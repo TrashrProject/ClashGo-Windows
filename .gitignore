@@ -1,0 +1,139 @@
+# Binaries & OS
+bin/
+*.exe
+*.test
+*.prof
+.DS_Store
+Thumbs.db
+
+# Local configurations (never commit secrets)
+config.json
+.env
+stats.json
+rotation_state.json
+attack_history.json
+# In-app updater runtime state (per-user skip preference, NOT code)
+internal/updater/skip_version.txt
+
+# IDEs & Editor configs
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Go
+vendor/
+# NOTE: go.sum is intentionally committed (reproducible CI builds).
+# The Release workflow builds from a fresh checkout on GitHub
+# Actions — without go.sum, `go build` fails with missing checksums.
+
+# Compiled Application Binaries (root & build/)
+ClashGO
+ClashGO.app/
+cli
+coc-bot
+coc-bot-test
+main
+roidiag
+clashgo
+clashgo_cli
+inspect_taps
+pick_coords
+bot_cli
+test_attack
+test_template
+build/pinpoint_helper
+build/test_wall_steps
+build/calibrate_stall
+# build/darwin/ is wails-generated (Info.plist etc.) EXCEPT the
+# versioned packaging resources below, which `make release` needs:
+#   install_update.sh     — in-place update helper bundled into the .app
+#   dmg-resources/        — License.txt + README.txt shown on the DMG
+build/darwin/*
+!build/darwin/install_update.sh
+!build/darwin/dmg-resources/
+adb_mock_v2.go
+full_mock_adb.go
+
+# Build artifacts
+build/bin/
+build/appicon.vtest.json
+*.test
+*.prof
+loot_*.vtest.json
+*.zip
+
+# Scratch / Runtime / Debug output (never commit)
+scratch/
+mock.log
+tmp/
+debug_attacks/
+debug_out_run1/
+debug_out/
+output/
+# tools/observe.sh artifacts (per-run captures + latest symlink)
+obs/
+
+# Diagnostic & Log files (per-attack artifacts)
+diag_*.json
+diag_*.png
+failure.diag
+failure.txt_img
+last_attack_report.json
+last_failure.json
+*.log
+logs/
+
+# Images: NEVER push decorative/screenshot raster images to GitHub.
+# Carve-outs (these are functional code inputs, not docs/screenshots):
+#   assets/templates/**/*.png          — gocv template matcher loads at runtime
+#   internal/game/testdata/screen_ocr.png     — Go test fixture (loot_test.go)
+#   internal/game/testdata/screen_victory.png — Go test fixture (loot_test.go)
+#   internal/game/testdata/screen_defeat.png  — defeat regression fixture (loot_test.go)
+#
+# If you add a new test fixture or grab-tool input, append it here explicitly
+# rather than dropping a PNG into those dirs — explicit list prevents an
+# accidental debug screenshot from being silently tracked.
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.gif
+**/*.bmp
+**/*.tiff
+!**/assets/templates/**/*.png
+!internal/game/testdata/screen_ocr.png
+!internal/game/testdata/screen_victory.png
+!internal/game/testdata/screen_defeat.png
+!web/src/assets/images/clashgo-logo.png
+!build/appicon.png
+assets/templates/debug/
+
+# Auto-generated bindings (do not commit)
+web/wailsjs/
+web/dist/
+web/node_modules/
+web/package.json.md5
+
+# Misc
+.agents/
+
+# Python cache (created by ad-hoc `python3 tools/picker.py` runs)
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Backup / restore artifacts (never commit)
+*.bak
+*.orig
+
+# In-process / per-run state files (not code)
+boot_profile.json
+attack_runtime.json
+adb_last_known.json
+
+# One-off root build outputs (have source in cmd/<name>/; can be re-derived).
+# Patterns are root-anchored so the cmd/<name>/ source directories are NOT ignored.
+/capture_template
