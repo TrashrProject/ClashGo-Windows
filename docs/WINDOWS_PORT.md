@@ -56,3 +56,15 @@ port first. The Settings > Windows Readiness panel can persist a specific
 instance when several are installed. Clear the selection to return to automatic
 mode. The selected instance is stored as `device.bluestacks_instance` in the
 normal ClashGO config and is only changed while the bot is stopped.
+
+
+## Installer
+
+After the portable bundle has been built, an NSIS setup can be created from the exact same runtime files:
+
+```powershell
+choco install nsis -y
+powershell -ExecutionPolicy Bypass -File .\\tools\\build-installer.ps1
+```
+
+The installer copies the complete tested portable bundle (EXE, assets, OpenCV/MinGW DLLs and update helper), creates Start Menu/Desktop shortcuts and registers a normal Windows uninstaller. `%APPDATA%\\ClashGO` is preserved on uninstall so configuration, diagnostics and attack history survive reinstallations.
