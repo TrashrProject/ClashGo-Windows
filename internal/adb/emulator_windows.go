@@ -24,7 +24,7 @@ type blueStacksWindowsInstance struct {
 }
 
 var windowsInstancePortRE = regexp.MustCompile("^bst\\.instance\\.([^.]+)\\.(?:status\\.)?adb_port=(.+)$")
-var windowsADBAccessRE = regexp.MustCompile("(?m)^bst\\.enable_adb_access\\s*=\\s*\\"([01])\\"\\s*$")
+var windowsADBAccessRE = regexp.MustCompile("(?m)^bst\\.enable_adb_access\\s*=\\s*\"([01])\"\\s*$")
 
 var fallbackWindowsADBPorts = []int{
 	5555, 5556, 5557, 5558, 5559, 5560, 5561, 5562, 5563, 5564, 5565,
@@ -120,7 +120,7 @@ func discoverBlueStacksWindowsInstances() []blueStacksWindowsInstance {
 		if len(m) != 3 {
 			continue
 		}
-		portText := strings.Trim(strings.TrimSpace(m[2]), "\\"'")
+		portText := strings.Trim(strings.TrimSpace(m[2]), "\"'")
 		port, err := strconv.Atoi(portText)
 		if err != nil || port < 1 || port > 65535 {
 			continue
@@ -187,7 +187,7 @@ func ensureBlueStacksADBAccess(conf string) (bool, error) {
 		}
 	}
 
-	updated := windowsADBAccessRE.ReplaceAll(data, []byte("bst.enable_adb_access=\\"1\\""))
+	updated := windowsADBAccessRE.ReplaceAll(data, []byte("bst.enable_adb_access=\"1\""))
 	if string(updated) == string(data) {
 		return false, nil
 	}
