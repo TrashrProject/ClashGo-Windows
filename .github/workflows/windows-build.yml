@@ -1,0 +1,103 @@
+name: Windows Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Build version
+        required: true
+        default: 0.6.0-windows-beta
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout Windows branch
+        uses: actions/checkout@v4
+        with:
+          ref: windows/core-port
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install MinGW and CMake
+        shell: powershell
+        run: |
+          choco install mingw cmake -y --no-progress
+          g++ --version
+          cmake --version
+
+      - name: Cache OpenCV
+        id: opencv-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\opencv\build\install
+          key: opencv-4.13.0-mingw-gocv043-v2
+
+      - name: Build OpenCV 4.13 for GoCV
+        if: steps.opencv-cache.outputs.cache-hit != 'true'
+        shell: powershell
+        run: |
+          git clone --depth 1 --branch v0.43.0 https://github.com/hybridgroup/gocv.git "$env:RUNNER_TEMP\gocv"
+          Push-Location "$env:RUNNER_TEMP\gocv"
+          cmd /c win_download_opencv.cmd
+          if ($LASTEXITCODE -ne 0) { throw "OpenCV download failed" }
+          cmd /c win_build_opencv.cmd
+          if ($LASTEXITCODE -ne 0) { throw "OpenCV build failed" }
+          Pop-Location
+
+      - name: Add OpenCV to PATH
+        shell: powershell
+        run: |
+          "C:\opencv\build\install\x64\mingw\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install Wails
+        shell: powershell
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          wails version
+
+      - name: Synchronize audited runtime assets
+        shell: powershell
+        run: .\tools\sync-upstream-runtime.ps1
+
+      - name: Format check
+        shell: powershell
+        run: |
+          $bad = gofmt -l .
+          if ($bad) {
+            Write-Host $bad
+            throw "Go files require gofmt"
+          }
+
+      - name: Backend tests
+        shell: powershell
+        run: go test ./internal/... ./pkg/...
+
+      - name: Build portable Windows bundle
+        shell: powershell
+        run: .\tools\build-windows.ps1 -Version "${{ inputs.version }}" -SkipSync -SkipTests
+
+      - name: Upload Windows portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClashGO-Windows-${{ inputs.version }}
+          path: |
+            dist/ClashGO-v*-windows.zip
+            dist/ClashGO-Windows/**
+          if-no-files-found: error
