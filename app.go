@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
@@ -353,7 +353,7 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 		}
 	}
 
-	if runtime.GOOS == "windows" {
+	if goruntime.GOOS == "windows" {
 		if !diag.Emulator.BlueStacksPlayerFound {
 			return BotStatus{Running: false, Message: "BlueStacks 5 was not detected. Install BlueStacks 5 or configure CLASHGO_BLUESTACKS_PLAYER."}
 		}
