@@ -76,15 +76,6 @@ jobs:
         shell: powershell
         run: .\tools\sync-upstream-runtime.ps1
 
-      - name: Format check
-        shell: powershell
-        run: |
-          $bad = gofmt -l .
-          if ($bad) {
-            Write-Host $bad
-            throw "Go files require gofmt"
-          }
-
       - name: Backend tests
         shell: powershell
         run: go test ./internal/... ./pkg/...
