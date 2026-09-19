@@ -109,6 +109,7 @@ func (h *Health) RecordSuccess(d time.Duration) {
 		h.AvgCaptureMs = h.AvgCaptureMs*0.9 + ms*0.1
 	}
 	h.ConsecutiveFails = 0
+	h.LastError = ""
 }
 
 func (h *Health) RecordFailure(err error) {
