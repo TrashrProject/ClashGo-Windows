@@ -1,0 +1,28 @@
+name: Bootstrap from ClashGO upstream
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    if: github.repository == 'TrashrProject/ClashGo-Windows'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bootstrap repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Import audited ClashGO upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/DSargent21/ClashGo.git
+          git fetch upstream main --tags
+          git checkout --detach 4fa82f2cdc3ac4897b1cab0fff29565cd16deef6
+          git push --force origin HEAD:main
