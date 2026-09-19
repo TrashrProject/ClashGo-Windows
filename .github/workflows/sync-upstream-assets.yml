@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git checkout 4fa82f2cdc3ac4897b1cab0fff29565cd16deef6 --             assets             build/appicon.png             internal/game/testdata             web             cmd             tests
+          git checkout 4fa82f2cdc3ac4897b1cab0fff29565cd16deef6 --             assets             build/appicon.png             internal/game/testdata
 
       - name: Commit synchronized files
         shell: bash
@@ -40,7 +40,7 @@ jobs:
           set -euo pipefail
           git config user.name "ClashGo Windows Sync"
           git config user.email "actions@users.noreply.github.com"
-          git add assets build/appicon.png internal/game/testdata web cmd tests
+          git add assets build/appicon.png internal/game/testdata
           if git diff --cached --quiet; then
             echo "Runtime assets already synchronized."
             exit 0
