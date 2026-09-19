@@ -16,6 +16,8 @@ import {
   ResetStats,
   GetConfig,
   GetStrategies,
+  GetSystemDiagnostics,
+  ExportDiagnostics,
   GetUpdateStatus,
   GetAppVersion,
   CheckForUpdate,
@@ -26,7 +28,7 @@ import {
   ClearSkippedVersion,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
-import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS } from './types';
+import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics } from './types';
 import UpdateBanner from './components/UpdateBanner';
 import './App.css';
 
@@ -128,6 +130,7 @@ function App() {
   // Updater state — pushed via `updater_status` event from Go.
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(DEFAULT_UPDATE_STATUS);
   const [appVersion, setAppVersion] = useState('');
+  const [systemDiagnostics, setSystemDiagnostics] = useState<SystemDiagnostics | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
 
   // Config states
@@ -201,6 +204,17 @@ function App() {
     fetchData();
     const interval = setInterval(fetchData, 2000);
 
+    const fetchDiagnostics = async () => {
+      try {
+        const d = await GetSystemDiagnostics();
+        setSystemDiagnostics(d as SystemDiagnostics);
+      } catch (err) {
+        console.warn('GetSystemDiagnostics failed:', err);
+      }
+    };
+    fetchDiagnostics();
+    const diagnosticsInterval = setInterval(fetchDiagnostics, 5000);
+
     // The 1 Hz screenshot poll used to live here. It moved into
     // <Feed/>'s own useEffect so it only runs when the Live View tab
     // is mounted, instead of burning the WailsIPC bridge every second
@@ -235,6 +249,7 @@ function App() {
 
     return () => {
       clearInterval(interval);
+      clearInterval(diagnosticsInterval);
       unsubUpdater();
       unsubBotError();
       unsubBotInitFailed();
@@ -289,6 +304,15 @@ function App() {
       setIsRunning(res.running);
     } catch (err) {
       console.error('Stop failed:', err);
+    }
+  };
+
+  const handleExportDiagnostics = async (): Promise<string> => {
+    try {
+      return await ExportDiagnostics();
+    } catch (err) {
+      console.error('ExportDiagnostics failed:', err);
+      throw err;
     }
   };
 
@@ -433,6 +457,8 @@ function App() {
                   onUpdateAndRestart={handleUpdaterOneClick}
                   onSkip={handleUpdaterSkip}
                   onClearSkip={handleUpdaterClearSkip}
+              systemDiagnostics={systemDiagnostics}
+              onExportDiagnostics={handleExportDiagnostics}
                   onDismiss={() => setUpdateDismissed(true)}
                 />
               )}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { BotStats, UpdateStatus } from '../types';
+import { BotStats, UpdateStatus, SystemDiagnostics } from '../types';
 
 interface SettingsViewProps {
   stats: BotStats;
@@ -11,21 +11,38 @@ interface SettingsViewProps {
   updateStatus: UpdateStatus;
   onCheckUpdates: () => void;
   onClearSkip: () => void;
+  systemDiagnostics: SystemDiagnostics | null;
+  onExportDiagnostics: () => Promise<string>;
 }
 
 const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   stats, adbPort, darkMode, setDarkMode, onResetStats,
-  appVersion, updateStatus, onCheckUpdates, onClearSkip,
+  appVersion, updateStatus, onCheckUpdates, onClearSkip, systemDiagnostics, onExportDiagnostics,
 }) => {
   // Destructive action protection: the first click only ARMS the reset
   // (visual shift + "click again" prompt); a second click within 4s
   // actually fires it. Prevents fat-finger stat wipes.
   const [resetArmed, setResetArmed] = React.useState(false);
+  const [diagnosticsPath, setDiagnosticsPath] = React.useState('');
+  const [diagnosticsBusy, setDiagnosticsBusy] = React.useState(false);
   const resetTimerRef = React.useRef<number | null>(null);
 
   React.useEffect(() => () => {
     if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current);
   }, []);
+
+  const handleExportDiagnostics = async () => {
+    if (diagnosticsBusy) return;
+    setDiagnosticsBusy(true);
+    try {
+      const path = await onExportDiagnostics();
+      setDiagnosticsPath(path);
+    } catch {
+      setDiagnosticsPath('Export failed — check app.log');
+    } finally {
+      setDiagnosticsBusy(false);
+    }
+  };
 
   const handleResetClick = () => {
     if (!resetArmed) {
@@ -37,6 +54,12 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
     setResetArmed(false);
     onResetStats();
   };
+
+  const preferredInstance = systemDiagnostics?.emulator.instances?.find((i) => i.preferred);
+  const runtimeReady = systemDiagnostics?.assets_ready ?? false;
+  const playerReady = systemDiagnostics?.emulator.bluestacks_player_found ?? false;
+  const adbReady = systemDiagnostics?.emulator.adb_found ?? false;
+  const overallReady = runtimeReady && playerReady && adbReady;
 
   return (
     <div className="bg-white dark:bg-zinc-900 p-10 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none max-w-2xl mx-auto transition-all duration-500">
@@ -52,6 +75,39 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
       </div>
 
       <div className="space-y-4">
+        <div className="bg-zinc-950 dark:bg-black text-white p-6 rounded-2xl border border-zinc-800 shadow-xl">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Windows Readiness</div>
+              <div className="text-lg font-black mt-1">{overallReady ? 'Ready to launch' : 'Setup required'}</div>
+            </div>
+            <div className={`w-3 h-3 rounded-full ${overallReady ? 'bg-emerald-400 shadow-[0_0_14px_rgba(52,211,153,.7)]' : 'bg-amber-400 animate-pulse'}`}></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: 'Runtime assets', ok: runtimeReady, value: runtimeReady ? 'Ready' : `${systemDiagnostics?.missing_assets?.length ?? 0} missing` },
+              { label: 'BlueStacks 5', ok: playerReady, value: playerReady ? 'Detected' : 'Not found' },
+              { label: 'ADB', ok: adbReady, value: adbReady ? 'Detected' : 'Not found' },
+              { label: 'Instance', ok: !!preferredInstance, value: preferredInstance ? `${preferredInstance.name} · ${preferredInstance.adb_port}` : 'Not detected' },
+              { label: 'BlueStacks running', ok: systemDiagnostics?.emulator.bluestacks_running ?? false, value: systemDiagnostics?.emulator.bluestacks_running ? 'Running' : 'Stopped' },
+              { label: 'ADB access', ok: systemDiagnostics?.emulator.adb_enabled ?? false, value: systemDiagnostics?.emulator.adb_enabled ? 'Enabled' : (systemDiagnostics?.emulator.adb_setting_present ? 'Disabled · auto-fix on Start' : 'Check BlueStacks settings') },
+            ].map((item) => (
+              <div key={item.label} className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3 min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${item.ok ? 'bg-emerald-400' : 'bg-amber-400'}`}></div>
+                  <span className="text-[9px] font-black uppercase tracking-wider text-zinc-500 truncate">{item.label}</span>
+                </div>
+                <div className="text-xs font-bold mt-1.5 truncate" title={item.value}>{item.value}</div>
+              </div>
+            ))}
+          </div>
+          {systemDiagnostics && !runtimeReady && systemDiagnostics.missing_assets.length > 0 && (
+            <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-[10px] font-mono text-amber-300 break-words">
+              Missing: {systemDiagnostics.missing_assets.join(', ')}
+            </div>
+          )}
+        </div>
+
         {/* Dark Mode Toggle */}
         <button
           type="button"
@@ -165,6 +221,25 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           </div>
         </div>
 
+
+        <button
+          type="button"
+          onClick={handleExportDiagnostics}
+          disabled={diagnosticsBusy}
+          className="w-full flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 p-6 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 hover:bg-white dark:hover:bg-zinc-800/60 transition-all duration-300 group disabled:opacity-60"
+        >
+          <div className="flex items-center gap-5 min-w-0">
+            <div className="w-12 h-12 rounded-xl bg-white dark:bg-zinc-900 flex items-center justify-center border border-zinc-100 dark:border-zinc-800 shadow-sm">
+              <span className="material-symbols-outlined text-xl text-zinc-500">folder_zip</span>
+            </div>
+            <div className="flex flex-col text-left min-w-0">
+              <span className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-0.5">Support</span>
+              <span className="text-sm font-bold text-zinc-950 dark:text-white">{diagnosticsBusy ? 'Creating bundle…' : 'Export Diagnostics'}</span>
+              {diagnosticsPath && <span className="text-[9px] font-mono text-zinc-500 truncate max-w-[360px]" title={diagnosticsPath}>{diagnosticsPath}</span>}
+            </div>
+          </div>
+          <span className="material-symbols-outlined text-zinc-400">download</span>
+        </button>
 
         {/* Reset Section — armed-confirm to protect against misclicks. */}
         <div className="pt-8 mt-8 border-t border-zinc-50 dark:border-zinc-800/50">
