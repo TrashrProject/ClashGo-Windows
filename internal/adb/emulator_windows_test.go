@@ -13,9 +13,9 @@ func TestDiscoverBlueStacksWindowsInstances(t *testing.T) {
 	dir := t.TempDir()
 	conf := filepath.Join(dir, "bluestacks.conf")
 	data := []byte(
-		"bst.instance.Pie64.adb_port=\\"5555\\"\n" +
-			"bst.instance.Tiramisu64.status.adb_port=\\"5562\\"\n" +
-			"bst.instance.Broken.adb_port=\\"nope\\"\n",
+		"bst.instance.Pie64.adb_port=\"5555\"\n" +
+			"bst.instance.Tiramisu64.status.adb_port=\"5562\"\n" +
+			"bst.instance.Broken.adb_port=\"nope\"\n",
 	)
 	if err := os.WriteFile(conf, data, 0o644); err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestWindowsCandidateADBPortsPreferred(t *testing.T) {
 func TestEnsureBlueStacksADBAccess(t *testing.T) {
 	dir := t.TempDir()
 	conf := filepath.Join(dir, "bluestacks.conf")
-	original := []byte("bst.enable_adb_access=\\"0\\"\r\nbst.other=\\"x\\"\r\n")
+	original := []byte("bst.enable_adb_access=\"0\"\r\nbst.other=\"x\"\r\n")
 	if err := os.WriteFile(conf, original, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestEnsureBlueStacksADBAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "bst.enable_adb_access=\\"1\\"") {
+	if !strings.Contains(string(got), "bst.enable_adb_access=\"1\"") {
 		t.Fatalf("ADB flag not enabled: %s", got)
 	}
 	if _, err := os.Stat(conf + ".clashgo.bak"); err != nil {
@@ -108,7 +108,7 @@ func TestEnsureBlueStacksADBAccess(t *testing.T) {
 func TestEnsureBlueStacksADBAccessAlreadyEnabled(t *testing.T) {
 	dir := t.TempDir()
 	conf := filepath.Join(dir, "bluestacks.conf")
-	if err := os.WriteFile(conf, []byte("bst.enable_adb_access=\\"1\\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(conf, []byte("bst.enable_adb_access=\"1\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	changed, err := ensureBlueStacksADBAccess(conf)
@@ -123,7 +123,7 @@ func TestEnsureBlueStacksADBAccessAlreadyEnabled(t *testing.T) {
 func TestEnsureBlueStacksADBAccessDoesNotInventMissingKey(t *testing.T) {
 	dir := t.TempDir()
 	conf := filepath.Join(dir, "bluestacks.conf")
-	if err := os.WriteFile(conf, []byte("bst.other=\\"x\\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(conf, []byte("bst.other=\"x\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	changed, err := ensureBlueStacksADBAccess(conf)
