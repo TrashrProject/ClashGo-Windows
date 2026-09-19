@@ -1,0 +1,357 @@
+//go:build windows
+
+package adb
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type blueStacksWindowsInstance struct {
+	Name    string
+	ADBPort int
+}
+
+var windowsInstancePortRE = regexp.MustCompile(`^bst\.instance\.([^.]+)\.(?:status\.)?adb_port=(.+)$`)
+
+var fallbackWindowsADBPorts = []int{5555, 5556, 5557, 5558, 5559, 5560, 5561, 5562, 5563, 5564, 5565}
+
+// EnsureBlueStacksMac keeps the upstream method name for boot/recovery
+// compatibility. On Windows it delegates to the BlueStacks 5 backend.
+func (c *Client) EnsureBlueStacksMac(width, height, dpi int) error {
+	return c.EnsureBlueStacksMacCtx(context.Background(), width, height, dpi)
+}
+
+func (c *Client) EnsureBlueStacksMacCtx(ctx context.Context, width, height, dpi int) error {
+	instances := discoverBlueStacksWindowsInstances()
+	ports := windowsCandidateADBPorts(instances)
+
+	if addr := c.findReachableBlueStacks(ctx, ports); addr != "" {
+		c.DeviceID = addr
+		c.log.Info(fmt.Sprintf("BlueStacks already reachable on %s — keeping existing instance", addr))
+		return c.ensureWindowsAndroidDisplay(width, height, dpi)
+	}
+
+	player, err := findBlueStacksWindowsPlayer()
+	if err != nil {
+		return err
+	}
+	instance := chooseBlueStacksWindowsInstance(instances)
+	if instance == "" {
+		return errors.New("BlueStacks 5 is installed but no instance was found in bluestacks.conf; start an instance once from Multi-instance Manager, then retry")
+	}
+
+	c.log.Info(fmt.Sprintf("starting BlueStacks 5 instance %q", instance))
+	if err := launchBlueStacksWindows(ctx, player, instance); err != nil {
+		return fmt.Errorf("start BlueStacks instance %q: %w", instance, err)
+	}
+	if err := c.waitForVMProcess(ctx, 45*time.Second); err != nil {
+		return err
+	}
+	if err := c.waitForBlueStacksADBWithPorts(ctx, 90*time.Second, ports); err != nil {
+		return err
+	}
+	return c.ensureWindowsAndroidDisplay(width, height, dpi)
+}
+
+func discoverBlueStacksWindowsInstances() []blueStacksWindowsInstance {
+	conf := findBlueStacksWindowsConfig()
+	if conf == "" {
+		return nil
+	}
+	f, err := os.Open(conf)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	byName := map[string]int{}
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		m := windowsInstancePortRE.FindStringSubmatch(strings.TrimSpace(s.Text()))
+		if len(m) != 3 {
+			continue
+		}
+		portText := strings.Trim(strings.TrimSpace(m[2]), "\"'")
+		port, err := strconv.Atoi(portText)
+		if err != nil || port < 1 || port > 65535 {
+			continue
+		}
+		byName[m[1]] = port
+	}
+
+	out := make([]blueStacksWindowsInstance, 0, len(byName))
+	for name, port := range byName {
+		out = append(out, blueStacksWindowsInstance{Name: name, ADBPort: port})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
+	return out
+}
+
+func findBlueStacksWindowsConfig() string {
+	var candidates []string
+	if p := strings.TrimSpace(os.Getenv("CLASHGO_BLUESTACKS_CONF")); p != "" {
+		candidates = append(candidates, p)
+	}
+	if data := strings.TrimSpace(os.Getenv("CLASHGO_BLUESTACKS_DATA")); data != "" {
+		candidates = append(candidates, filepath.Join(data, "bluestacks.conf"))
+	}
+	if data := strings.TrimSpace(os.Getenv("ProgramData")); data != "" {
+		candidates = append(candidates,
+			filepath.Join(data, "BlueStacks_nxt", "bluestacks.conf"),
+			filepath.Join(data, "BlueStacks", "bluestacks.conf"),
+		)
+	}
+	candidates = append(candidates,
+		`C:\ProgramData\BlueStacks_nxt\bluestacks.conf`,
+		`C:\ProgramData\BlueStacks\bluestacks.conf`,
+	)
+	for _, p := range candidates {
+		if fileExists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+func findBlueStacksWindowsPlayer() (string, error) {
+	var candidates []string
+	if p := strings.TrimSpace(os.Getenv("CLASHGO_BLUESTACKS_PLAYER")); p != "" {
+		candidates = append(candidates, p)
+	}
+	if home := strings.TrimSpace(os.Getenv("CLASHGO_BLUESTACKS_HOME")); home != "" {
+		candidates = append(candidates, filepath.Join(home, "HD-Player.exe"))
+	}
+	for _, root := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)"), `C:\Program Files`, `C:\Program Files (x86)`} {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		candidates = append(candidates,
+			filepath.Join(root, "BlueStacks_nxt", "HD-Player.exe"),
+			filepath.Join(root, "BlueStacks", "HD-Player.exe"),
+		)
+	}
+	for _, p := range candidates {
+		if fileExists(p) {
+			return p, nil
+		}
+	}
+	return "", errors.New("BlueStacks 5 HD-Player.exe was not found; install BlueStacks 5 or set CLASHGO_BLUESTACKS_PLAYER")
+}
+
+func chooseBlueStacksWindowsInstance(instances []blueStacksWindowsInstance) string {
+	if forced := strings.TrimSpace(os.Getenv("CLASHGO_BLUESTACKS_INSTANCE")); forced != "" {
+		return forced
+	}
+	for _, want := range []string{"Tiramisu64", "Rvc64", "Pie64", "Nougat64", "Nougat32"} {
+		for _, inst := range instances {
+			if strings.EqualFold(inst.Name, want) {
+				return inst.Name
+			}
+		}
+	}
+	if len(instances) > 0 {
+		return instances[0].Name
+	}
+	return ""
+}
+
+func windowsCandidateADBPorts(instances []blueStacksWindowsInstance) []int {
+	seen := map[int]bool{}
+	out := make([]int, 0, len(instances)+len(fallbackWindowsADBPorts))
+	for _, inst := range instances {
+		if inst.ADBPort > 0 && !seen[inst.ADBPort] {
+			seen[inst.ADBPort] = true
+			out = append(out, inst.ADBPort)
+		}
+	}
+	for _, p := range fallbackWindowsADBPorts {
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func launchBlueStacksWindows(ctx context.Context, player, instance string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	cmd := exec.Command(player, "--instance", instance)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
+}
+
+func (c *Client) findReachableBlueStacks(ctx context.Context, ports []int) string {
+	for _, port := range c.tcpScanListens(ports, 120*time.Millisecond) {
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
+		pctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		_ = exec.CommandContext(pctx, "adb", "connect", addr).Run()
+		cancel()
+		if c.isBlueStacksDevice(addr) {
+			return addr
+		}
+	}
+	return ""
+}
+
+// launchBlueStacks preserves the recovery.go API.
+// It intentionally restarts all HD-Player instances in this first Windows
+// implementation; per-instance restart comes in the platform-neutral manager.
+func (c *Client) launchBlueStacks(_ bool, width, height, dpi int) error {
+	_ = exec.Command("taskkill", "/F", "/IM", "HD-Player.exe").Run()
+	time.Sleep(800 * time.Millisecond)
+
+	player, err := findBlueStacksWindowsPlayer()
+	if err != nil {
+		return err
+	}
+	instances := discoverBlueStacksWindowsInstances()
+	instance := chooseBlueStacksWindowsInstance(instances)
+	if instance == "" {
+		return errors.New("no BlueStacks instance found in bluestacks.conf")
+	}
+	if err := launchBlueStacksWindows(context.Background(), player, instance); err != nil {
+		return err
+	}
+	if err := c.waitForBlueStacksADBWithPorts(context.Background(), 90*time.Second, windowsCandidateADBPorts(instances)); err != nil {
+		return err
+	}
+	return c.ensureWindowsAndroidDisplay(width, height, dpi)
+}
+
+func (c *Client) waitForVMProcess(ctx context.Context, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if c.firstVMSignal() != "" {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return errors.New("timeout waiting for BlueStacks HD-Player.exe")
+}
+
+func (c *Client) firstVMSignal() string {
+	out, err := exec.Command("tasklist", "/FI", "IMAGENAME eq HD-Player.exe", "/FO", "CSV", "/NH").Output()
+	if err == nil && strings.Contains(strings.ToLower(string(out)), "hd-player.exe") {
+		return "HD-Player.exe"
+	}
+	return ""
+}
+
+func (c *Client) isBlueStacksDevice(id string) bool {
+	t, err := NewTransport(id, c.host, c.port, 2*time.Second)
+	if err != nil {
+		return false
+	}
+	defer t.Close()
+
+	var identity strings.Builder
+	for _, cmd := range []string{
+		"getprop ro.product.manufacturer",
+		"getprop ro.product.brand",
+		"getprop ro.product.model",
+	} {
+		if out, err := t.Shell(cmd); err == nil {
+			identity.WriteString(" ")
+			identity.WriteString(strings.ToLower(strings.TrimSpace(out)))
+		}
+	}
+	low := identity.String()
+	for _, marker := range []string{"bluestacks", "microvirt", "samsung", "oneplus", "asus"} {
+		if strings.Contains(low, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Client) waitForBlueStacksADB(ctx context.Context, timeout time.Duration) error {
+	return c.waitForBlueStacksADBWithPorts(ctx, timeout, windowsCandidateADBPorts(discoverBlueStacksWindowsInstances()))
+}
+
+func (c *Client) waitForBlueStacksADBWithPorts(ctx context.Context, timeout time.Duration, ports []int) error {
+	deadline := time.Now().Add(timeout)
+	midpoint := time.Now().Add(timeout / 2)
+	resetDone := false
+	for time.Now().Before(deadline) {
+		if addr := c.findReachableBlueStacks(ctx, ports); addr != "" {
+			c.DeviceID = addr
+			c.log.Info(fmt.Sprintf("BlueStacks ADB ready at %s", addr))
+			return nil
+		}
+		if !resetDone && time.Now().After(midpoint) {
+			c.log.Warn("BlueStacks ADB not ready at half-budget; resetting local adb-server")
+			_ = c.ResetAdbServer()
+			resetDone = true
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+	return fmt.Errorf("timeout waiting for BlueStacks ADB on ports %v", ports)
+}
+
+func (c *Client) ensureWindowsAndroidDisplay(width, height, dpi int) error {
+	if c.DeviceID == "" || width <= 0 || height <= 0 {
+		return nil
+	}
+	t, err := NewTransport(c.DeviceID, c.host, c.port, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("connect display transport: %w", err)
+	}
+	defer t.Close()
+
+	if _, err := t.Shell(fmt.Sprintf("wm size %dx%d", width, height)); err != nil {
+		return fmt.Errorf("set Android display size %dx%d: %w", width, height, err)
+	}
+	if dpi > 0 {
+		if _, err := t.Shell(fmt.Sprintf("wm density %d", dpi)); err != nil {
+			c.log.Warn(fmt.Sprintf("could not set Android density to %d: %v", dpi, err))
+		}
+	}
+	return nil
+}
+
+// Legacy compatibility no-op: Windows does not use macOS plist defaults.
+func (c *Client) writeResolutionDefaultsIfPlistExists(_, _, _ int) {}
+
+func (c *Client) tcpScanListens(ports []int, perPort time.Duration) []int {
+	var open []int
+	for _, p := range ports {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", p), perPort)
+		if err != nil {
+			continue
+		}
+		_ = conn.Close()
+		open = append(open, p)
+	}
+	return open
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
