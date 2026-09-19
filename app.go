@@ -613,7 +613,11 @@ func (a *App) IsRunning() bool {
 
 // GetConfig returns the current config.json settings
 func (a *App) GetConfig() *config.BotConfig {
-	return config.LoadOrDefault("config.json")
+	cfg := config.LoadOrDefault("config.json")
+	if cfg.Attack.StrategyFile != "" {
+		cfg.Attack.StrategyFile = filepath.Base(cfg.Attack.StrategyFile)
+	}
+	return cfg
 }
 
 // SetBlueStacksInstance persists the preferred BlueStacks 5 instance.
@@ -776,7 +780,17 @@ func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strat
 	cfg.Search.Enabled = searchEnabled
 	cfg.Attack.StallTimerSeconds = stall
 	if strategyFile != "" {
-		cfg.Attack.StrategyFile = strategyFile
+		name := filepath.Base(filepath.Clean(strategyFile))
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext != ".yaml" && ext != ".csv" {
+			return fmt.Errorf("unsupported strategy file %q", name)
+		}
+		resolved := paths.Resolve(filepath.Join("strategies", name))
+		info, err := os.Stat(resolved)
+		if err != nil || info.IsDir() {
+			return fmt.Errorf("strategy %q was not found in packaged assets", name)
+		}
+		cfg.Attack.StrategyFile = resolved
 	}
 
 	// Update running bot in real-time if it exists

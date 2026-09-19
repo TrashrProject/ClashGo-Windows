@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Ducky705/ClashGO/internal/paths"
@@ -188,6 +190,34 @@ func DefaultConfig() *BotConfig {
 	}
 }
 
+func normalizeStrategyFile(cfg *BotConfig) {
+	if cfg == nil {
+		return
+	}
+	raw := strings.TrimSpace(cfg.Attack.StrategyFile)
+	if raw == "" {
+		cfg.Attack.StrategyFile = paths.Resolve("strategies/auto_edrag_rush.yaml")
+		return
+	}
+
+	// Relative values are always interpreted as a strategy basename inside
+	// the packaged assets tree. This makes config.json portable.
+	if !filepath.IsAbs(raw) {
+		cfg.Attack.StrategyFile = paths.Resolve(filepath.Join("strategies", filepath.Base(raw)))
+		return
+	}
+
+	// Keep a valid absolute path (older configs), but rebase stale absolute
+	// paths after the portable folder has been moved or updated.
+	if info, err := os.Stat(raw); err == nil && !info.IsDir() {
+		return
+	}
+	candidate := paths.Resolve(filepath.Join("strategies", filepath.Base(raw)))
+	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		cfg.Attack.StrategyFile = candidate
+	}
+}
+
 func Load(path string) (*BotConfig, error) {
 	if path == "config.json" {
 		path = paths.ResolveConfig("config.json")
@@ -203,6 +233,7 @@ func Load(path string) (*BotConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	normalizeStrategyFile(&cfg)
 
 	return &cfg, nil
 }
