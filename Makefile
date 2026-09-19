@@ -1,0 +1,240 @@
+# Makefile for ClashGO
+
+BINARY_NAME=bot_cli
+BUILD_DIR=build/bin
+MACOS_VERSION=$(shell sw_vers -productVersion | cut -d . -f 1-2)
+
+# Build metadata — shared between the CLI build (-tags cli) and the
+# Wails GUI build (build/darwin). Override VERSION on the command line
+# before running `make release`:
+#
+#     make release VERSION=0.3.0-beta
+#
+# The same value goes into:
+#   - Go ldflags (binary --version)
+#   - Wails .app Info.plist (productVersion)
+#   - The release zip filename (-v<VERSION>-macOS)
+#   - The latest.json manifest emitted alongside the zip
+ifeq ($(origin VERSION),undefined)
+VERSION := $(shell grep '"productVersion":' wails.json | cut -d '"' -f 4)
+endif
+VERSION_TAG := v$(VERSION)
+GIT_COMMIT  := $(shell git rev-parse HEAD 2>/dev/null || echo "none")
+RELEASE_ZIP := ClashGO-v$(VERSION)-macOS.zip
+
+# ldflags injected into both the CLI binary and the Wails GUI binary.
+# Variables must match the package-level var names in version.go
+# (main.version / main.commit / main.date).
+LDFLAGS := -X main.version=$(VERSION) \
+           -X main.commit=$(GIT_COMMIT)
+
+# min_supported in latest.json: the lowest version that can update in
+# place. For stable releases that's the version being shipped; for a
+# prerelease (e.g. 0.3.0-beta) it's the previous minor (0.2.0) so users
+# of the last stable/beta still get the update banner. Override with
+# MIN_SUPPORTED= on the command line when the default is wrong.
+MIN_SUPPORTED ?= $(shell echo "$(VERSION)" | awk -F'[.-]' '{ if (NF > 3) { m = $$2 - 1; if (m < 0) m = 0; print $$1 "." m ".0" } else { print $$1 "." $$2 ".0" } }')
+
+# OpenCV test ldflags: the local Homebrew/sdk OpenCV build ships dylibs
+# with @rpath install names, so test binaries need the lib dir baked into
+# LC_RPATH or they abort at spawn ("Library not loaded: libopencv_gapi").
+# Resolved via pkg-config; empty when unavailable (CI runners use a
+# keg-only install where the default linking already works).
+OPENCV_LIBDIR := $(shell pkg-config --variable=libdir opencv4 2>/dev/null)
+ifneq ($(OPENCV_LIBDIR),)
+    GOTEST_LDFLAGS := -ldflags='-extldflags=-Wl,-rpath,$(OPENCV_LIBDIR)'
+endif
+
+.PHONY: all build build-cli build-gui clean release manifest test test-go test-py
+
+all: build-cli build-gui
+
+build: build-cli build-gui
+
+# test: full verification suite — vet, Go tests, Python strategy contract
+# tests. go vet before tests so a type error fails fast without paying
+# for the (slow) first OpenCV link.
+test: test-go test-py
+	@echo "ALL TESTS PASSED"
+
+test-go:
+	@echo "Running go vet ./..."
+	go vet ./...
+	@echo "Running go test ./..."
+	go test $(GOTEST_LDFLAGS) ./...
+
+# Locate a python3 interpreter that actually has pytest + pyyaml. The
+# macOS system python3 (CLT 3.9) lacks both, while framework/homebrew
+# installs carry them — probe candidates instead of assuming.
+PYTEST_PY := $(shell for p in python3 /usr/local/bin/python3.12 /opt/homebrew/bin/python3 $(HOME)/.local/bin/python3.11; do command -v $$p >/dev/null 2>&1 || continue; $$p -c "import pytest, yaml" >/dev/null 2>&1 && { command -v $$p; break; }; done)
+
+test-py:
+	@echo "Running strategy contract tests (pytest)"
+ifdef PYTEST_PY
+	$(PYTEST_PY) -m pytest tests/
+else
+	@echo "SKIP: no python3 with pytest+pyyaml found — strategy contract tests not run"
+endif
+
+build-cli:
+	@echo "Building CLI (version=$(VERSION), commit=$(GIT_COMMIT))..."
+	@mkdir -p $(BUILD_DIR)
+	MACOSX_DEPLOYMENT_TARGET=$(MACOS_VERSION) go build -tags cli -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) .
+
+# one-shot attack: capture screen, design placements per unit, deploy via
+# formula. No game restart, no bot search loop. Single command. Always
+# rebuilds the CLI first so the cached binary used by
+# ./run_designed_attack.sh is fresh.
+attack-once: build-cli
+	@./run_designed_attack.sh --clashgo build/bin/$(BINARY_NAME)
+
+.PHONY: attack-once attack-once-cli auto-attack auto-attack-right auto-attack-left auto-attack-top auto-attack-bottom attack-record attack-replay attack-classify
+
+attack-once-cli: build-cli
+	@./run_designed_attack.sh \
+		--strategy assets/strategies/auto_edrag_rush.yaml \
+		--device localhost:5555 \
+		--out tmp/last_designed_attack \
+		--clashgo build/bin/$(BINARY_NAME)
+
+# No-click variants: capture screen → auto-pick every unit on the chosen
+# side → deploy via formula. Use when the manual click-by-click picker
+# is overkill (e.g. forcing a single-side attack for repeat runs).
+auto-attack: build-cli
+	@./run_designed_attack.sh --clashgo build/bin/$(BINARY_NAME) --auto --target-edge right
+
+auto-attack-right: auto-attack
+auto-attack-left: build-cli
+	@./run_designed_attack.sh --clashgo build/bin/$(BINARY_NAME) --auto --target-edge left
+auto-attack-top: build-cli
+	@./run_designed_attack.sh --clashgo build/bin/$(BINARY_NAME) --auto --target-edge top
+auto-attack-bottom: build-cli
+	@./run_designed_attack.sh --clashgo build/bin/$(BINARY_NAME) --auto --target-edge bottom
+
+auto-attack-bluestacks: build-cli
+	@./run_designed_attack.sh --clashgo build/bin/$(BINARY_NAME) --auto --target-edge right --device 127.0.0.1:5555
+
+# Macro recorder/replayer — teach by demonstration. Record mode opens a
+# window over the device screen; clicks get forwarded + saved to JSON.
+# Replay mode replays that JSON on the device at the recorded cadence.
+#
+# These targets compile cmd/attack_record to a SEPARATE binary
+# (build/bin/attack_record) so it doesn't share flags with bot_cli's
+# main CLI. They do NOT depend on build-cli because the recorder has no
+# `-tags cli` build tag — the gocv window + tap hooks are pure main.
+OUT ?= tmp/my_attack.json
+IN ?= tmp/my_attack.json
+DEVICE ?= 127.0.0.1:5555
+# Replay-only: how many extra fires per non-hero drop (troop/spell). Heroes
+# always stay at 0 (one tap is correct — hero ability does the work).
+# Set to 1 or 2 if BlueStacks is dropping single taps. Pairs with EXTRA_DELAY.
+EXTRA_TAPS ?= 1
+EXTRA_DELAY ?= 50
+
+build-attack-record:
+	@echo "Building attack_record..."
+	@mkdir -p $(BUILD_DIR)
+	@go build -o $(BUILD_DIR)/attack_record ./cmd/attack_record
+
+attack-record: build-attack-record
+	@./build/bin/attack_record --mode record --out $(OUT) --device $(DEVICE)
+
+attack-replay: build-attack-record
+	@./build/bin/attack_record --mode replay --in $(IN) --device $(DEVICE) \
+		--extra-tap-count $(EXTRA_TAPS) --extra-tap-delay $(EXTRA_DELAY)
+
+# Same as attack-replay but lets you preview what classification+extras a
+# recorded macro gets without actually firing taps. Useful for sanity-check.
+# Uses the binary's --dry-run flag so no clicks reach the device.
+attack-classify: build-attack-record
+	@echo "Classifying taps in $(IN) (dry-run, no device taps fired)"
+	@./build/bin/attack_record --mode replay --in $(IN) --device $(DEVICE) \
+		--extra-tap-count $(EXTRA_TAPS) --extra-tap-delay $(EXTRA_DELAY) \
+		--dry-run 2>&1 | grep -E 'slot|deploy|dry-run'
+
+build-gui:
+	@echo "Building GUI (version=$(VERSION), commit=$(GIT_COMMIT))..."
+	@mkdir -p $(BUILD_DIR)
+	MACOSX_DEPLOYMENT_TARGET=$(MACOS_VERSION) wails build -o ClashGO -ldflags "$(LDFLAGS)"
+
+# manifest target — produces build/bin/latest.json once the zip is on
+# disk. Standalone so it can be invoked from CI without a full GUI
+# build. Run after `build-cli` (which produces the zip via `release`).
+# Optional release-notes file for latest.json ("notes" field). The CI
+# workflow passes the CHANGELOG section for the tagged version so the
+# in-app update window shows what's new instead of "No release notes"
+# and the GitHub release body carries the same text.
+NOTES_FILE ?=
+
+manifest:
+	@echo "Building release_manifest helper..."
+	@mkdir -p $(BUILD_DIR)
+	@go build -o $(BUILD_DIR)/release_manifest ./cmd/release_manifest
+	@echo "Emitting build/bin/latest.json for $(VERSION)..."
+	@./build/bin/release_manifest \
+		-version $(VERSION) \
+		-zip $(BUILD_DIR)/$(RELEASE_ZIP) \
+		-min-supported $(MIN_SUPPORTED) \
+		-out $(BUILD_DIR)/latest.json \
+		-repo Ducky705/ClashGO \
+		-os darwin \
+		$(if $(NOTES_FILE),-notes-file $(NOTES_FILE))
+
+# stage-app injects the read-only assets (templates, strategies) and the
+# in-app update helper into the built .app bundle itself, then re-signs
+# (ad-hoc). This is required BEFORE both packaging paths so every
+# artifact the user can install — the DMG and the zip — ships with a
+# working assets dir and a valid bundle signature:
+#
+#   - Without this, build-zip would zip the raw wails .app, whose
+#     Contents/Resources holds only the icon. Installed from the zip,
+#     GetAssetsDir() would resolve to an empty dir: the Config page's
+#     strategy list would be empty and the bot's OCR templates would
+#     silently fail to load.
+#   - build_dmg.sh does its own injection into a staged copy for
+#     standalone use, but the zip path never saw it.
+#
+# wails ad-hoc signs the bundle during `wails build`; touching
+# Contents/Resources afterwards invalidates the sealed resources, so we
+# re-sign here (codesign --verify --deep --strict must pass on the
+# shipped app — see tools/build_dmg.sh Stage 2.5 for the full rationale).
+.PHONY: stage-app
+stage-app: build-gui
+	@echo "Staging assets + install helper into $(BUILD_DIR)/ClashGO.app..."
+	@mkdir -p $(BUILD_DIR)/ClashGO.app/Contents/Resources/assets
+	@if [ -d assets ]; then cp -R assets/. $(BUILD_DIR)/ClashGO.app/Contents/Resources/assets/; fi
+	@if [ -f build/darwin/install_update.sh ]; then cp build/darwin/install_update.sh $(BUILD_DIR)/ClashGO.app/Contents/Resources/install_update.sh && chmod +x $(BUILD_DIR)/ClashGO.app/Contents/Resources/install_update.sh; fi
+	@codesign --force --deep -s - $(BUILD_DIR)/ClashGO.app >/dev/null 2>&1 && echo "  re-signed (ad-hoc)" || echo "  WARNING: codesign failed"
+	@codesign --verify --deep --strict $(BUILD_DIR)/ClashGO.app >/dev/null 2>&1 && echo "  bundle signature verified" || echo "  WARNING: signature verify failed"
+
+# package depends on stage-app (not build-gui directly) so a `make
+# release` run never rebuilds the app between staging and DMG assembly —
+# a fresh `wails build` would wipe the staged Contents/Resources/assets
+# and the zip (built afterwards) would silently ship without them. make
+# dedupes the stage-app prerequisite within one invocation, so `release`
+# still only builds the GUI once.
+package: stage-app
+	@echo "Packaging DMG via tools/build_dmg.sh..."
+	@bash tools/build_dmg.sh $(BUILD_DIR)/ClashGO.app $(BUILD_DIR)/ClashGO.dmg "ClashGO Installer"
+
+# note: tools/build_dmg.sh runs standalone \u2014 no Make dependency on the
+# caller. Callers (CI / `make release`) still trigger `package` to keep
+# the legacy make-graph intact.
+
+release: build-cli stage-app package build-zip manifest
+	@echo "Release v$(VERSION) emitted:"
+	@echo "  - $(BUILD_DIR)/ClashGO-v$(VERSION)-macOS.zip"
+	@echo "  - $(BUILD_DIR)/ClashGO.dmg"
+	@echo "  - $(BUILD_DIR)/latest.json (publish alongside the zip on GitHub)"
+
+# build-zip turns the packaged .app into the zip artifact.
+build-zip:
+	@echo "Building release zip..."
+	@mkdir -p $(BUILD_DIR)/release
+	@cp -R $(BUILD_DIR)/ClashGO.app $(BUILD_DIR)/release/
+	@cd $(BUILD_DIR)/release && zip -r ../$(RELEASE_ZIP) ClashGO.app
+	@rm -rf $(BUILD_DIR)/release
+
+clean:
+	rm -rf $(BUILD_DIR)/*
+	rm -f $(BINARY_NAME)
