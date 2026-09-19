@@ -77,7 +77,7 @@ Section "ClashGO Windows" SEC_MAIN
 SectionEnd
 
 Section "Uninstall"
-  SetShellVarContext all
+  SetShellVarContext current
   Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
   RMDir /r "$SMPROGRAMS\${PRODUCT_NAME}"
   RMDir /r "$INSTDIR"
