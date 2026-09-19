@@ -41,7 +41,7 @@ jobs:
 
       - name: Install MinGW and CMake
         shell: powershell
-        run: choco install mingw cmake -y --no-progress
+        run: choco install mingw cmake nsis -y --no-progress
 
       - name: Restore cached OpenCV
         id: opencv-cache
@@ -93,6 +93,10 @@ jobs:
         shell: powershell
         run: .\tools\build-windows.ps1 -Version "${{ inputs.version }}" -SkipSync -SkipTests
 
+      - name: Build NSIS installer
+        shell: powershell
+        run: .\tools\build-installer.ps1 -Version "${{ inputs.version }}"
+
       - name: Generate update manifest
         id: manifest
         shell: powershell
@@ -132,4 +136,6 @@ jobs:
         run: |
           $version = "${{ inputs.version }}"
           $zip = "${{ steps.manifest.outputs.zip }}"
-          gh release create "v$version" "$zip" "dist\latest.json" --repo TrashrProject/ClashGo-Windows --title "ClashGO Windows v$version" --notes "${{ inputs.notes }}" --target windows/core-port
+          $setup = Get-ChildItem dist -Filter "ClashGO-v$version-windows-setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "Installer EXE not found" }
+          gh release create "v$version" "$zip" "$($setup.FullName)" "dist\latest.json" --repo TrashrProject/ClashGo-Windows --title "ClashGO Windows v$version" --notes "${{ inputs.notes }}" --target windows/core-port
