@@ -23,67 +23,34 @@ type blueStacksWindowsInstance struct {
 	ADBPort int
 }
 
-var windowsInstancePortRE = regexp.MustCompile(`^bst\.instance\.([^.]+)\.(?:status\.)?adb_port=(.+)//go:build windows
+var windowsInstancePortRE = regexp.MustCompile("^bst\\.instance\\.([^.]+)\\.(?:status\\.)?adb_port=(.+)$")
+var windowsADBAccessRE = regexp.MustCompile("(?m)^bst\\.enable_adb_access\\s*=\\s*\\"([01])\\"\\s*$")
 
-package adb
-
-import (
-	"bufio"
-	"context"
-	"errors"
-	"fmt"
-	"net"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
-	"sort"
-	"strconv"
-	"strings"
-	"time"
-)
-
-type blueStacksWindowsInstance struct {
-	Name    string
-	ADBPort int
+var fallbackWindowsADBPorts = []int{
+	5555, 5556, 5557, 5558, 5559, 5560, 5561, 5562, 5563, 5564, 5565,
 }
 
-)\nvar windowsADBAccessRE = regexp.MustCompile(`(?m)^bst\\.enable_adb_access\\s*=\\s*"([01])"\\s*//go:build windows
-
-package adb
-
-import (
-	"bufio"
-	"context"
-	"errors"
-	"fmt"
-	"net"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
-	"sort"
-	"strconv"
-	"strings"
-	"time"
-)
-
-type blueStacksWindowsInstance struct {
-	Name    string
-	ADBPort int
+// ensureBlueStacksPlatform is the Windows implementation behind the
+// platform-neutral API used by the boot orchestrator and recovery layer.
+func (c *Client) ensureBlueStacksPlatform(ctx context.Context, width, height, dpi int) error {
+	return c.ensureBlueStacksWindows(ctx, width, height, dpi)
 }
 
-)
-
-var fallbackWindowsADBPorts = []int{5555, 5556, 5557, 5558, 5559, 5560, 5561, 5562, 5563, 5564, 5565}
-
-// ensureBlueStacksPlatform is the Windows implementation behind the platform-neutral API.\nfunc (c *Client) ensureBlueStacksPlatform(ctx context.Context, width, height, dpi int) error {\n\treturn c.EnsureBlueStacksMacCtx(ctx, width, height, dpi)\n}\n\n// EnsureBlueStacksMac keeps the upstream method name for boot/recovery
-// compatibility. On Windows it delegates to the BlueStacks 5 backend.
+// Keep the upstream Mac-named entry points for compatibility with tooling that
+// may still call them directly. Core code uses EnsureBlueStacks/EnsureBlueStacksCtx.
 func (c *Client) EnsureBlueStacksMac(width, height, dpi int) error {
-	return c.EnsureBlueStacksMacCtx(context.Background(), width, height, dpi)
+	return c.ensureBlueStacksWindows(context.Background(), width, height, dpi)
 }
 
 func (c *Client) EnsureBlueStacksMacCtx(ctx context.Context, width, height, dpi int) error {
+	return c.ensureBlueStacksWindows(ctx, width, height, dpi)
+}
+
+func (c *Client) ensureBlueStacksWindows(ctx context.Context, width, height, dpi int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	conf := findBlueStacksWindowsConfig()
 	adbSettingChanged := false
 	if conf != "" {
@@ -107,9 +74,9 @@ func (c *Client) EnsureBlueStacksMacCtx(ctx context.Context, width, height, dpi 
 			return c.ensureWindowsAndroidDisplay(width, height, dpi)
 		}
 	} else {
-		// ADB was disabled. A running HD-Player may not re-read the global
-		// setting until restart, so restart the player before launching the
-		// selected instance. User data remains in the BlueStacks VM.
+		// BlueStacks reads this global setting at player startup. Restarting
+		// HD-Player after changing it is more reliable than waiting for a live
+		// instance to notice the file mutation.
 		_ = exec.Command("taskkill", "/F", "/IM", "HD-Player.exe").Run()
 		time.Sleep(800 * time.Millisecond)
 	}
@@ -118,14 +85,13 @@ func (c *Client) EnsureBlueStacksMacCtx(ctx context.Context, width, height, dpi 
 	if err != nil {
 		return err
 	}
-	instance := preferred
-	if instance == "" {
+	if preferred == "" {
 		return errors.New("BlueStacks 5 is installed but no instance was found in bluestacks.conf; start an instance once from Multi-instance Manager, then retry")
 	}
 
-	c.log.Info(fmt.Sprintf("starting BlueStacks 5 instance %q", instance))
-	if err := launchBlueStacksWindows(ctx, player, instance); err != nil {
-		return fmt.Errorf("start BlueStacks instance %q: %w", instance, err)
+	c.log.Info(fmt.Sprintf("starting BlueStacks 5 instance %q via %s", preferred, player))
+	if err := launchBlueStacksWindows(ctx, player, preferred); err != nil {
+		return fmt.Errorf("start BlueStacks instance %q: %w", preferred, err)
 	}
 	if err := c.waitForVMProcess(ctx, 45*time.Second); err != nil {
 		return err
@@ -148,13 +114,13 @@ func discoverBlueStacksWindowsInstances() []blueStacksWindowsInstance {
 	defer f.Close()
 
 	byName := map[string]int{}
-	s := bufio.NewScanner(f)
-	for s.Scan() {
-		m := windowsInstancePortRE.FindStringSubmatch(strings.TrimSpace(s.Text()))
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		m := windowsInstancePortRE.FindStringSubmatch(strings.TrimSpace(scanner.Text()))
 		if len(m) != 3 {
 			continue
 		}
-		portText := strings.Trim(strings.TrimSpace(m[2]), "\"'")
+		portText := strings.Trim(strings.TrimSpace(m[2]), "\\"'")
 		port, err := strconv.Atoi(portText)
 		if err != nil || port < 1 || port > 65535 {
 			continue
@@ -187,8 +153,8 @@ func findBlueStacksWindowsConfig() string {
 		)
 	}
 	candidates = append(candidates,
-		`C:\ProgramData\BlueStacks_nxt\bluestacks.conf`,
-		`C:\ProgramData\BlueStacks\bluestacks.conf`,
+		"C:\\ProgramData\\BlueStacks_nxt\\bluestacks.conf",
+		"C:\\ProgramData\\BlueStacks\\bluestacks.conf",
 	)
 	for _, p := range candidates {
 		if fileExists(p) {
@@ -198,6 +164,9 @@ func findBlueStacksWindowsConfig() string {
 	return ""
 }
 
+// ensureBlueStacksADBAccess only changes BlueStacks' official ADB flag when
+// that flag already exists. It never invents config keys. A one-time backup
+// is created before mutation so the user can restore the original file.
 func ensureBlueStacksADBAccess(conf string) (bool, error) {
 	data, err := os.ReadFile(conf)
 	if err != nil {
@@ -205,8 +174,6 @@ func ensureBlueStacksADBAccess(conf string) (bool, error) {
 	}
 	m := windowsADBAccessRE.FindSubmatch(data)
 	if len(m) != 2 {
-		// Never add unknown/missing keys: newer BlueStacks builds validate
-		// config keys strictly. Only modify the official key when present.
 		return false, nil
 	}
 	if string(m[1]) == "1" {
@@ -219,13 +186,14 @@ func ensureBlueStacksADBAccess(conf string) (bool, error) {
 			return false, fmt.Errorf("backup bluestacks.conf: %w", err)
 		}
 	}
-	updated := windowsADBAccessRE.ReplaceAll(data, []byte(`bst.enable_adb_access="1"`))
+
+	updated := windowsADBAccessRE.ReplaceAll(data, []byte("bst.enable_adb_access=\\"1\\""))
 	if string(updated) == string(data) {
 		return false, nil
 	}
-	info, _ := os.Stat(conf)
+
 	mode := os.FileMode(0o644)
-	if info != nil {
+	if info, err := os.Stat(conf); err == nil {
 		mode = info.Mode().Perm()
 	}
 	if err := os.WriteFile(conf, updated, mode); err != nil {
@@ -242,7 +210,12 @@ func findBlueStacksWindowsPlayer() (string, error) {
 	if home := strings.TrimSpace(os.Getenv("CLASHGO_BLUESTACKS_HOME")); home != "" {
 		candidates = append(candidates, filepath.Join(home, "HD-Player.exe"))
 	}
-	for _, root := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)"), `C:\Program Files`, `C:\Program Files (x86)`} {
+	for _, root := range []string{
+		os.Getenv("ProgramFiles"),
+		os.Getenv("ProgramFiles(x86)"),
+		"C:\\Program Files",
+		"C:\\Program Files (x86)",
+	} {
 		if strings.TrimSpace(root) == "" {
 			continue
 		}
@@ -333,9 +306,8 @@ func (c *Client) findReachableBlueStacks(ctx context.Context, ports []int) strin
 	return ""
 }
 
-// launchBlueStacks preserves the recovery.go API.
-// It intentionally restarts all HD-Player instances in this first Windows
-// implementation; per-instance restart comes in the platform-neutral manager.
+// launchBlueStacks preserves the upstream recovery API. The first Windows
+// implementation restarts HD-Player and relaunches only the selected instance.
 func (c *Client) launchBlueStacks(_ bool, width, height, dpi int) error {
 	_ = exec.Command("taskkill", "/F", "/IM", "HD-Player.exe").Run()
 	time.Sleep(800 * time.Millisecond)
@@ -352,7 +324,14 @@ func (c *Client) launchBlueStacks(_ bool, width, height, dpi int) error {
 	if err := launchBlueStacksWindows(context.Background(), player, instance); err != nil {
 		return err
 	}
-	if err := c.waitForBlueStacksADBWithPorts(context.Background(), 90*time.Second, windowsCandidateADBPortsPreferred(instances, instance)); err != nil {
+	if err := c.waitForVMProcess(context.Background(), 45*time.Second); err != nil {
+		return err
+	}
+	if err := c.waitForBlueStacksADBWithPorts(
+		context.Background(),
+		90*time.Second,
+		windowsCandidateADBPortsPreferred(instances, instance),
+	); err != nil {
 		return err
 	}
 	return c.ensureWindowsAndroidDisplay(width, height, dpi)
@@ -374,7 +353,12 @@ func (c *Client) waitForVMProcess(ctx context.Context, timeout time.Duration) er
 }
 
 func (c *Client) firstVMSignal() string {
-	out, err := exec.Command("tasklist", "/FI", "IMAGENAME eq HD-Player.exe", "/FO", "CSV", "/NH").Output()
+	out, err := exec.Command(
+		"tasklist",
+		"/FI", "IMAGENAME eq HD-Player.exe",
+		"/FO", "CSV",
+		"/NH",
+	).Output()
 	if err == nil && strings.Contains(strings.ToLower(string(out)), "hd-player.exe") {
 		return "HD-Player.exe"
 	}
@@ -399,6 +383,7 @@ func (c *Client) isBlueStacksDevice(id string) bool {
 			identity.WriteString(strings.ToLower(strings.TrimSpace(out)))
 		}
 	}
+
 	low := identity.String()
 	for _, marker := range []string{"bluestacks", "microvirt", "samsung", "oneplus", "asus"} {
 		if strings.Contains(low, marker) {
@@ -409,13 +394,20 @@ func (c *Client) isBlueStacksDevice(id string) bool {
 }
 
 func (c *Client) waitForBlueStacksADB(ctx context.Context, timeout time.Duration) error {
-	instances := discoverBlueStacksWindowsInstances()\n\treturn c.waitForBlueStacksADBWithPorts(ctx, timeout, windowsCandidateADBPortsPreferred(instances, chooseBlueStacksWindowsInstance(instances)))
+	instances := discoverBlueStacksWindowsInstances()
+	preferred := chooseBlueStacksWindowsInstance(instances)
+	return c.waitForBlueStacksADBWithPorts(
+		ctx,
+		timeout,
+		windowsCandidateADBPortsPreferred(instances, preferred),
+	)
 }
 
 func (c *Client) waitForBlueStacksADBWithPorts(ctx context.Context, timeout time.Duration, ports []int) error {
 	deadline := time.Now().Add(timeout)
 	midpoint := time.Now().Add(timeout / 2)
 	resetDone := false
+
 	for time.Now().Before(deadline) {
 		if addr := c.findReachableBlueStacks(ctx, ports); addr != "" {
 			c.DeviceID = addr
@@ -457,7 +449,6 @@ func (c *Client) ensureWindowsAndroidDisplay(width, height, dpi int) error {
 	return nil
 }
 
-// Legacy compatibility no-op: Windows does not use macOS plist defaults.
 func (c *Client) writeResolutionDefaultsIfPlistExists(_, _, _ int) {}
 
 func (c *Client) tcpScanListens(ports []int, perPort time.Duration) []int {

@@ -3,11 +3,6 @@
 // Package adb — emulator_mac.go
 //
 
-// ensureBlueStacksPlatform is the platform-neutral dispatcher used by the boot layer.
-func (c *Client) ensureBlueStacksPlatform(ctx context.Context, width, height, dpi int) error {
-	return c.EnsureBlueStacksMacCtx(ctx, width, height, dpi)
-}
-
 // EnsureBlueStacksMac brings up a BlueStacks instance with the
 // requested resolution. Single launch attempt: if the main GUI
 // binary exits cleanly without spawning qemu-system-aarch64 / hd-adb
@@ -63,6 +58,10 @@ import (
 	"strings"
 	"time"
 )
+
+func (c *Client) ensureBlueStacksPlatform(ctx context.Context, width, height, dpi int) error {
+	return c.EnsureBlueStacksMacCtx(ctx, width, height, dpi)
+}
 
 // vmProcessSignals is the list of process-name substrings whose
 // presence indicates "BlueStacks' Android VM subsystem is alive".
