@@ -71,6 +71,15 @@ function safeEventsOn(
   }
 }
 
+const normalizeBotErrorMessage = (payload: unknown, fallback: string): string => {
+  if (typeof payload === 'string' && payload.trim()) return payload.trim();
+  if (payload && typeof payload === 'object' && 'message' in payload) {
+    const message = (payload as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message.trim();
+  }
+  return fallback;
+};
+
 const getInitialDarkMode = (): boolean => {
   try {
     const stored = localStorage.getItem('darkMode');
@@ -133,6 +142,8 @@ function App() {
   const [appVersion, setAppVersion] = useState('');
   const [systemDiagnostics, setSystemDiagnostics] = useState<SystemDiagnostics | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [botError, setBotError] = useState('');
+  const [botDiagnosticPath, setBotDiagnosticPath] = useState('');
 
   // Config states
   const [goldThreshold, setGoldThreshold] = useState(400000);
@@ -241,11 +252,13 @@ function App() {
     // bot_init_failed — without listening, the sidebar stays on
     // "STOP BOT" forever and Stop becomes a confusing no-op (there's
     // no bot to stop). Flip the button back to START on either event.
-    const unsubBotError = safeEventsOn("bot_error", () => {
+    const unsubBotError = safeEventsOn("bot_error", (payload: unknown) => {
       setIsRunning(false);
+      setBotError(normalizeBotErrorMessage(payload, 'The bot failed to start.'));
     });
-    const unsubBotInitFailed = safeEventsOn("bot_init_failed", () => {
+    const unsubBotInitFailed = safeEventsOn("bot_init_failed", (payload: unknown) => {
       setIsRunning(false);
+      setBotError(normalizeBotErrorMessage(payload, 'BlueStacks / ADB initialization failed.'));
     });
 
     return () => {
@@ -291,11 +304,18 @@ function App() {
   };
 
   const handleStart = async () => {
+    setBotError('');
+    setBotDiagnosticPath('');
     try {
       const res = await StartBot(goldThreshold, elixirThreshold, deThreshold, upgradeWalls, searchEnabled);
       setIsRunning(res.running);
+      if (!res.running && res.message) {
+        setBotError(res.message);
+      }
     } catch (err) {
       console.error('Start failed:', err);
+      setIsRunning(false);
+      setBotError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -320,6 +340,16 @@ function App() {
     } catch (err) {
       console.error('ExportDiagnostics failed:', err);
       throw err;
+    }
+  };
+
+  const handleBotDiagnosticExport = async () => {
+    setBotDiagnosticPath('');
+    try {
+      const path = await handleExportDiagnostics();
+      setBotDiagnosticPath(path);
+    } catch {
+      setBotDiagnosticPath('Diagnostic export failed — check the system console.');
     }
   };
 
@@ -484,6 +514,47 @@ function App() {
               </div>
             </div>
           </header>
+
+          {botError && (
+            <section className="mb-6 no-drag rounded-2xl border border-rose-500/30 bg-rose-500/10 px-5 py-4 shadow-sm" role="alert">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+                    <span className="material-symbols-outlined text-lg">error</span>
+                    <span className="text-[10px] font-black uppercase tracking-[0.22em]">Bot startup failed</span>
+                  </div>
+                  <p className="mt-1 break-words text-sm font-semibold text-zinc-800 dark:text-zinc-200">{botError}</p>
+                  {botDiagnosticPath && (
+                    <p className="mt-2 break-all text-[10px] font-mono text-zinc-500 dark:text-zinc-400">{botDiagnosticPath}</p>
+                  )}
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTab('settings')}
+                    className="rounded-xl border border-zinc-300/70 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  >
+                    Windows readiness
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleBotDiagnosticExport()}
+                    className="rounded-xl bg-rose-600 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition hover:bg-rose-500"
+                  >
+                    Export diagnostics
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setBotError(''); setBotDiagnosticPath(''); }}
+                    className="rounded-xl px-3 py-2 text-zinc-500 transition hover:bg-rose-500/10 hover:text-rose-600 dark:text-zinc-400"
+                    aria-label="Dismiss startup error"
+                  >
+                    <span className="material-symbols-outlined text-lg">close</span>
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
 
           {tab === 'dashboard' && <Dashboard {...dashboardProps} />}
           {tab === 'analytics' && <Analytics stats={stats} />}

@@ -424,6 +424,34 @@ func TestServiceDownloadRejectsBadSHA(t *testing.T) {
 	}
 }
 
+
+func TestApplyAutoRequiresVerifiedManifestSHA(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "legacy.zip")
+	if err := os.WriteFile(archive, []byte("legacy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newServiceForTest(t, "0.1.0-beta", http.DefaultClient)
+	s.statusMu.Lock()
+	s.status.State = StateReady
+	s.status.DownloadPath = archive
+	s.downloadSpec = downloadSpec{
+		Name:    "legacy.zip",
+		Version: "0.2.0-beta",
+		SHA256:  "",
+	}
+	s.statusMu.Unlock()
+
+	ok, err := s.ApplyAuto()
+	if ok {
+		t.Fatal("ApplyAuto unexpectedly accepted an unverified legacy release")
+	}
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "sha256") {
+		t.Fatalf("expected SHA256 verification error, got %v", err)
+	}
+}
+
 // ----- skip-version persistence -----
 
 func TestSkipVersionPersistsToFile(t *testing.T) {

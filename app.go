@@ -139,6 +139,7 @@ func (a *App) loadPersistedStats() {
 	}
 
 	// Connection/CPU fields are live process metrics, not durable history.
+	stats.AdbHealth.LastCapture = time.Time{}
 	stats.AdbHealth.AvgCaptureMs = 0
 	stats.AdbHealth.ConsecutiveFails = 0
 	stats.AdbHealth.CapturesTotal = 0
