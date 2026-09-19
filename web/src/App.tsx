@@ -292,15 +292,6 @@ function App() {
     }
   };
 
-  const handleExportDiagnostics = async (): Promise<string> => {
-    try {
-      return await ExportDiagnostics();
-    } catch (err) {
-      console.error('ExportDiagnostics failed:', err);
-      throw err;
-    }
-  };
-
   const handleReset = async () => {
     try {
       await ResetStats();

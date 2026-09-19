@@ -21,26 +21,11 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   // (visual shift + "click again" prompt); a second click within 4s
   // actually fires it. Prevents fat-finger stat wipes.
   const [resetArmed, setResetArmed] = React.useState(false);
-  const [diagnosticsPath, setDiagnosticsPath] = React.useState('');
-  const [diagnosticsBusy, setDiagnosticsBusy] = React.useState(false);
   const resetTimerRef = React.useRef<number | null>(null);
 
   React.useEffect(() => () => {
     if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current);
   }, []);
-
-  const handleExportDiagnostics = async () => {
-    if (diagnosticsBusy) return;
-    setDiagnosticsBusy(true);
-    try {
-      const path = await onExportDiagnostics();
-      setDiagnosticsPath(path);
-    } catch {
-      setDiagnosticsPath('Export failed — check app.log');
-    } finally {
-      setDiagnosticsBusy(false);
-    }
-  };
 
   const handleResetClick = () => {
     if (!resetArmed) {
@@ -180,26 +165,6 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           </div>
         </div>
 
-
-        {/* Support bundle */}
-        <button
-          type="button"
-          onClick={handleExportDiagnostics}
-          disabled={diagnosticsBusy}
-          className="w-full flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 p-6 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 hover:bg-white dark:hover:bg-zinc-800/60 hover:shadow-premium dark:hover:shadow-none transition-all duration-300 group disabled:opacity-60"
-        >
-          <div className="flex items-center gap-5 min-w-0">
-            <div className="w-12 h-12 rounded-xl bg-white dark:bg-zinc-900 flex items-center justify-center border border-zinc-100 dark:border-zinc-800 shadow-sm">
-              <span className="material-symbols-outlined text-xl text-zinc-500">folder_zip</span>
-            </div>
-            <div className="flex flex-col text-left min-w-0">
-              <span className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-0.5">Support</span>
-              <span className="text-sm font-bold text-zinc-950 dark:text-white">{diagnosticsBusy ? 'Creating bundle…' : 'Export Diagnostics'}</span>
-              {diagnosticsPath && <span className="text-[9px] font-mono text-zinc-500 truncate max-w-[360px]" title={diagnosticsPath}>{diagnosticsPath}</span>}
-            </div>
-          </div>
-          <span className="material-symbols-outlined text-zinc-400">download</span>
-        </button>
 
         {/* Reset Section — armed-confirm to protect against misclicks. */}
         <div className="pt-8 mt-8 border-t border-zinc-50 dark:border-zinc-800/50">
