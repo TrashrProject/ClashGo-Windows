@@ -99,37 +99,3 @@ export const DEFAULT_UPDATE_STATUS: UpdateStatus = {
   skip_version: '',
   min_supported: '',
 };
-
-
-export interface PlatformInstanceDiagnostic {
-  name: string;
-  adb_port: number;
-  preferred: boolean;
-}
-
-export interface PlatformDiagnostics {
-  os: string;
-  supported: boolean;
-  adb_executable: string;
-  adb_found: boolean;
-  bluestacks_player: string;
-  bluestacks_player_found: boolean;
-  bluestacks_config: string;
-  bluestacks_config_found: boolean;
-  bluestacks_running: boolean;
-  adb_setting_present: boolean;
-  adb_enabled: boolean;
-  preferred_instance: string;
-  instances: PlatformInstanceDiagnostic[];
-}
-
-export interface SystemDiagnostics {
-  os: string;
-  arch: string;
-  version: string;
-  assets_dir: string;
-  config_dir: string;
-  assets_ready: boolean;
-  missing_assets: string[];
-  emulator: PlatformDiagnostics;
-}
