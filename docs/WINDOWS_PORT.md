@@ -36,3 +36,13 @@ size and whether Clash of Clans is installed.
 - `CLASHGO_BLUESTACKS_INSTANCE`: force an instance name
 
 These are troubleshooting escape hatches; normal installs should auto-detect.
+
+
+## Build validation
+
+The `Windows Build` GitHub Actions workflow runs automatically for updates to
+`windows/core-port`. It installs the Windows Go/Wails/OpenCV toolchain, restores
+the audited upstream runtime assets, runs backend tests, creates the portable
+bundle and uploads `ClashGO-v0.6.0-windows-beta-windows.zip` as an artifact.
+
+A successful CI build is the release gate before live BlueStacks testing.
