@@ -826,6 +826,16 @@ func (s *Service) ApplyAuto() (bool, error) {
 		return false, errors.New("download not ready — call Download() first")
 	}
 
+	// Automatic replacement is intentionally stricter than the manual
+	// "reveal archive" fallback: only a release described by latest.json
+	// carries the expected SHA256 and is eligible for one-click install.
+	s.statusMu.RLock()
+	verifiedManifest := strings.TrimSpace(s.downloadSpec.SHA256) != ""
+	s.statusMu.RUnlock()
+	if !verifiedManifest {
+		return false, errors.New("automatic install requires a SHA256-verified release manifest; use the manual update action for legacy releases")
+	}
+
 	if runtime.GOOS == "windows" {
 		exe, err := os.Executable()
 		if err != nil {
