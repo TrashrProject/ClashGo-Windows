@@ -2,6 +2,7 @@ package adb
 
 import (
 	"errors"
+	"sync"
 	"time"
 )
 
