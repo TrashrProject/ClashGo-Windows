@@ -54,8 +54,11 @@ type Bot struct {
 	stars1      atomic.Int32
 	stars2      atomic.Int32
 	stars3      atomic.Int32
-	seqRunning  atomic.Bool
-	zoomedOut   atomic.Bool
+	seqRunning        atomic.Bool
+	zoomedOut         atomic.Bool
+	recoveryAttempts  atomic.Int32
+	recoverySuccesses atomic.Int32
+	blueStacksRestarts atomic.Int32
 
 	chestDismissInFlight  atomic.Bool
 	splashDismissInFlight atomic.Bool
@@ -613,6 +616,7 @@ func (b *Bot) restartGame() {
 //  4. EnsureBlueStacksMac   — emulator really gone; relaunch at the
 //     configured resolution, then poll up to 2 min for adb
 func (b *Bot) recoverEmulator() {
+	b.recoveryAttempts.Add(1)
 	b.logger.Warn().Msg("capture pipeline dead; beginning device recovery ladder")
 
 	deviceOK := func() bool {
@@ -623,6 +627,7 @@ func (b *Bot) recoverEmulator() {
 	if deviceOK() {
 		b.logger.Info().Msg("device still responsive; restarting game only")
 		b.restartGame()
+		b.recoverySuccesses.Add(1)
 		return
 	}
 
@@ -632,6 +637,7 @@ func (b *Bot) recoverEmulator() {
 	}
 	if deviceOK() {
 		b.restartGame()
+		b.recoverySuccesses.Add(1)
 		return
 	}
 
@@ -643,22 +649,31 @@ func (b *Bot) recoverEmulator() {
 	_ = b.client.Reconnect()
 	if deviceOK() {
 		b.restartGame()
+		b.recoverySuccesses.Add(1)
 		return
 	}
 
 	b.logger.Error().Msg("device unreachable after transport + adb-server recovery; relaunching BlueStacks")
-	if err := b.client.EnsureBlueStacksMac(b.cfg.Device.Width, b.cfg.Device.Height, b.cfg.Device.DPI); err != nil {
+	b.blueStacksRestarts.Add(1)
+	if err := b.client.EnsureBlueStacks(b.cfg.Device.Width, b.cfg.Device.Height, b.cfg.Device.DPI); err != nil {
 		b.logger.Error().Err(err).Msg("BlueStacks relaunch failed; will retry on next stuck check")
 	}
 	// Give the freshly-relaunched emulator up to 2 minutes to expose
 	// its adb daemon (cold VM boot can take 45-70s on this hardware).
+	recovered := false
 	for i := 0; i < 60; i++ {
 		if deviceOK() {
+			recovered = true
 			break
 		}
 		time.Sleep(2 * time.Second)
 	}
+	if !recovered {
+		b.logger.Error().Msg("device remained unreachable after BlueStacks recovery window; deferring until next watchdog cycle")
+		return
+	}
 	b.restartGame()
+	b.recoverySuccesses.Add(1)
 }
 
 func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, captureMs time.Duration) {
@@ -1981,7 +1996,10 @@ func (b *Bot) Health() game.SystemHealth {
 		AvgCaptureMs:     b.client.Health().AvgCaptureMs,
 		ConsecutiveFails: b.client.Health().ConsecutiveFails,
 		CPUTimeSec:       CPUTime().Seconds(),
-		CPUCores:         b.cpuSampler.Usage(),
+		CPUCores:          b.cpuSampler.Usage(),
+		RecoveryAttempts:  b.recoveryAttempts.Load(),
+		RecoverySuccesses: b.recoverySuccesses.Load(),
+		BlueStacksRestarts: b.blueStacksRestarts.Load(),
 	}
 }
 
@@ -2031,6 +2049,10 @@ type BotStats struct {
 	CPUTimeSec float64 `json:"cpu_time_sec"`
 
 	CPUCores float64 `json:"cpu_cores"`
+
+	RecoveryAttempts   int32 `json:"recovery_attempts"`
+	RecoverySuccesses  int32 `json:"recovery_successes"`
+	BlueStacksRestarts int32 `json:"bluestacks_restarts"`
 }
 
 type AttackReport struct {

@@ -195,6 +195,8 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             // logical core count only to render a familiar 0-100% number.
             { label: 'CPU Time', value: `${stats.cpu_time_sec.toFixed(1)}s`, status: 'info', icon: 'schedule' },
             { label: 'CPU Usage', value: isNaN(stats.cpu_cores) ? '0%' : `${(stats.cpu_cores * (navigator.hardwareConcurrency || 1) * 100).toFixed(1)}%`, status: stats.cpu_cores < 0.5 ? 'success' : 'info', icon: 'memory' },
+            { label: 'Recovery Success', value: stats.recovery_attempts > 0 ? `${stats.recovery_successes}/${stats.recovery_attempts}` : '0/0', status: stats.recovery_attempts === stats.recovery_successes ? 'success' : 'info', icon: 'healing' },
+            { label: 'BlueStacks Restarts', value: stats.bluestacks_restarts.toLocaleString(), status: stats.bluestacks_restarts === 0 ? 'success' : 'info', icon: 'restart_alt' },
           ].map((item, i) => (
 
           <div key={i} className="flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 p-6 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 hover:bg-white dark:hover:bg-zinc-800/60 hover:shadow-premium dark:hover:shadow-none transition-all duration-300 group">

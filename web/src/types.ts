@@ -16,6 +16,9 @@ export interface BotStats {
   // cpu_cores by that host's logical core count.
   cpu_time_sec: number;
   cpu_cores: number;
+  recovery_attempts: number;
+  recovery_successes: number;
+  bluestacks_restarts: number;
   adb_health: {
     avg_capture_ms: number;
     consecutive_fails: number;

@@ -257,7 +257,10 @@ func mergeStats(acc, current bot.BotStats) bot.BotStats {
 		Uptime:           acc.Uptime + current.Uptime,
 		AdbHealth:        current.AdbHealth,
 		CPUTimeSec:       current.CPUTimeSec,
-		CPUCores:         current.CPUCores,
+		CPUCores:          current.CPUCores,
+		RecoveryAttempts:  acc.RecoveryAttempts + current.RecoveryAttempts,
+		RecoverySuccesses: acc.RecoverySuccesses + current.RecoverySuccesses,
+		BlueStacksRestarts: acc.BlueStacksRestarts + current.BlueStacksRestarts,
 	}
 }
 
