@@ -18,6 +18,7 @@ import {
   GetStrategies,
   GetSystemDiagnostics,
   ExportDiagnostics,
+  SetBlueStacksInstance,
   GetUpdateStatus,
   GetAppVersion,
   CheckForUpdate,
@@ -307,6 +308,12 @@ function App() {
     }
   };
 
+  const handleSetBlueStacksInstance = async (instance: string): Promise<void> => {
+    await SetBlueStacksInstance(instance);
+    const d = await GetSystemDiagnostics();
+    setSystemDiagnostics(d as SystemDiagnostics);
+  };
+
   const handleExportDiagnostics = async (): Promise<string> => {
     try {
       return await ExportDiagnostics();
@@ -494,6 +501,7 @@ function App() {
               onClearSkip={handleUpdaterClearSkip}
               systemDiagnostics={systemDiagnostics}
               onExportDiagnostics={handleExportDiagnostics}
+              onSetBlueStacksInstance={handleSetBlueStacksInstance}
             />
           )}
         </div>

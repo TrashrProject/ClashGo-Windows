@@ -131,5 +131,6 @@ export interface SystemDiagnostics {
   config_dir: string;
   assets_ready: boolean;
   missing_assets: string[];
+  configured_instance: string;
   emulator: PlatformDiagnostics;
 }

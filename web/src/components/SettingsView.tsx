@@ -13,11 +13,12 @@ interface SettingsViewProps {
   onClearSkip: () => void;
   systemDiagnostics: SystemDiagnostics | null;
   onExportDiagnostics: () => Promise<string>;
+  onSetBlueStacksInstance: (instance: string) => Promise<void>;
 }
 
 const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   stats, adbPort, darkMode, setDarkMode, onResetStats,
-  appVersion, updateStatus, onCheckUpdates, onClearSkip, systemDiagnostics, onExportDiagnostics,
+  appVersion, updateStatus, onCheckUpdates, onClearSkip, systemDiagnostics, onExportDiagnostics, onSetBlueStacksInstance,
 }) => {
   // Destructive action protection: the first click only ARMS the reset
   // (visual shift + "click again" prompt); a second click within 4s
@@ -25,11 +26,27 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   const [resetArmed, setResetArmed] = React.useState(false);
   const [diagnosticsPath, setDiagnosticsPath] = React.useState('');
   const [diagnosticsBusy, setDiagnosticsBusy] = React.useState(false);
+  const [instanceBusy, setInstanceBusy] = React.useState(false);
+  const [instanceMessage, setInstanceMessage] = React.useState('');
   const resetTimerRef = React.useRef<number | null>(null);
 
   React.useEffect(() => () => {
     if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current);
   }, []);
+
+  const handleInstanceChange = async (instance: string) => {
+    if (instanceBusy) return;
+    setInstanceBusy(true);
+    setInstanceMessage('');
+    try {
+      await onSetBlueStacksInstance(instance);
+      setInstanceMessage(instance ? 'Instance saved' : 'Automatic selection enabled');
+    } catch (err) {
+      setInstanceMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInstanceBusy(false);
+    }
+  };
 
   const handleExportDiagnostics = async () => {
     if (diagnosticsBusy) return;
@@ -106,6 +123,37 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
               Missing: {systemDiagnostics.missing_assets.join(', ')}
             </div>
           )}
+
+          {/* BlueStacks instance selection */}
+          <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">BlueStacks instance</div>
+                <div className="text-[11px] text-zinc-300 mt-1">
+                  {systemDiagnostics?.configured_instance
+                    ? `Forced · ${systemDiagnostics.configured_instance}`
+                    : `Auto · ${systemDiagnostics?.emulator.preferred_instance || 'waiting for detection'}`}
+                </div>
+              </div>
+              <select
+                value={systemDiagnostics?.configured_instance || ''}
+                disabled={instanceBusy || !systemDiagnostics}
+                onChange={(e) => handleInstanceChange(e.target.value)}
+                className="max-w-[220px] rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-bold text-white outline-none focus:border-emerald-500 disabled:opacity-50"
+                aria-label="BlueStacks instance selection"
+              >
+                <option value="">Automatic</option>
+                {(systemDiagnostics?.emulator.instances ?? []).map((inst) => (
+                  <option key={inst.name} value={inst.name}>
+                    {inst.name} · ADB {inst.adb_port}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {instanceMessage && (
+              <div className="mt-2 text-[9px] font-medium text-zinc-400">{instanceMessage}</div>
+            )}
+          </div>
         </div>
 
         {/* Dark Mode Toggle */}

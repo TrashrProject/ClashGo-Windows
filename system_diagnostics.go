@@ -17,7 +17,8 @@ type SystemDiagnostics struct {
 	AssetsDir     string                  `json:"assets_dir"`
 	ConfigDir     string                  `json:"config_dir"`
 	AssetsReady   bool                    `json:"assets_ready"`
-	MissingAssets []string                `json:"missing_assets"`
+	MissingAssets      []string                `json:"missing_assets"`
+	ConfiguredInstance string                  `json:"configured_instance"`
 	Emulator      adb.PlatformDiagnostics `json:"emulator"`
 }
 
@@ -52,7 +53,8 @@ func collectSystemDiagnostics() SystemDiagnostics {
 	d.AssetsReady = len(d.MissingAssets) == 0
 
 	cfg := config.LoadOrDefault("config.json")
-	if requested := strings.TrimSpace(cfg.Device.BlueStacksInstance); requested != "" {
+	d.ConfiguredInstance = strings.TrimSpace(cfg.Device.BlueStacksInstance)
+	if requested := d.ConfiguredInstance; requested != "" {
 		d.Emulator.PreferredInstance = requested
 		for i := range d.Emulator.Instances {
 			d.Emulator.Instances[i].Preferred = strings.EqualFold(d.Emulator.Instances[i].Name, requested)
