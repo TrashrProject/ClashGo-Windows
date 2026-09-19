@@ -199,7 +199,7 @@ func (t *Transport) connectLocked() error {
 	conn, err := net.DialTimeout("tcp", addr, DialTimeout)
 	if err != nil {
 		// Auto-start ADB server if connection is refused
-		_ = exec.Command("adb", "start-server").Run()
+		_ = exec.Command(ADBExecutable(), "start-server").Run()
 		time.Sleep(500 * time.Millisecond) // brief wait for startup
 		conn, err = net.DialTimeout("tcp", addr, DialTimeout)
 		if err != nil {

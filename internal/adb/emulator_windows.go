@@ -202,7 +202,7 @@ func (c *Client) findReachableBlueStacks(ctx context.Context, ports []int) strin
 	for _, port := range c.tcpScanListens(ports, 120*time.Millisecond) {
 		addr := fmt.Sprintf("127.0.0.1:%d", port)
 		pctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		_ = exec.CommandContext(pctx, "adb", "connect", addr).Run()
+		_ = exec.CommandContext(pctx, ADBExecutable(), "connect", addr).Run()
 		cancel()
 		if c.isBlueStacksDevice(addr) {
 			return addr

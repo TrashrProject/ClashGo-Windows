@@ -165,7 +165,7 @@ func (c *Client) EnsureBlueStacksMacCtx(ctx context.Context, width, height, dpi 
 			// behavior; without it the precheck succeeds but the
 			// bot's diagnostic surface thinks nothing is connected.
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			if err := exec.CommandContext(ctx, "adb", "connect", addr).Run(); err != nil {
+			if err := exec.CommandContext(ctx, ADBExecutable(), "connect", addr).Run(); err != nil {
 				// adb-server might be busy or the connect may have
 				// raced a reload. Direct transport still works for
 				// the bot's adb commands (c.transport.Exec), but flag
@@ -513,7 +513,7 @@ func (c *Client) waitForBlueStacksADB(ctx context.Context, timeout time.Duration
 		for _, port := range openPorts {
 			addr := fmt.Sprintf("localhost:%d", port)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = exec.CommandContext(ctx, "adb", "connect", addr).Run()
+			_ = exec.CommandContext(ctx, ADBExecutable(), "connect", addr).Run()
 			cancel()
 			if c.isBlueStacksDevice(addr) {
 				if c.DeviceID != addr {
@@ -539,7 +539,7 @@ func (c *Client) waitForBlueStacksADB(ctx context.Context, timeout time.Duration
 			continue
 		}
 		// Diagnostic log. Captured in app.log for forensics.
-		if out, derr := exec.Command("adb", "devices", "-l").Output(); derr == nil {
+		if out, derr := exec.Command(ADBExecutable(), "devices", "-l").Output(); derr == nil {
 			c.log.Debugf("adb devices -l: %s", strings.TrimSpace(string(out)))
 		}
 		select {

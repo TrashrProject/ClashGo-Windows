@@ -53,22 +53,38 @@ if ($ports.Count -gt 0) {
     Write-Step "Instances" $false "no ADB ports found in config"
 }
 
-$adb = Get-Command adb.exe -ErrorAction SilentlyContinue
-Write-Step "ADB executable" ([bool]$adb) $(if ($adb) { $adb.Source } else { "adb.exe is not in PATH" })
+$adbPath = $null
+if ($env:CLASHGO_ADB_PATH -and (Test-Path $env:CLASHGO_ADB_PATH)) {
+    $adbPath = $env:CLASHGO_ADB_PATH
+}
+if (-not $adbPath) {
+    $adbCmd = Get-Command adb.exe -ErrorAction SilentlyContinue
+    if ($adbCmd) { $adbPath = $adbCmd.Source }
+}
+if (-not $adbPath) {
+    $adbCandidates = @()
+    if ($env:CLASHGO_BLUESTACKS_HOME) { $adbCandidates += (Join-Path $env:CLASHGO_BLUESTACKS_HOME "HD-Adb.exe") }
+    if ($env:ProgramFiles) {
+        $adbCandidates += (Join-Path $env:ProgramFiles "BlueStacks_nxt\HD-Adb.exe")
+        $adbCandidates += (Join-Path $env:ProgramFiles "BlueStacks_nxt\adb.exe")
+    }
+    $adbPath = $adbCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+Write-Step "ADB executable" ([bool]$adbPath) $(if ($adbPath) { $adbPath } else { "adb/HD-Adb.exe not found" })
 
-if ($adb) {
-    & adb start-server | Out-Null
+if ($adbPath) {
+    & $adbPath start-server | Out-Null
     foreach ($entry in $ports) {
         $addr = "127.0.0.1:$($entry.Port)"
-        & adb connect $addr | Out-Null
+        & $adbPath connect $addr | Out-Null
     }
-    $devices = (& adb devices -l) -join " | "
+    $devices = (& $adbPath devices -l) -join " | "
     Write-Step "ADB devices" ($devices -match '\bdevice\b') $devices
 
     $target = $null
     foreach ($entry in $ports) {
         $addr = "127.0.0.1:$($entry.Port)"
-        $state = (& adb -s $addr get-state 2>$null)
+        $state = (& $adbPath -s $addr get-state 2>$null)
         if ($state -eq "device") {
             $target = $addr
             break
@@ -77,12 +93,12 @@ if ($adb) {
 
     if ($target) {
         Write-Step "BlueStacks target" $true $target
-        $manufacturer = (& adb -s $target shell getprop ro.product.manufacturer 2>$null).Trim()
-        $model = (& adb -s $target shell getprop ro.product.model 2>$null).Trim()
+        $manufacturer = (& $adbPath -s $target shell getprop ro.product.manufacturer 2>$null).Trim()
+        $model = (& $adbPath -s $target shell getprop ro.product.model 2>$null).Trim()
         Write-Step "Android identity" $true "$manufacturer / $model"
-        $size = (& adb -s $target shell wm size 2>$null) -join " "
+        $size = (& $adbPath -s $target shell wm size 2>$null) -join " "
         Write-Step "Display size" ($size.Length -gt 0) $size
-        $pkg = (& adb -s $target shell pm path com.supercell.clashofclans 2>$null) -join " "
+        $pkg = (& $adbPath -s $target shell pm path com.supercell.clashofclans 2>$null) -join " "
         Write-Step "Clash of Clans" ($pkg -match "package:") $(if ($pkg) { $pkg } else { "package not found" })
     } else {
         Write-Step "BlueStacks target" $false "no configured ADB port is online"
@@ -91,7 +107,7 @@ if ($adb) {
 
 Write-Host ""
 Write-Host "Environment overrides supported:"
-Write-Host "  CLASHGO_BLUESTACKS_PLAYER"
+Write-Host "  CLASHGO_ADB_PATH"`nWrite-Host "  CLASHGO_BLUESTACKS_PLAYER"
 Write-Host "  CLASHGO_BLUESTACKS_HOME"
 Write-Host "  CLASHGO_BLUESTACKS_DATA"
 Write-Host "  CLASHGO_BLUESTACKS_CONF"
