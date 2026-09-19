@@ -87,6 +87,7 @@ func WithJitterFraction(v float64) Option {
 }
 
 type Health struct {
+	mu               sync.Mutex
 	LastCapture      time.Time `json:"last_capture"`
 	AvgCaptureMs     float64   `json:"avg_capture_ms"`
 	ConsecutiveFails int       `json:"consecutive_fails"`
@@ -96,7 +97,11 @@ type Health struct {
 }
 
 func (h *Health) RecordSuccess(d time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	h.LastCapture = time.Now()
+	h.CapturesTotal++
 	ms := d.Seconds() * 1000
 	if h.AvgCaptureMs == 0 {
 		h.AvgCaptureMs = ms
@@ -107,12 +112,31 @@ func (h *Health) RecordSuccess(d time.Duration) {
 }
 
 func (h *Health) RecordFailure(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	h.ConsecutiveFails++
+	h.ErrorsTotal++
 	if err != nil {
 		h.LastError = err.Error()
 	}
 }
 
 func (h *Health) IsHealthy() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	return h.ConsecutiveFails < 3
+}
+
+func (h *Health) Snapshot() Health {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return Health{
+		LastCapture:      h.LastCapture,
+		AvgCaptureMs:     h.AvgCaptureMs,
+		ConsecutiveFails: h.ConsecutiveFails,
+		CapturesTotal:    h.CapturesTotal,
+		ErrorsTotal:      h.ErrorsTotal,
+		LastError:        h.LastError,
+	}
 }

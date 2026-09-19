@@ -19,6 +19,8 @@ export interface BotStats {
   adb_health: {
     avg_capture_ms: number;
     consecutive_fails: number;
+    captures_total: number;
+    errors_total: number;
     last_error?: string;
   };
 }

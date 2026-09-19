@@ -1268,7 +1268,7 @@ func (c *Client) DetectTouchDevice() (string, error) {
 }
 
 func (c *Client) Health() Health {
-	return c.health
+	return c.health.Snapshot()
 }
 
 func errStr(err error) string {

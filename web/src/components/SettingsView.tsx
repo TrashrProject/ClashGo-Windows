@@ -188,6 +188,8 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             { label: 'Connection Status', value: stats.adb_health.consecutive_fails === 0 ? 'Optimal' : 'Interrupted', status: stats.adb_health.consecutive_fails === 0 ? 'success' : 'error', icon: 'hub', detail: stats.adb_health.last_error },
             { label: 'ADB Port', value: adbPort.toString(), status: 'info', icon: 'router' },
             { label: 'Capture Latency', value: isNaN(stats.adb_health.avg_capture_ms) ? '0ms' : `${stats.adb_health.avg_capture_ms.toFixed(1)}ms`, status: stats.adb_health.avg_capture_ms < 200 ? 'success' : 'info', icon: 'speed' },
+            { label: 'Capture Success', value: stats.adb_health.captures_total > 0 ? `${((stats.adb_health.captures_total / Math.max(1, stats.adb_health.captures_total + stats.adb_health.errors_total)) * 100).toFixed(1)}%` : '—', status: stats.adb_health.errors_total === 0 ? 'success' : 'info', icon: 'monitoring' },
+            { label: 'ADB Errors', value: stats.adb_health.errors_total.toLocaleString(), status: stats.adb_health.consecutive_fails > 0 ? 'error' : 'success', icon: 'error' },
             // cpu_time_sec is device-independent (absolute CPU seconds since
             // start). cpu_cores is a fraction of one core; scaled by the host's
             // logical core count only to render a familiar 0-100% number.
