@@ -121,6 +121,8 @@ jobs:
           $json = $manifest | ConvertTo-Json -Depth 6
           $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
           [System.IO.File]::WriteAllText((Join-Path $PWD "dist\latest.json"), $json, $utf8NoBom)
+          node -e "JSON.parse(require('fs').readFileSync('dist/latest.json','utf8')); console.log('latest.json: valid UTF-8 JSON')"
+          if ($LASTEXITCODE -ne 0) { throw "latest.json validation failed" }
           "zip=$($zip.FullName)" >> $env:GITHUB_OUTPUT
 
       - name: Publish GitHub release
