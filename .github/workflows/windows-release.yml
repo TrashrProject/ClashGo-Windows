@@ -87,7 +87,7 @@ jobs:
 
       - name: Test
         shell: powershell
-        run: go test ./internal/... ./pkg/...
+        run: go test ./...
 
       - name: Build
         shell: powershell
