@@ -7,13 +7,20 @@ on:
         description: Build version
         required: true
         default: 0.6.0-windows-beta
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'windows/core-port'
     runs-on: windows-latest
+    env:
+      BUILD_VERSION: ${{ github.event.inputs.version || '0.6.0-windows-beta' }}
     timeout-minutes: 120
     steps:
       - name: Checkout Windows branch
@@ -82,12 +89,12 @@ jobs:
 
       - name: Build portable Windows bundle
         shell: powershell
-        run: .\tools\build-windows.ps1 -Version "${{ inputs.version }}" -SkipSync -SkipTests
+        run: .\tools\build-windows.ps1 -Version "$env:BUILD_VERSION" -SkipSync -SkipTests
 
       - name: Upload Windows portable build
         uses: actions/upload-artifact@v4
         with:
-          name: ClashGO-Windows-${{ inputs.version }}
+          name: ClashGO-Windows-${{ env.BUILD_VERSION }}
           path: |
             dist/ClashGO-v*-windows.zip
             dist/ClashGO-Windows/**
