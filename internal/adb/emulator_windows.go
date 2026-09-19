@@ -146,6 +146,9 @@ func findBlueStacksWindowsConfig() string {
 	if data := strings.TrimSpace(os.Getenv("CLASHGO_BLUESTACKS_DATA")); data != "" {
 		candidates = append(candidates, filepath.Join(data, "bluestacks.conf"))
 	}
+	for _, data := range blueStacksRegistryDataDirs() {
+		candidates = append(candidates, filepath.Join(data, "bluestacks.conf"))
+	}
 	if data := strings.TrimSpace(os.Getenv("ProgramData")); data != "" {
 		candidates = append(candidates,
 			filepath.Join(data, "BlueStacks_nxt", "bluestacks.conf"),
