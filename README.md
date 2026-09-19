@@ -1,3 +1,40 @@
+# ClashGO Windows
+
+Windows-first fork of [ClashGO](https://github.com/DSargent21/ClashGo), based on the audited upstream `0.5.0-beta` codebase and preserving the original MIT license/copyright.
+
+## Windows status
+
+The `windows/core-port` branch targets Windows 10/11 + BlueStacks 5. It now includes automatic BlueStacks discovery/startup, instance-specific ADB port discovery, optional safe ADB enablement, 860×732/160-DPI setup, Windows CPU metrics, Wails Windows UI settings, portable packaging, Windows self-update support, a live readiness panel, and diagnostic export.
+
+### Fast path for a development machine
+
+```powershell
+git clone https://github.com/TrashrProject/ClashGo-Windows.git
+cd ClashGo-Windows
+git checkout windows/core-port
+powershell -ExecutionPolicy Bypass -File .\tools\setup-windows-dev.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\sync-upstream-runtime.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\run-windows-dev.ps1
+```
+
+To install/build OpenCV automatically when it is not already present:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\setup-windows-dev.ps1 -InstallOpenCV
+```
+
+To produce a portable release ZIP:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\build-windows.ps1
+```
+
+The packaged app searches for runtime assets beside `ClashGO.exe`, stores writable state under `%APPDATA%\ClashGO`, and can discover BlueStacks' bundled ADB when a standalone Android platform-tools install is not in PATH.
+
+See `docs/WINDOWS_PORT.md` and run `tools\windows-doctor.ps1` for a host preflight.
+
+---
+
 # ClashGO ⚔️
 
 This is **ClashGO**, a super lightweight Clash of Clans bot written in Go.
