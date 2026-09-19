@@ -232,7 +232,15 @@ func findBlueStacksWindowsPlayer() (string, error) {
 	return "", errors.New("BlueStacks 5 HD-Player.exe was not found; install BlueStacks 5 or set CLASHGO_BLUESTACKS_PLAYER")
 }
 
-func chooseBlueStacksWindowsInstance(instances []blueStacksWindowsInstance) string {
+func chooseBlueStacksWindowsInstance(instances []blueStacksWindowsInstance, configured string) string {
+	configured = strings.TrimSpace(configured)
+	if configured != "" {
+		for _, inst := range instances {
+			if strings.EqualFold(inst.Name, configured) {
+				return inst.Name
+			}
+		}
+	}
 	if forced := strings.TrimSpace(os.Getenv("CLASHGO_BLUESTACKS_INSTANCE")); forced != "" {
 		for _, inst := range instances {
 			if strings.EqualFold(inst.Name, forced) {
