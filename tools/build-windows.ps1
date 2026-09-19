@@ -70,7 +70,7 @@ try {
     Set-Content -Path (Join-Path $bundle "VERSION.txt") -Value $versionText -Encoding UTF8
 
     if (-not (Test-Path $distRoot)) { New-Item -ItemType Directory -Force -Path $distRoot | Out-Null }
-    $zip = Join-Path $distRoot ("ClashGO-v{0}-Windows-x64.zip" -f $Version)
+    $zip = Join-Path $distRoot ("ClashGO-v{0}-windows.zip" -f $Version)
     if (Test-Path $zip) { Remove-Item $zip -Force }
     Compress-Archive -Path $bundle -DestinationPath $zip -CompressionLevel Optimal
     Write-Host ""
