@@ -244,12 +244,12 @@ func chooseBlueStacksWindowsInstance(instances []blueStacksWindowsInstance, conf
 			}
 		}
 	}
+	// Environment override is intentionally permissive for advanced/dev use:
+	// BlueStacks can accept an instance name before it has appeared in the
+	// currently parsed config snapshot. Persistent UI selection stays strict
+	// because SetBlueStacksInstance validates detected instances before saving.
 	if forced := strings.TrimSpace(os.Getenv("CLASHGO_BLUESTACKS_INSTANCE")); forced != "" {
-		for _, inst := range instances {
-			if strings.EqualFold(inst.Name, forced) {
-				return inst.Name
-			}
-		}
+		return forced
 	}
 	for _, want := range []string{"Tiramisu64", "Rvc64", "Pie64", "Nougat64", "Nougat32"} {
 		for _, inst := range instances {
