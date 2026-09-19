@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -305,6 +306,14 @@ type BotStatus struct {
 // instead of finishing the boot and starting anyway (the old
 // behavior — see the concurrency notes in StopBot).
 func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled bool) BotStatus {
+	diag := collectSystemDiagnostics()
+	if !diag.AssetsReady {
+		return BotStatus{
+			Running: false,
+			Message: "Runtime assets missing: " + strings.Join(diag.MissingAssets, ", "),
+		}
+	}
+
 	a.mu.Lock()
 
 	if a.bot != nil {
