@@ -68,3 +68,18 @@ powershell -ExecutionPolicy Bypass -File .\\tools\\build-installer.ps1
 ```
 
 The installer copies the complete tested portable bundle (EXE, assets, OpenCV/MinGW DLLs and update helper), creates Start Menu/Desktop shortcuts and registers a normal Windows uninstaller. `%APPDATA%\\ClashGO` is preserved on uninstall so configuration, diagnostics and attack history survive reinstallations.
+
+
+## v0.6 Windows beta readiness
+
+The Windows beta now includes the platform-neutral emulator API, BlueStacks 5
+auto-discovery/start/recovery, persistent instance selection, safe ADB enablement,
+BlueStacks custom DataDir registry discovery, Windows CPU metrics, portable
+runtime packaging, SHA256-verified self-update, readiness diagnostics, support
+bundle export, persistent statistics/history, strategy-path rebasing, ADB health
+telemetry, recovery outcome telemetry, fail-fast Windows prerequisites and a
+full-runtime NSIS installer definition.
+
+Release gate: Windows CI must generate Wails bindings, pass frontend/backend
+tests, create the portable bundle and upload the artifact before the branch is
+merged into `main`.
