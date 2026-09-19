@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// EnsureBlueStacksMac is a stub for non-macOS platforms.
+// ensureBlueStacksPlatform keeps unsupported platforms compiling while surfacing a clear error.\nfunc (c *Client) ensureBlueStacksPlatform(_ context.Context, width, height, dpi int) error {\n\treturn errors.New(\"BlueStacks auto-config is not supported on this platform\")\n}\n\n// EnsureBlueStacksMac is a stub for non-macOS platforms.
 func (c *Client) EnsureBlueStacksMac(width, height, dpi int) error {
 	return errors.New("BlueStacks auto-config only supported on macOS")
 }

@@ -27,7 +27,7 @@ var windowsInstancePortRE = regexp.MustCompile(`^bst\.instance\.([^.]+)\.(?:stat
 
 var fallbackWindowsADBPorts = []int{5555, 5556, 5557, 5558, 5559, 5560, 5561, 5562, 5563, 5564, 5565}
 
-// EnsureBlueStacksMac keeps the upstream method name for boot/recovery
+// ensureBlueStacksPlatform is the Windows implementation behind the platform-neutral API.\nfunc (c *Client) ensureBlueStacksPlatform(ctx context.Context, width, height, dpi int) error {\n\treturn c.EnsureBlueStacksMacCtx(ctx, width, height, dpi)\n}\n\n// EnsureBlueStacksMac keeps the upstream method name for boot/recovery
 // compatibility. On Windows it delegates to the BlueStacks 5 backend.
 func (c *Client) EnsureBlueStacksMac(width, height, dpi int) error {
 	return c.EnsureBlueStacksMacCtx(context.Background(), width, height, dpi)
