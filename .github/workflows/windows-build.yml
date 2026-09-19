@@ -15,6 +15,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: windows-core-port-build
+  cancel-in-progress: true
+
 jobs:
   build:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'windows/core-port'
@@ -41,6 +45,16 @@ jobs:
           node-version: '20'
           cache: npm
           cache-dependency-path: web/package-lock.json
+
+      - name: Frontend TypeScript build
+        shell: powershell
+        run: |
+          Push-Location web
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
+          Pop-Location
 
       - name: Install MinGW and CMake
         shell: powershell
