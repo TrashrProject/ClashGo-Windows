@@ -457,8 +457,6 @@ function App() {
                   onUpdateAndRestart={handleUpdaterOneClick}
                   onSkip={handleUpdaterSkip}
                   onClearSkip={handleUpdaterClearSkip}
-              systemDiagnostics={systemDiagnostics}
-              onExportDiagnostics={handleExportDiagnostics}
                   onDismiss={() => setUpdateDismissed(true)}
                 />
               )}
@@ -494,6 +492,8 @@ function App() {
               updateStatus={updateStatus}
               onCheckUpdates={handleUpdaterCheck}
               onClearSkip={handleUpdaterClearSkip}
+              systemDiagnostics={systemDiagnostics}
+              onExportDiagnostics={handleExportDiagnostics}
             />
           )}
         </div>
