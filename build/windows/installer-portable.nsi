@@ -22,7 +22,7 @@ SetCompressor /SOLID lzma
 
 Name "${PRODUCT_NAME}"
 OutFile "${OUTPUT_PATH}"
-InstallDir "$PROGRAMFILES64\${COMPANY_NAME}\${PRODUCT_NAME}"
+InstallDir "$LOCALAPPDATA\Programs\${COMPANY_NAME}\${PRODUCT_NAME}"
 InstallDirRegKey HKCU "${UNINSTALL_KEY}" "InstallLocation"
 ShowInstDetails show
 ShowUninstDetails show
