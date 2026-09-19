@@ -118,7 +118,9 @@ jobs:
               }
             }
           }
-          $manifest | ConvertTo-Json -Depth 6 | Set-Content dist\latest.json -Encoding UTF8
+          $json = $manifest | ConvertTo-Json -Depth 6
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText((Join-Path $PWD "dist\latest.json"), $json, $utf8NoBom)
           "zip=$($zip.FullName)" >> $env:GITHUB_OUTPUT
 
       - name: Publish GitHub release
