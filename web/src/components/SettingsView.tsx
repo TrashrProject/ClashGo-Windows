@@ -3,6 +3,7 @@ import { BotStats, UpdateStatus, SystemDiagnostics } from '../types';
 
 interface SettingsViewProps {
   stats: BotStats;
+  isRunning: boolean;
   adbPort: number;
   darkMode: boolean;
   setDarkMode: (val: boolean) => void;
@@ -17,7 +18,7 @@ interface SettingsViewProps {
 }
 
 const SettingsView: React.FC<SettingsViewProps> = React.memo(({
-  stats, adbPort, darkMode, setDarkMode, onResetStats,
+  stats, isRunning, adbPort, darkMode, setDarkMode, onResetStats,
   appVersion, updateStatus, onCheckUpdates, onClearSkip, systemDiagnostics, onExportDiagnostics, onSetBlueStacksInstance,
 }) => {
   // Destructive action protection: the first click only ARMS the reset
@@ -62,6 +63,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   };
 
   const handleResetClick = () => {
+    if (isRunning) return;
     if (!resetArmed) {
       setResetArmed(true);
       resetTimerRef.current = window.setTimeout(() => setResetArmed(false), 4000);
@@ -293,8 +295,9 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
         <div className="pt-8 mt-8 border-t border-zinc-50 dark:border-zinc-800/50">
            <button
              onClick={handleResetClick}
+             disabled={isRunning}
              aria-live="polite"
-             className={`w-full flex justify-between items-center p-6 rounded-2xl border transition-all duration-300 group ${
+             className={`w-full flex justify-between items-center p-6 rounded-2xl border transition-all duration-300 group disabled:opacity-50 disabled:cursor-not-allowed ${
                resetArmed
                  ? 'bg-rose-500 border-rose-600 text-white shadow-[0_0_30px_-6px_rgba(244,63,94,0.5)]'
                  : 'bg-rose-50/50 dark:bg-rose-950/10 border-rose-100/50 dark:border-rose-900/20 hover:bg-rose-100/50 dark:hover:bg-rose-950/20'
@@ -309,7 +312,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
                <div className="flex flex-col text-left">
                  <span className={`text-[10px] font-black uppercase tracking-[0.2em] mb-0.5 ${resetArmed ? 'text-white/80' : 'text-rose-600 dark:text-rose-500'}`}>Danger Zone</span>
                  <span className={`text-sm font-bold ${resetArmed ? 'text-white' : 'text-rose-600 dark:text-rose-400'}`}>
-                   {resetArmed ? 'Click again to confirm — wipes all stats' : 'Reset All Statistics'}
+                   {isRunning ? 'Stop the bot before resetting' : (resetArmed ? 'Click again to confirm — wipes all stats' : 'Reset All Statistics')}
                  </span>
                </div>
              </div>

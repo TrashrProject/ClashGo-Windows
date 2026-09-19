@@ -86,13 +86,10 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	// Ensure fresh stats and history every boot
-	_ = os.Remove(paths.ResolveConfig("stats.json"))
-	_ = os.Remove(paths.ResolveConfig("attack_history.json"))
-
 	// Setup log bridge
 	wailsWriter := &WailsLogWriter{app: a}
 	logger.Init(os.Getenv("DEBUG") != "", wailsWriter)
+	a.loadPersistedStats()
 
 	// Bring up the updater service. If NewApp wasn't used (rare
 	// test scaffold), construct lazily.
@@ -124,6 +121,41 @@ func (a *App) startup(ctx context.Context) {
 		// Start Web Server for Remote Access (production-only).
 		go a.startWebServer()
 	}
+}
+
+func (a *App) loadPersistedStats() {
+	data, err := os.ReadFile(paths.ResolveConfig("stats.json"))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Warn().Err(err).Msg("failed to read persisted stats")
+		}
+		return
+	}
+
+	var stats bot.BotStats
+	if err := json.Unmarshal(data, &stats); err != nil {
+		log.Warn().Err(err).Msg("failed to parse persisted stats; starting counters at zero")
+		return
+	}
+
+	// Connection/CPU fields are live process metrics, not durable history.
+	stats.AdbHealth.AvgCaptureMs = 0
+	stats.AdbHealth.ConsecutiveFails = 0
+	stats.AdbHealth.CapturesTotal = 0
+	stats.AdbHealth.ErrorsTotal = 0
+	stats.AdbHealth.LastError = ""
+	stats.CPUTimeSec = 0
+	stats.CPUCores = 0
+
+	a.mu.Lock()
+	a.lastStats = stats
+	a.mu.Unlock()
+
+	log.Info().
+		Int32("attacks", stats.AttacksCompleted).
+		Int64("gold", stats.TotalGold).
+		Int64("elixir", stats.TotalElixir).
+		Msg("restored persisted session totals")
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -227,22 +259,27 @@ func mergeStats(acc, current bot.BotStats) bot.BotStats {
 	}
 }
 
-func (a *App) ResetStats() {
+func (a *App) ResetStats() error {
 	a.mu.Lock()
-	a.lastStats = bot.BotStats{}
-	if a.bot != nil {
-		// We can't easily reset atomic counters in a running bot without adding a Reset method there too.
-		// For now, stopping the bot might be required for a full reset, or we just clear the persistent part.
+	if a.bot != nil || a.cancel != nil {
+		a.mu.Unlock()
+		return fmt.Errorf("stop the bot before resetting statistics")
 	}
+	a.lastStats = bot.BotStats{}
 	a.mu.Unlock()
-	// Drop the cached history so the next GetAttackHistory re-reads
-	// (correct empty) state from disk instead of serving stale rows
-	// we'd just deleted from disk but still keep in memory.
+
 	a.cachedHistoryMu.Lock()
 	a.cachedHistory = nil
 	a.cachedHistoryMu.Unlock()
-	_ = os.Remove(paths.ResolveConfig("stats.json"))
-	_ = os.Remove(paths.ResolveConfig("attack_history.json"))
+
+	if err := os.Remove(paths.ResolveConfig("stats.json")); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Remove(paths.ResolveConfig("attack_history.json")); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	_ = os.Remove(paths.ResolveConfig("last_attack_report.json"))
+	return nil
 }
 
 func (a *App) startWebServer() {

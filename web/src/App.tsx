@@ -386,13 +386,13 @@ function App() {
   // <ip>:{port}`; the port number is just the local ADB server's
   // listen port, not the device host regardless.
   const adbState: 'connected' | 'degraded' | 'disconnected' | 'awaiting' =
-    stats.attacks_completed + stats.search_skips > 0
-      ? stats.adb_health.consecutive_fails === 0
+    !isRunning
+      ? 'awaiting'
+      : stats.adb_health.consecutive_fails === 0
         ? 'connected'
         : stats.adb_health.consecutive_fails < 5
           ? 'degraded'
-          : 'disconnected'
-      : 'awaiting';
+          : 'disconnected';
   const adbStateLabel =
     adbState === 'connected'
       ? 'Connected'
@@ -491,6 +491,7 @@ function App() {
           {tab === 'settings' && (
             <SettingsView
               stats={stats}
+              isRunning={isRunning}
               adbPort={adbPort}
               darkMode={darkMode}
               setDarkMode={setDarkMode}
