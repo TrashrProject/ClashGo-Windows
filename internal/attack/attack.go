@@ -1,0 +1,2131 @@
+package attack
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"image"
+	"image/color"
+	"math"
+	"math/rand"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/Ducky705/ClashGO/internal/adb"
+	"github.com/Ducky705/ClashGO/internal/config"
+	"github.com/Ducky705/ClashGO/internal/game"
+	"github.com/Ducky705/ClashGO/internal/paths"
+	"github.com/Ducky705/ClashGO/internal/vision"
+	"github.com/Ducky705/ClashGO/pkg/strategy"
+	"github.com/rs/zerolog"
+	"gocv.io/x/gocv"
+)
+
+type Executor struct {
+	client        *adb.Client
+	cal           *game.Calibration
+	cfg           *config.AttackConfig
+	logger        zerolog.Logger
+	classify      func(gocv.Mat) (game.GameState, int)
+	tappedSiegeXs map[int]bool
+	templates     map[string]gocv.Mat
+	// activeStrategy mirrors the strategy being executed so the battle-end
+	// wait can honor per-strategy knobs (e.g. EndAtPercent). Nil when no
+	// dynamic deploy has run yet.
+	activeStrategy *strategy.DynamicStrategy
+
+	// lastDestructionPct is the highest destruction percentage the battle
+	// wait measured from the stall ROI (monotonic in practice). It is the
+	// authoritative "final damage" for star computation per game rules
+	// (>=50% = 1 star, TH destroyed = +1, 100% = 3). Zero when the wait
+	// had no percent ROI to sample. Updated on the executor's goroutine
+	// and read right after WaitForBattleEndCtx returns on the same
+	// goroutine — no locking needed.
+	lastDestructionPct int
+	// thDestroyed latches once the golden "Town Hall destroyed" banner is
+	// observed in the optional stall_config th_banner_zone. False when the
+	// zone is unconfigured (TH state unknown).
+	thDestroyed bool
+
+	OnPhaseStart func(phase string, edge string)
+	OnUnitDeploy func(unit string, slotX int, slotY int)
+
+	OnDukePick func(targetEdge string, chosenEdge string)
+}
+
+// LastDestructionPercent returns the highest destruction percentage the
+// battle-end wait measured from the stall ROI (0 when nothing was read).
+func (e *Executor) LastDestructionPercent() int {
+	return e.lastDestructionPct
+}
+
+// ThDestroyed reports whether the golden Town Hall destroyed banner was
+// seen during the wait (false when no th_banner_zone is configured, i.e.
+// the TH state is unknown).
+func (e *Executor) ThDestroyed() bool {
+	return e.thDestroyed
+}
+
+// goldPixels counts golden-text pixels (BGR: strong red, mid green, weak
+// blue) in a physical ROI. The "Town Hall destroyed" banner renders as
+// golden lettering on a dark band, so this signature cleanly separates it
+// from the bright-white troop bar and the pale battle HUD.
+func (e *Executor) goldPixels(screen gocv.Mat, roi image.Rectangle) int {
+	if roi.Empty() {
+		return 0
+	}
+	sub := screen.Region(roi)
+	defer sub.Close()
+	count := 0
+	for y := 0; y < sub.Rows(); y++ {
+		for x := 0; x < sub.Cols(); x++ {
+			p := sub.GetVecbAt(y, x)
+			if p[2] > 140 && p[1] > 70 && p[0] < 110 && p[2] >= p[1] {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+type PrecisionConfig struct {
+	Edges map[string]ManualEdge `json:"edges"`
+
+	Sides        map[string]ManualEdge  `json:"sides,omitempty"`
+	SpellEdgesA  map[string]ManualEdge  `json:"spell_edges_a"`
+	SpellEdgesB  map[string]ManualEdge  `json:"spell_edges_b"`
+	HeroTargets  map[string]image.Point `json:"hero_targets"`
+	SpellTargets map[string]image.Point `json:"spell_targets"`
+	BarY         int                    `json:"bar_y"`
+	Width        int                    `json:"width"`
+	Height       int                    `json:"height"`
+}
+
+type StallConfig struct {
+	PercentROI image.Rectangle `json:"percent_roi"`
+	EndButton  image.Point     `json:"end_button"`
+	ConfirmBtn image.Point     `json:"confirm_btn"`
+	RefWidth   int             `json:"ref_width"`
+	RefHeight  int             `json:"ref_height"`
+	// ThBannerZone is an OPTIONAL reference-resolution region to scan for
+	// the persistent golden "Town Hall destroyed" banner that appears above
+	// the troop bar once the TH falls. When configured, the battle wait
+	// latches ThDestroyed the first tick the zone contains at least
+	// ThBannerGold gold pixels. Leave empty to treat the TH as unknown
+	// (star counting then relies on destruction percent alone; the zone
+	// was not yet calibrated from a live TH-destroyed capture).
+	ThBannerZone image.Rectangle `json:"th_banner_zone,omitempty"`
+	ThBannerGold int             `json:"th_banner_gold"`
+}
+
+type ManualEdge struct {
+	P1 image.Point `json:"p1"`
+	P2 image.Point `json:"p2"`
+}
+
+func NewExecutor(client *adb.Client, cal *game.Calibration, cfg *config.AttackConfig, logger zerolog.Logger) *Executor {
+
+	classifier := game.NewClassifier(cal, game.ClassifierConfig{
+		ConfirmFrames:     1,
+		TemplateThreshold: 0.7,
+	}, logger)
+
+	exec := &Executor{
+		client:        client,
+		cal:           cal,
+		cfg:           cfg,
+		logger:        logger.With().Str("component", "attack_executor").Logger(),
+		classify:      classifier.ClassifyState,
+		tappedSiegeXs: make(map[int]bool),
+		templates:     make(map[string]gocv.Mat),
+	}
+	exec.loadTemplates()
+	return exec
+}
+
+// configCache memoizes small attack JSON configs for a short window so steady-state
+// reads (per attack / per phase) do not re-hit disk. Entries are invalidated after a
+// TTL so on-disk edits are still picked up without a restart.
+type configCacheEntry struct {
+	data   []byte
+	readAt time.Time
+}
+
+var (
+	configCacheMu  sync.Mutex
+	configCache    = map[string]configCacheEntry{}
+	configCacheTTL = 5 * time.Second
+)
+
+func readConfigJSON(name string) ([]byte, bool) {
+	configCacheMu.Lock()
+	if e, ok := configCache[name]; ok && time.Since(e.readAt) < configCacheTTL {
+		data := e.data
+		configCacheMu.Unlock()
+		return data, true
+	}
+	configCacheMu.Unlock()
+
+	data, err := os.ReadFile(paths.Resolve(name))
+	if err != nil {
+		return nil, false
+	}
+	configCacheMu.Lock()
+	configCache[name] = configCacheEntry{data: data, readAt: time.Now()}
+	configCacheMu.Unlock()
+	return data, true
+}
+
+func (e *Executor) loadTemplates() {
+	dir := paths.Resolve("templates/attack")
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		e.logger.Error().Err(err).Msg("failed to read templates/attack directory")
+		return
+	}
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(strings.ToLower(f.Name()), ".png") {
+			continue
+		}
+		name := strings.TrimSuffix(strings.ToLower(f.Name()), ".png")
+		path := filepath.Join(dir, f.Name())
+		mat := gocv.IMRead(path, gocv.IMReadColor)
+		if mat.Empty() {
+			e.logger.Warn().Str("path", path).Msg("failed to load template image")
+			continue
+		}
+		e.templates[name] = mat
+		e.logger.Debug().Str("name", name).Msg("cached attack template")
+	}
+}
+
+func (e *Executor) SetClassifier(fn func(gocv.Mat) (game.GameState, int)) {
+	e.classify = fn
+}
+
+// SetActiveStrategy records the strategy being executed so battle-end
+// waiting can honor per-strategy knobs (end_at_percent). Pass nil to clear.
+func (e *Executor) SetActiveStrategy(s *strategy.DynamicStrategy) {
+	e.activeStrategy = s
+}
+
+func (e *Executor) UpdateConfig(cfg *config.AttackConfig) {
+	e.cfg = cfg
+}
+
+// Validate ensures all required templates for the strategy exist or are covered by manual labels
+func (e *Executor) Validate(s *strategy.DynamicStrategy) error {
+
+	manualUnits := make(map[string]bool)
+	if data, ok := readConfigJSON("manual_labels.json"); ok {
+		var lConf struct {
+			Slots []struct {
+				X    int    `json:"x"`
+				Name string `json:"name"`
+			} `json:"slots"`
+		}
+		if json.Unmarshal(data, &lConf) == nil {
+			for _, s := range lConf.Slots {
+				manualUnits[strings.ToLower(strings.TrimSpace(s.Name))] = true
+			}
+		}
+	}
+
+	for _, phase := range s.Phases {
+		for _, unit := range phase.Units {
+			unitName := strings.ToLower(strings.TrimSpace(unit.Name))
+
+			if manualUnits[unitName] {
+				continue
+			}
+
+			fileName := strings.ReplaceAll(unitName, " ", "_")
+			if _, ok := e.templates[fileName]; !ok {
+				return fmt.Errorf("missing template for unit '%s' (and not found in manual_labels.json)", unit.Name)
+			}
+		}
+	}
+	return nil
+}
+
+func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (int, error) {
+	w, h := screen.Cols(), screen.Rows()
+	targetEdge := s.TargetEdge
+
+	if err := e.Validate(s); err != nil {
+		e.logger.Error().Err(err).Msg("pre-flight validation failed")
+		return 0, err
+	}
+
+	var pCfg PrecisionConfig
+	usePrecision := false
+	mBarY := int(float64(h) * 0.78)
+
+	pData, ok := readConfigJSON("precision_config.json")
+	if ok && json.Unmarshal(pData, &pCfg) == nil {
+		usePrecision = true
+		scaleX, scaleY := float64(w)/float64(pCfg.Width), float64(h)/float64(pCfg.Height)
+
+		for k, v := range pCfg.Edges {
+			pCfg.Edges[k] = ManualEdge{
+				P1: image.Pt(int(float64(v.P1.X)*scaleX), int(float64(v.P1.Y)*scaleY)),
+				P2: image.Pt(int(float64(v.P2.X)*scaleX), int(float64(v.P2.Y)*scaleY)),
+			}
+		}
+		for k, v := range pCfg.SpellEdgesA {
+			pCfg.SpellEdgesA[k] = ManualEdge{
+				P1: image.Pt(int(float64(v.P1.X)*scaleX), int(float64(v.P1.Y)*scaleY)),
+				P2: image.Pt(int(float64(v.P2.X)*scaleX), int(float64(v.P2.Y)*scaleY)),
+			}
+		}
+		for k, v := range pCfg.SpellEdgesB {
+			pCfg.SpellEdgesB[k] = ManualEdge{
+				P1: image.Pt(int(float64(v.P1.X)*scaleX), int(float64(v.P1.Y)*scaleY)),
+				P2: image.Pt(int(float64(v.P2.X)*scaleX), int(float64(v.P2.Y)*scaleY)),
+			}
+		}
+		for k, v := range pCfg.HeroTargets {
+			pCfg.HeroTargets[k] = image.Pt(int(float64(v.X)*scaleX), int(float64(v.Y)*scaleY))
+		}
+		for k, v := range pCfg.SpellTargets {
+			pCfg.SpellTargets[k] = image.Pt(int(float64(v.X)*scaleX), int(float64(v.Y)*scaleY))
+		}
+
+		if pCfg.Sides != nil {
+			for k, v := range pCfg.Sides {
+				pCfg.Sides[k] = ManualEdge{
+					P1: image.Pt(int(float64(v.P1.X)*scaleX), int(float64(v.P1.Y)*scaleY)),
+					P2: image.Pt(int(float64(v.P2.X)*scaleX), int(float64(v.P2.Y)*scaleY)),
+				}
+			}
+		}
+		mBarY = int(float64(pCfg.BarY) * scaleY)
+		if mBarY > int(float64(h)*0.92) {
+			mBarY = int(float64(h) * 0.92)
+		}
+		e.logger.Info().Int("bar_y", mBarY).Msg("using ULTIMATE PRECISION config")
+	}
+
+	if !usePrecision {
+		return 0, fmt.Errorf("precision config required (run cmd/precision_setup)")
+	}
+
+	if strings.EqualFold(targetEdge, "Random") {
+		edges := []string{"TopLeft", "TopRight", "BottomLeft", "BottomRight"}
+		targetEdge = edges[rand.Intn(len(edges))]
+		e.logger.Info().Str("edge", targetEdge).Msg("random edge selected")
+	}
+
+	lastBar := gocv.NewMat()
+	defer func() {
+		if !lastBar.Closed() {
+			lastBar.Close()
+		}
+	}()
+
+	var deployedHeroSlots []image.Point
+	globalUsedSlots := make(map[int]bool)
+	e.tappedSiegeXs = make(map[int]bool)
+
+	slots := e.ParseLayout(screen, pCfg, w, h, mBarY)
+
+	unitCache := make(map[string]*vision.Match)
+	scaleY := float64(h) / float64(pCfg.Height)
+	slotY := mBarY + int(38.0*scaleY)
+	if data, ok := readConfigJSON("manual_slots.json"); ok {
+		var mConf struct {
+			SlotY      int `json:"slot_y"`
+			CardHeight int `json:"card_height"`
+		}
+		if json.Unmarshal(data, &mConf) == nil {
+			if mConf.SlotY > 0 {
+				slotY = mConf.SlotY
+			} else if mConf.CardHeight > 0 {
+				slotY = mBarY + mConf.CardHeight/2
+			}
+		}
+	}
+	barROI := image.Rect(0, mBarY, w, h)
+
+	manualMap := make(map[int]string)
+	if data, ok := readConfigJSON("manual_labels.json"); ok {
+		var lConf struct {
+			Slots []struct {
+				X    int    `json:"x"`
+				Name string `json:"name"`
+			} `json:"slots"`
+		}
+		if json.Unmarshal(data, &lConf) == nil {
+			for _, sVal := range lConf.Slots {
+				manualMap[sVal.X] = sVal.Name
+			}
+		}
+	}
+
+	e.logger.Info().Msg("🤖 Pinpointing slot identities dynamically via template matching...")
+	for tplName, tpl := range e.templates {
+		if tpl.Empty() {
+			continue
+		}
+		matches, _ := vision.MatchMultiScaleROICached(screen, tpl, tplName, 0.2, 1.2, 20, 0.55, barROI)
+		if len(matches) > 0 {
+			sort.Slice(matches, func(i, j int) bool { return matches[i].Confidence > matches[j].Confidence })
+			bestMatch := matches[0]
+			cleanName := strings.ReplaceAll(tplName, "_", " ")
+			e.logger.Info().Str("unit", cleanName).Int("x", bestMatch.Point.X).Float64("conf", bestMatch.Confidence).Msg("pinpointed unit via template match")
+
+			unitCache[cleanName] = &bestMatch
+		}
+	}
+
+	var siegeXs []int
+	for idx := range slots {
+		slot := &slots[idx]
+
+		matchedName := ""
+		for name, match := range unitCache {
+			if math.Abs(float64(slot.X-match.Point.X)) < float64(w)*0.04 {
+				matchedName = name
+				break
+			}
+		}
+
+		if matchedName != "" {
+
+			unitCache[matchedName].Point = image.Pt(slot.X, slot.Y)
+
+			if e.isSiege(matchedName) {
+				slot.Category = "Siege"
+			} else if e.isHero(matchedName) {
+				slot.Category = "Hero"
+			} else if e.isSpell(matchedName) {
+				slot.Category = "Spell"
+			} else if strings.Contains(matchedName, "cc") || strings.Contains(matchedName, "castle") {
+				slot.Category = "CC"
+			} else {
+				slot.Category = "Troop"
+			}
+		} else {
+
+			if label, ok := manualMap[slot.X]; ok && label != "Empty" {
+				cleanName := strings.ToLower(strings.TrimSpace(label))
+				e.logger.Warn().Int("x", slot.X).Str("fallback", cleanName).Msg("using fallback manual label for slot")
+
+				unitCache[cleanName] = &vision.Match{
+					Point:      image.Pt(slot.X, slotY),
+					Confidence: 1.0,
+					Scale:      1.0,
+				}
+
+				if e.isSiege(cleanName) {
+					slot.Category = "Siege"
+				} else if e.isHero(cleanName) {
+					slot.Category = "Hero"
+				} else if e.isSpell(cleanName) {
+					slot.Category = "Spell"
+				} else if strings.Contains(cleanName, "cc") || strings.Contains(cleanName, "castle") {
+					slot.Category = "CC"
+				} else {
+					slot.Category = "Troop"
+				}
+			}
+		}
+
+		if slot.Category == "Siege" {
+			siegeXs = append(siegeXs, slot.X)
+		}
+	}
+
+	slotMap := make(map[string][]image.Point)
+	for _, slot := range slots {
+		slotMap[slot.Category] = append(slotMap[slot.Category], image.Pt(slot.X, slot.Y))
+	}
+
+	debugImg := screen.Clone()
+	defer debugImg.Close()
+
+	gocv.Line(&debugImg, image.Pt(0, mBarY), image.Pt(w, mBarY), color.RGBA{0, 0, 255, 255}, 2)
+
+	if edge, ok := pCfg.Edges[targetEdge]; ok {
+		gocv.Line(&debugImg, edge.P1, edge.P2, color.RGBA{0, 255, 0, 255}, 3)
+	}
+
+	for _, slot := range slots {
+		c := color.RGBA{255, 255, 255, 255}
+		switch slot.Category {
+		case "Troop":
+			c = color.RGBA{255, 0, 0, 255}
+		case "Siege":
+			c = color.RGBA{0, 255, 255, 255}
+		case "Hero":
+			c = color.RGBA{0, 255, 0, 255}
+		case "Spell":
+			c = color.RGBA{255, 0, 255, 255}
+		case "CC":
+			c = color.RGBA{0, 165, 255, 255}
+		}
+		gocv.Circle(&debugImg, image.Pt(slot.X, slot.Y), 18, c, 2)
+		gocv.PutText(&debugImg, slot.Category, image.Pt(slot.X-15, slot.Y-25), gocv.FontHersheySimplex, 0.4, c, 1)
+	}
+	gocv.IMWrite(paths.ResolveConfig("attack_deploy_debug.png"), debugImg)
+	e.logger.Info().Msg("saved visual diagnostics to attack_deploy_debug.png")
+
+	for name, match := range unitCache {
+		category := "Troop"
+		nameLower := strings.ToLower(name)
+		if e.isSpell(nameLower) {
+			category = "Spell"
+		} else if e.isHero(nameLower) {
+			category = "Hero"
+		} else if e.isSiege(nameLower) {
+			category = "Siege"
+		}
+
+		for idx, slot := range slotMap[category] {
+			if math.Abs(float64(match.Point.X-slot.X)) < float64(w)*0.05 {
+				slotMap[category] = append(slotMap[category][:idx], slotMap[category][idx+1:]...)
+				e.logger.Debug().Str("unit", name).Int("x", slot.X).Str("category", category).Msg("pre-removed cached unit from fallback slotMap")
+				break
+			}
+		}
+	}
+
+	for _, phase := range s.Phases {
+		e.logger.Info().Str("phase", phase.Name).Msg("attack phase")
+		if e.OnPhaseStart != nil {
+			e.OnPhaseStart(phase.Name, targetEdge)
+		}
+
+		sortedUnits := make([]struct {
+			unit      strategy.Unit
+			isAbility bool
+		}, 0, len(phase.Units))
+
+		for _, u := range phase.Units {
+			isAbility := u.Pattern == "Ability" || phase.Pattern == "Ability"
+			sortedUnits = append(sortedUnits, struct {
+				unit      strategy.Unit
+				isAbility bool
+			}{u, isAbility})
+		}
+
+		sort.SliceStable(sortedUnits, func(i, j int) bool {
+			u1, u2 := sortedUnits[i], sortedUnits[j]
+			n1, n2 := strings.ToLower(u1.unit.Name), strings.ToLower(u2.unit.Name)
+
+			p1, p2 := 1, 1
+			if strings.Contains(n1, "spell") {
+				p1 = 0
+			} else if u1.isAbility {
+				p1 = 2
+			}
+			if strings.Contains(n2, "spell") {
+				p2 = 0
+			} else if u2.isAbility {
+				p2 = 2
+			}
+
+			return p1 < p2
+		})
+
+		var heroMatches []struct {
+			unit      strategy.Unit
+			match     *vision.Match
+			isAbility bool
+		}
+
+		isHeroesPhase := strings.Contains(phase.Name, "Heroes")
+		usedSlots := make(map[int]bool)
+
+		if lastBar.Closed() || lastBar.Empty() {
+			var err error
+			lastBar, err = e.client.CaptureToMat()
+			if err != nil {
+				e.logger.Warn().Err(err).Msg("failed initial phase capture")
+				continue
+			}
+		}
+
+		for _, su := range sortedUnits {
+			unit := su.unit
+			unitName := strings.ToLower(strings.TrimSpace(unit.Name))
+			isAbility := su.isAbility
+
+			if isAbility && phase.Name != "Abilities" {
+				continue
+			}
+
+			isSpell := e.isSpell(unitName)
+			isSiege := e.isSiege(unitName)
+			isHero := e.isHero(unitName)
+
+			var match *vision.Match
+			match = unitCache[unitName]
+			if match == nil && isSiege {
+				if m, ok := unitCache["siege machine"]; ok {
+					match = m
+					e.logger.Info().Str("unit", unit.Name).Interface("pos", m.Point).Msg("mapped to manual 'siege machine' slot")
+				}
+			}
+			if match != nil {
+				e.logger.Info().Str("unit", unit.Name).Interface("pos", match.Point).Msg("using manual label coordinates from cache")
+			}
+
+			if match == nil {
+				fileName := strings.ReplaceAll(unitName, " ", "_")
+				tpl, ok := e.templates[fileName]
+				if ok && !tpl.Empty() {
+					if lastBar.Closed() || lastBar.Empty() {
+						var err error
+						lastBar, err = e.client.CaptureToMat()
+						if err != nil {
+							e.logger.Warn().Err(err).Msg("failed capture")
+							continue
+						}
+					}
+
+					findMatch := func(screen gocv.Mat, currentThreshold float32) *vision.Match {
+						matches, _ := vision.MatchMultiScaleROICached(screen, tpl, fileName, 0.2, 1.2, 20, currentThreshold, barROI)
+						if len(matches) > 0 {
+							sort.Slice(matches, func(i, j int) bool { return matches[i].Confidence > matches[j].Confidence })
+							for _, m := range matches {
+								isUsed := false
+								for ux := range usedSlots {
+									if math.Abs(float64(m.Point.X-ux)) < float64(w)*0.05 {
+										isUsed = true
+										break
+									}
+								}
+								if !isUsed {
+									return &m
+								}
+							}
+						}
+						return nil
+					}
+
+					thresholds := []float32{0.80, 0.70, 0.60, 0.55}
+					if isHero {
+						thresholds = []float32{0.85, 0.80, 0.75, 0.70}
+					}
+					if isSiege {
+						thresholds = []float32{0.75, 0.65, 0.55, 0.50}
+					}
+					if isSpell {
+						thresholds = []float32{0.80, 0.75, 0.70, 0.65}
+					}
+
+					for _, t := range thresholds {
+						match = findMatch(lastBar, t)
+						if match != nil {
+							if strings.EqualFold(unitName, "grand warden") {
+								shiftX := int(-6.0 * e.cal.ScaleX)
+								shiftY := int(-16.0 * e.cal.ScaleY)
+								match.Point.X += shiftX
+								match.Point.Y += shiftY
+								e.logger.Info().Int("orig_x", match.Point.X-shiftX).Int("orig_y", match.Point.Y-shiftY).
+									Int("new_x", match.Point.X).Int("new_y", match.Point.Y).Msg("shifted grand warden click target upward/leftward")
+							}
+							break
+						}
+					}
+				}
+			}
+
+			category := "Troop"
+			if isSpell {
+				category = "Spell"
+			} else if isHero {
+				category = "Hero"
+			} else if isSiege {
+				category = "Siege"
+			}
+
+			if match == nil && !isAbility {
+
+				if isHero {
+					e.logger.Warn().Str("unit", unit.Name).Msg("hero has no template match, skipping to prevent slot theft")
+				} else if len(slotMap[category]) > 0 {
+					targetPt := slotMap[category][0]
+					slotMap[category] = slotMap[category][1:]
+					match = &vision.Match{
+						Point:      targetPt,
+						Confidence: 1.0,
+					}
+					e.logger.Info().Str("unit", unit.Name).Str("category", category).Interface("pos", targetPt).Msg("layout parser fallback mapping")
+				}
+			} else if match != nil {
+
+				for idx, slot := range slotMap[category] {
+					if math.Abs(float64(match.Point.X-slot.X)) < float64(w)*0.05 {
+						slotMap[category] = append(slotMap[category][:idx], slotMap[category][idx+1:]...)
+						break
+					}
+				}
+			}
+
+			if isHeroesPhase && isHero && match != nil {
+				heroMatches = append(heroMatches, struct {
+					unit      strategy.Unit
+					match     *vision.Match
+					isAbility bool
+				}{unit, match, isAbility})
+				usedSlots[match.Point.X] = true
+				globalUsedSlots[match.Point.X] = true
+				continue
+			}
+
+			if match == nil {
+				if !isAbility {
+					e.logger.Warn().Str("unit", unit.Name).Msg("unit not found in bar")
+				}
+				continue
+			}
+
+			usedSlots[match.Point.X] = true
+			globalUsedSlots[match.Point.X] = true
+			if e.OnUnitDeploy != nil {
+				e.OnUnitDeploy(unit.Name, match.Point.X, slotY)
+			}
+			e.deployUnit(unit, match, pCfg, targetEdge, w, h, slotY, isAbility, lastBar, phase)
+		}
+
+		if isHeroesPhase && len(heroMatches) > 0 {
+
+			var mainDeployments []struct {
+				unit      strategy.Unit
+				match     *vision.Match
+				isAbility bool
+			}
+			var bonusDeployments []struct {
+				unit      strategy.Unit
+				match     *vision.Match
+				isAbility bool
+			}
+
+			for _, hm := range heroMatches {
+				if hm.isAbility {
+					continue
+				}
+				name := strings.ToLower(hm.unit.Name)
+				isMain := e.isHero(name)
+
+				if isMain {
+					mainDeployments = append(mainDeployments, hm)
+					e.logger.Debug().Str("unit", hm.unit.Name).Msg("added to mainDeployments")
+				} else {
+					bonusDeployments = append(bonusDeployments, hm)
+					e.logger.Debug().Str("unit", hm.unit.Name).Msg("added to bonusDeployments")
+				}
+			}
+
+			sort.Slice(mainDeployments, func(i, j int) bool {
+				return mainDeployments[i].match.Confidence > mainDeployments[j].match.Confidence
+			})
+
+			limitMain := len(mainDeployments)
+
+			e.logger.Debug().Int("main", len(mainDeployments)).Int("bonus", len(bonusDeployments)).Int("limit", limitMain).Msg("hero phase summary")
+			for i := 0; i < limitMain; i++ {
+				e.logger.Debug().Str("unit", mainDeployments[i].unit.Name).Int("x", mainDeployments[i].match.Point.X).Msg("deploying main hero")
+				if e.OnUnitDeploy != nil {
+					e.OnUnitDeploy(mainDeployments[i].unit.Name, mainDeployments[i].match.Point.X, slotY)
+				}
+				if e.deployUnit(mainDeployments[i].unit, mainDeployments[i].match, pCfg, targetEdge, w, h, slotY, false, lastBar, phase) {
+					deployedHeroSlots = append(deployedHeroSlots, mainDeployments[i].match.Point)
+				}
+			}
+
+			sort.Slice(bonusDeployments, func(i, j int) bool {
+				return bonusDeployments[i].match.Confidence > bonusDeployments[j].match.Confidence
+			})
+
+			for i := 0; i < len(bonusDeployments); i++ {
+				e.logger.Debug().Str("unit", bonusDeployments[i].unit.Name).Int("x", bonusDeployments[i].match.Point.X).Msg("deploying bonus hero")
+				if e.OnUnitDeploy != nil {
+					e.OnUnitDeploy(bonusDeployments[i].unit.Name, bonusDeployments[i].match.Point.X, slotY)
+				}
+				if e.deployUnit(bonusDeployments[i].unit, bonusDeployments[i].match, pCfg, targetEdge, w, h, slotY, false, lastBar, phase) {
+					deployedHeroSlots = append(deployedHeroSlots, bonusDeployments[i].match.Point)
+				}
+			}
+
+			if len(deployedHeroSlots) > 0 {
+				e.logger.Info().Int("count", len(deployedHeroSlots)).Msg("bulk activating hero abilities...")
+				time.Sleep(80 * time.Millisecond)
+				for _, pt := range deployedHeroSlots {
+					e.logger.Info().Int("x", pt.X).Int("y", pt.Y).Msg("tapping hero icon for ability (bulk)")
+					e.client.TapFast(pt.X, pt.Y, 2.0)
+					time.Sleep(80 * time.Millisecond)
+				}
+			}
+		}
+
+		pDelay := time.Duration(phase.DelayAfterMS) * time.Millisecond
+		if strings.Contains(phase.Name, "Heroes") || strings.Contains(phase.Name, "Siege") {
+			pDelay = 80 * time.Millisecond
+		}
+		if pDelay > 200*time.Millisecond {
+			pDelay = 1000 * time.Millisecond
+		}
+		if pDelay > 0 {
+			time.Sleep(pDelay)
+		}
+	}
+
+	sweepScreen, err := e.client.CaptureToMat()
+	if err == nil {
+		e.SweepRemainingSlots(sweepScreen, pCfg, targetEdge, w, h, mBarY, globalUsedSlots, siegeXs, slots, slotY)
+		sweepScreen.Close()
+	}
+
+	e.logger.Info().Msg("waiting for deployment to settle before verification...")
+
+	e.logger.Info().Msg("verifying deployment success...")
+	var remainingCount int
+	for attempt := 1; attempt <= 2; attempt++ {
+		verifyScreen, err := e.client.CaptureToMat()
+		if err != nil {
+			break
+		}
+
+		var remainingActiveSlots []TroopSlot
+		verifySlots := e.ParseLayout(verifyScreen, pCfg, w, h, mBarY)
+		for _, slot := range verifySlots {
+
+			if slot.Category == "Siege" || e.isSiegeTapped(slot.X, w) {
+				e.logger.Debug().Int("x", slot.X).Msg("skipping siege slot in verify")
+				continue
+			}
+
+			ratio := e.getSlotActivityRatio(verifyScreen, slot.X, slot.Y)
+
+			if ratio < 0.08 {
+				continue
+			}
+
+			if ratio < 0.4 {
+				e.logger.Debug().Int("x", slot.X).Float64("ratio", ratio).Str("category", slot.Category).Msg("skipping low-ratio slot in verify (ability icon?)")
+				continue
+			}
+
+			if slot.Category == "Troop" || slot.Category == "Spell" || slot.Category == "CC" {
+				remainingActiveSlots = append(remainingActiveSlots, slot)
+			}
+		}
+		verifyScreen.Close()
+
+		remainingCount = len(remainingActiveSlots)
+		if remainingCount == 0 {
+			e.logger.Info().Msg("all troops, spells, and CC successfully deployed!")
+			break
+		}
+
+		e.logger.Warn().Int("attempt", attempt).Int("remaining_slots", len(remainingActiveSlots)).Msg("detected undeployed units, retrying...")
+
+		for _, slot := range remainingActiveSlots {
+
+			alreadyDeployed := false
+			for ux := range globalUsedSlots {
+				if math.Abs(float64(slot.X-ux)) < float64(w)*0.04 {
+					alreadyDeployed = true
+					break
+				}
+			}
+			if alreadyDeployed {
+				e.logger.Debug().Int("x", slot.X).Msg("skipping main-phase-deployed slot in verify")
+				continue
+			}
+
+			isDeployedUnit := false
+			for _, hp := range deployedHeroSlots {
+				if math.Abs(float64(slot.X-hp.X)) < float64(w)*0.06 {
+					isDeployedUnit = true
+					break
+				}
+			}
+			if !isDeployedUnit && e.isSiegeTapped(slot.X, w) {
+				isDeployedUnit = true
+			}
+			if isDeployedUnit {
+				e.logger.Debug().Int("x", slot.X).Msg("skipping already-deployed unit in verify")
+				continue
+			}
+
+			e.logger.Info().Int("x", slot.X).Str("category", slot.Category).Msg("re-deploying remaining slot")
+
+			e.client.TapFast(slot.X, slot.Y, 2.0)
+			e.client.HumanSleep(35, 10)
+
+			var p1, p2 image.Point
+			if slot.Category == "Spell" {
+				if edge, ok := pCfg.SpellEdgesB[targetEdge]; ok {
+					p1, p2 = edge.P1, edge.P2
+
+					centerX, centerY := w/2, h/2
+					pct := 0.20
+					p1 = image.Pt(int(float64(p1.X)+float64(centerX-p1.X)*pct), int(float64(p1.Y)+float64(centerY-p1.Y)*pct))
+					p2 = image.Pt(int(float64(p2.X)+float64(centerX-p2.X)*pct), int(float64(p2.Y)+float64(centerY-p2.Y)*pct))
+				}
+			}
+			if p1.X == 0 && p1.Y == 0 {
+				if edge, ok := pCfg.Edges[targetEdge]; ok {
+					p1, p2 = edge.P1, edge.P2
+				} else {
+					p1 = image.Pt(w/2, h/2)
+					p2 = p1
+				}
+			}
+
+			maxRetryAttempts := 2
+			for batch := 0; batch < maxRetryAttempts; batch++ {
+				if p1 == p2 {
+
+					e.client.TapTriple(p1.X, p1.Y, 12.0, p1.X, p1.Y, 12.0, p1.X, p1.Y, 12.0)
+				} else {
+
+					steps := 9
+					for i := 0; i < steps; i += 3 {
+						pct1 := float64(i) / float64(steps-1)
+						pct2 := float64(i+1) / float64(steps-1)
+						pct3 := float64(i+2) / float64(steps-1)
+						tx1, ty1 := int(float64(p1.X)+float64(p2.X-p1.X)*pct1), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct1)
+						tx2, ty2 := int(float64(p1.X)+float64(p2.X-p1.X)*pct2), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct2)
+						tx3, ty3 := int(float64(p1.X)+float64(p2.X-p1.X)*pct3), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct3)
+						e.client.TapTriple(tx1, ty1, 15.0, tx2, ty2, 15.0, tx3, ty3, 15.0)
+					}
+				}
+
+				time.Sleep(80 * time.Millisecond)
+				checkMat, err := e.client.CaptureToMat()
+				if err != nil {
+					break
+				}
+				isEmpty := e.isSlotEmpty(checkMat, slot.X, slot.Y)
+				checkMat.Close()
+
+				if isEmpty {
+					break
+				}
+
+				e.client.TapFast(slot.X, slot.Y, 2.0)
+				time.Sleep(50 * time.Millisecond)
+			}
+			e.client.HumanSleep(35, 10)
+		}
+	}
+
+	return remainingCount, nil
+}
+
+func (e *Executor) IsSlotEmpty(screen gocv.Mat, x, y int) bool {
+	return e.isSlotEmpty(screen, x, y)
+}
+
+func (e *Executor) isSlotEmpty(screen gocv.Mat, x, y int) bool {
+	size := int(25.0 * e.cal.ScaleX)
+	ratio := slotActivity(screen, x, y, 860, size)
+	isEmpty := ratio < 0.08
+
+	e.logger.Debug().
+		Int("x", x).
+		Float64("active_ratio", ratio).
+		Bool("is_empty", isEmpty).
+		Msg("slot occupancy check")
+
+	return isEmpty
+}
+
+func (e *Executor) getSlotActivityRatio(screen gocv.Mat, x, y int) float64 {
+	size := int(25.0 * e.cal.ScaleX)
+	return slotActivity(screen, x, y, 860, size)
+}
+
+// GetSlotActivityRatio is the exported wrapper for debug scripts.
+func (e *Executor) GetSlotActivityRatio(screen gocv.Mat, x, y int) float64 {
+	return e.getSlotActivityRatio(screen, x, y)
+}
+
+// GetSlotY returns the Y coordinate used for slot detection.
+func (e *Executor) GetSlotY(h, mBarY int) int {
+	slotY := mBarY + int(38.0*e.cal.ScaleY)
+	if data, ok := readConfigJSON("manual_slots.json"); ok {
+		var mConf struct {
+			SlotY      int `json:"slot_y"`
+			CardHeight int `json:"card_height"`
+		}
+		if json.Unmarshal(data, &mConf) == nil {
+			if mConf.SlotY > 0 {
+				slotY = mConf.SlotY
+			} else if mConf.CardHeight > 0 {
+				slotY = mBarY + mConf.CardHeight/2
+			}
+		}
+	}
+	return slotY
+}
+
+func (e *Executor) isHero(name string) bool {
+	n := strings.ToLower(name)
+	return strings.Contains(n, "king") || strings.Contains(n, "queen") || strings.Contains(n, "warden") ||
+		strings.Contains(n, "prince") || strings.Contains(n, "duke") || strings.Contains(n, "champion")
+}
+
+func (e *Executor) isSiege(name string) bool {
+	n := strings.ToLower(name)
+	return strings.Contains(n, "slammer") || strings.Contains(n, "siege") || strings.Contains(n, "blimp") ||
+		strings.Contains(n, "wrecker") || strings.Contains(n, "launcher") || strings.Contains(n, "drill")
+}
+
+func (e *Executor) isSpell(name string) bool {
+	return strings.Contains(strings.ToLower(name), "spell")
+}
+
+func (e *Executor) isSiegeTapped(x int, w int) bool {
+	if e.tappedSiegeXs == nil {
+		return false
+	}
+	for sx := range e.tappedSiegeXs {
+		if math.Abs(float64(x-sx)) < float64(w)*0.06 {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg PrecisionConfig, targetEdge string, w, h, slotY int, isAbility bool, currentScreen gocv.Mat, phase strategy.Phase) bool {
+	unitName := strings.ToLower(strings.TrimSpace(unit.Name))
+	isSiege := e.isSiege(unitName)
+	isHero := e.isHero(unitName)
+	isSpell := e.isSpell(unitName)
+
+	uPt := image.Pt(match.Point.X, slotY)
+
+	if e.isSiegeTapped(uPt.X, w) {
+		e.logger.Warn().Str("unit", unit.Name).Int("x", uPt.X).Msg("slot marked as siege, blocking tap for any unit")
+		return false
+	}
+
+	e.logger.Info().Str("unit", unit.Name).Bool("ability", isAbility).Int("x", uPt.X).Int("y", uPt.Y).Float64("conf", match.Confidence).Msg("selecting unit")
+
+	if isAbility {
+
+		if !currentScreen.Empty() {
+			if e.isSlotEmpty(currentScreen, uPt.X, uPt.Y) {
+				e.logger.Info().Str("unit", unit.Name).Msg("hero dead or ability used, skipping")
+				return false
+			}
+		} else {
+			verify, err := e.client.CaptureToMat()
+			if err == nil {
+				defer verify.Close()
+				if e.isSlotEmpty(verify, uPt.X, uPt.Y) {
+					e.logger.Info().Str("unit", unit.Name).Msg("hero dead or ability used, skipping")
+					return false
+				}
+			}
+		}
+
+		e.client.HumanSleep(10, 5)
+
+		e.client.TapFast(uPt.X, uPt.Y, 4.0)
+		e.client.HumanSleep(10, 5)
+		return true
+	}
+
+	if !currentScreen.Empty() {
+		if e.isSlotEmpty(currentScreen, uPt.X, uPt.Y) {
+			e.logger.Info().Str("unit", unit.Name).Msg("slot is empty/already deployed, skipping")
+			return false
+		}
+	} else {
+		verify, err := e.client.CaptureToMat()
+		if err == nil {
+			defer verify.Close()
+			if e.isSlotEmpty(verify, uPt.X, uPt.Y) {
+				e.logger.Info().Str("unit", unit.Name).Msg("slot is empty/already deployed, skipping")
+				return false
+			}
+		}
+	}
+
+	if isSiege && e.isSiegeTapped(uPt.X, w) {
+		e.logger.Info().Str("unit", unit.Name).Msg("siege slot already tapped, skipping to avoid destruction")
+		return false
+	}
+
+	jCard := e.addJitter(uPt, 8)
+	e.logger.Debug().Int("x", jCard.X).Int("y", jCard.Y).Msg("tapping slot for selection (with jitter)")
+	e.client.TapFast(jCard.X, jCard.Y, 2.0)
+
+	if isSiege {
+		if e.tappedSiegeXs == nil {
+			e.tappedSiegeXs = make(map[int]bool)
+		}
+		e.tappedSiegeXs[uPt.X] = true
+		e.logger.Debug().Int("x", uPt.X).Msg("marked siege as tapped in cache")
+	}
+
+	if isHero {
+		e.client.HumanSleep(250, 50)
+	} else {
+
+		e.client.HumanSleep(35, 10)
+	}
+
+	isDragonDuke := strings.Contains(unitName, "duke")
+
+	if isSpell {
+		e.logger.Debug().Str("unit", unit.Name).Str("uPattern", unit.Pattern).Str("pPattern", phase.Pattern).Msg("spell pattern check")
+		isFourSides := unit.Pattern == "FourSides" || phase.Pattern == "FourSides"
+		if isFourSides {
+			edges := []string{"TopRight", "BottomRight", "BottomLeft", "TopLeft"}
+
+			for i := 0; i < 4; i++ {
+				currentEdge := edges[i]
+				e.logger.Info().Str("unit", unit.Name).Str("edge", currentEdge).Msg("FourSides spell deployment")
+
+				if targetPt, okT := pCfg.SpellTargets[currentEdge]; okT {
+
+					for j := 0; j < 4; j++ {
+						angle := float64(j) * 2.0 * math.Pi / 4.0
+						radius := 18.0 * e.cal.ScaleX
+						tx := targetPt.X + int(radius*math.Cos(angle))
+						ty := targetPt.Y + int(radius*math.Sin(angle))
+						jPt := e.addJitter(image.Pt(tx, ty), 6)
+						e.client.TapFast(jPt.X, jPt.Y, 8.0)
+						time.Sleep(50 * time.Millisecond)
+					}
+				} else {
+
+					edge, ok := pCfg.SpellEdgesB[currentEdge]
+					if !ok {
+						edge, ok = pCfg.SpellEdgesA[currentEdge]
+						if !ok {
+							edge = pCfg.Edges[currentEdge]
+						}
+					}
+
+					p1, p2 := edge.P1, edge.P2
+
+					off := unit.Offset
+					if off == 0 {
+						off = phase.Offset
+					}
+					if off > 0 {
+
+						centerX, centerY := w/2, h/2
+						pct := float64(off) / 300.0
+						p1 = image.Pt(int(float64(p1.X)+float64(centerX-p1.X)*pct), int(float64(p1.Y)+float64(centerY-p1.Y)*pct))
+						p2 = image.Pt(int(float64(p2.X)+float64(centerX-p2.X)*pct), int(float64(p2.Y)+float64(centerY-p2.Y)*pct))
+					}
+					e.logger.Debug().Interface("p1", p1).Interface("p2", p2).Msg("FourSides spell edge coords (inward)")
+
+					for j := 0; j < 4; j++ {
+						pct := float64(j) / 3.0
+						tx, ty := int(float64(p1.X)+float64(p2.X-p1.X)*pct), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct)
+						jPt := e.addJitter(image.Pt(tx, ty), 6)
+						e.client.TapFast(jPt.X, jPt.Y, 8.0)
+						time.Sleep(50 * time.Millisecond)
+					}
+				}
+				time.Sleep(45 * time.Millisecond)
+			}
+			time.Sleep(200 * time.Millisecond)
+			return true
+		}
+
+		spellTarget, okT := pCfg.SpellTargets[targetEdge]
+		isPointPattern := unit.Pattern == "Point" || phase.Pattern == "Point"
+
+		e.logger.Debug().
+			Str("unit", unit.Name).
+			Str("targetEdge", targetEdge).
+			Bool("isPointPattern", isPointPattern).
+			Bool("hasSpellTargetPoint", okT).
+			Msg("Determining spell deployment parameters")
+
+		if isPointPattern && okT {
+			maxSpells := 5
+			if unit.Amount != "All" && unit.Amount != "" {
+				if val, err := strconv.Atoi(unit.Amount); err == nil {
+					maxSpells = val
+				}
+			}
+
+			e.logger.Info().Str("unit", unit.Name).Interface("point", spellTarget).Int("count", maxSpells).Msg("Deploying spells clustered around point target")
+
+			points := make([]image.Point, 0, maxSpells)
+			for i := 0; i < maxSpells; i++ {
+				var offset image.Point
+				if maxSpells > 1 {
+					angle := float64(i) * 2.0 * math.Pi / float64(maxSpells)
+					radius := 18.0 * e.cal.ScaleX
+					offset = image.Pt(int(radius*math.Cos(angle)), int(radius*math.Sin(angle)))
+				}
+				pt := image.Pt(spellTarget.X+offset.X, spellTarget.Y+offset.Y)
+				points = append(points, e.addJitter(pt, 6))
+			}
+
+			for idx, pt := range points {
+				e.logger.Info().Str("unit", unit.Name).Int("idx", idx).Interface("pt", pt).Msg("tapping spell target point")
+				e.client.TapFast(pt.X, pt.Y, 8.0)
+
+				if idx < len(points)-1 {
+					e.client.HumanSleep(180, 40)
+				}
+			}
+			return true
+		}
+
+		var edge ManualEdge
+		var ok bool
+		var selectedLine string
+		isRage := strings.Contains(unitName, "rage")
+
+		if isRage {
+			edge, ok = pCfg.SpellEdgesA[targetEdge]
+			selectedLine = "SpellEdgesA (Line A)"
+			if !ok {
+				edge, ok = pCfg.SpellEdgesB[targetEdge]
+				selectedLine = "SpellEdgesB (Line B fallback)"
+			}
+		} else {
+			edge, ok = pCfg.SpellEdgesB[targetEdge]
+			selectedLine = "SpellEdgesB (Line B)"
+			if !ok {
+				edge, ok = pCfg.SpellEdgesA[targetEdge]
+				selectedLine = "SpellEdgesA (Line A fallback)"
+			}
+		}
+
+		e.logger.Info().
+			Str("unit", unit.Name).
+			Str("line", selectedLine).
+			Bool("found", ok).
+			Interface("coords", edge).
+			Msg("Routing spell to deployment line")
+
+		if ok {
+			maxSpells := 5
+			if unit.Amount != "All" && unit.Amount != "" {
+				if val, err := strconv.Atoi(unit.Amount); err == nil {
+					maxSpells = val
+				}
+			}
+
+			if isRage && maxSpells == 5 {
+				edgeA, okA := pCfg.SpellEdgesA[targetEdge]
+				edgeB, okB := pCfg.SpellEdgesB[targetEdge]
+				if okA && okB {
+					e.logger.Info().Msg("Deploying Rage Spells: 3 on Line A (even), 2 on Line B (far)")
+
+					p1A, p2A := edgeA.P1, edgeA.P2
+
+					pointsA := []image.Point{
+						e.addJitter(image.Pt(int(float64(p1A.X)+float64(p2A.X-p1A.X)*0.10), int(float64(p1A.Y)+float64(p2A.Y-p1A.Y)*0.10)), 8),
+						e.addJitter(image.Pt(int(float64(p1A.X)+float64(p2A.X-p1A.X)*0.50), int(float64(p1A.Y)+float64(p2A.Y-p1A.Y)*0.50)), 8),
+						e.addJitter(image.Pt(int(float64(p1A.X)+float64(p2A.X-p1A.X)*0.90), int(float64(p1A.Y)+float64(p2A.Y-p1A.Y)*0.90)), 8),
+					}
+
+					p1B, p2B := edgeB.P1, edgeB.P2
+
+					pointsB := []image.Point{
+						e.addJitter(image.Pt(int(float64(p1B.X)+float64(p2B.X-p1B.X)*0.10), int(float64(p1B.Y)+float64(p2B.Y-p1B.Y)*0.10)), 8),
+						e.addJitter(image.Pt(int(float64(p1B.X)+float64(p2B.X-p1B.X)*0.90), int(float64(p1B.Y)+float64(p2B.Y-p1B.Y)*0.90)), 8),
+					}
+
+					for idx, pt := range pointsA {
+						e.logger.Info().Int("idx", idx).Interface("pt", pt).Msg("tapping Rage Spell Line A")
+						e.client.TapFast(pt.X, pt.Y, 8.0)
+						e.client.HumanSleep(180, 40)
+					}
+					for idx, pt := range pointsB {
+						e.logger.Info().Int("idx", idx+3).Interface("pt", pt).Msg("tapping Rage Spell Line B")
+						e.client.TapFast(pt.X, pt.Y, 8.0)
+						if idx < len(pointsB)-1 {
+							e.client.HumanSleep(180, 40)
+						}
+					}
+					return true
+				}
+			}
+
+			p1, p2 := edge.P1, edge.P2
+
+			off := unit.Offset
+			if off == 0 {
+				off = phase.Offset
+			}
+			if off > 0 {
+				centerX, centerY := w/2, h/2
+				pct := float64(off)/150.0 + 0.12
+				p1 = image.Pt(int(float64(p1.X)+float64(centerX-p1.X)*pct), int(float64(p1.Y)+float64(centerY-p1.Y)*pct))
+				p2 = image.Pt(int(float64(p2.X)+float64(centerX-p2.X)*pct), int(float64(p2.Y)+float64(centerY-p2.Y)*pct))
+				e.logger.Debug().Interface("offset_p1", p1).Interface("offset_p2", p2).Msg("Applied inward offset to spell line")
+			}
+
+			points := make([]image.Point, 0, maxSpells)
+			for i := 0; i < maxSpells; i++ {
+				pct := 0.5
+				if maxSpells > 1 {
+					pct = 0.22 + float64(i)*0.56/float64(maxSpells-1)
+				}
+				tx := int(float64(p1.X) + float64(p2.X-p1.X)*pct)
+				ty := int(float64(p1.Y) + float64(p2.Y-p1.Y)*pct)
+				points = append(points, e.addJitter(image.Pt(tx, ty), 8))
+			}
+
+			for idx, pt := range points {
+				e.logger.Info().Str("unit", unit.Name).Int("idx", idx).Interface("pt", pt).Msg("tapping spell target line")
+				e.client.TapFast(pt.X, pt.Y, 8.0)
+
+				if idx < len(points)-1 {
+					e.client.HumanSleep(180, 40)
+				}
+			}
+		} else {
+			e.logger.Warn().Str("unit", unit.Name).Msg("No spell deployment line or target point configured for edge")
+		}
+		return true
+	} else {
+		var p1, p2 image.Point
+		deploymentEdge := targetEdge
+
+		isFourSides := unit.Pattern == "FourSides" || phase.Pattern == "FourSides"
+		if isFourSides {
+			edges := []string{"TopRight", "BottomRight", "BottomLeft", "TopLeft"}
+
+			for _, edgeName := range edges {
+				edge, ok := pCfg.Edges[edgeName]
+				if !ok {
+					continue
+				}
+				p1, p2 = edge.P1, edge.P2
+
+				off := unit.Offset
+				if off == 0 {
+					off = phase.Offset
+				}
+				if off > 0 {
+					if target, ok := pCfg.HeroTargets[edgeName]; ok {
+						pct := float64(off) / 200.0
+						p1 = image.Pt(int(float64(p1.X)+float64(target.X-p1.X)*pct), int(float64(p1.Y)+float64(target.Y-p1.Y)*pct))
+						p2 = image.Pt(int(float64(p2.X)+float64(target.X-p2.X)*pct), int(float64(p2.Y)+float64(target.Y-p2.Y)*pct))
+					}
+				}
+
+				e.logger.Info().Str("unit", unit.Name).Str("edge", edgeName).Msg("FourSides rapid dense spam")
+				e.logger.Debug().Interface("p1", p1).Interface("p2", p2).Msg("FourSides edge coords")
+				steps := 12
+				for i := 0; i < steps; i += 3 {
+					pct1 := float64(i) / float64(steps-1)
+					pct2 := float64(i+1) / float64(steps-1)
+					pct3 := float64(i+2) / float64(steps-1)
+					tx1, ty1 := int(float64(p1.X)+float64(p2.X-p1.X)*pct1), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct1)
+					tx2, ty2 := int(float64(p1.X)+float64(p2.X-p1.X)*pct2), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct2)
+					tx3, ty3 := int(float64(p1.X)+float64(p2.X-p1.X)*pct3), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct3)
+					j1 := e.addJitter(image.Pt(tx1, ty1), 8)
+					j2 := e.addJitter(image.Pt(tx2, ty2), 8)
+					j3 := e.addJitter(image.Pt(tx3, ty3), 8)
+					e.client.TapTriple(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0, j3.X, j3.Y, 12.0)
+					time.Sleep(45 * time.Millisecond)
+				}
+			}
+			time.Sleep(120 * time.Millisecond)
+			return true
+		}
+
+		if isDragonDuke && !isAbility {
+
+			adjacentEdges := map[string][]string{
+				"TopLeft":     {"TopRight", "BottomLeft"},
+				"TopRight":    {"TopLeft", "BottomRight"},
+				"BottomLeft":  {"TopLeft", "BottomRight"},
+				"BottomRight": {"TopRight", "BottomLeft"},
+			}
+			chosen := targetEdge
+			if adj, ok := adjacentEdges[targetEdge]; ok && len(adj) > 0 {
+				chosen = adj[rand.Intn(len(adj))]
+			}
+			deploymentEdge = chosen
+			e.logger.Info().Str("target", targetEdge).Str("duke_edge", deploymentEdge).Msg("Dragon Duke adjacent-edge placement")
+			if e.OnDukePick != nil {
+				e.OnDukePick(targetEdge, chosen)
+			}
+
+			if edge, ok := pCfg.Edges[deploymentEdge]; ok {
+				scaled := ScaleEdge(edge, pCfg.Width, pCfg.Height, w, h)
+				p1, p2 = scaled.P1, scaled.P2
+				e.logger.Info().Str("edge", deploymentEdge).Interface("p1", p1).Interface("p2", p2).Msg("placing Dragon Duke along adjacent edge line")
+			}
+		}
+
+		if isHero && !(isDragonDuke && !isAbility) {
+
+			if edge, ok := pCfg.Edges[deploymentEdge]; ok {
+				scaled := ScaleEdge(edge, pCfg.Width, pCfg.Height, w, h)
+				p1, p2 = scaled.P1, scaled.P1
+			}
+		} else if !isDragonDuke || isAbility {
+
+			if edge, ok := pCfg.Edges[deploymentEdge]; ok {
+				scaled := ScaleEdge(edge, pCfg.Width, pCfg.Height, w, h)
+				p1, p2 = scaled.P1, scaled.P2
+			}
+		}
+
+		if isHero {
+			jPt := e.addJitter(p1, 10)
+			e.logger.Info().Str("unit", unit.Name).Int("x", jPt.X).Int("y", jPt.Y).Msg("deploying hero")
+
+			j2 := e.addJitter(p1, 10)
+			j3 := e.addJitter(p1, 10)
+			e.client.TapTriple(jPt.X, jPt.Y, 12.0, j2.X, j2.Y, 12.0, j3.X, j3.Y, 12.0)
+			e.client.HumanSleep(200, 40)
+		} else {
+
+			maxTaps := 12
+			if unit.Amount != "All" && unit.Amount != "" {
+				if val, err := strconv.Atoi(unit.Amount); err == nil {
+					maxTaps = val
+				}
+			} else {
+				if strings.Contains(unitName, "balloon") {
+					maxTaps = 12
+				} else if strings.Contains(unitName, "electro") || strings.Contains(unitName, "dragon") {
+					maxTaps = 12
+				}
+			}
+
+			if p1 == p2 {
+				e.logger.Info().Str("unit", unit.Name).Int("count", maxTaps).Msg("deploying troop point batch")
+				for i := 0; i < maxTaps; {
+					rem := maxTaps - i
+					if rem >= 3 {
+						j1 := e.addJitter(p1, 8)
+						j2 := e.addJitter(p1, 8)
+						j3 := e.addJitter(p1, 8)
+						e.client.TapTriple(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0, j3.X, j3.Y, 12.0)
+						i += 3
+					} else if rem == 2 {
+						j1 := e.addJitter(p1, 8)
+						j2 := e.addJitter(p1, 8)
+						e.client.TapDual(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0)
+						i += 2
+					} else {
+						j1 := e.addJitter(p1, 8)
+						e.client.TapFast(j1.X, j1.Y, 12.0)
+						i += 1
+					}
+					e.client.HumanSleep(200, 40)
+				}
+			} else {
+				e.logger.Info().Str("unit", unit.Name).Int("count", maxTaps).Msg("deploying troop line precisely")
+				points := make([]image.Point, 0, maxTaps)
+				for i := 0; i < maxTaps; i++ {
+					pct := 0.5
+					if maxTaps > 1 {
+						pct = float64(i) / float64(maxTaps-1)
+					}
+					tx := int(float64(p1.X) + float64(p2.X-p1.X)*pct)
+					ty := int(float64(p1.Y) + float64(p2.Y-p1.Y)*pct)
+					points = append(points, e.addJitter(image.Pt(tx, ty), 10))
+				}
+
+				if rand.Float64() < 0.5 {
+					e.logger.Debug().Msg("reversing deployment order along line for human variability")
+					for i, j := 0, len(points)-1; i < j; i, j = i+1, j-1 {
+						points[i], points[j] = points[j], points[i]
+					}
+				}
+
+				for i := 0; i < len(points); {
+					rem := len(points) - i
+					if rem >= 3 {
+						e.client.TapTriple(points[i].X, points[i].Y, 15.0, points[i+1].X, points[i+1].Y, 15.0, points[i+2].X, points[i+2].Y, 15.0)
+						i += 3
+					} else if rem == 2 {
+						e.client.TapDual(points[i].X, points[i].Y, 15.0, points[i+1].X, points[i+1].Y, 15.0)
+						i += 2
+					} else {
+						e.client.TapFast(points[i].X, points[i].Y, 15.0)
+						i += 1
+					}
+
+					sleepBase := 200
+					sleepDev := 40
+					if rand.Float64() < 0.10 {
+
+						sleepBase = 300
+						sleepDev = 50
+					}
+					e.client.HumanSleep(sleepBase, sleepDev)
+
+					if i < len(points) {
+						if verify, err := e.client.CaptureToMat(); err == nil {
+							empty := e.isSlotEmpty(verify, match.Point.X, slotY)
+							verify.Close()
+							if empty {
+								e.logger.Info().Str("unit", unit.Name).Msg("slot emptied mid-deploy, stopping batch")
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+		time.Sleep(15 * time.Millisecond)
+		return true
+	}
+}
+
+func (e *Executor) CalculateInBetween(edge string, offset int, bT, bB, bL, bR, fT, fB, fL, fR image.Point) (p1, p2 image.Point) {
+	pct := float64(offset) / 100.0
+	var baseP1, baseP2, fieldP1, fieldP2 image.Point
+	switch edge {
+	case "TopRight":
+		baseP1, baseP2, fieldP1, fieldP2 = bT, bR, fT, fR
+	case "BottomRight":
+		baseP1, baseP2, fieldP1, fieldP2 = bR, bB, fR, fB
+	case "BottomLeft":
+		baseP1, baseP2, fieldP1, fieldP2 = bB, bL, fB, fL
+	case "TopLeft":
+		baseP1, baseP2, fieldP1, fieldP2 = bL, bT, fL, fT
+	default:
+		baseP1, baseP2, fieldP1, fieldP2 = bT, bR, fT, fR
+	}
+
+	p1 = image.Pt(
+		int(float64(baseP1.X)+float64(fieldP1.X-baseP1.X)*pct),
+		int(float64(baseP1.Y)+float64(fieldP1.Y-baseP1.Y)*pct),
+	)
+	p2 = image.Pt(
+		int(float64(baseP2.X)+float64(fieldP2.X-baseP2.X)*pct),
+		int(float64(baseP2.Y)+float64(fieldP2.Y-baseP2.Y)*pct),
+	)
+	return
+}
+
+func (e *Executor) MaximizeLineSpread(p1, p2 image.Point, w, mBarY int) (image.Point, image.Point) {
+	return p1, p2
+}
+func (e *Executor) EndBattle() error {
+
+	var sCfg StallConfig
+	pinpoint := false
+	if data, ok := readConfigJSON("stall_config.json"); ok && json.Unmarshal(data, &sCfg) == nil {
+		pinpoint = true
+	}
+
+	ex, ey := e.cal.ScaleRef(34, 588)
+	if pinpoint {
+		scaleX, scaleY := float64(e.cal.PhysicalW)/float64(sCfg.RefWidth), float64(e.cal.PhysicalH)/float64(sCfg.RefHeight)
+		ex, ey = int(float64(sCfg.EndButton.X)*scaleX), int(float64(sCfg.EndButton.Y)*scaleY)
+		e.logger.Info().Int("x", ex).Int("y", ey).Msg("using pinpoint End Battle button")
+	} else {
+		screen, err := e.client.CaptureToMat()
+		if err == nil {
+			defer screen.Close()
+			positions := []image.Point{
+				{X: 34, Y: 588},
+				{X: 67, Y: 570},
+				{X: 112, Y: 408},
+			}
+			for _, pos := range positions {
+				sx, sy := e.cal.ScaleRef(pos.X, pos.Y)
+				if sx >= 0 && sy >= 0 && sx < screen.Cols() && sy < screen.Rows() {
+					b := screen.GetUCharAt(sy, sx*3)
+					g := screen.GetUCharAt(sy, sx*3+1)
+					r := screen.GetUCharAt(sy, sx*3+2)
+					if r > 130 && g < 110 && b < 110 {
+						ex, ey = sx, sy
+						e.logger.Info().Int("x", pos.X).Int("y", pos.Y).Msg("dynamically detected End Battle button location")
+						break
+					}
+				}
+			}
+		}
+	}
+	if err := e.client.TapHuman(ex, ey, 5.0); err != nil {
+		return err
+	}
+	time.Sleep(120 * time.Millisecond)
+
+	okX, okY := e.cal.ScaleRef(520, 430)
+	if pinpoint {
+		scaleX, scaleY := float64(e.cal.PhysicalW)/float64(sCfg.RefWidth), float64(e.cal.PhysicalH)/float64(sCfg.RefHeight)
+		okX, okY = int(float64(sCfg.ConfirmBtn.X)*scaleX), int(float64(sCfg.ConfirmBtn.Y)*scaleY)
+		e.logger.Info().Int("x", okX).Int("y", okY).Msg("using pinpoint Confirm button")
+	}
+	if err := e.client.TapHuman(okX, okY, 5.0); err != nil {
+		return err
+	}
+	time.Sleep(120 * time.Millisecond)
+	return nil
+}
+
+func (e *Executor) ReturnHome() error {
+	hx, hy := e.cal.ScaleRef(430, 566)
+	if err := e.client.TapHuman(hx, hy, 5.0); err != nil {
+		return err
+	}
+	time.Sleep(900 * time.Millisecond)
+	screen, err := e.client.CaptureToMat()
+	if err != nil {
+		return err
+	}
+	defer screen.Close()
+	state, _ := e.classify(screen)
+	if state != game.StateMainVillage {
+		return fmt.Errorf("did not return home")
+	}
+	return nil
+}
+
+// WaitForBattleEnd is the context-free variant of
+// WaitForBattleEndCtx. Kept as the stable entry point for callers
+// (CLI, tests) that don't need cancellation.
+func (e *Executor) WaitForBattleEnd(timeout time.Duration) bool {
+	return e.WaitForBattleEndCtx(context.Background(), timeout)
+}
+
+// WaitForBattleEndCtx polls until the battle-end overlay appears,
+// the stall timer fires, the deadline passes, or ctx is cancelled.
+// The ctx select is what lets a bot Stop interrupt a battle wait
+// immediately — without it, stopping the bot mid-battle left the
+// attack goroutine polling for the full timeout (up to 4 minutes)
+// and, because CaptureToMat reconnects a closed transport, it kept
+// issuing taps the whole time.
+//
+// When the active strategy sets end_at_percent, the battle also ends
+// as soon as the destruction percentage reaches that threshold — the
+// win is already secured, so waiting longer only burns wall time.
+// endAtPercentReached is the single auto-end decision: the battle ends
+// early only when the active strategy declared a threshold (endAtPct > 0)
+// AND the measured destruction has reached it (>=, not > — a valk_spam
+// army that secured the win at exactly 50% must not keep fighting).
+// A threshold of 0 disables the feature entirely.
+func endAtPercentReached(endAtPct, currentPct int) bool {
+	return endAtPct > 0 && currentPct >= endAtPct
+}
+
+// validDestructionRead reports whether a stall-ROI OCR read is a
+// plausible enemy destruction percentage. Destruction in CoC is capped at
+// 100; reads above that are digit-OCR garbage of whatever counter sits
+// under the ROI on the current HUD/theme (observed live on auto_edrag
+// battles: reads of 381, 851, 991 while the result screen later showed a
+// 32% defeat). Garbage reads must never feed the stall timer, the
+// end_at_percent auto-end, or the battle's star computation.
+func validDestructionRead(pct int) bool {
+	return pct >= 0 && pct <= 100
+}
+
+// ResetBattleOutcome clears the per-battle destruction/TH state. Called
+// at the top of WaitForBattleEndCtx so a misread from a previous battle
+// can never bleed into the next battle's star computation (observed live:
+// battle 1's garbage 381% was still latched on the shared Executor when
+// battle 2's result was parsed, turning a 32% defeat into "3 stars").
+func (e *Executor) ResetBattleOutcome() {
+	e.lastDestructionPct = 0
+	e.thDestroyed = false
+}
+
+// endButtonVisible reports whether the red "End Battle" button is on the
+// given frame at the stall_config end_button location. CoC only shows
+// that button once the army is fully spent, so tapping it blind when it
+// is absent just taps the map. The check mirrors EndBattle's legacy
+// dynamic probe (bright red pixel). Returns false when no stall_config is
+// loaded or the probe point is off-screen.
+func (e *Executor) endButtonVisible(screen gocv.Mat, sCfg StallConfig) bool {
+	if sCfg.RefWidth == 0 || sCfg.RefHeight == 0 {
+		return false
+	}
+	scaleX := float64(e.cal.PhysicalW) / float64(sCfg.RefWidth)
+	scaleY := float64(e.cal.PhysicalH) / float64(sCfg.RefHeight)
+	x := int(float64(sCfg.EndButton.X) * scaleX)
+	y := int(float64(sCfg.EndButton.Y) * scaleY)
+	if x < 0 || y < 0 || x >= screen.Cols() || y >= screen.Rows() {
+		return false
+	}
+	b := screen.GetUCharAt(y, x*3)
+	g := screen.GetUCharAt(y, x*3+1)
+	r := screen.GetUCharAt(y, x*3+2)
+	return r > 130 && g < 110 && b < 110
+}
+
+func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(1000 * time.Millisecond)
+	defer ticker.Stop()
+
+	// Per-battle outcome reset. lastDestructionPct / thDestroyed are
+	// executor-scoped and would otherwise carry a previous battle's reads
+	// into this one's star computation (see ResetBattleOutcome).
+	e.ResetBattleOutcome()
+
+	lastPct := 0
+	lastPctTime := time.Now()
+	stallLimit := time.Duration(e.cfg.StallTimerSeconds) * time.Second
+
+	var sCfg StallConfig
+	hasStallROI := false
+	if data, ok := readConfigJSON("stall_config.json"); ok && json.Unmarshal(data, &sCfg) == nil {
+		hasStallROI = !sCfg.PercentROI.Empty()
+	}
+
+	tStore, err := game.NewTemplateStore(paths.Resolve("templates"))
+	if err != nil {
+		e.logger.Error().Err(err).Msg("failed to create template store for stall detection")
+		return false
+	}
+	tStore.LoadTemplates()
+	lootRec := game.NewLootRecognizer(e.cal, tStore, e.logger)
+	defer lootRec.Close()
+
+	var pRoi image.Rectangle
+	if hasStallROI {
+		scaleX, scaleY := float64(e.cal.PhysicalW)/float64(sCfg.RefWidth), float64(e.cal.PhysicalH)/float64(sCfg.RefHeight)
+		pRoi = image.Rect(
+			int(float64(sCfg.PercentROI.Min.X)*scaleX),
+			int(float64(sCfg.PercentROI.Min.Y)*scaleY),
+			int(float64(sCfg.PercentROI.Max.X)*scaleX),
+			int(float64(sCfg.PercentROI.Max.Y)*scaleY),
+		)
+	}
+
+	// Optional golden "Town Hall destroyed" banner scan. The banner sits
+	// above the troop bar and persists for the rest of the battle once the
+	// TH falls, so a single tick crossing the gold-pixel threshold latches
+	// ThDestroyed. Coordinates follow percent_roi's reference scheme.
+	var thRoi image.Rectangle
+	hasThZone := !sCfg.ThBannerZone.Empty()
+	if hasThZone {
+		scaleX, scaleY := float64(e.cal.PhysicalW)/float64(sCfg.RefWidth), float64(e.cal.PhysicalH)/float64(sCfg.RefHeight)
+		thRoi = image.Rect(
+			int(float64(sCfg.ThBannerZone.Min.X)*scaleX),
+			int(float64(sCfg.ThBannerZone.Min.Y)*scaleY),
+			int(float64(sCfg.ThBannerZone.Max.X)*scaleX),
+			int(float64(sCfg.ThBannerZone.Max.Y)*scaleY),
+		)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			e.logger.Info().Msg("battle end wait cancelled (bot stopping)")
+			return false
+		case <-ticker.C:
+			screen, err := e.client.CaptureToMat()
+			if err != nil {
+				e.logger.Warn().Err(err).Msg("battle-end wait capture failed; retrying next tick")
+				continue
+			}
+			state, _ := e.classify(screen)
+
+			if state == game.StateBattleEnd || state == game.StateReturnHome {
+				screen.Close()
+				return true
+			}
+
+			// Per-strategy auto-end threshold from end_at_percent (0 = off).
+			endAtPct := 0
+			if e.activeStrategy != nil {
+				endAtPct = e.activeStrategy.EndAtPercent
+			}
+
+			// Destruction-percent reads serve two purposes: the stall
+			// timer and the strategy's end_at_percent auto-end. When a
+			// strategy declares a threshold, the stall timer is disabled
+			// BELOW it — ending early on a stall would abandon the win
+			// the strategy is built around (e.g. valk_spam's 50%). Only
+			// the deadline bounds how long we keep waiting for it.
+			if hasStallROI && (e.cfg.StallTimerSeconds > 0 || endAtPct > 0) {
+				currentPct := lootRec.ReadDestructionPercentage(screen, pRoi)
+
+				// Garbage-read guard: destruction can never exceed 100, so a
+				// >100 read means the ROI is scanning an unrelated counter on
+				// this HUD/theme. Such ticks are ignored entirely — they must
+				// not latch as destruction (fake stars), must not satisfy
+				// end_at_percent (early surrender), and must not stall-end
+				// the battle. The stall timer is reset as if progress was
+				// made so a garbage-reading HUD lets the battle run its
+				// natural course to the result overlay.
+				if !validDestructionRead(currentPct) {
+					e.logger.Debug().
+						Int("raw_pct", currentPct).
+						Msg("stall ROI misread outside 0-100; ignoring tick")
+					lastPctTime = time.Now()
+					screen.Close()
+					if time.Now().After(deadline) {
+						return false
+					}
+					continue
+				}
+
+				// Latch the highest measured destruction as the battle's
+				// final damage (destruction is monotonic; transient 0 reads
+				// happen when the overlay starts rendering before its state
+				// is classified, so max — not last — is authoritative).
+				if currentPct > e.lastDestructionPct {
+					e.lastDestructionPct = currentPct
+				}
+
+				// TH destroyed banner latch (only when the zone is
+				// calibrated in stall_config.json; see ThBannerZone).
+				if hasThZone && !e.thDestroyed {
+					gold := e.goldPixels(screen, thRoi)
+					if gold >= sCfg.ThBannerGold {
+						e.thDestroyed = true
+						e.logger.Info().Int("gold", gold).Msg("Town Hall destroyed banner detected")
+					}
+				}
+
+				// Progress visibility in threshold mode: log every tick so
+				// a long battle toward end_at_percent is observable (the
+				// stall branch's "destruction increased" only fires when
+				// the stall timer is active).
+				if endAtPct > 0 && currentPct != lastPct {
+					lastPct = currentPct
+					e.logger.Info().Int("percent", currentPct).Int("threshold", endAtPct).Msg("destruction progress toward strategy threshold")
+				}
+
+				if endAtPercentReached(endAtPct, currentPct) {
+					// End only when the red End Battle button is actually on
+					// screen (army fully spent). A misread percent must not
+					// tap the map mid-fight.
+					if !e.endButtonVisible(screen, sCfg) {
+						e.logger.Debug().Int("percent", currentPct).Msg("threshold reached but End Battle button not visible; keeping battle alive")
+					} else {
+						e.logger.Info().Int("percent", currentPct).Int("threshold", endAtPct).Msg("destruction reached strategy threshold, ending battle!")
+						screen.Close()
+						e.EndBattle()
+						return true
+					}
+				}
+
+				if e.cfg.StallTimerSeconds > 0 && endAtPct == 0 {
+					if currentPct > lastPct {
+						lastPct = currentPct
+						lastPctTime = time.Now()
+						e.logger.Info().Int("percent", currentPct).Msg("destruction increased, resetting stall timer")
+					} else {
+						elapsed := time.Since(lastPctTime)
+						if elapsed > stallLimit {
+							// Stall-end only when the red End Battle button is on
+							// screen. If it is not, troops are still fighting —
+							// ending blind would tap the map, and the "stall" may
+							// be a HUD/OCR artifact rather than a dead army.
+							if !e.endButtonVisible(screen, sCfg) {
+								e.logger.Warn().Int("last_pct", lastPct).Msg("stall detected but End Battle button not visible; keeping battle alive")
+								lastPctTime = time.Now()
+							} else {
+								e.logger.Warn().Int("last_pct", lastPct).Dur("elapsed", elapsed).Msg("stall detected, ending battle!")
+								screen.Close()
+								e.EndBattle()
+								return true
+							}
+						}
+					}
+				}
+			}
+
+			screen.Close()
+			if time.Now().After(deadline) {
+				return false
+			}
+		}
+	}
+}
+
+func (e *Executor) SweepRemainingSlots(screen gocv.Mat, pCfg PrecisionConfig, targetEdge string, w, h int, mBarY int, usedSlots map[int]bool, siegeXs []int, allSlots []TroopSlot, slotY int) {
+	e.logger.Info().Msg("starting sweep of remaining/event slots...")
+
+	for _, slot := range allSlots {
+		x := slot.X
+
+		if slot.Category == "Siege" || e.isSiegeTapped(x, w) {
+			continue
+		}
+
+		alreadyUsed := false
+		for ux := range usedSlots {
+			if math.Abs(float64(x-ux)) < float64(w)*0.04 {
+				alreadyUsed = true
+				break
+			}
+		}
+		if alreadyUsed {
+			continue
+		}
+
+		if !e.isSlotEmpty(screen, x, slotY) {
+			e.logger.Info().Int("x", x).Str("category", slot.Category).Msg("found undeployed troop slot during sweep, deploying...")
+
+			e.client.TapFast(x, slotY, 2.0)
+			e.client.HumanSleep(35, 10)
+
+			var p1, p2 image.Point
+			if slot.Category == "Spell" {
+				if edge, ok := pCfg.SpellEdgesB[targetEdge]; ok {
+					p1, p2 = edge.P1, edge.P2
+				}
+			}
+			if p1.X == 0 && p1.Y == 0 {
+				if edge, ok := pCfg.Edges[targetEdge]; ok {
+					p1, p2 = edge.P1, edge.P2
+				} else {
+					p1 = image.Pt(w/2, h/2)
+					p2 = p1
+				}
+			}
+
+			maxSweepAttempts := 2
+			for batch := 0; batch < maxSweepAttempts; batch++ {
+				if p1 == p2 {
+					e.client.TapTriple(p1.X, p1.Y, 12.0, p1.X, p1.Y, 12.0, p1.X, p1.Y, 12.0)
+				} else {
+					steps := 9
+					for i := 0; i < steps; i += 3 {
+						pct1 := float64(i) / float64(steps-1)
+						pct2 := float64(i+1) / float64(steps-1)
+						pct3 := float64(i+2) / float64(steps-1)
+						tx1, ty1 := int(float64(p1.X)+float64(p2.X-p1.X)*pct1), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct1)
+						tx2, ty2 := int(float64(p1.X)+float64(p2.X-p1.X)*pct2), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct2)
+						tx3, ty3 := int(float64(p1.X)+float64(p2.X-p1.X)*pct3), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct3)
+						e.client.TapTriple(tx1, ty1, 15.0, tx2, ty2, 15.0, tx3, ty3, 15.0)
+					}
+				}
+
+				time.Sleep(200 * time.Millisecond)
+				checkMat, err := e.client.CaptureToMat()
+				if err != nil {
+					break
+				}
+				isEmpty := e.isSlotEmpty(checkMat, x, slotY)
+				checkMat.Close()
+
+				if isEmpty {
+					e.logger.Info().Int("x", x).Msg("swept slot empty, finished deploying")
+					break
+				}
+				e.client.TapFast(x, slotY, 2.0)
+				time.Sleep(50 * time.Millisecond)
+			}
+
+			usedSlots[x] = true
+			e.client.HumanSleep(35, 10)
+		}
+	}
+}
+
+type TroopSlot struct {
+	X        int
+	Y        int
+	Category string
+}
+
+func (e *Executor) ParseLayout(screen gocv.Mat, pCfg PrecisionConfig, w, h, mBarY int) []TroopSlot {
+	var activeXs []int
+	slotY := mBarY + int(38.0*e.cal.ScaleY)
+
+	if data, ok := readConfigJSON("manual_slots.json"); ok {
+		var mConf struct {
+			CardWidth  int   `json:"card_width"`
+			CardHeight int   `json:"card_height"`
+			SlotXs     []int `json:"slot_xs"`
+			SlotY      int   `json:"slot_y"`
+		}
+		if json.Unmarshal(data, &mConf) == nil {
+			e.logger.Info().Int("slots", len(mConf.SlotXs)).Msg("using 100% precise manual slot mapping")
+			if mConf.SlotY > 0 {
+				slotY = mConf.SlotY
+			} else if mConf.CardHeight > 0 {
+				slotY = mBarY + mConf.CardHeight/2
+			}
+
+			for _, x := range mConf.SlotXs {
+				if !e.isSlotEmpty(screen, x, slotY) {
+					activeXs = append(activeXs, x)
+				}
+			}
+		}
+	}
+
+	if len(activeXs) == 0 {
+		e.logger.Info().Msg("manual calibration missing/empty, falling back to grid detection")
+		step := int(75.0 * e.cal.ScaleX)
+		startX := int(40.0 * e.cal.ScaleX)
+		for x := startX; x < w-20; x += step {
+			if !e.isSlotEmpty(screen, x, slotY) {
+				activeXs = append(activeXs, x)
+			}
+		}
+	}
+	e.logger.Info().Ints("active_xs", activeXs).Msg("detected active slots in bar")
+
+	if len(activeXs) == 0 {
+		return nil
+	}
+
+	barROI := image.Rect(0, mBarY, w, h)
+	heroNames := []string{"barbarian_king", "archer_queen", "grand_warden", "minion_prince", "dragon_duke", "royal_champion"}
+	spellNames := []string{"rage_spell", "ice_spell", "freeze_spell", "heal_spell", "jump_spell", "poison_spell", "recall_spell", "revive_spell"}
+	siegeNames := []string{"stone_slammer", "battle_blimp", "wall_wrecker", "siege_barracks", "log_launcher"}
+
+	matchedHeroes := make(map[int]bool)
+	matchedSpells := make(map[int]bool)
+	matchedSieges := make(map[int]bool)
+
+	for _, name := range heroNames {
+		tpl, ok := e.templates[name]
+		if !ok || tpl.Empty() {
+			continue
+		}
+		matches, _ := vision.MatchMultiScaleROICached(screen, tpl, name, 0.2, 1.2, 20, 0.65, barROI)
+		for _, m := range matches {
+			matchedHeroes[m.Point.X] = true
+		}
+	}
+
+	for _, name := range spellNames {
+		tpl, ok := e.templates[name]
+		if !ok || tpl.Empty() {
+			continue
+		}
+		matches, _ := vision.MatchMultiScaleROICached(screen, tpl, name, 0.2, 1.2, 20, 0.75, barROI)
+		for _, m := range matches {
+			matchedSpells[m.Point.X] = true
+		}
+	}
+
+	for _, name := range siegeNames {
+		tpl, ok := e.templates[name]
+		if !ok || tpl.Empty() {
+			continue
+		}
+		matches, _ := vision.MatchMultiScaleROICached(screen, tpl, name, 0.2, 1.2, 20, 0.55, barROI)
+		for _, m := range matches {
+			matchedSieges[m.Point.X] = true
+		}
+	}
+
+	firstHeroX := 9999
+	lastHeroX := -1
+	for hx := range matchedHeroes {
+		if hx < firstHeroX {
+			firstHeroX = hx
+		}
+		if hx > lastHeroX {
+			lastHeroX = hx
+		}
+	}
+
+	firstSpellX := 9999
+	for sx := range matchedSpells {
+		if sx < firstSpellX {
+			firstSpellX = sx
+		}
+	}
+
+	if firstHeroX == 9999 {
+
+		idx := len(activeXs) / 2
+		if idx < len(activeXs) {
+			firstHeroX = activeXs[idx]
+			lastHeroX = firstHeroX
+		}
+	}
+	if firstSpellX == 9999 {
+
+		firstSpellX = lastHeroX + int(70.0*e.cal.ScaleX)
+	}
+
+	var slots []TroopSlot
+	for _, x := range activeXs {
+		cat := "Troop"
+
+		isSiege := false
+		for sx := range matchedSieges {
+			if math.Abs(float64(x-sx)) < float64(w)*0.06 {
+				isSiege = true
+				break
+			}
+		}
+		if !isSiege && firstHeroX != 9999 && x < firstHeroX {
+			isLastBeforeHero := true
+			for _, otherX := range activeXs {
+				if otherX > x && otherX < firstHeroX {
+					isLastBeforeHero = false
+					break
+				}
+			}
+			if isLastBeforeHero && x != activeXs[0] {
+				isSiege = true
+			}
+		}
+
+		if x >= firstSpellX-int(30.0*e.cal.ScaleX) {
+			cat = "Spell"
+		} else if x >= firstHeroX-int(30.0*e.cal.ScaleX) && x <= lastHeroX+int(30.0*e.cal.ScaleX) {
+			cat = "Hero"
+		} else if isSiege {
+			cat = "Siege"
+		}
+
+		slots = append(slots, TroopSlot{
+			X:        x,
+			Y:        slotY,
+			Category: cat,
+		})
+		e.logger.Info().Int("x", x).Str("category", cat).Msg("classified slot")
+	}
+
+	if len(slots) > 0 {
+		lastIdx := len(slots) - 1
+		if slots[lastIdx].Category == "Spell" && slots[lastIdx].X > w-int(100.0*e.cal.ScaleX) {
+			slots[lastIdx].Category = "CC"
+			e.logger.Info().Int("x", slots[lastIdx].X).Msg("classified last slot as CC")
+		}
+	}
+
+	return slots
+}
+
+func (e *Executor) addJitter(pt image.Point, maxPixels int) image.Point {
+	if maxPixels <= 0 {
+		return pt
+	}
+	jx := int(float64(maxPixels) * e.cal.ScaleX)
+	jy := int(float64(maxPixels) * e.cal.ScaleY)
+	if jx <= 0 {
+		jx = 1
+	}
+	if jy <= 0 {
+		jy = 1
+	}
+	return image.Pt(
+		pt.X+rand.Intn(jx*2+1)-jx,
+		pt.Y+rand.Intn(jy*2+1)-jy,
+	)
+}
+
+func (e *Executor) GetTemplates() map[string]gocv.Mat {
+	return e.templates
+}
+
+func ScaleEdge(e ManualEdge, refW, refH, curW, curH int) ManualEdge {
+	if refW == 0 || refH == 0 {
+		return e
+	}
+	sx, sy := float64(curW)/float64(refW), float64(curH)/float64(refH)
+	return ManualEdge{
+		P1: image.Pt(int(float64(e.P1.X)*sx), int(float64(e.P1.Y)*sy)),
+		P2: image.Pt(int(float64(e.P2.X)*sx), int(float64(e.P2.Y)*sy)),
+	}
+}
