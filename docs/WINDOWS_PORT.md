@@ -46,3 +46,13 @@ the audited upstream runtime assets, runs backend tests, creates the portable
 bundle and uploads `ClashGO-v0.6.0-windows-beta-windows.zip` as an artifact.
 
 A successful CI build is the release gate before live BlueStacks testing.
+
+
+### Multiple BlueStacks instances
+
+ClashGO discovers BlueStacks 5 instances from `bluestacks.conf`. By default it
+selects an appropriate instance automatically and probes that instance's ADB
+port first. The Settings > Windows Readiness panel can persist a specific
+instance when several are installed. Clear the selection to return to automatic
+mode. The selected instance is stored as `device.bluestacks_instance` in the
+normal ClashGO config and is only changed while the bot is stopped.
