@@ -69,6 +69,8 @@ jobs:
           cmd /c win_download_opencv.cmd
           if ($LASTEXITCODE -ne 0) { throw "OpenCV download failed" }
           (Get-Content .\win_build_opencv.cmd -Raw).Replace("-DBUILD_PERF_TESTS=ON", "-DBUILD_PERF_TESTS=OFF") | Set-Content .\win_build_opencv.cmd -Encoding ASCII
+          $env:CMAKE_BUILD_PARALLEL_LEVEL = [Environment]::ProcessorCount
+          Write-Host "Building OpenCV with $env:CMAKE_BUILD_PARALLEL_LEVEL parallel jobs"
           cmd /c win_build_opencv.cmd
           if ($LASTEXITCODE -ne 0) { throw "OpenCV build failed" }
           Pop-Location
