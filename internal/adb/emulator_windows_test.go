@@ -146,3 +146,26 @@ func TestChooseBlueStacksWindowsConfiguredInstance(t *testing.T) {
 		t.Fatalf("expected configured Pie64 instance, got %q", got)
 	}
 }
+
+
+func TestWindowsCandidateADBPortsConfiguredSelectionIsStrict(t *testing.T) {
+	instances := []blueStacksWindowsInstance{
+		{Name: "Pie64", ADBPort: 5555},
+		{Name: "Tiramisu64", ADBPort: 5562},
+	}
+	got := windowsCandidateADBPortsForSelection(instances, "Pie64", "Pie64")
+	if len(got) != 1 || got[0] != 5555 {
+		t.Fatalf("configured instance must use only its own ADB port, got %v", got)
+	}
+}
+
+func TestWindowsCandidateADBPortsAutoKeepsFallbacks(t *testing.T) {
+	instances := []blueStacksWindowsInstance{
+		{Name: "Pie64", ADBPort: 5555},
+		{Name: "Tiramisu64", ADBPort: 5562},
+	}
+	got := windowsCandidateADBPortsForSelection(instances, "Tiramisu64", "")
+	if len(got) < 2 || got[0] != 5562 || got[1] != 5555 {
+		t.Fatalf("automatic mode should preserve preferred/fallback ordering, got %v", got)
+	}
+}
