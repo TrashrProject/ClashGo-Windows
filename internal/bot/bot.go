@@ -2027,9 +2027,12 @@ func (b *Bot) Stats() BotStats {
 		Stars2:           b.stars2.Load(),
 		Stars3:           b.stars3.Load(),
 		Uptime:           time.Since(b.startedAt),
-		AdbHealth:        b.client.Health(),
-		CPUTimeSec:       CPUTime().Seconds(),
-		CPUCores:         b.cpuSampler.Usage(),
+		AdbHealth:          b.client.Health(),
+		CPUTimeSec:         CPUTime().Seconds(),
+		CPUCores:           b.cpuSampler.Usage(),
+		RecoveryAttempts:   b.recoveryAttempts.Load(),
+		RecoverySuccesses:  b.recoverySuccesses.Load(),
+		BlueStacksRestarts: b.blueStacksRestarts.Load(),
 	}
 }
 
