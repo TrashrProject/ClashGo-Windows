@@ -4,7 +4,7 @@ package adb
 
 import (
 	"os"
-	"path/filepath"
+	"path/filepath"\n\t"strings"
 	"testing"
 )
 
@@ -62,5 +62,58 @@ func TestWindowsCandidateADBPortsDeduplicates(t *testing.T) {
 	}
 	if seen[5555] != 1 || seen[5562] != 1 {
 		t.Fatalf("ports were not deduplicated: %v", got)
+	}
+}
+
+
+func TestEnsureBlueStacksADBAccess(t *testing.T) {
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "bluestacks.conf")
+	original := []byte("bst.enable_adb_access=\"0\"\r\nbst.other=\"x\"\r\n")
+	if err := os.WriteFile(conf, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := ensureBlueStacksADBAccess(conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("expected ADB setting to be changed")
+	}
+	got, err := os.ReadFile(conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "bst.enable_adb_access=\"1\"") {
+		t.Fatalf("ADB flag not enabled: %s", got)
+	}
+	if _, err := os.Stat(conf + ".clashgo.bak"); err != nil {
+		t.Fatalf("backup missing: %v", err)
+	}
+}
+
+func TestEnsureBlueStacksADBAccessDoesNotInventMissingKey(t *testing.T) {
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "bluestacks.conf")
+	if err := os.WriteFile(conf, []byte("bst.other=\"x\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := ensureBlueStacksADBAccess(conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatal("must not add an ADB key that was absent")
+	}
+}
+
+func TestWindowsCandidateADBPortsPreferred(t *testing.T) {
+	instances := []blueStacksWindowsInstance{
+		{Name: "Pie64", ADBPort: 5555},
+		{Name: "Tiramisu64", ADBPort: 5562},
+	}
+	got := windowsCandidateADBPortsPreferred(instances, "Tiramisu64")
+	if len(got) < 2 || got[0] != 5562 || got[1] != 5555 {
+		t.Fatalf("preferred port ordering wrong: %v", got[:2])
 	}
 }

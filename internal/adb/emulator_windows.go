@@ -23,7 +23,57 @@ type blueStacksWindowsInstance struct {
 	ADBPort int
 }
 
-var windowsInstancePortRE = regexp.MustCompile(`^bst\.instance\.([^.]+)\.(?:status\.)?adb_port=(.+)$`)
+var windowsInstancePortRE = regexp.MustCompile(`^bst\.instance\.([^.]+)\.(?:status\.)?adb_port=(.+)//go:build windows
+
+package adb
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type blueStacksWindowsInstance struct {
+	Name    string
+	ADBPort int
+}
+
+)\nvar windowsADBAccessRE = regexp.MustCompile(`(?m)^bst\\.enable_adb_access\\s*=\\s*"([01])"\\s*//go:build windows
+
+package adb
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type blueStacksWindowsInstance struct {
+	Name    string
+	ADBPort int
+}
+
+)
 
 var fallbackWindowsADBPorts = []int{5555, 5556, 5557, 5558, 5559, 5560, 5561, 5562, 5563, 5564, 5565}
 
@@ -34,20 +84,41 @@ func (c *Client) EnsureBlueStacksMac(width, height, dpi int) error {
 }
 
 func (c *Client) EnsureBlueStacksMacCtx(ctx context.Context, width, height, dpi int) error {
-	instances := discoverBlueStacksWindowsInstances()
-	ports := windowsCandidateADBPorts(instances)
+	conf := findBlueStacksWindowsConfig()
+	adbSettingChanged := false
+	if conf != "" {
+		changed, err := ensureBlueStacksADBAccess(conf)
+		if err != nil {
+			c.log.Warn(fmt.Sprintf("could not auto-enable BlueStacks ADB: %v", err))
+		} else if changed {
+			adbSettingChanged = true
+			c.log.Info("enabled BlueStacks Android Debug Bridge in bluestacks.conf (backup created)")
+		}
+	}
 
-	if addr := c.findReachableBlueStacks(ctx, ports); addr != "" {
-		c.DeviceID = addr
-		c.log.Info(fmt.Sprintf("BlueStacks already reachable on %s — keeping existing instance", addr))
-		return c.ensureWindowsAndroidDisplay(width, height, dpi)
+	instances := discoverBlueStacksWindowsInstances()
+	preferred := chooseBlueStacksWindowsInstance(instances)
+	ports := windowsCandidateADBPortsPreferred(instances, preferred)
+
+	if !adbSettingChanged {
+		if addr := c.findReachableBlueStacks(ctx, ports); addr != "" {
+			c.DeviceID = addr
+			c.log.Info(fmt.Sprintf("BlueStacks already reachable on %s — keeping existing instance", addr))
+			return c.ensureWindowsAndroidDisplay(width, height, dpi)
+		}
+	} else {
+		// ADB was disabled. A running HD-Player may not re-read the global
+		// setting until restart, so restart the player before launching the
+		// selected instance. User data remains in the BlueStacks VM.
+		_ = exec.Command("taskkill", "/F", "/IM", "HD-Player.exe").Run()
+		time.Sleep(800 * time.Millisecond)
 	}
 
 	player, err := findBlueStacksWindowsPlayer()
 	if err != nil {
 		return err
 	}
-	instance := chooseBlueStacksWindowsInstance(instances)
+	instance := preferred
 	if instance == "" {
 		return errors.New("BlueStacks 5 is installed but no instance was found in bluestacks.conf; start an instance once from Multi-instance Manager, then retry")
 	}
@@ -127,6 +198,42 @@ func findBlueStacksWindowsConfig() string {
 	return ""
 }
 
+func ensureBlueStacksADBAccess(conf string) (bool, error) {
+	data, err := os.ReadFile(conf)
+	if err != nil {
+		return false, err
+	}
+	m := windowsADBAccessRE.FindSubmatch(data)
+	if len(m) != 2 {
+		// Never add unknown/missing keys: newer BlueStacks builds validate
+		// config keys strictly. Only modify the official key when present.
+		return false, nil
+	}
+	if string(m[1]) == "1" {
+		return false, nil
+	}
+
+	backup := conf + ".clashgo.bak"
+	if _, err := os.Stat(backup); os.IsNotExist(err) {
+		if err := os.WriteFile(backup, data, 0o644); err != nil {
+			return false, fmt.Errorf("backup bluestacks.conf: %w", err)
+		}
+	}
+	updated := windowsADBAccessRE.ReplaceAll(data, []byte(`bst.enable_adb_access="1"`))
+	if string(updated) == string(data) {
+		return false, nil
+	}
+	info, _ := os.Stat(conf)
+	mode := os.FileMode(0o644)
+	if info != nil {
+		mode = info.Mode().Perm()
+	}
+	if err := os.WriteFile(conf, updated, mode); err != nil {
+		return false, fmt.Errorf("write bluestacks.conf: %w", err)
+	}
+	return true, nil
+}
+
 func findBlueStacksWindowsPlayer() (string, error) {
 	var candidates []string
 	if p := strings.TrimSpace(os.Getenv("CLASHGO_BLUESTACKS_PLAYER")); p != "" {
@@ -167,6 +274,21 @@ func chooseBlueStacksWindowsInstance(instances []blueStacksWindowsInstance) stri
 		return instances[0].Name
 	}
 	return ""
+}
+
+func windowsCandidateADBPortsPreferred(instances []blueStacksWindowsInstance, preferred string) []int {
+	ordered := make([]blueStacksWindowsInstance, 0, len(instances))
+	for _, inst := range instances {
+		if preferred != "" && strings.EqualFold(inst.Name, preferred) {
+			ordered = append(ordered, inst)
+		}
+	}
+	for _, inst := range instances {
+		if preferred == "" || !strings.EqualFold(inst.Name, preferred) {
+			ordered = append(ordered, inst)
+		}
+	}
+	return windowsCandidateADBPorts(ordered)
 }
 
 func windowsCandidateADBPorts(instances []blueStacksWindowsInstance) []int {
@@ -230,7 +352,7 @@ func (c *Client) launchBlueStacks(_ bool, width, height, dpi int) error {
 	if err := launchBlueStacksWindows(context.Background(), player, instance); err != nil {
 		return err
 	}
-	if err := c.waitForBlueStacksADBWithPorts(context.Background(), 90*time.Second, windowsCandidateADBPorts(instances)); err != nil {
+	if err := c.waitForBlueStacksADBWithPorts(context.Background(), 90*time.Second, windowsCandidateADBPortsPreferred(instances, instance)); err != nil {
 		return err
 	}
 	return c.ensureWindowsAndroidDisplay(width, height, dpi)
@@ -287,7 +409,7 @@ func (c *Client) isBlueStacksDevice(id string) bool {
 }
 
 func (c *Client) waitForBlueStacksADB(ctx context.Context, timeout time.Duration) error {
-	return c.waitForBlueStacksADBWithPorts(ctx, timeout, windowsCandidateADBPorts(discoverBlueStacksWindowsInstances()))
+	instances := discoverBlueStacksWindowsInstances()\n\treturn c.waitForBlueStacksADBWithPorts(ctx, timeout, windowsCandidateADBPortsPreferred(instances, chooseBlueStacksWindowsInstance(instances)))
 }
 
 func (c *Client) waitForBlueStacksADBWithPorts(ctx context.Context, timeout time.Duration, ports []int) error {
