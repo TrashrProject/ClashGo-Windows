@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -349,6 +350,18 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 		return BotStatus{
 			Running: false,
 			Message: "Runtime assets missing: " + strings.Join(diag.MissingAssets, ", "),
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		if !diag.Emulator.BlueStacksPlayerFound {
+			return BotStatus{Running: false, Message: "BlueStacks 5 was not detected. Install BlueStacks 5 or configure CLASHGO_BLUESTACKS_PLAYER."}
+		}
+		if !diag.Emulator.ADBFound {
+			return BotStatus{Running: false, Message: "ADB was not detected. ClashGO can use Android platform-tools or BlueStacks HD-Adb.exe."}
+		}
+		if strings.TrimSpace(diag.Emulator.PreferredInstance) == "" {
+			return BotStatus{Running: false, Message: "No BlueStacks instance was detected. Start an instance once from BlueStacks Multi-instance Manager, then retry."}
 		}
 	}
 
