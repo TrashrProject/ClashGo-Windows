@@ -111,7 +111,7 @@ jobs:
 
       - name: Backend tests
         shell: powershell
-        run: go test ./internal/... ./pkg/...
+        run: go test ./...
 
       - name: Build portable Windows bundle
         shell: powershell
