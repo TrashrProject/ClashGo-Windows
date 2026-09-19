@@ -579,6 +579,44 @@ func (a *App) GetConfig() *config.BotConfig {
 	return config.LoadOrDefault("config.json")
 }
 
+// SetBlueStacksInstance persists the preferred BlueStacks 5 instance.
+// An empty value restores automatic instance selection. The setting is only
+// changed while the bot is stopped so the active ADB transport cannot jump
+// to another emulator mid-session.
+func (a *App) SetBlueStacksInstance(instance string) error {
+	instance = strings.TrimSpace(instance)
+
+	a.mu.Lock()
+	if a.bot != nil || a.cancel != nil {
+		a.mu.Unlock()
+		return fmt.Errorf("stop the bot before changing BlueStacks instance")
+	}
+	a.mu.Unlock()
+
+	if instance != "" {
+		diag := collectSystemDiagnostics()
+		found := false
+		for _, inst := range diag.Emulator.Instances {
+			if strings.EqualFold(inst.Name, instance) {
+				instance = inst.Name
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("BlueStacks instance %q was not detected", instance)
+		}
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Device.BlueStacksInstance = instance
+	bytes, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644)
+}
+
 // GetStats returns the bot's live runtime statistics
 func (a *App) GetStats() bot.BotStats {
 	a.mu.Lock()

@@ -34,7 +34,8 @@ type Client struct {
 	timeout  time.Duration
 	log      Logger
 
-	zoomOutKey string
+	blueStacksInstance string
+	zoomOutKey          string
 	zoomInKey  string
 
 	transport *Transport

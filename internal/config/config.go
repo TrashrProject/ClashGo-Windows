@@ -22,6 +22,7 @@ type DeviceConfig struct {
 	ADBHost               string `json:"adb_host"`
 	ADBPort               int    `json:"adb_port"`
 	DeviceID              string `json:"device_id"`
+	BlueStacksInstance    string `json:"bluestacks_instance,omitempty"`
 	PackageName           string `json:"package_name"`
 	ZoomOutKey            string `json:"zoom_out_key"` // Key to press for zoom out (e.g., "-")
 	ZoomInKey             string `json:"zoom_in_key"`  // Key to press for zoom in (e.g., "+")
@@ -129,6 +130,7 @@ func DefaultConfig() *BotConfig {
 			ADBHost:               "127.0.0.1",
 			ADBPort:               5037,
 			DeviceID:              "localhost:5555",
+			BlueStacksInstance:    "",
 			PackageName:           "com.supercell.clashofclans",
 			ZoomOutKey:            "i",
 			ZoomInKey:             "o",

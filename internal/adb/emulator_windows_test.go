@@ -41,12 +41,12 @@ func TestChooseBlueStacksWindowsInstance(t *testing.T) {
 		{Name: "Pie64", ADBPort: 5555},
 		{Name: "Tiramisu64", ADBPort: 5562},
 	}
-	if got := chooseBlueStacksWindowsInstance(instances); got != "Tiramisu64" {
+	if got := chooseBlueStacksWindowsInstance(instances, ""); got != "Tiramisu64" {
 		t.Fatalf("expected Tiramisu64 preference, got %q", got)
 	}
 
 	t.Setenv("CLASHGO_BLUESTACKS_INSTANCE", "Custom64")
-	if got := chooseBlueStacksWindowsInstance(instances); got != "Custom64" {
+	if got := chooseBlueStacksWindowsInstance(instances, ""); got != "Custom64" {
 		t.Fatalf("expected env override, got %q", got)
 	}
 }
@@ -132,5 +132,17 @@ func TestEnsureBlueStacksADBAccessDoesNotInventMissingKey(t *testing.T) {
 	}
 	if changed {
 		t.Fatal("must not add an ADB key that was absent")
+	}
+}
+
+
+func TestChooseBlueStacksWindowsConfiguredInstance(t *testing.T) {
+	t.Setenv("CLASHGO_BLUESTACKS_INSTANCE", "")
+	instances := []blueStacksWindowsInstance{
+		{Name: "Pie64", ADBPort: 5555},
+		{Name: "Tiramisu64", ADBPort: 5562},
+	}
+	if got := chooseBlueStacksWindowsInstance(instances, "Pie64"); got != "Pie64" {
+		t.Fatalf("expected configured Pie64 instance, got %q", got)
 	}
 }

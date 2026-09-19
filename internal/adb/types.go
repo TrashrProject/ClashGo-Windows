@@ -53,6 +53,10 @@ func WithLogger(l Logger) Option {
 	return func(c *Client) { c.log = l }
 }
 
+func WithBlueStacksInstance(instance string) Option {
+	return func(c *Client) { c.blueStacksInstance = instance }
+}
+
 func WithTimeout(d time.Duration) Option {
 	return func(c *Client) {
 		c.timeout = d

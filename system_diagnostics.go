@@ -3,8 +3,10 @@ package main
 import (
 	"os"
 	"runtime"
+	"strings"
 
 	"github.com/Ducky705/ClashGO/internal/adb"
+	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/paths"
 )
 
@@ -48,6 +50,14 @@ func collectSystemDiagnostics() SystemDiagnostics {
 		}
 	}
 	d.AssetsReady = len(d.MissingAssets) == 0
+
+	cfg := config.LoadOrDefault("config.json")
+	if requested := strings.TrimSpace(cfg.Device.BlueStacksInstance); requested != "" {
+		d.Emulator.PreferredInstance = requested
+		for i := range d.Emulator.Instances {
+			d.Emulator.Instances[i].Preferred = strings.EqualFold(d.Emulator.Instances[i].Name, requested)
+		}
+	}
 	return d
 }
 

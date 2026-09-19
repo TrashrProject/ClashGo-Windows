@@ -64,7 +64,7 @@ func (c *Client) ensureBlueStacksWindows(ctx context.Context, width, height, dpi
 	}
 
 	instances := discoverBlueStacksWindowsInstances()
-	preferred := chooseBlueStacksWindowsInstance(instances)
+	preferred := chooseBlueStacksWindowsInstance(instances, c.blueStacksInstance)
 	ports := windowsCandidateADBPortsPreferred(instances, preferred)
 
 	if !adbSettingChanged {
@@ -234,7 +234,11 @@ func findBlueStacksWindowsPlayer() (string, error) {
 
 func chooseBlueStacksWindowsInstance(instances []blueStacksWindowsInstance) string {
 	if forced := strings.TrimSpace(os.Getenv("CLASHGO_BLUESTACKS_INSTANCE")); forced != "" {
-		return forced
+		for _, inst := range instances {
+			if strings.EqualFold(inst.Name, forced) {
+				return inst.Name
+			}
+		}
 	}
 	for _, want := range []string{"Tiramisu64", "Rvc64", "Pie64", "Nougat64", "Nougat32"} {
 		for _, inst := range instances {
@@ -317,7 +321,7 @@ func (c *Client) launchBlueStacks(_ bool, width, height, dpi int) error {
 		return err
 	}
 	instances := discoverBlueStacksWindowsInstances()
-	instance := chooseBlueStacksWindowsInstance(instances)
+	instance := chooseBlueStacksWindowsInstance(instances, c.blueStacksInstance)
 	if instance == "" {
 		return errors.New("no BlueStacks instance found in bluestacks.conf")
 	}
@@ -395,7 +399,7 @@ func (c *Client) isBlueStacksDevice(id string) bool {
 
 func (c *Client) waitForBlueStacksADB(ctx context.Context, timeout time.Duration) error {
 	instances := discoverBlueStacksWindowsInstances()
-	preferred := chooseBlueStacksWindowsInstance(instances)
+	preferred := chooseBlueStacksWindowsInstance(instances, c.blueStacksInstance)
 	return c.waitForBlueStacksADBWithPorts(
 		ctx,
 		timeout,

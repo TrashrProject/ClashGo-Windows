@@ -38,7 +38,7 @@ func getPlatformDiagnostics() PlatformDiagnostics {
 	}
 
 	instances := discoverBlueStacksWindowsInstances()
-	d.PreferredInstance = chooseBlueStacksWindowsInstance(instances)
+	d.PreferredInstance = chooseBlueStacksWindowsInstance(instances, "")
 	for _, inst := range instances {
 		d.Instances = append(d.Instances, PlatformInstanceDiagnostic{
 			Name:      inst.Name,
