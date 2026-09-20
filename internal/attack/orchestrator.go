@@ -638,9 +638,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			switch cat {
 			case "Troop":
 				return 0
-			case "Siege", "CC":
-				return 1
 			case "Hero":
+				return 1
+			case "Siege", "CC":
 				return 2
 			case "Spell":
 				return 3
