@@ -1,11 +1,12 @@
 import React from 'react';
-import { BotStats } from '../types';
+import { BotStats, VillageResourceSnapshot } from '../types';
 
 interface AnalyticsProps {
   stats: BotStats;
+  resourceHistory: VillageResourceSnapshot[];
 }
 
-const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats }) => {
+const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory }) => {
   // `color` drives Tailwind bar classes; `hex` feeds the conic-gradient
   // (Tailwind class names are NOT valid CSS color values — using them
   // inside the gradient string would silently drop the donut).
@@ -15,6 +16,16 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats }) => {
     { label: '1 Star', count: stats.stars_1, color: 'bg-zinc-400', hex: '#a1a1aa', bg: 'bg-zinc-400/10' },
     { label: '0 Stars', count: stats.stars_0, color: 'bg-rose-500', hex: '#f43f5e', bg: 'bg-rose-500/10' },
   ];
+
+  const validResourceHistory = resourceHistory.filter((s) => s.valid);
+  const firstResource = validResourceHistory[0];
+  const lastResource = validResourceHistory[validResourceHistory.length - 1];
+  const resourceDelta = {
+    gold: firstResource && lastResource ? lastResource.gold - firstResource.gold : 0,
+    elixir: firstResource && lastResource ? lastResource.elixir - firstResource.elixir : 0,
+    dark: firstResource && lastResource ? lastResource.dark_elixir - firstResource.dark_elixir : 0,
+  };
+  const formatSigned = (v: number) => (v > 0 ? '+' : '') + v.toLocaleString();
 
   const totalAttacks = stats.stars_3 + stats.stars_2 + stats.stars_1 + stats.stars_0;
   const getPercent = (count: number) => totalAttacks > 0 ? Math.round((count / totalAttacks) * 100) : 0;
@@ -35,6 +46,45 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats }) => {
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 max-w-6xl mx-auto">
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
+          <div>
+            <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Village Resource Tracking</h3>
+            <p className="text-sm text-zinc-500 mt-1">Automatic BlueStacks snapshots. No manual entry required.</p>
+          </div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+            {validResourceHistory.length} snapshots
+          </div>
+        </div>
+
+        {lastResource ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {[
+              { label: 'Gold', current: lastResource.gold, delta: resourceDelta.gold, icon: 'monetization_on' },
+              { label: 'Elixir', current: lastResource.elixir, delta: resourceDelta.elixir, icon: 'water_drop' },
+              { label: 'Dark Elixir', current: lastResource.dark_elixir, delta: resourceDelta.dark, icon: 'opacity' },
+            ].map((item) => (
+              <div key={item.label} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/30 p-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">{item.label}</div>
+                    <div className="mt-2 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{item.current.toLocaleString()}</div>
+                  </div>
+                  <span className="material-symbols-outlined text-zinc-400">{item.icon}</span>
+                </div>
+                <div className={`mt-3 text-xs font-black tabular-nums ${item.delta >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {formatSigned(item.delta)} since first snapshot
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="py-10 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">
+            Waiting for ClashGO to scan the home village
+          </div>
+        )}
+      </div>
 
       <div className="bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none group transition-all duration-500">
         <div className="flex justify-between items-center mb-8">
