@@ -3,6 +3,7 @@ package attack
 import (
 	"image"
 	"math/rand"
+	"runtime"
 	"strings"
 	"time"
 
@@ -105,13 +106,33 @@ func (t *TapExecutor) TapSlot(slot *TrackedSlot, jitterPx int) {
 	if strings.Contains(strings.ToLower(slot.UnitName), "warden") {
 		ptY -= int(25.0 * t.cal.ScaleY)
 	}
+
+	// Hard Windows safety rail: a troop-card selection tap is NEVER allowed
+	// outside the bottom battle bar. This protects against stale/manual slot
+	// coordinates accidentally landing on HUD buttons such as Surrender.
+	if runtime.GOOS == "windows" {
+		h := t.cal.PhysicalH
+		if h <= 0 { h = 732 }
+		minY := int(float64(h) * 0.84)
+		maxY := int(float64(h) * 0.975)
+		if ptY < minY || ptY > maxY {
+			safeY := int(float64(h) * 0.925)
+			t.logger.Warn().
+				Int("requested_y", ptY).
+				Int("safe_y", safeY).
+				Str("unit", slot.UnitName).
+				Msg("blocked unsafe troop-slot Y outside bottom battle bar")
+			ptY = safeY
+		}
+	}
+
 	jPt := t.addJitter(image.Pt(slot.X, ptY), jitterPx)
 	t.logger.Debug().
 		Int("x", jPt.X).
 		Int("y", jPt.Y).
 		Str("unit", slot.UnitName).
 		Msg("tapping slot")
-	t.client.TapFast(jPt.X, jPt.Y, 2.0)
+	t.client.TapFast(jPt.X, jPt.Y, 0.8)
 }
 
 // TapDeployLine distributes taps along a line from p1 to p2.
