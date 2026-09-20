@@ -47,3 +47,22 @@ func TestArmyStateManagerTracksProfileAndReconcile(t *testing.T) {
 		t.Fatalf("EDrag state not complete: %+v", s)
 	}
 }
+
+
+func TestArmyStateManagerDoesNotFailOnUnseenProfileUnit(t *testing.T) {
+	profile := config.FarmProfile{
+		TownHall: 18,
+		Troops: []config.FarmUnit{{Name: "Electro Dragon", Count: 9, Housing: 30}},
+		Heroes: []string{"Royal Champion"},
+	}
+	m := NewArmyStateManager(profile)
+
+	m.Attempt("Electro Dragon", 9)
+	m.ObserveRemaining("Electro Dragon", 0)
+
+	// A profile hero that vision never observed must not create a phantom
+	// incomplete deployment. The live bar remains authoritative.
+	if got := m.IncompleteCount(); got != 0 {
+		t.Fatalf("unseen profile unit created %d incomplete state(s)", got)
+	}
+}
