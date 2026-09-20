@@ -615,7 +615,10 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
 					tapExec.TapDeployPoint(image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2), 1, 2)
 				} else {
-					tapExec.TapDeployLine(line[0], line[1], n, 2)
+					// Windows/BlueStacks can drop rapid tap triples under load.
+					// Use paced one-by-one line deployment so a 9-count EDrag
+					// card does not end with 1-2 troops still sitting in the bar.
+					tapExec.TapDeployLineReliable(line[0], line[1], n, 2)
 				}
 			}
 		}
@@ -759,11 +762,11 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 			// Do not trust old coordinates after this point. On the next loop
 			// the whole bar is captured and re-indexed from scratch.
-			if cardAttempts[key] >= 8 && chosen.UnitName != "" {
+			if cardAttempts[key] >= 8 && chosen.UnitName != "" && chosenCount <= 0 {
 				e.logger.Warn().
 					Str("unit", chosen.UnitName).
 					Str("category", chosen.Category).
-					Msg("Windows live deployment card persisted after 8 bursts; moving on to avoid a stuck ability/card loop")
+					Msg("Windows live deployment card persisted with unknown count after 8 bursts; blacklisting to avoid a stuck loop")
 				oneShotDone["Troop:"+strings.ToLower(strings.TrimSpace(chosen.UnitName))] = true
 			}
 		}
