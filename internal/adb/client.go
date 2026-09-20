@@ -40,6 +40,7 @@ type Client struct {
 
 	transport *Transport
 	health    Health
+	healthMu  sync.Mutex
 	mu        sync.Mutex
 	closed    bool
 
@@ -300,7 +301,7 @@ func (c *Client) captureScreenRaw() ([]byte, error) {
 
 	if c.transport == nil {
 		if err := c.connectTransport(); err != nil {
-			c.health.RecordFailure(err)
+			c.recordHealthFailure(err)
 			return nil, err
 		}
 	}
@@ -312,7 +313,7 @@ func (c *Client) captureScreenRaw() ([]byte, error) {
 		}
 	}
 	if err != nil {
-		c.health.RecordFailure(err)
+		c.recordHealthFailure(err)
 		return nil, err
 	}
 
@@ -347,7 +348,7 @@ func (c *Client) CaptureToMat() (gocv.Mat, error) {
 	if c.transport == nil {
 		if err := c.connectTransport(); err != nil {
 			c.mu.Unlock()
-			c.health.RecordFailure(err)
+			c.recordHealthFailure(err)
 			return emptyMat(), err
 		}
 	}
@@ -361,7 +362,7 @@ func (c *Client) CaptureToMat() (gocv.Mat, error) {
 		}
 	}
 	if err != nil {
-		c.health.RecordFailure(err)
+		c.recordHealthFailure(err)
 		return emptyMat(), err
 	}
 	defer ReturnBuffer(bufPtr)
@@ -370,7 +371,7 @@ func (c *Client) CaptureToMat() (gocv.Mat, error) {
 
 	if len(resp) < 12 {
 		err := fmt.Errorf("screencap response too short: %d bytes", len(resp))
-		c.health.RecordFailure(err)
+		c.recordHealthFailure(err)
 		return emptyMat(), err
 	}
 
@@ -379,21 +380,21 @@ func (c *Client) CaptureToMat() (gocv.Mat, error) {
 
 	if width <= 0 || height <= 0 || width > 4096 || height > 4096 {
 		err := fmt.Errorf("invalid screencap dimensions: %dx%d", width, height)
-		c.health.RecordFailure(err)
+		c.recordHealthFailure(err)
 		return emptyMat(), err
 	}
 
 	expected := width * height * 4
 	if len(resp) < expected+12 {
 		err := fmt.Errorf("incomplete screencap: got %d, want %d", len(resp), expected+12)
-		c.health.RecordFailure(err)
+		c.recordHealthFailure(err)
 		return emptyMat(), err
 	}
 
 	pixels := resp[12 : expected+12]
 	imgRGBA, err := gocv.NewMatFromBytes(height, width, gocv.MatTypeCV8UC4, pixels)
 	if err != nil {
-		c.health.RecordFailure(err)
+		c.recordHealthFailure(err)
 		return emptyMat(), fmt.Errorf("mat from bytes: %w", err)
 	}
 
@@ -404,11 +405,11 @@ func (c *Client) CaptureToMat() (gocv.Mat, error) {
 	if imgBGR.Empty() {
 		imgBGR.Close()
 		err := errors.New("converted BGR mat is empty")
-		c.health.RecordFailure(err)
+		c.recordHealthFailure(err)
 		return emptyMat(), err
 	}
 
-	c.health.RecordSuccess(time.Since(start))
+	c.recordHealthSuccess(time.Since(start))
 	return imgBGR, nil
 }
 
@@ -866,7 +867,7 @@ func (c *Client) CaptureScreenWithContext(ctx context.Context) ([]byte, error) {
 	if c.transport == nil {
 		if err := c.connectTransport(); err != nil {
 			c.mu.Unlock()
-			c.health.RecordFailure(err)
+			c.recordHealthFailure(err)
 			return nil, err
 		}
 	}
@@ -914,7 +915,7 @@ func (c *Client) CaptureScreenWithContext(ctx context.Context) ([]byte, error) {
 		return nil, ctx.Err()
 	case r := <-done:
 		if r.err != nil {
-			c.health.RecordFailure(r.err)
+			c.recordHealthFailure(r.err)
 		}
 		return r.buf, r.err
 	}
@@ -1268,7 +1269,21 @@ func (c *Client) DetectTouchDevice() (string, error) {
 }
 
 func (c *Client) Health() Health {
-	return c.health.Snapshot()
+	c.healthMu.Lock()
+	defer c.healthMu.Unlock()
+	return c.health
+}
+
+func (c *Client) recordHealthSuccess(d time.Duration) {
+	c.healthMu.Lock()
+	defer c.healthMu.Unlock()
+	c.health.RecordSuccess(d)
+}
+
+func (c *Client) recordHealthFailure(err error) {
+	c.healthMu.Lock()
+	defer c.healthMu.Unlock()
+	c.health.RecordFailure(err)
 }
 
 func errStr(err error) string {
