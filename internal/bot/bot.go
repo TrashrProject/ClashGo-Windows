@@ -714,12 +714,16 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 
 		if isVillage {
 			if b.zoomedOut.CompareAndSwap(false, true) {
-				b.logger.Info().Msg("village detected, performing MANDATORY initial zoom out...")
-				b.navigator.ZoomOut()
+				// Windows/BlueStacks: the native sendevent pinch path has proven
+				// unstable on some installations and can terminate the Wails
+				// process immediately after "performing ... zoom out". The bot
+				// already forces the reference 860x732 display override, so the
+				// startup zoom is not required for coordinate calibration.
+				// Mark initialization complete and continue without injecting a
+				// multi-touch gesture; attack-button detection will decide whether
+				// the village is usable.
+				b.logger.Info().Msg("village detected; skipping native startup zoom on Windows-safe path")
 				b.recordActivity()
-
-				time.Sleep(1800 * time.Millisecond)
-
 				return
 			}
 		}
