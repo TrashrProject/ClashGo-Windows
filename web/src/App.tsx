@@ -4,6 +4,8 @@ import Dashboard from './components/Dashboard';
 import Analytics from './components/Analytics';
 import ConfigView from './components/ConfigView';
 import SettingsView from './components/SettingsView';
+import AccountView from './components/AccountView';
+import AccountOnboarding from './components/AccountOnboarding';
 import { EventsOn } from '../wailsjs/runtime';
 import {
   GetStats,
@@ -27,6 +29,7 @@ import {
   InstallAndRestart,
   SkipCurrentVersion,
   ClearSkippedVersion,
+  GetAccountConfig,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
 import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics } from './types';
@@ -143,6 +146,8 @@ function App() {
   const [adbPort, setAdbPort] = useState(5555);
   const [darkMode, setDarkMode] = useState(getInitialDarkMode);
   const [sidebarExpanded, setSidebarExpanded] = useState(getInitialSidebarExpanded);
+  const [playerTag, setPlayerTag] = useState('');
+  const [accountReady, setAccountReady] = useState(false);
 
   // Updater state — pushed via `updater_status` event from Go.
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(DEFAULT_UPDATE_STATUS);
@@ -167,10 +172,11 @@ function App() {
   useEffect(() => {
     const init = async () => {
       try {
-        const [conf, running, strats] = await Promise.all([
+        const [conf, running, strats, account] = await Promise.all([
           GetConfig(),
           IsRunning(),
-          GetStrategies()
+          GetStrategies(),
+          GetAccountConfig()
         ]);
 
         setGoldThreshold(conf.search.min_loot_gold);
@@ -190,8 +196,11 @@ function App() {
         // future binding regresses to null.
         setStrategiesList(strats ?? []);
         setAdbPort(conf.device.adb_port);
+        setPlayerTag(account?.player_tag || '');
       } catch (err) {
         console.error('Init failed:', err);
+      } finally {
+        setAccountReady(true);
       }
 
       // Pull the embedded app version + initial updater snapshot.
@@ -613,6 +622,15 @@ function App() {
           )}
 
           {tab === 'dashboard' && <Dashboard {...dashboardProps} />}
+          {tab === 'account' && (
+            <AccountView
+              playerTag={playerTag}
+              onAccountChanged={(tag) => {
+                setPlayerTag(tag);
+                if (tag) setTab('account');
+              }}
+            />
+          )}
           {tab === 'analytics' && <Analytics stats={stats} />}
           {tab === 'config' && <ConfigView {...configProps} />}
           {tab === 'settings' && (
@@ -634,6 +652,15 @@ function App() {
           )}
         </div>
       </main>
+
+      {accountReady && !playerTag && (
+        <AccountOnboarding
+          onLinked={(tag) => {
+            setPlayerTag(tag);
+            setTab('account');
+          }}
+        />
+      )}
     </div>
   );
 }
