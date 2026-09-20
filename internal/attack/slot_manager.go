@@ -168,6 +168,60 @@ func (sm *SlotManager) detectActiveSlots(screen gocv.Mat) []int {
 	}
 	} else {
 		sm.logger.Info().Msg("Windows: ignoring stale manual slot map; detecting every live troop-bar card")
+
+		// Dense live scan instead of a fixed 72px grid. The current CoC bar
+		// does not align to the old grid (the first ED card can sit ~20-30px
+		// away from a nominal center), so a valid troop card could be skipped
+		// entirely while later siege/spell cards were found.
+		type candidate struct {
+			x int
+			a float64
+		}
+		scaleX := float64(sm.w) / 860.0
+		minSep := int(48.0 * scaleX)
+		if minSep < 36 { minSep = 36 }
+
+		var candidates []candidate
+		for x := int(24.0*scaleX); x < sm.w-int(24.0*scaleX); x += 4 {
+			a := GetSlotActivityRatioStatic(screen, x, sm.slotY, sm.w)
+			if a >= 0.085 {
+				candidates = append(candidates, candidate{x: x, a: a})
+			}
+		}
+		sort.Slice(candidates, func(i, j int) bool {
+			return candidates[i].a > candidates[j].a
+		})
+
+		var picked []candidate
+		for _, cand := range candidates {
+			tooClose := false
+			for _, p := range picked {
+				d := cand.x - p.x
+				if d < 0 { d = -d }
+				if d < minSep {
+					tooClose = true
+					break
+				}
+			}
+			if tooClose {
+				continue
+			}
+			picked = append(picked, cand)
+			if len(picked) >= 12 {
+				break
+			}
+		}
+		sort.Slice(picked, func(i, j int) bool { return picked[i].x < picked[j].x })
+		activeXs := make([]int, 0, len(picked))
+		for _, p := range picked {
+			activeXs = append(activeXs, p.x)
+		}
+
+		sm.logger.Info().
+			Ints("slot_xs", activeXs).
+			Int("count", len(activeXs)).
+			Msg("Windows dense live troop-bar scan detected card centers")
+		return activeXs
 	}
 
 	sm.logger.Info().Msg("manual calibration missing, falling back to grid detection")
@@ -176,27 +230,10 @@ func (sm *SlotManager) detectActiveSlots(screen gocv.Mat) []int {
 	startX := int(38.0 * scaleX)
 	var activeXs []int
 	for nominal := startX; nominal < sm.w-20; nominal += step {
-		bestX := nominal
-		bestActivity := 0.0
-		searchRadius := int(12.0 * scaleX)
-		if searchRadius < 6 { searchRadius = 6 }
-		for x := nominal-searchRadius; x <= nominal+searchRadius; x += 3 {
-			if x < 8 || x >= sm.w-8 { continue }
-			a := GetSlotActivityRatioStatic(screen, x, sm.slotY, sm.w)
-			if a > bestActivity {
-				bestActivity = a
-				bestX = x
-			}
-		}
-		if bestActivity >= 0.08 {
-			// Avoid duplicate centers when neighboring nominal cells converge
-			// on the same wide card.
-			if len(activeXs) == 0 || bestX-activeXs[len(activeXs)-1] > int(42.0*scaleX) {
-				activeXs = append(activeXs, bestX)
-			}
+		if !isSlotEmptyStatic(screen, nominal, sm.slotY, sm.w, sm.h) {
+			activeXs = append(activeXs, nominal)
 		}
 	}
-	sm.logger.Info().Ints("slot_xs", activeXs).Msg("live troop-bar slots detected")
 	return activeXs
 }
 
@@ -251,14 +288,24 @@ func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates 
 		bestSlot.Confidence = res.match.Confidence
 		bestSlot.State = SlotIdentified
 
-		if isHeroStatic(cleanName) {
-			bestSlot.Category = "Hero"
-		} else if isSiegeStatic(cleanName) {
-			bestSlot.Category = "Siege"
-		} else if isSpellStatic(cleanName) {
-			bestSlot.Category = "Spell"
-		} else if strings.Contains(cleanName, "cc") || strings.Contains(cleanName, "castle") {
-			bestSlot.Category = "CC"
+		specialConfOK := runtime.GOOS != "windows" || res.match.Confidence >= 0.72
+		if specialConfOK {
+			if isHeroStatic(cleanName) {
+				bestSlot.Category = "Hero"
+			} else if isSiegeStatic(cleanName) {
+				bestSlot.Category = "Siege"
+			} else if isSpellStatic(cleanName) {
+				bestSlot.Category = "Spell"
+			} else if strings.Contains(cleanName, "cc") || strings.Contains(cleanName, "castle") {
+				bestSlot.Category = "CC"
+			}
+		} else if isHeroStatic(cleanName) || isSiegeStatic(cleanName) || isSpellStatic(cleanName) ||
+			strings.Contains(cleanName, "cc") || strings.Contains(cleanName, "castle") {
+			sm.logger.Warn().
+				Str("unit", cleanName).
+				Float64("conf", res.match.Confidence).
+				Int("x", bestSlot.X).
+				Msg("Windows special-category template confidence too low; keeping card as normal troop")
 		}
 
 		sm.logger.Info().
