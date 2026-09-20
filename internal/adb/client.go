@@ -999,13 +999,37 @@ func (c *Client) ScreenSize() (int, int, error) {
 		return 0, 0, err
 	}
 
-	var w, h int
-	if _, err := fmt.Sscanf(out, "Physical size: %dx%d", &w, &h); err != nil {
-		if _, err := fmt.Sscanf(out, "Override size: %dx%d", &w, &h); err != nil {
-			return 0, 0, fmt.Errorf("parse wm size: %w", err)
+	// Android prints both values when a wm-size override is active:
+	//
+	//   Physical size: 1600x900
+	//   Override size: 860x732
+	//
+	// screencap/input coordinates use the EFFECTIVE override dimensions.
+	// The old parser always consumed "Physical size" first, so ClashGO
+	// calibrated 860x732 reference coordinates against 1600x900 while the
+	// actual captured frame was 860x732. That explains the Windows symptoms:
+	// button templates never lined up, taps landed on neighbouring controls,
+	// and the bot eventually hit the stuck watchdog.
+	//
+	// Prefer Override size whenever present; fall back to Physical size only
+	// when Android has no override configured.
+	var overrideW, overrideH int
+	if idx := strings.Index(out, "Override size:"); idx >= 0 {
+		if _, scanErr := fmt.Sscanf(out[idx:], "Override size: %dx%d", &overrideW, &overrideH); scanErr == nil &&
+			overrideW > 0 && overrideH > 0 {
+			return overrideW, overrideH, nil
 		}
 	}
-	return w, h, nil
+
+	var physicalW, physicalH int
+	if idx := strings.Index(out, "Physical size:"); idx >= 0 {
+		if _, scanErr := fmt.Sscanf(out[idx:], "Physical size: %dx%d", &physicalW, &physicalH); scanErr == nil &&
+			physicalW > 0 && physicalH > 0 {
+			return physicalW, physicalH, nil
+		}
+	}
+
+	return 0, 0, fmt.Errorf("parse wm size: unexpected output %q", out)
 }
 
 func (c *Client) ScreenCapPng(path string) error {
