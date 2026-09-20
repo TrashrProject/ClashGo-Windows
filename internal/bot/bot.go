@@ -1731,7 +1731,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		}
 
 		if parsedOK {
-			battleStars = parsedResult.Stars
+			visualStars := parsedResult.Stars
 			battleGold = parsedResult.Loot.Gold
 			battleElixir = parsedResult.Loot.Elixir
 			battleDE = parsedResult.Loot.DarkElixir
@@ -1740,65 +1740,102 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			bonusDE = parsedResult.Bonus.DarkElixir
 			parsedResults = true
 
-			// The result panel's star art is the ground truth: the two-pass
-			// defeat-safe read correctly returned 0 stars on the live 32%
-			// defeat (the OCR'd "Defeat" screen). The destruction-rule read
-			// (stall ROI) is only a fallback when the panel parse fails
-			// entirely — see the !parsedOK branch below. This block used to
-			// OVERRIDE the visual stars with the rule whenever any percent
-			// was measured, and a garbage stall-ROI read (381%, later
-			// clamped + per-battle-reset in WaitForBattleEndCtx) turned live
-			// defeats into fabricated 3-star victories. Visual wins now;
-			// the rule comparison is logged for observability only.
-			if finalPct > 0 {
+			// Reconcile stars against the measured destruction. The result
+			// screen remains useful for distinguishing 1 vs 2 stars, but it
+			// may never claim an impossible outcome (e.g. 3 stars below 100%
+			// or 0 stars at >=50%). This removes the "random" history stars
+			// while still preserving a genuine TH star under 50%.
+			battleStars = visualStars
+			if finalPct >= 100 {
+				battleStars = 3
+			} else if finalPct > 0 {
 				ruleStars := game.StarsFromOutcome(finalPct, b.attackExec.ThDestroyed())
-				if ruleStars != battleStars {
-					b.logger.Info().
-						Int("visual_stars", battleStars).
-						Int("rule_stars", ruleStars).
+				if finalPct >= 50 {
+					if visualStars < 1 || visualStars > 2 {
+						battleStars = ruleStars
+					}
+				} else {
+					if visualStars < 0 || visualStars > 1 {
+						battleStars = ruleStars
+					}
+				}
+				if battleStars != visualStars {
+					b.logger.Warn().
+						Int("visual_stars", visualStars).
+						Int("reconciled_stars", battleStars).
 						Int("destruction_pct", finalPct).
 						Bool("th_destroyed", b.attackExec.ThDestroyed()).
-						Msg("battle stars: keeping visual parse over destruction-rule read")
+						Msg("result-screen stars rejected as inconsistent with battle outcome")
 				}
 			}
 
-			b.totalGold.Add(int64(parsedResult.Loot.Gold + parsedResult.Bonus.Gold))
-			b.totalElixir.Add(int64(parsedResult.Loot.Elixir + parsedResult.Bonus.Elixir))
-			b.totalDE.Add(int64(parsedResult.Loot.DarkElixir + parsedResult.Bonus.DarkElixir))
-			b.totalStars.Add(int32(battleStars))
-
-			switch battleStars {
-			case 0:
-				b.stars0.Add(1)
-			case 1:
-				b.stars1.Add(1)
-			case 2:
-				b.stars2.Add(1)
-			case 3:
-				b.stars3.Add(1)
+			// Prefer the battle's live Available-Loot delta over themed
+			// result-screen OCR whenever two stable live reads were accepted.
+			// This directly measures what disappeared from the enemy's loot
+			// counters and is substantially more stable across CoC themes.
+			if liveLoot, ok := b.attackExec.EstimatedLootStolen(); ok {
+				b.logger.Info().
+					Int("live_gold", liveLoot.Gold).
+					Int("ocr_gold", battleGold).
+					Int("live_elixir", liveLoot.Elixir).
+					Int("ocr_elixir", battleElixir).
+					Int("live_de", liveLoot.DarkElixir).
+					Int("ocr_de", battleDE).
+					Msg("using stable live-loot delta as authoritative attack loot")
+				battleGold = liveLoot.Gold
+				battleElixir = liveLoot.Elixir
+				battleDE = liveLoot.DarkElixir
 			}
-
-			b.logger.Info().
-				Int("stars", battleStars).
-				Int("gold", parsedResult.Loot.Gold).
-				Int("bonus_gold", parsedResult.Bonus.Gold).
-				Int("destruction_pct", finalPct).
-				Msg("battle result processed")
 		} else {
-			// OCR failed after retries — still record the rules-derived
-			// star count when the wait measured destruction, so a battle
-			// is never reported as a 0-star defeat merely because the
-			// result panel misparsed.
 			if finalPct > 0 {
 				battleStars = game.StarsFromOutcome(finalPct, b.attackExec.ThDestroyed())
-				b.logger.Error().
+				b.logger.Warn().
 					Int("stars", battleStars).
 					Int("destruction_pct", finalPct).
-					Msg("battle result OCR failed after retries; stars recorded from destruction rules")
+					Msg("result-screen OCR failed; stars derived from measured battle outcome")
 			} else {
-				b.logger.Error().Msg("battle result OCR failed after retries; recording unparsed attack")
+				b.logger.Error().Msg("battle result OCR failed after retries; no reliable destruction read available")
+			}
+
+			if liveLoot, ok := b.attackExec.EstimatedLootStolen(); ok {
+				battleGold = liveLoot.Gold
+				battleElixir = liveLoot.Elixir
+				battleDE = liveLoot.DarkElixir
+				b.logger.Info().
+					Int("gold", battleGold).
+					Int("elixir", battleElixir).
+					Int("de", battleDE).
+					Msg("result-screen OCR failed; using stable live-loot delta")
 			}
 		}
+
+		// Totals always use the reconciled values that are also written to
+		// attack_history.json, so dashboard cards and attack rows can no
+		// longer disagree.
+		b.totalGold.Add(int64(battleGold + bonusGold))
+		b.totalElixir.Add(int64(battleElixir + bonusElixir))
+		b.totalDE.Add(int64(battleDE + bonusDE))
+		b.totalStars.Add(int32(battleStars))
+
+		switch battleStars {
+		case 0:
+			b.stars0.Add(1)
+		case 1:
+			b.stars1.Add(1)
+		case 2:
+			b.stars2.Add(1)
+		case 3:
+			b.stars3.Add(1)
+		}
+
+		b.logger.Info().
+			Int("stars", battleStars).
+			Int("gold", battleGold).
+			Int("elixir", battleElixir).
+			Int("de", battleDE).
+			Int("bonus_gold", bonusGold).
+			Int("destruction_pct", finalPct).
+			Msg("battle result reconciled and ready for history")
 	} else if b.ctx.Err() != nil {
 		// The bot was stopped mid-battle. Exit cleanly — no forced
 		// restart (the ADB client is already being torn down by the
