@@ -469,10 +469,15 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			case "right":
 				x := redZone.BBox.Max.X + outsidePad
 				if x > w-edgeMargin { x = w-edgeMargin }
-				hudSafeBottom := int(float64(h) * 0.70)
-				y1 := clamp(redZone.BBox.Min.Y+35, edgeMargin, hudSafeBottom)
-				y2 := clamp(redZone.BBox.Max.Y-35, edgeMargin, hudSafeBottom)
-				if y2 < y1 { y1, y2 = y2, y1 }
+				fieldTop := int(float64(h) * 0.22)
+				fieldBottom := int(float64(h) * 0.58)
+				y1 := clamp(redZone.BBox.Min.Y+45, fieldTop, fieldBottom)
+				y2 := clamp(redZone.BBox.Max.Y-45, fieldTop, fieldBottom)
+				if y2-y1 < int(float64(h)*0.12) {
+					mid := (fieldTop + fieldBottom) / 2
+					half := int(float64(h) * 0.10)
+					y1, y2 = mid-half, mid+half
+				}
 				p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
 			case "top":
 				y := redZone.BBox.Min.Y - outsidePad
@@ -489,10 +494,15 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			default: // left
 				x := redZone.BBox.Min.X - outsidePad
 				if x < edgeMargin { x = edgeMargin }
-				hudSafeBottom := int(float64(h) * 0.70)
-				y1 := clamp(redZone.BBox.Min.Y+35, edgeMargin, hudSafeBottom)
-				y2 := clamp(redZone.BBox.Max.Y-35, edgeMargin, hudSafeBottom)
-				if y2 < y1 { y1, y2 = y2, y1 }
+				fieldTop := int(float64(h) * 0.22)
+				fieldBottom := int(float64(h) * 0.58)
+				y1 := clamp(redZone.BBox.Min.Y+45, fieldTop, fieldBottom)
+				y2 := clamp(redZone.BBox.Max.Y-45, fieldTop, fieldBottom)
+				if y2-y1 < int(float64(h)*0.12) {
+					mid := (fieldTop + fieldBottom) / 2
+					half := int(float64(h) * 0.10)
+					y1, y2 = mid-half, mid+half
+				}
 				p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
 			}
 
@@ -554,14 +564,10 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			return out
 		}
 
-		// Keep three retry bands behind the same red line. This gives enough
-		// clearance for the line thickness, tap jitter and contour error.
-		for _, extra := range []int{16, 32, 48} {
-			line := nudgeOutside(baseLine, extra)
-			if line != safeLines[len(safeLines)-1] {
-				safeLines = append(safeLines, line)
-			}
-		}
+		// One stable line only on Windows. Repeatedly nudging farther outward
+		// eventually pushed taps into screen chrome / HUD. The base line is
+		// already outside the detected red boundary by outsidePad.
+		_ = nudgeOutside
 		e.logger.Info().
 			Str("side", deploySide).
 			Int("safe_lines", len(safeLines)).
