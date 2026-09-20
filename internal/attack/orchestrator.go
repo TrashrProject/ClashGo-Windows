@@ -859,11 +859,29 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			finalFrame.Close()
 		}
 
+		profileIncomplete := 0
+		if armyState != nil {
+			profileIncomplete = armyState.IncompleteCount()
+			if profileIncomplete > 0 {
+				e.logger.Warn().
+					Int("profile_incomplete", profileIncomplete).
+					Interface("units", armyState.IncompleteUnits()).
+					Msg("farm profile still has undeployed expected units")
+			}
+		}
+
+		totalRemaining := liveRemaining
+		if profileIncomplete > totalRemaining {
+			totalRemaining = profileIncomplete
+		}
+
 		e.logger.Info().
-			Int("remaining", liveRemaining).
+			Int("visible_remaining", liveRemaining).
+			Int("profile_incomplete", profileIncomplete).
+			Int("remaining", totalRemaining).
 			Msg("Windows dynamic live-bar deployment complete")
-		if liveRemaining > 0 {
-			return liveRemaining, fmt.Errorf("%d deployable card(s) still visible after dynamic live deployment", liveRemaining)
+		if totalRemaining > 0 {
+			return totalRemaining, fmt.Errorf("%d expected/deployable card(s) still incomplete after dynamic live deployment", totalRemaining)
 		}
 		return 0, nil
 	}
