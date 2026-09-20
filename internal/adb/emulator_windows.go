@@ -64,8 +64,27 @@ func (c *Client) ensureBlueStacksWindows(ctx context.Context, width, height, dpi
 	}
 
 	instances := discoverBlueStacksWindowsInstances()
-	preferred := chooseBlueStacksWindowsInstance(instances, c.blueStacksInstance)
-	ports := windowsCandidateADBPortsPreferred(instances, preferred)
+	configuredInstance := strings.TrimSpace(c.blueStacksInstance)
+	if configuredInstance != "" {
+		found := false
+		for _, inst := range instances {
+			if strings.EqualFold(inst.Name, configuredInstance) {
+				configuredInstance = inst.Name
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("configured BlueStacks instance %q was not found; open Settings and reselect the instance or switch back to Automatic", c.blueStacksInstance)
+		}
+	}
+
+	preferred := chooseBlueStacksWindowsInstance(instances, configuredInstance)
+	strictSelection := configuredInstance != ""
+	ports := windowsCandidateADBPortsForSelection(instances, preferred, strictSelection)
+	if strictSelection && len(ports) == 0 {
+		return fmt.Errorf("configured BlueStacks instance %q has no usable ADB port in bluestacks.conf", configuredInstance)
+	}
 
 	if !adbSettingChanged {
 		if addr := c.findReachableBlueStacks(ctx, ports); addr != "" {
@@ -264,6 +283,18 @@ func chooseBlueStacksWindowsInstance(instances []blueStacksWindowsInstance, conf
 	return ""
 }
 
+func windowsCandidateADBPortsForSelection(instances []blueStacksWindowsInstance, preferred string, strict bool) []int {
+	if strict && strings.TrimSpace(preferred) != "" {
+		for _, inst := range instances {
+			if strings.EqualFold(inst.Name, preferred) && inst.ADBPort > 0 {
+				return []int{inst.ADBPort}
+			}
+		}
+		return nil
+	}
+	return windowsCandidateADBPortsPreferred(instances, preferred)
+}
+
 func windowsCandidateADBPortsPreferred(instances []blueStacksWindowsInstance, preferred string) []int {
 	ordered := make([]blueStacksWindowsInstance, 0, len(instances))
 	for _, inst := range instances {
@@ -345,7 +376,7 @@ func (c *Client) launchBlueStacks(_ bool, width, height, dpi int) error {
 	if err := c.waitForBlueStacksADBWithPorts(
 		context.Background(),
 		90*time.Second,
-		windowsCandidateADBPortsPreferred(instances, instance),
+		windowsCandidateADBPortsForSelection(instances, instance, strings.TrimSpace(c.blueStacksInstance) != ""),
 	); err != nil {
 		return err
 	}
@@ -410,11 +441,12 @@ func (c *Client) isBlueStacksDevice(id string) bool {
 
 func (c *Client) waitForBlueStacksADB(ctx context.Context, timeout time.Duration) error {
 	instances := discoverBlueStacksWindowsInstances()
-	preferred := chooseBlueStacksWindowsInstance(instances, c.blueStacksInstance)
+	configured := strings.TrimSpace(c.blueStacksInstance)
+	preferred := chooseBlueStacksWindowsInstance(instances, configured)
 	return c.waitForBlueStacksADBWithPorts(
 		ctx,
 		timeout,
-		windowsCandidateADBPortsPreferred(instances, preferred),
+		windowsCandidateADBPortsForSelection(instances, preferred, configured != ""),
 	)
 }
 
