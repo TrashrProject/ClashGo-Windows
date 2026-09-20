@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -89,8 +90,8 @@ func main() {
 
 	mux.HandleFunc("GET /v1/player/{tag}", func(w http.ResponseWriter, r *http.Request) {
 		ip := r.RemoteAddr
-		if host, _, err := strings.Cut(ip, ":"); err {
-			_ = host
+		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+			ip = host
 		}
 		if !limiter.allow(ip) {
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{
