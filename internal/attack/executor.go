@@ -135,6 +135,46 @@ func (t *TapExecutor) TapSlot(slot *TrackedSlot, jitterPx int) {
 	t.client.TapFast(jPt.X, jPt.Y, 0.8)
 }
 
+// sanitizeDeployPoint prevents deployment taps from ever landing on the
+// lower battle HUD under Windows/BlueStacks. In particular, the Surrender
+// button occupies the lower-left HUD and the Overall Damage panel the
+// lower-right. If a computed point enters that band, move it upward while
+// preserving X so the troop still lands on the same outside edge.
+func (t *TapExecutor) sanitizeDeployPoint(pt image.Point) image.Point {
+	if runtime.GOOS != "windows" {
+		return pt
+	}
+	w := t.cal.PhysicalW
+	h := t.cal.PhysicalH
+	if w <= 0 { w = 860 }
+	if h <= 0 { h = 732 }
+
+	maxBattleY := int(float64(h) * 0.70)
+	if pt.Y > maxBattleY {
+		old := pt
+		pt.Y = maxBattleY
+		t.logger.Warn().
+			Int("old_x", old.X).
+			Int("old_y", old.Y).
+			Int("safe_x", pt.X).
+			Int("safe_y", pt.Y).
+			Msg("blocked deploy tap in lower HUD; moved above Surrender/damage controls")
+	}
+
+	// Extra hard rail for the exact Surrender/End-Battle region on the left.
+	if pt.X < int(float64(w)*0.22) && pt.Y > int(float64(h)*0.64) {
+		old := pt
+		pt.Y = int(float64(h) * 0.62)
+		t.logger.Warn().
+			Int("old_x", old.X).
+			Int("old_y", old.Y).
+			Int("safe_x", pt.X).
+			Int("safe_y", pt.Y).
+			Msg("blocked deploy tap over Surrender button region")
+	}
+	return pt
+}
+
 // TapDeployLine distributes taps along a line from p1 to p2.
 // Deployment taps deliberately use sub-2px transport jitter. The previous
 // 12-15px Gaussian jitter was large enough to throw otherwise-correct
@@ -143,6 +183,9 @@ func (t *TapExecutor) TapSlot(slot *TrackedSlot, jitterPx int) {
 // back up the next call, so consecutive passes never restart at the top.
 func (t *TapExecutor) TapDeployLine(p1, p2 image.Point, count int, jitterPx int) {
 	points := t.calculateLinePoints(p1, p2, count)
+	for i := range points {
+		points[i] = t.sanitizeDeployPoint(points[i])
+	}
 
 	t.lineForward = !t.lineForward
 	if !t.lineForward {
@@ -175,6 +218,7 @@ func (t *TapExecutor) TapDeployLine(p1, p2 image.Point, count int, jitterPx int)
 
 // TapDeployPoint clusters taps around a single point.
 func (t *TapExecutor) TapDeployPoint(pt image.Point, count int, jitterPx int) {
+	pt = t.sanitizeDeployPoint(pt)
 	for i := 0; i < count; {
 		rem := count - i
 		if rem >= 3 {
