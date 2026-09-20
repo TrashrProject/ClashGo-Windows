@@ -295,14 +295,16 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				"bottom": uiCutoff - redZone.BBox.Max.Y,
 			}
 
-			if free[deploySide] < outsidePad+8 {
-				deploySide = "left"
-				best := free["left"]
-				for _, side := range []string{"right", "top", "bottom"} {
-					if free[side] > best {
-						deploySide = side
-						best = free[side]
-					}
+			// Reliability first on Windows: use the side with the most real
+			// free space outside the detected red box, regardless of the
+			// strategy's preferred corner. The old preference could pick a
+			// very narrow strip and force taps back toward the village.
+			deploySide = "left"
+			best := free["left"]
+			for _, side := range []string{"right", "top", "bottom"} {
+				if free[side] > best {
+					deploySide = side
+					best = free[side]
 				}
 			}
 
@@ -338,7 +340,8 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				Interface("red_bbox", redZone.BBox).
 				Interface("p1", p1).
 				Interface("p2", p2).
-				Msg("Windows deploy line placed outside live red zone")
+				Int("free_space", free[deploySide]).
+				Msg("Windows deploy line locked to widest free side outside live red zone")
 		} else if len(deployLine.Points) >= 2 {
 			// Existing calculator already keeps these points near the outer
 			// edge; use them if red-line detection itself was unavailable.
