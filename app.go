@@ -952,7 +952,7 @@ func (a *App) InstallAndRestart() error {
 	// Finder-open and don't exit.
 	started, err := a.updater.ApplyAuto()
 	if err != nil || !started {
-		log.Warn().Err(err).Msg("InstallAndRestart: helper unavailable, falling back to Finder")
+		log.Warn().Err(err).Msg("InstallAndRestart: helper unavailable, falling back to manual update reveal")
 		_ = a.updater.Apply()
 		// Revert state so the UI comes back to "ready" instead of
 		// staying on the restart splash.
@@ -973,7 +973,7 @@ func (a *App) InstallAndRestart() error {
 }
 
 // SkipCurrentVersion marks the current latest version as "skip this".
-// Persisted to ~/Library/Application Support/ClashGO/skip_version.txt.
+// Persisted in ClashGO's platform-specific config directory as skip_version.txt.
 func (a *App) SkipCurrentVersion() error {
 	if a.updater == nil {
 		return fmt.Errorf("updater not initialized")
