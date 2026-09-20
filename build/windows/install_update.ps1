@@ -37,4 +37,7 @@ catch {
 finally {
     Start-Sleep -Milliseconds 500
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    # This helper is a temporary copy created by the app specifically so the
+    # installed resources directory can be replaced without locking itself.
+    Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 }

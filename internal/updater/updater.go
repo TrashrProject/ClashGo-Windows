@@ -859,11 +859,34 @@ func (s *Service) ApplyAuto() (bool, error) {
 		if err := checkInstallDirWritable(installDir); err != nil {
 			return false, err
 		}
+		// Execute a temporary copy of the helper, not the copy inside the
+		// installation directory. The update replaces the whole runtime tree
+		// (including resources/install_update.ps1); running the source copy
+		// from that same tree can leave Windows file locks in the way.
+		helperBytes, err := os.ReadFile(helper)
+		if err != nil {
+			return false, fmt.Errorf("read Windows update helper: %w", err)
+		}
+		tempHelper, err := os.CreateTemp("", "clashgo-install-update-*.ps1")
+		if err != nil {
+			return false, fmt.Errorf("create temporary update helper: %w", err)
+		}
+		tempHelperPath := tempHelper.Name()
+		if _, err := tempHelper.Write(helperBytes); err != nil {
+			_ = tempHelper.Close()
+			_ = os.Remove(tempHelperPath)
+			return false, fmt.Errorf("write temporary update helper: %w", err)
+		}
+		if err := tempHelper.Close(); err != nil {
+			_ = os.Remove(tempHelperPath)
+			return false, fmt.Errorf("close temporary update helper: %w", err)
+		}
+
 		cmd := exec.Command(
 			"powershell.exe",
 			"-NoProfile",
 			"-ExecutionPolicy", "Bypass",
-			"-File", helper,
+			"-File", tempHelperPath,
 			"-ZipPath", st.DownloadPath,
 			"-InstallDir", installDir,
 			"-ExePath", exe,
@@ -872,6 +895,7 @@ func (s *Service) ApplyAuto() (bool, error) {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Start(); err != nil {
+			_ = os.Remove(tempHelperPath)
 			return false, fmt.Errorf("start Windows update helper: %w", err)
 		}
 		go func() { _ = cmd.Wait() }()
