@@ -122,7 +122,7 @@ jobs:
           if (-not (Test-Path web\dist\index.html)) {
             Set-Content web\dist\index.html "<!doctype html><html><body></body></html>" -Encoding UTF8
           }
-          wails generate module -tags "customenv,gocv_specific_modules" -tags "customenv,gocv_specific_modules"
+          wails generate module -tags "customenv,gocv_specific_modules"
           if ($LASTEXITCODE -ne 0) { throw "Wails binding generation failed" }
           Push-Location web
           npm ci
