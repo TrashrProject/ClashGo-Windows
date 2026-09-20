@@ -6,6 +6,7 @@ import (
 	"image"
 	"math/rand"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -615,7 +616,29 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			}
 		}
 
-		for _, slot := range slotMgr.GetAllSlots() {
+		windowsSlots := append([]*TrackedSlot(nil), slotMgr.GetAllSlots()...)
+		categoryPriority := func(cat string) int {
+			switch cat {
+			case "Troop":
+				return 0
+			case "Hero":
+				return 1
+			case "Siege", "CC":
+				return 2
+			case "Spell":
+				return 3
+			default:
+				return 0
+			}
+		}
+		sort.SliceStable(windowsSlots, func(i, j int) bool {
+			pi := categoryPriority(windowsSlots[i].Category)
+			pj := categoryPriority(windowsSlots[j].Category)
+			if pi != pj { return pi < pj }
+			return windowsSlots[i].X < windowsSlots[j].X
+		})
+
+		for _, slot := range windowsSlots {
 			if tapExec.DeployBudgetExhausted() {
 				unverifiedSlots++
 				continue
