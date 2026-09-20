@@ -34,6 +34,11 @@ if ($env:ProgramData) {
     $confCandidates += (Join-Path $env:ProgramData "BlueStacks_nxt\bluestacks.conf")
     $confCandidates += (Join-Path $env:ProgramData "BlueStacks\bluestacks.conf")
 }
+
+foreach ($regPath in @("HKLM:\SOFTWARE\BlueStacks_nxt", "HKLM:\SOFTWARE\BlueStacks_msi5", "HKLM:\SOFTWARE\WOW6432Node\BlueStacks_nxt")) {
+    $dataDir = (Get-ItemProperty -Path $regPath -Name DataDir -ErrorAction SilentlyContinue).DataDir
+    if ($dataDir) { $confCandidates += (Join-Path $dataDir "bluestacks.conf") }
+}
 $conf = $confCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 Write-Step "bluestacks.conf" ([bool]$conf) $(if ($conf) { $conf } else { "not found" })
 
@@ -107,7 +112,8 @@ if ($adbPath) {
 
 Write-Host ""
 Write-Host "Environment overrides supported:"
-Write-Host "  CLASHGO_ADB_PATH"`nWrite-Host "  CLASHGO_BLUESTACKS_PLAYER"
+Write-Host "  CLASHGO_ADB_PATH"
+Write-Host "  CLASHGO_BLUESTACKS_PLAYER"
 Write-Host "  CLASHGO_BLUESTACKS_HOME"
 Write-Host "  CLASHGO_BLUESTACKS_DATA"
 Write-Host "  CLASHGO_BLUESTACKS_CONF"
