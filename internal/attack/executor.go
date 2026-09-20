@@ -216,6 +216,28 @@ func (t *TapExecutor) TapDeployLine(p1, p2 image.Point, count int, jitterPx int)
 	}
 }
 
+// TapDeployLineReliable uses individual taps with a larger settle on Windows.
+// It is intentionally slower than TapDeployLine, but far more reliable for
+// expensive multi-capacity troops (e.g. EDrags) where losing 1-2 gestures is
+// worse than spending a few hundred extra milliseconds.
+func (t *TapExecutor) TapDeployLineReliable(p1, p2 image.Point, count int, jitterPx int) {
+	points := t.calculateLinePoints(p1, p2, count)
+	for i := range points {
+		points[i] = t.sanitizeDeployPoint(points[i])
+	}
+	t.lineForward = !t.lineForward
+	if !t.lineForward {
+		for i, j := 0, len(points)-1; i < j; i, j = i+1, j-1 {
+			points[i], points[j] = points[j], points[i]
+		}
+	}
+	for _, pt := range points {
+		j := t.addJitter(pt, jitterPx)
+		_ = t.client.TapFast(j.X, j.Y, 0.8)
+		t.client.HumanSleep(95, 15)
+	}
+}
+
 // TapDeployPoint clusters taps around a single point.
 func (t *TapExecutor) TapDeployPoint(pt image.Point, count int, jitterPx int) {
 	pt = t.sanitizeDeployPoint(pt)
