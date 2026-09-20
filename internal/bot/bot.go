@@ -32,8 +32,9 @@ type Bot struct {
 	navigator  *game.Navigator
 	graph      *game.StateGraph
 	templates  *game.TemplateStore
-	recognizer *game.Recognizer
-	cfg        *config.BotConfig
+	recognizer     *game.Recognizer
+	resourceReader *game.VillageResourceReader
+	cfg            *config.BotConfig
 
 	classify func(gocv.Mat) (game.GameState, int)
 
@@ -72,6 +73,7 @@ type Bot struct {
 	lastCapture           time.Time
 	lastIdlePan           time.Time
 	lastVisionLog         time.Time
+	lastResourceScan      time.Time
 	// lastAttackEnd is stamped when a battle fully returns home; the
 	// inter-attack cooldown (cfg.Attack.MinSecondsBetweenAttacks) is
 	// measured from it. Written by the attack goroutine only.
@@ -244,12 +246,15 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 	// bot without waiting for the App-level bot.Cancel() to be called.
 	ctx, cancel := context.WithCancel(bootCtx)
 
+	resourceReader := game.NewVillageResourceReader(cal, templates, log.Logger)
+
 	b = &Bot{
 		client:            client,
 		cal:               cal,
 		graph:             graph,
 		templates:         templates,
 		recognizer:        recognizer,
+		resourceReader:    resourceReader,
 		cfg:               cfg,
 		attackExec:        attackExec,
 		ctx:               ctx,
@@ -358,6 +363,9 @@ func (b *Bot) Stop() {
 	b.client.Close()
 	globalAsyncWriter.Close()
 	vision.CloseTemplateCache()
+	if b.resourceReader != nil {
+		b.resourceReader.Close()
+	}
 	if b.dukePicksFile != nil {
 		_ = b.dukePicksFile.Close()
 	}
@@ -870,6 +878,10 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			Str("state", state.String()).
 			Int("score", score).
 			Msg("state detected")
+	}
+
+	if !b.seqRunning.Load() && (state == game.StateMainVillage || gc.State == game.StateMainVillage) {
+		b.maybeScanVillageResources(screen)
 	}
 
 	if state == game.StateChestReward {
