@@ -274,6 +274,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// If the strategy's preferred side has no room, use the side with the
 		// most room instead of falling back toward the middle of the base.
 		var p1, p2 image.Point
+		const edgeMargin = 24
 		deploySide := strings.ToLower(targetEdge)
 		if strings.Contains(deploySide, "top") {
 			deploySide = "top"
@@ -287,7 +288,6 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 		if redZone.Valid {
 			const outsidePad = 18
-			const edgeMargin = 24
 			free := map[string]int{
 				"left":   redZone.BBox.Min.X,
 				"right":  w - redZone.BBox.Max.X,
