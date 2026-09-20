@@ -1997,9 +1997,6 @@ func (b *Bot) Health() game.SystemHealth {
 		ConsecutiveFails: b.client.Health().ConsecutiveFails,
 		CPUTimeSec:       CPUTime().Seconds(),
 		CPUCores:          b.cpuSampler.Usage(),
-		RecoveryAttempts:  b.recoveryAttempts.Load(),
-		RecoverySuccesses: b.recoverySuccesses.Load(),
-		BlueStacksRestarts: b.blueStacksRestarts.Load(),
 	}
 }
 
