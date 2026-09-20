@@ -693,13 +693,13 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 	gc.UpdateScreen(screen, captureMs)
 
 	if !b.zoomedOut.Load() {
-
-		pinX, pinY := b.cal.ScaleRef(60, 695)
+		// Only zoom when we have evidence that this is actually the home
+		// village. The old fallback used a single orange pixel / loose
+		// template hit, which can also occur on the troop bar and battle HUD.
+		// That caused a live battle/search screen to be logged as "village
+		// detected" and consumed the frame before the attack logic could run.
 		isVillage := state == game.StateMainVillage ||
-			state == game.StateArmyCamp ||
-			b.isOrange(screen, pinX, pinY) ||
-			b.templateMatch(screen, "btn_attack", 0.45) ||
-			b.templateMatch(screen, "btn_settings", 0.6)
+			((state == game.StateUnknown || state == game.StateArmyCamp) && b.findAttackButton(screen, 0.45))
 
 		if isVillage {
 			if b.zoomedOut.CompareAndSwap(false, true) {
