@@ -67,6 +67,90 @@ type AttackConfig struct {
 	// three near-identical defeats in under four minutes). 0 disables the
 	// pause.
 	MinSecondsBetweenAttacks int `json:"min_seconds_between_attacks"`
+
+	// FarmComposition gives the Windows live deployer a deterministic army
+	// contract instead of making troop quantity/hero decisions from OCR alone.
+	Farm FarmConfig `json:"farm"`
+}
+
+type FarmUnit struct {
+	Name    string `json:"name"`
+	Count   int    `json:"count"`
+	Housing int    `json:"housing"`
+}
+
+type FarmProfile struct {
+	TownHall                int        `json:"town_hall"`
+	Label                   string     `json:"label"`
+	TroopCapacity           int        `json:"troop_capacity"`
+	SpellCapacity           int        `json:"spell_capacity"`
+	ClanCastleTroopCapacity int        `json:"clan_castle_troop_capacity"`
+	ClanCastleSpellCapacity int        `json:"clan_castle_spell_capacity"`
+	ClanCastleSiegeCapacity int        `json:"clan_castle_siege_capacity"`
+	Troops                  []FarmUnit `json:"troops"`
+	Spells                  []FarmUnit `json:"spells"`
+	Heroes                  []string   `json:"heroes"`
+	Siege                   string     `json:"siege"`
+}
+
+type FarmConfig struct {
+	Enabled  bool                   `json:"enabled"`
+	TownHall int                    `json:"town_hall"`
+	Profiles map[string]FarmProfile `json:"profiles"`
+}
+
+// ActiveProfile returns the selected TH profile.
+func (f FarmConfig) ActiveProfile() (FarmProfile, bool) {
+	if !f.Enabled {
+		return FarmProfile{}, false
+	}
+	p, ok := f.Profiles[fmt.Sprintf("%d", f.TownHall)]
+	return p, ok
+}
+
+// DesiredCount returns the configured amount for a named troop/spell.
+func (p FarmProfile) DesiredCount(name string) int {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, u := range append(append([]FarmUnit{}, p.Troops...), p.Spells...) {
+		if strings.EqualFold(strings.TrimSpace(u.Name), name) {
+			return u.Count
+		}
+	}
+	return 0
+}
+
+func (p FarmProfile) UsesHero(name string) bool {
+	for _, h := range p.Heroes {
+		if strings.EqualFold(strings.TrimSpace(h), strings.TrimSpace(name)) {
+			return true
+		}
+	}
+	return false
+}
+
+func defaultFarmProfiles() map[string]FarmProfile {
+	makeP := func(th, troopCap, spellCap, ccTroop, ccSpell, ccSiege int, troops, spells []FarmUnit, heroes []string, siege string) FarmProfile {
+		return FarmProfile{
+			TownHall: th, Label: fmt.Sprintf("HDV %d - Farm Air", th),
+			TroopCapacity: troopCap, SpellCapacity: spellCap,
+			ClanCastleTroopCapacity: ccTroop, ClanCastleSpellCapacity: ccSpell, ClanCastleSiegeCapacity: ccSiege,
+			Troops: troops, Spells: spells, Heroes: heroes, Siege: siege,
+		}
+	}
+	rage := func(n int) []FarmUnit { return []FarmUnit{{Name:"Rage Spell", Count:n, Housing:2}, {Name:"Ice Spell", Count:1, Housing:1}} }
+	return map[string]FarmProfile{
+		"8":  makeP(8, 200, 7, 25, 1, 0, []FarmUnit{{Name:"Balloon", Count:40, Housing:5}}, rage(3), []string{"Barbarian King","Archer Queen"}, ""),
+		"9":  makeP(9, 220, 9, 30, 1, 0, []FarmUnit{{Name:"Balloon", Count:44, Housing:5}}, rage(4), []string{"Barbarian King","Archer Queen","Minion Prince"}, ""),
+		"10": makeP(10, 240, 11, 35, 1, 1, []FarmUnit{{Name:"Balloon", Count:48, Housing:5}}, rage(5), []string{"Barbarian King","Archer Queen","Minion Prince"}, "Stone Slammer"),
+		"11": makeP(11, 260, 11, 35, 2, 1, []FarmUnit{{Name:"Electro Dragon", Count:8, Housing:30},{Name:"Balloon", Count:4, Housing:5}}, rage(5), []string{"Barbarian King","Archer Queen","Minion Prince","Grand Warden"}, "Stone Slammer"),
+		"12": makeP(12, 280, 11, 40, 2, 1, []FarmUnit{{Name:"Electro Dragon", Count:9, Housing:30},{Name:"Balloon", Count:2, Housing:5}}, rage(5), []string{"Barbarian King","Archer Queen","Minion Prince","Grand Warden"}, "Stone Slammer"),
+		"13": makeP(13, 300, 11, 45, 2, 1, []FarmUnit{{Name:"Electro Dragon", Count:10, Housing:30}}, rage(5), []string{"Barbarian King","Archer Queen","Grand Warden","Royal Champion"}, "Stone Slammer"),
+		"14": makeP(14, 300, 11, 45, 3, 1, []FarmUnit{{Name:"Electro Dragon", Count:10, Housing:30}}, rage(5), []string{"Barbarian King","Archer Queen","Grand Warden","Royal Champion"}, "Stone Slammer"),
+		"15": makeP(15, 320, 11, 50, 3, 1, []FarmUnit{{Name:"Electro Dragon", Count:10, Housing:30},{Name:"Balloon", Count:4, Housing:5}}, rage(5), []string{"Barbarian King","Archer Queen","Grand Warden","Royal Champion"}, "Stone Slammer"),
+		"16": makeP(16, 320, 11, 50, 3, 2, []FarmUnit{{Name:"Electro Dragon", Count:10, Housing:30},{Name:"Balloon", Count:4, Housing:5}}, rage(5), []string{"Barbarian King","Archer Queen","Grand Warden","Royal Champion"}, "Stone Slammer"),
+		"17": makeP(17, 340, 11, 55, 3, 2, []FarmUnit{{Name:"Electro Dragon", Count:11, Housing:30},{Name:"Balloon", Count:2, Housing:5}}, rage(5), []string{"Barbarian King","Archer Queen","Grand Warden","Royal Champion"}, "Stone Slammer"),
+		"18": makeP(18, 352, 11, 55, 4, 2, []FarmUnit{{Name:"Electro Dragon", Count:11, Housing:30},{Name:"Balloon", Count:4, Housing:5}}, rage(5), []string{"Barbarian King","Archer Queen","Grand Warden","Royal Champion"}, "Stone Slammer"),
+	}
 }
 
 type SearchConfig struct {
@@ -167,6 +251,11 @@ func DefaultConfig() *BotConfig {
 			LootExitEnabled:          false,
 			LootExitPercent:          100,
 			MinSecondsBetweenAttacks: 30,
+			Farm: FarmConfig{
+				Enabled:  true,
+				TownHall: 18,
+				Profiles: defaultFarmProfiles(),
+			},
 		},
 		Search: SearchConfig{
 			Enabled:              true,
