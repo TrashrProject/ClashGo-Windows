@@ -1054,6 +1054,73 @@ func (b *Bot) hasAttackButtonColor(screen gocv.Mat) bool {
 	return ok
 }
 
+// locateFindMatchButtonColor finds the large orange/gold "Find Match" button
+// after the village Attack button opens the attack menu. The old flow relied
+// on a text/template match plus StateFindMatch, but the current CoC UI can
+// still classify that overlay as MainVillage because the village remains
+// visible behind it. A tight ROI + large orange blob is a safer signal.
+func (b *Bot) locateFindMatchButtonColor(screen gocv.Mat) (int, int, bool) {
+	x0, y0 := b.cal.ScaleRef(40, 420)
+	x1, y1 := b.cal.ScaleRef(420, 640)
+
+	if x0 < 0 { x0 = 0 }
+	if y0 < 0 { y0 = 0 }
+	if x1 > screen.Cols() { x1 = screen.Cols() }
+	if y1 > screen.Rows() { y1 = screen.Rows() }
+	if x1-x0 < 2 || y1-y0 < 2 {
+		return 0, 0, false
+	}
+
+	roi := screen.Region(image.Rect(x0, y0, x1, y1))
+	defer roi.Close()
+
+	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+
+	gocv.InRangeWithScalar(
+		roi,
+		gocv.NewScalar(0, 70, 110, 0),
+		gocv.NewScalar(210, 255, 255, 0),
+		&mask,
+	)
+
+	contours := gocv.FindContours(mask, gocv.RetrievalExternal, gocv.ChainApproxSimple)
+	defer contours.Close()
+
+	bestArea := 0.0
+	bestRect := image.Rectangle{}
+	for i := 0; i < contours.Size(); i++ {
+		contour := contours.At(i)
+		area := gocv.ContourArea(contour)
+		if area <= bestArea {
+			continue
+		}
+		rect := gocv.BoundingRect(contour)
+		if rect.Dx() < 55 || rect.Dy() < 24 {
+			continue
+		}
+		bestArea = area
+		bestRect = rect
+	}
+
+	if bestArea < 900 || bestRect.Empty() {
+		return 0, 0, false
+	}
+
+	x := x0 + bestRect.Min.X + bestRect.Dx()/2
+	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
+
+	b.logger.Info().
+		Float64("area", bestArea).
+		Int("x", x).
+		Int("y", y).
+		Int("w", bestRect.Dx()).
+		Int("h", bestRect.Dy()).
+		Msg("Find Match button verified via localized orange region")
+
+	return x, y, true
+}
+
 // locateAttackButtonColor returns the center of the largest orange/gold blob
 // inside the tight bottom-left Attack-button ROI. Using the detected blob
 // center is safer than tapping a historical hard-coded point: on the user's
@@ -1704,39 +1771,49 @@ func (b *Bot) clickSequence() bool {
 
 	findMatchClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
-		if b.findAndClick("btn_find_match", "Find Match", 1) {
-			findMatchClicked = true
-			break
-		}
-
-		// Localized CoC layouts can make the Find Match template unreliable
-		// even though the state classifier correctly knows we are on the
-		// Find-Match screen. In that case this is NOT a blind tap: the
-		// classifier's StateFindMatch rule has already verified the screen.
-		// Use the rule's own reference anchor as the safe button center.
 		if screen, err := b.client.CaptureToMat(); err == nil {
-			state, score := b.classify(screen)
-			if state == game.StateFindMatch {
-				x, y := b.cal.ScaleRef(215, 563)
-				b.logger.Info().
-					Int("score", score).
-					Int("x", x).
-					Int("y", y).
-					Msg("Find Match screen verified by classifier; clicking canonical button center")
+			// First prefer the large orange button that appears after opening the
+			// attack menu. This works even when the classifier still reports
+			// MainVillage because the village remains visible behind the overlay.
+			if x, y, ok := b.locateFindMatchButtonColor(screen); ok {
 				screen.Close()
+				b.logger.Info().Int("x", x).Int("y", y).Msg("Find Match button verified; clicking detected button center")
 				if err := b.client.TapRandomized(x, y); err == nil {
 					b.recordActivity()
 					findMatchClicked = true
 					break
 				}
 			} else {
-				b.logger.Info().
-					Str("state", state.String()).
-					Int("score", score).
-					Msg("Find Match retry: current classified state")
+				state, score := b.classify(screen)
 				screen.Close()
+				if state == game.StateFindMatch {
+					x, y := b.cal.ScaleRef(215, 563)
+					b.logger.Info().
+						Int("score", score).
+						Int("x", x).
+						Int("y", y).
+						Msg("Find Match screen verified by classifier; clicking canonical button center")
+					if err := b.client.TapRandomized(x, y); err == nil {
+						b.recordActivity()
+						findMatchClicked = true
+						break
+					}
+				} else {
+					b.logger.Info().
+						Str("state", state.String()).
+						Int("score", score).
+						Msg("Find Match retry: no orange button and current classified state")
+				}
 			}
 		}
+
+		// Keep the legacy template path as a final fallback, not the primary
+		// detector for this localized/current CoC screen.
+		if b.findAndClick("btn_find_match", "Find Match", 1) {
+			findMatchClicked = true
+			break
+		}
+
 		b.client.JitteredSleep(500 * time.Millisecond)
 	}
 	if !findMatchClicked {
