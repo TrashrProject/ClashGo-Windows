@@ -863,23 +863,9 @@ func (s *Service) ApplyAuto() (bool, error) {
 		// installation directory. The update replaces the whole runtime tree
 		// (including resources/install_update.ps1); running the source copy
 		// from that same tree can leave Windows file locks in the way.
-		helperBytes, err := os.ReadFile(helper)
+		tempHelperPath, err := prepareWindowsUpdateHelper(helper)
 		if err != nil {
-			return false, fmt.Errorf("read Windows update helper: %w", err)
-		}
-		tempHelper, err := os.CreateTemp("", "clashgo-install-update-*.ps1")
-		if err != nil {
-			return false, fmt.Errorf("create temporary update helper: %w", err)
-		}
-		tempHelperPath := tempHelper.Name()
-		if _, err := tempHelper.Write(helperBytes); err != nil {
-			_ = tempHelper.Close()
-			_ = os.Remove(tempHelperPath)
-			return false, fmt.Errorf("write temporary update helper: %w", err)
-		}
-		if err := tempHelper.Close(); err != nil {
-			_ = os.Remove(tempHelperPath)
-			return false, fmt.Errorf("close temporary update helper: %w", err)
+			return false, err
 		}
 
 		cmd := exec.Command(
@@ -941,6 +927,33 @@ func (s *Service) ApplyAuto() (bool, error) {
 	// Reap async — no need to wait. The helper will wait for our exit itself.
 	go func() { _ = cmd.Wait() }()
 	return true, nil
+}
+
+func prepareWindowsUpdateHelper(source string) (string, error) {
+	helperBytes, err := os.ReadFile(source)
+	if err != nil {
+		return "", fmt.Errorf("read Windows update helper: %w", err)
+	}
+
+	tempHelper, err := os.CreateTemp("", "clashgo-install-update-*.ps1")
+	if err != nil {
+		return "", fmt.Errorf("create temporary update helper: %w", err)
+	}
+	tempHelperPath := tempHelper.Name()
+
+	cleanup := func() {
+		_ = tempHelper.Close()
+		_ = os.Remove(tempHelperPath)
+	}
+	if _, err := tempHelper.Write(helperBytes); err != nil {
+		cleanup()
+		return "", fmt.Errorf("write temporary update helper: %w", err)
+	}
+	if err := tempHelper.Close(); err != nil {
+		_ = os.Remove(tempHelperPath)
+		return "", fmt.Errorf("close temporary update helper: %w", err)
+	}
+	return tempHelperPath, nil
 }
 
 func checkInstallDirWritable(dir string) error {
