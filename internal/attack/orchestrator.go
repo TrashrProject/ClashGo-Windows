@@ -643,7 +643,10 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			}
 		}
 		farmProfile, farmControlled := e.cfg.Farm.ActiveProfile()
+		var armyState *ArmyStateManager
 		if farmControlled {
+			armyState = NewArmyStateManager(farmProfile)
+			defer writeAttackTrace(s.Name, armyState)
 			e.logger.Info().
 				Int("town_hall", farmProfile.TownHall).
 				Str("profile", farmProfile.Label).
@@ -735,6 +738,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 				count := GetCountForSlot(liveCounts, slot.X)
 				if count > 50 { count = 0 }
+				if armyState != nil && count > 0 && strings.TrimSpace(slot.UnitName) != "" {
+					armyState.ObserveRemaining(slot.UnitName, count)
+				}
 
 				chosen = slot
 				chosenCount = count
@@ -773,6 +779,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				tapExec.HumanSleep(130, 15)
 				tapExec.TapDeployPoint(pt, 1, 1)
 				oneShotDone[key] = true
+				if armyState != nil && strings.TrimSpace(chosen.UnitName) != "" {
+					armyState.CompleteOneShot(chosen.UnitName)
+				}
 				e.logger.Info().
 					Str("unit", chosen.UnitName).
 					Str("category", chosen.Category).
@@ -810,6 +819,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			if count > 40 { count = 40 }
 
 			deploySlot(chosen, count)
+			if armyState != nil && strings.TrimSpace(chosen.UnitName) != "" {
+				armyState.Attempt(chosen.UnitName, count)
+			}
 			tapExec.HumanSleep(150, 20)
 
 			// Do not trust old coordinates after this point. On the next loop
@@ -820,6 +832,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 					Str("category", chosen.Category).
 					Msg("Windows live deployment card persisted with unknown count after 8 bursts; blacklisting to avoid a stuck loop")
 				oneShotDone["Troop:"+strings.ToLower(strings.TrimSpace(chosen.UnitName))] = true
+				if armyState != nil {
+					armyState.Fail(chosen.UnitName)
+				}
 			}
 		}
 
