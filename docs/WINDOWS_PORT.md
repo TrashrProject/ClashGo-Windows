@@ -113,3 +113,5 @@ linking unused DNN, video, face, tracking and GUI modules.
 CI generation: bootstrap web/dist before Wails binding generation.
 
 CI binding generation now passes GoCV reduced-module tags explicitly to Wails.
+
+CI generation: explicit minimal GoCV tags for Wails bindings.
