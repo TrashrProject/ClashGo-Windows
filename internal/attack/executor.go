@@ -221,9 +221,18 @@ func (t *TapExecutor) TapDeployLine(p1, p2 image.Point, count int, jitterPx int)
 // expensive multi-capacity troops (e.g. EDrags) where losing 1-2 gestures is
 // worse than spending a few hundred extra milliseconds.
 func (t *TapExecutor) TapDeployLineReliable(p1, p2 image.Point, count int, jitterPx int) {
-	points := t.calculateLinePoints(p1, p2, count)
-	for i := range points {
-		points[i] = t.sanitizeDeployPoint(points[i])
+	// Do not use the exact line endpoints. On live bases the endpoint pixels
+	// are the first ones to fall outside the legal deployment contour; this
+	// produced the repeatable 7/9 EDrag symptom (two endpoint taps rejected).
+	// Spread troops over the inner 12%-88% of the verified line instead.
+	points := make([]image.Point, 0, count)
+	for i := 0; i < count; i++ {
+		pct := 0.50
+		if count > 1 {
+			pct = 0.12 + 0.76*(float64(i)/float64(count-1))
+		}
+		x, y := intLerp(p1, p2, pct)
+		points = append(points, t.sanitizeDeployPoint(image.Pt(x, y)))
 	}
 	t.lineForward = !t.lineForward
 	if !t.lineForward {
@@ -234,7 +243,9 @@ func (t *TapExecutor) TapDeployLineReliable(p1, p2 image.Point, count int, jitte
 	for _, pt := range points {
 		j := t.addJitter(pt, jitterPx)
 		_ = t.client.TapFast(j.X, j.Y, 0.8)
-		t.client.HumanSleep(95, 15)
+		// 60-70ms is enough separation for CoC while avoiding the visibly
+		// sluggish 95ms cadence on 8-10 heavy troops.
+		t.client.HumanSleep(65, 10)
 	}
 }
 
