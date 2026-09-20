@@ -128,7 +128,7 @@ func NewSlotManager(
 	if runtime.GOOS != "windows" {
 		sm.applyManualLabelsFallback()
 	} else {
-		sm.logger.Info().Msg("Windows: skipping stale manual labels; unidentified cards remain safe-edge troops")
+		sm.logger.Debug().Msg("Windows: skipping stale manual labels; unidentified cards remain safe-edge troops")
 	}
 
 	for _, slot := range sm.slots {
@@ -167,7 +167,7 @@ func (sm *SlotManager) detectActiveSlots(screen gocv.Mat) []int {
 		}
 	}
 	} else {
-		sm.logger.Info().Msg("Windows: ignoring stale manual slot map; detecting every live troop-bar card")
+		sm.logger.Debug().Msg("Windows: ignoring stale manual slot map; detecting every live troop-bar card")
 
 		// Dense live scan instead of a fixed 72px grid. The current CoC bar
 		// does not align to the old grid (the first ED card can sit ~20-30px
@@ -328,7 +328,7 @@ func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates 
 			}
 		}
 
-		sm.logger.Info().
+		sm.logger.Debug().
 			Str("unit", cleanName).
 			Int("x", bestSlot.X).
 			Float64("conf", res.match.Confidence).
@@ -338,7 +338,7 @@ func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates 
 	if runtime.GOOS != "windows" {
 		sm.applyPositionalClassification(activeXs)
 	} else {
-		sm.logger.Info().Msg("Windows: positional hero/spell guessing disabled; using template-only categories")
+		sm.logger.Debug().Msg("Windows: positional hero/spell guessing disabled; using template-only categories")
 	}
 }
 
