@@ -823,7 +823,7 @@ func (a *App) refreshHistory() {
 }
 
 // SaveConfig updates config.json settings
-func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strategyFile string, searchEnabled bool, stall int) error {
+func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strategyFile string, searchEnabled bool, stall int, lootExitEnabled bool, lootExitPercent int) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -834,6 +834,10 @@ func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strat
 	cfg.Upgrade.UpgradeWalls = upgradeWalls
 	cfg.Search.Enabled = searchEnabled
 	cfg.Attack.StallTimerSeconds = stall
+	cfg.Attack.LootExitEnabled = lootExitEnabled
+	if lootExitPercent < 0 { lootExitPercent = 0 }
+	if lootExitPercent > 100 { lootExitPercent = 100 }
+	cfg.Attack.LootExitPercent = lootExitPercent
 	if strategyFile != "" {
 		name := filepath.Base(filepath.Clean(strategyFile))
 		ext := strings.ToLower(filepath.Ext(name))
