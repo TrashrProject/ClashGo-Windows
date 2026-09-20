@@ -993,6 +993,47 @@ func (a *App) GetStats() bot.BotStats {
 }
 
 // GetLogs returns the buffered logs
+type VillageResourceSnapshot struct {
+	Timestamp   time.Time `json:"timestamp"`
+	Gold        int       `json:"gold"`
+	Elixir      int       `json:"elixir"`
+	DarkElixir  int       `json:"dark_elixir"`
+	GoldValid   bool      `json:"gold_valid"`
+	ElixirValid bool      `json:"elixir_valid"`
+	DarkValid   bool      `json:"dark_valid"`
+	Valid       bool      `json:"valid"`
+}
+
+// GetVillageResources returns the latest locally observed home-village
+// balances. These values come from the BlueStacks HUD scanner, not from the
+// public Clash player API.
+func (a *App) GetVillageResources() *VillageResourceSnapshot {
+	data, err := os.ReadFile(paths.ResolveConfig("village_resources.json"))
+	if err != nil {
+		return nil
+	}
+	var snap VillageResourceSnapshot
+	if json.Unmarshal(data, &snap) != nil || !snap.Valid {
+		return nil
+	}
+	return &snap
+}
+
+func (a *App) GetVillageResourceHistory() []VillageResourceSnapshot {
+	data, err := os.ReadFile(paths.ResolveConfig("village_resource_history.json"))
+	if err != nil {
+		return []VillageResourceSnapshot{}
+	}
+	var history []VillageResourceSnapshot
+	if json.Unmarshal(data, &history) != nil {
+		return []VillageResourceSnapshot{}
+	}
+	if len(history) > 1000 {
+		history = history[len(history)-1000:]
+	}
+	return history
+}
+
 func (a *App) GetLogs() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
