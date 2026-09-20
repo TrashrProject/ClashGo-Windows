@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -673,6 +676,187 @@ func (a *App) GetConfig() *config.BotConfig {
 		cfg.Attack.StrategyFile = filepath.Base(cfg.Attack.StrategyFile)
 	}
 	return cfg
+}
+
+type ClashAccountPublicConfig struct {
+	PlayerTag        string `json:"player_tag"`
+	APIConfigured    bool   `json:"api_configured"`
+	MaskedAPIKey     string `json:"masked_api_key,omitempty"`
+}
+
+type ClashPlayerClan struct {
+	Tag      string `json:"tag"`
+	Name     string `json:"name"`
+	ClanLevel int   `json:"clanLevel"`
+}
+
+type ClashPlayerLeague struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type ClashPlayerUnit struct {
+	Name        string `json:"name"`
+	Level       int    `json:"level"`
+	MaxLevel    int    `json:"maxLevel"`
+	Village     string `json:"village"`
+}
+
+type ClashPlayerProfile struct {
+	Tag              string            `json:"tag"`
+	Name             string            `json:"name"`
+	TownHallLevel    int               `json:"townHallLevel"`
+	TownHallWeaponLevel int            `json:"townHallWeaponLevel,omitempty"`
+	ExpLevel         int               `json:"expLevel"`
+	Trophies         int               `json:"trophies"`
+	BestTrophies     int               `json:"bestTrophies"`
+	WarStars         int               `json:"warStars"`
+	AttackWins       int               `json:"attackWins"`
+	DefenseWins      int               `json:"defenseWins"`
+	Donations        int               `json:"donations"`
+	DonationsReceived int              `json:"donationsReceived"`
+	Clan             *ClashPlayerClan  `json:"clan,omitempty"`
+	League           *ClashPlayerLeague `json:"league,omitempty"`
+	Troops           []ClashPlayerUnit `json:"troops"`
+	Heroes           []ClashPlayerUnit `json:"heroes"`
+	Spells           []ClashPlayerUnit `json:"spells"`
+	HeroEquipment    []ClashPlayerUnit `json:"heroEquipment"`
+}
+
+func normalizePlayerTag(tag string) (string, error) {
+	tag = strings.ToUpper(strings.TrimSpace(tag))
+	tag = strings.ReplaceAll(tag, " ", "")
+	if tag == "" {
+		return "", fmt.Errorf("player tag is required")
+	}
+	if !strings.HasPrefix(tag, "#") {
+		tag = "#" + tag
+	}
+	for _, r := range tag[1:] {
+		if !(r >= '0' && r <= '9') && !(r >= 'A' && r <= 'Z') {
+			return "", fmt.Errorf("invalid player tag")
+		}
+	}
+	return tag, nil
+}
+
+// GetAccountConfig returns only safe account metadata. The raw Clash API key
+// is never sent back to the webview after it has been saved.
+func (a *App) GetAccountConfig() ClashAccountPublicConfig {
+	cfg := config.LoadOrDefault("config.json")
+	masked := ""
+	if cfg.Account.APIKey != "" {
+		masked = "••••••••"
+		if len(cfg.Account.APIKey) >= 4 {
+			masked += cfg.Account.APIKey[len(cfg.Account.APIKey)-4:]
+		}
+	}
+	return ClashAccountPublicConfig{
+		PlayerTag: cfg.Account.PlayerTag,
+		APIConfigured: strings.TrimSpace(cfg.Account.APIKey) != "",
+		MaskedAPIKey: masked,
+	}
+}
+
+// SaveAccountConfig stores the player tag and optionally replaces the API key.
+// Passing an empty apiKey keeps the existing key, which lets the onboarding
+// screen save only the tag without exposing or erasing credentials.
+func (a *App) SaveAccountConfig(playerTag, apiKey string) error {
+	tag, err := normalizePlayerTag(playerTag)
+	if err != nil {
+		return err
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Account.PlayerTag = tag
+	if strings.TrimSpace(apiKey) != "" {
+		key := strings.TrimSpace(apiKey)
+		key = strings.TrimPrefix(key, "Bearer ")
+		cfg.Account.APIKey = key
+	}
+
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+
+	bytes, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0600)
+}
+
+// ClearAccount removes the local account link and API credential.
+func (a *App) ClearAccount() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Account = config.AccountConfig{}
+	bytes, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0600)
+}
+
+// GetPlayerProfile fetches the linked player from the official Clash of Clans
+// API. The API key belongs to ClashGO's local configuration; the player's
+// Supercell password is never requested or used.
+func (a *App) GetPlayerProfile() (*ClashPlayerProfile, error) {
+	cfg := config.LoadOrDefault("config.json")
+	tag, err := normalizePlayerTag(cfg.Account.PlayerTag)
+	if err != nil {
+		return nil, err
+	}
+	key := strings.TrimSpace(cfg.Account.APIKey)
+	if key == "" {
+		return nil, fmt.Errorf("Clash API key is not configured")
+	}
+
+	endpoint := "https://api.clashofclans.com/v1/players/" + url.PathEscape(tag)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Clash API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		var apiErr struct {
+			Reason  string `json:"reason"`
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(body, &apiErr)
+		msg := strings.TrimSpace(apiErr.Message)
+		if msg == "" {
+			msg = strings.TrimSpace(apiErr.Reason)
+		}
+		if msg == "" {
+			msg = resp.Status
+		}
+		return nil, fmt.Errorf("Clash API: %s", msg)
+	}
+
+	var profile ClashPlayerProfile
+	if err := json.Unmarshal(body, &profile); err != nil {
+		return nil, fmt.Errorf("parse Clash player profile: %w", err)
+	}
+	return &profile, nil
 }
 
 // SetBlueStacksInstance persists the preferred BlueStacks 5 instance.
