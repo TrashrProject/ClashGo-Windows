@@ -59,6 +59,14 @@ type Executor struct {
 	initialLootElixir int
 	initialLootDE     int
 
+	// Accepted live "Available Loot" snapshot during the battle. These values
+	// only update after two consistent OCR reads, so one bad frame cannot
+	// fabricate a giant loot total in the dashboard.
+	lastRemainingGold   int
+	lastRemainingElixir int
+	lastRemainingDE     int
+	remainingLootValid  bool
+
 	OnPhaseStart func(phase string, edge string)
 	OnUnitDeploy func(unit string, slotX int, slotY int)
 
@@ -84,6 +92,29 @@ func (e *Executor) SetInitialLoot(gold, elixir, darkElixir int) {
 	e.initialLootGold = gold
 	e.initialLootElixir = elixir
 	e.initialLootDE = darkElixir
+	e.lastRemainingGold = gold
+	e.lastRemainingElixir = elixir
+	e.lastRemainingDE = darkElixir
+	e.remainingLootValid = false
+}
+
+// EstimatedLootStolen returns loot derived from the live battle counters.
+// It is intentionally independent from the result-screen OCR, which varies
+// heavily across themes. The bool is false until two consistent live reads
+// have been accepted.
+func (e *Executor) EstimatedLootStolen() (game.Resources, bool) {
+	if !e.remainingLootValid {
+		return game.Resources{}, false
+	}
+	clamp := func(v int) int {
+		if v < 0 { return 0 }
+		return v
+	}
+	return game.Resources{
+		Gold:       clamp(e.initialLootGold - e.lastRemainingGold),
+		Elixir:     clamp(e.initialLootElixir - e.lastRemainingElixir),
+		DarkElixir: clamp(e.initialLootDE - e.lastRemainingDE),
+	}, true
 }
 
 // goldPixels counts golden-text pixels (BGR: strong red, mid green, weak
@@ -1710,6 +1741,18 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 	stallLimit := time.Duration(e.cfg.StallTimerSeconds) * time.Second
 	lootExitConfirmations := 0
 
+	// Live-loot OCR stabilizer used both for the optional loot-exit rule and
+	// for accurate dashboard/history totals.
+	var pendingLoot game.Resources
+	pendingLootHits := 0
+	lootClose := func(a, b, initial int) bool {
+		tol := initial / 20 // 5%
+		if tol < 5000 { tol = 5000 }
+		d := a - b
+		if d < 0 { d = -d }
+		return d <= tol
+	}
+
 	var sCfg StallConfig
 	hasStallROI := false
 	if data, ok := readConfigJSON("stall_config.json"); ok && json.Unmarshal(data, &sCfg) == nil {
@@ -1768,6 +1811,49 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			if state == game.StateBattleEnd || state == game.StateReturnHome {
 				screen.Close()
 				return true
+			}
+
+			// Continuously sample the live Available Loot counters. Accept only
+			// two consecutive, mutually-consistent reads and never allow an
+			// accepted remaining amount to increase. This gives the history UI
+			// a stable loot source even when the themed result panel OCR fails.
+			if e.initialLootGold > 0 || e.initialLootElixir > 0 || e.initialLootDE > 0 {
+				liveLoot, _ := lootRec.ReadAvailableLoot(screen)
+				plausible := liveLoot.Gold >= 0 && liveLoot.Gold <= e.initialLootGold &&
+					liveLoot.Elixir >= 0 && liveLoot.Elixir <= e.initialLootElixir &&
+					liveLoot.DarkElixir >= 0 && liveLoot.DarkElixir <= e.initialLootDE
+
+				if plausible {
+					if pendingLootHits > 0 &&
+						lootClose(liveLoot.Gold, pendingLoot.Gold, e.initialLootGold) &&
+						lootClose(liveLoot.Elixir, pendingLoot.Elixir, e.initialLootElixir) &&
+						lootClose(liveLoot.DarkElixir, pendingLoot.DarkElixir, e.initialLootDE) {
+						pendingLootHits++
+					} else {
+						pendingLootHits = 1
+					}
+					pendingLoot = liveLoot
+
+					if pendingLootHits >= 2 {
+						if !e.remainingLootValid || liveLoot.Gold <= e.lastRemainingGold {
+							e.lastRemainingGold = liveLoot.Gold
+						}
+						if !e.remainingLootValid || liveLoot.Elixir <= e.lastRemainingElixir {
+							e.lastRemainingElixir = liveLoot.Elixir
+						}
+						if !e.remainingLootValid || liveLoot.DarkElixir <= e.lastRemainingDE {
+							e.lastRemainingDE = liveLoot.DarkElixir
+						}
+						e.remainingLootValid = true
+						e.logger.Debug().
+							Int("remaining_gold", e.lastRemainingGold).
+							Int("remaining_elixir", e.lastRemainingElixir).
+							Int("remaining_de", e.lastRemainingDE).
+							Msg("accepted stable live loot snapshot")
+					}
+				} else {
+					pendingLootHits = 0
+				}
 			}
 
 			// Optional UI-controlled early exit based on LOOT collected, not
