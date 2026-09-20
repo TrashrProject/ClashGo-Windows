@@ -124,16 +124,10 @@ jobs:
       - name: Generate distribution checksums
         shell: powershell
         run: |
-          $files = Get-ChildItem dist -File | Where-Object { $_.Name -match 'windows\.(zip|exe)$|windows-setup\.exe        uses: actions/upload-artifact@v4
-        with:
-          name: ClashGO-Windows-${{ env.BUILD_VERSION }}
-          path: |
-            dist/ClashGO-v*-windows.zip
-            dist/ClashGO-v*-windows-setup.exe
-            dist/ClashGO-Windows/**
-            dist/SHA256SUMS.txt
-          if-no-files-found: error
- }
+          $files = Get-ChildItem dist -File | Where-Object {
+            $_.Name -like "ClashGO-v*-windows.zip" -or
+            $_.Name -like "ClashGO-v*-windows-setup.exe"
+          }
           if (-not $files) { throw "No Windows distributables found for checksum generation" }
           $lines = foreach ($file in $files) {
             $sha = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower()
@@ -149,4 +143,5 @@ jobs:
             dist/ClashGO-v*-windows.zip
             dist/ClashGO-v*-windows-setup.exe
             dist/ClashGO-Windows/**
+            dist/SHA256SUMS.txt
           if-no-files-found: error
