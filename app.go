@@ -445,13 +445,18 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 		// without burning the bridge. See App.GetLiveScreenshot.
 
 		b.OnStatsUpdate = func() {
-			// Refresh the in-memory history cache once per attack
-			// so React's 2 s GetAttackHistory poll doesn't re-read
-			// attack_history.json from disk every tick. Bounded
-			// to roughly the bot's attack cadence (a few minutes)
-			// — well below the 0.5 Hz poll rate.
+			// Refresh persisted history/stats, then push the fresh history to
+			// React immediately. The dashboard still keeps its low-frequency
+			// polling as a recovery path, but attack rows no longer wait up to
+			// two seconds (or a tab remount) to appear.
 			a.refreshHistory()
 			a.saveStats()
+
+			if a.ctx != nil {
+				history := a.GetAttackHistory()
+				runtime.EventsEmit(a.ctx, "attack_history_updated", history)
+				runtime.EventsEmit(a.ctx, "stats_updated", a.GetStats())
+			}
 		}
 
 		a.mu.Lock()
