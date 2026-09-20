@@ -109,3 +109,5 @@ The Windows port only uses OpenCV core, imgproc and imgcodecs at runtime.
 Windows CI and the local setup script therefore build those modules only and
 compile GoCV with `customenv,gocv_specific_modules`. This avoids building and
 linking unused DNN, video, face, tracking and GUI modules.
+
+CI generation: bootstrap web/dist before Wails binding generation.
