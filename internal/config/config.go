@@ -23,7 +23,12 @@ type BotConfig struct {
 
 type AccountConfig struct {
 	PlayerTag string `json:"player_tag"`
-	APIKey    string `json:"api_key,omitempty"`
+	// ProxyURL points to the ClashGO account service. End users never need
+	// a Clash developer key; the server owns that credential.
+	ProxyURL string `json:"proxy_url,omitempty"`
+	// LegacyAPIKey is kept only so older config.json files still unmarshal.
+	// The desktop app no longer uses or exposes it.
+	LegacyAPIKey string `json:"api_key,omitempty"`
 }
 
 type DeviceConfig struct {
