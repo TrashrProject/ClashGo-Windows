@@ -718,29 +718,24 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 					anonymousHeroIndex++
 				}
 
-				// When the user enabled an HDV farm composition, named cards
-				// outside that composition are deliberately ignored. Unknown
-				// cards still fall back to live OCR so seasonal/event troops
-				// are not accidentally stranded.
+				// The farm profile is a TARGET, never a reason to strand a live
+				// card. Actual battle-bar contents are authoritative: seasonal
+				// troops, a different siege, or a user's chosen hero lineup
+				// must still be deployed. Profile counts are used below when
+				// the unit is known; deviations are diagnostic only.
 				if farmControlled && strings.TrimSpace(slot.UnitName) != "" {
 					switch slot.Category {
 					case "Hero":
 						if !farmProfile.UsesHero(slot.UnitName) {
-							oneShotDone[key] = true
-							e.logger.Info().Str("unit", slot.UnitName).Msg("farm profile: hero not selected; skipping")
-							continue
+							e.logger.Debug().Str("unit", slot.UnitName).Msg("live hero differs from farm target; deploying live hero")
 						}
 					case "Siege", "CC":
 						if strings.TrimSpace(farmProfile.Siege) == "" || !strings.EqualFold(strings.TrimSpace(farmProfile.Siege), strings.TrimSpace(slot.UnitName)) {
-							oneShotDone[key] = true
-							e.logger.Info().Str("unit", slot.UnitName).Msg("farm profile: siege not selected; skipping")
-							continue
+							e.logger.Debug().Str("unit", slot.UnitName).Msg("live siege/CC differs from farm target; deploying live card")
 						}
 					case "Troop", "Spell":
 						if farmProfile.DesiredCount(slot.UnitName) <= 0 {
-							oneShotDone[key] = true
-							e.logger.Info().Str("unit", slot.UnitName).Str("category", slot.Category).Msg("farm profile: named card not in composition; skipping")
-							continue
+							e.logger.Debug().Str("unit", slot.UnitName).Str("category", slot.Category).Msg("live card not in farm target; deploying observed amount")
 						}
 					}
 				}
