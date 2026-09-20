@@ -1,8 +1,21 @@
 
 import React from 'react';
-import { ClearAccount, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetPlayerProfile, GetVillageResources } from '../../wailsjs/go/main/App';
+import { ClearAccount, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetPlayerProfile, GetVillageResources } from '../../wailsjs/go/main/App';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
+type CurrentArmyUnit = {
+  name: string;
+  category: string;
+  count: number;
+  confidence: number;
+  slot_x: number;
+};
+
+type CurrentArmy = {
+  timestamp: string;
+  units: CurrentArmyUnit[];
+};
+
 type FarmUnit = { name: string; count: number; housing: number };
 type FarmProfile = {
   town_hall: number;
@@ -44,6 +57,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
   const [profile, setProfile] = React.useState<PlayerProfile | null>(null);
   const [resources, setResources] = React.useState<VillageResources | null>(null);
   const [farmProfile, setFarmProfile] = React.useState<FarmProfile | null>(null);
+  const [currentArmy, setCurrentArmy] = React.useState<CurrentArmy | null>(null);
   const [serviceConfigured, setServiceConfigured] = React.useState(false);
   const [serviceURL, setServiceURL] = React.useState('');
   const [busy, setBusy] = React.useState(false);
@@ -104,10 +118,11 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
     let active = true;
     const loadResources = async () => {
       try {
-        const snap = await GetVillageResources();
+        const [snap, army] = await Promise.all([GetVillageResources(), GetCurrentArmy()]);
         if (active && snap) setResources(snap as VillageResources);
+        if (active && army) setCurrentArmy(army as CurrentArmy);
       } catch {
-        // Resource tracking is best-effort while BlueStacks is unavailable.
+        // Live tracking is best-effort while BlueStacks is unavailable.
       }
     };
     void loadResources();
@@ -210,6 +225,36 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
               </div>
             ))}
           </section>
+
+          {currentArmy && currentArmy.units.length > 0 && (
+            <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
+              <div className="flex items-center justify-between gap-4 mb-5">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">Last detected army</div>
+                  <h4 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Live battle composition</h4>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Captured automatically from the troop bar before deployment.
+                  </p>
+                </div>
+                <div className="text-[10px] font-bold text-zinc-400">
+                  {new Date(currentArmy.timestamp).toLocaleTimeString()}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
+                {currentArmy.units.map((unit, idx) => (
+                  <div key={idx} className="rounded-xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-3 min-w-0">
+                    <div className="truncate text-xs font-black text-zinc-900 dark:text-white" title={unit.name || 'Unknown card'}>
+                      {unit.name || 'Unknown card'}
+                    </div>
+                    <div className="mt-1 flex items-center justify-between gap-2 text-[10px] font-bold text-zinc-400">
+                      <span>{unit.category}</span>
+                      <span className="tabular-nums">{unit.count > 0 ? '×' + unit.count : 'detected'}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {farmProfile && (
             <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
