@@ -145,36 +145,45 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             </div>
           )}
 
-          {/* BlueStacks instance selection */}
-          <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
-            <div className="flex items-center justify-between gap-4">
+          {/* Automatic selection is the default. Manual instance choice is
+              intentionally tucked away so normal users never need to touch it. */}
+          <details className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/70 overflow-hidden">
+            <summary className="cursor-pointer list-none p-4 flex items-center justify-between gap-4">
               <div className="min-w-0">
-                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">BlueStacks instance</div>
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">Advanced connection</div>
                 <div className="text-[11px] text-zinc-300 mt-1">
-                  {systemDiagnostics?.configured_instance
-                    ? `Forced · ${systemDiagnostics.configured_instance}`
-                    : `Auto · ${systemDiagnostics?.emulator.preferred_instance || 'waiting for detection'}`}
+                  BlueStacks instance · {systemDiagnostics?.configured_instance
+                    ? `Manual: ${systemDiagnostics.configured_instance}`
+                    : `Automatic: ${systemDiagnostics?.emulator.preferred_instance || 'detecting'}`}
                 </div>
               </div>
-              <select
-                value={systemDiagnostics?.configured_instance || ''}
-                disabled={instanceBusy || !systemDiagnostics}
-                onChange={(e) => handleInstanceChange(e.target.value)}
-                className="max-w-[220px] rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-bold text-white outline-none focus:border-emerald-500 disabled:opacity-50"
-                aria-label="BlueStacks instance selection"
-              >
-                <option value="">Automatic</option>
-                {(systemDiagnostics?.emulator.instances ?? []).map((inst) => (
-                  <option key={inst.name} value={inst.name}>
-                    {inst.name} · ADB {inst.adb_port}
-                  </option>
-                ))}
-              </select>
+              <span className="material-symbols-outlined text-zinc-500">tune</span>
+            </summary>
+            <div className="border-t border-zinc-800 p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="text-[11px] text-zinc-400 max-w-[250px]">
+                  Leave this on Automatic unless ClashGO detected the wrong BlueStacks instance.
+                </div>
+                <select
+                  value={systemDiagnostics?.configured_instance || ''}
+                  disabled={instanceBusy || !systemDiagnostics}
+                  onChange={(e) => handleInstanceChange(e.target.value)}
+                  className="max-w-[220px] rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-bold text-white outline-none focus:border-emerald-500 disabled:opacity-50"
+                  aria-label="BlueStacks instance selection"
+                >
+                  <option value="">Automatic</option>
+                  {(systemDiagnostics?.emulator.instances ?? []).map((inst) => (
+                    <option key={inst.name} value={inst.name}>
+                      {inst.name} · ADB {inst.adb_port}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {instanceMessage && (
+                <div className="mt-2 text-[9px] font-medium text-zinc-400">{instanceMessage}</div>
+              )}
             </div>
-            {instanceMessage && (
-              <div className="mt-2 text-[9px] font-medium text-zinc-400">{instanceMessage}</div>
-            )}
-          </div>
+          </details>
         </div>
 
         {/* Dark Mode Toggle */}
