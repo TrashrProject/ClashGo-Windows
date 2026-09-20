@@ -13,7 +13,20 @@ if (-not (Test-Path (Join-Path $BundlePath "ClashGO.exe"))) {
 }
 
 $makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue
-if (-not $makensis) { throw "makensis.exe was not found. Install NSIS (for example: choco install nsis -y)." }
+if (-not $makensis) {
+    $candidates = @(
+        "$env:ProgramFiles(x86)\NSIS\makensis.exe",
+        "$env:ProgramFiles\NSIS\makensis.exe",
+        "$env:ChocolateyInstall\bin\makensis.exe"
+    )
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate)) {
+            $makensis = Get-Item $candidate
+            break
+        }
+    }
+}
+if (-not $makensis) { throw "makensis.exe was not found after NSIS installation." }
 
 $dist = Join-Path $repoRoot "dist"
 if (-not (Test-Path $dist)) { New-Item -ItemType Directory -Force -Path $dist | Out-Null }
