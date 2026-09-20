@@ -21,6 +21,8 @@ interface ConfigViewProps {
   setLootExitEnabled: (v: boolean) => void;
   lootExitPercent: number;
   setLootExitPercent: (v: number) => void;
+  simpleMode: boolean;
+  onSetSimpleMode: (enabled: boolean) => Promise<void>;
   // Returns the underlying SaveConfig promise so ConfigView can own
   // the save-status indicator (green flash / red flash + inline
   // "Saved!" / "Save failed" pill) and surface success or failure to
@@ -48,10 +50,14 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   stallTimer, setStallTimer,
   lootExitEnabled, setLootExitEnabled,
   lootExitPercent, setLootExitPercent,
+  simpleMode,
+  onSetSimpleMode,
   onSave
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
   const [saveStatus, setSaveStatus] = React.useState<SaveStatus>('idle');
+  const [advancedOpen, setAdvancedOpen] = React.useState(false);
+  const [simpleModeBusy, setSimpleModeBusy] = React.useState(false);
   const [lastSaveError, setLastSaveError] = React.useState<string | null>(null);
   const dropdownRef = React.useRef<HTMLDivElement>(null);
   const savedTimerRef = React.useRef<number | null>(null);
@@ -143,6 +149,68 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
     <div className="max-w-4xl mx-auto">
 
       <form onSubmit={handleSubmit} className="space-y-8">
+        <section className="bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+            <div className="max-w-2xl">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                  <span className="material-symbols-outlined">auto_awesome</span>
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black text-zinc-950 dark:text-white tracking-tight">Automatic Setup</h3>
+                  <p className="text-sm text-zinc-500 font-medium mt-1">
+                    Recommended. ClashGO uses your linked account, HDV and live game state to choose the farm profile and keep resource tracking active automatically.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 flex flex-wrap gap-2">
+                {['Account → HDV', 'Auto farm profile', 'Army guard', 'Resource tracking', 'Auto profile sync'].map((label) => (
+                  <span key={label} className="px-3 py-2 rounded-xl bg-zinc-50 dark:bg-zinc-800 text-[10px] font-black uppercase tracking-wider text-zinc-500">
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={simpleModeBusy}
+              onClick={async () => {
+                if (simpleModeBusy) return;
+                setSimpleModeBusy(true);
+                try {
+                  await onSetSimpleMode(!simpleMode);
+                } finally {
+                  setSimpleModeBusy(false);
+                }
+              }}
+              className={`shrink-0 px-6 py-4 rounded-2xl text-sm font-black transition-all border disabled:opacity-50 ${
+                simpleMode
+                  ? 'bg-emerald-500 text-white border-emerald-400'
+                  : 'bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 border-transparent'
+              }`}
+            >
+              {simpleModeBusy ? 'Updating…' : simpleMode ? 'Automatic ✓' : 'Enable Automatic'}
+            </button>
+          </div>
+
+          <div className="mt-6 pt-5 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-black text-zinc-900 dark:text-white">Advanced controls</div>
+              <div className="text-xs text-zinc-500 mt-1">Only open these if you want to override the automatic behavior.</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen(v => !v)}
+              className="px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-black text-zinc-600 dark:text-zinc-300"
+            >
+              {advancedOpen ? 'Hide advanced' : 'Show advanced'}
+            </button>
+          </div>
+        </section>
+
+        {(!simpleMode || advancedOpen) && (
+          <>
         {/* Resource Thresholds */}
         <div className="bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none space-y-10 transition-all duration-500">
           <div className="flex justify-between items-start">
@@ -430,6 +498,8 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
             </span>
           </button>
         </div>
+          </>
+        )}
       </form>
     </div>
   );
