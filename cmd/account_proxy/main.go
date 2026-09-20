@@ -25,6 +25,42 @@ type clientWindow struct {
 	count int
 }
 
+type cacheEntry struct {
+	status int
+	body   []byte
+	expiry time.Time
+}
+
+type profileCache struct {
+	mu      sync.RWMutex
+	entries map[string]cacheEntry
+}
+
+func (c *profileCache) get(tag string) (cacheEntry, bool) {
+	c.mu.RLock()
+	entry, ok := c.entries[tag]
+	c.mu.RUnlock()
+	if !ok || time.Now().After(entry.expiry) {
+		if ok {
+			c.mu.Lock()
+			delete(c.entries, tag)
+			c.mu.Unlock()
+		}
+		return cacheEntry{}, false
+	}
+	return entry, true
+}
+
+func (c *profileCache) put(tag string, status int, body []byte, ttl time.Duration) {
+	if status != http.StatusOK || len(body) == 0 {
+		return
+	}
+	cp := append([]byte(nil), body...)
+	c.mu.Lock()
+	c.entries[tag] = cacheEntry{status: status, body: cp, expiry: time.Now().Add(ttl)}
+	c.mu.Unlock()
+}
+
 func (l *limiterState) allow(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -89,6 +125,7 @@ func main() {
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	limiter := &limiterState{entries: make(map[string]*clientWindow)}
+	cache := &profileCache{entries: make(map[string]cacheEntry)}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -111,6 +148,15 @@ func main() {
 		tag, err := normalizeTag(r.PathValue("tag"))
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"reason": "invalid_tag", "message": err.Error()})
+			return
+		}
+
+		if hit, ok := cache.get(tag); ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "private, max-age=30")
+			w.Header().Set("X-ClashGO-Cache", "HIT")
+			w.WriteHeader(hit.status)
+			_, _ = w.Write(hit.body)
 			return
 		}
 
@@ -167,8 +213,13 @@ func main() {
 			return
 		}
 
+		if resp.StatusCode == http.StatusOK {
+			cache.put(tag, resp.StatusCode, body, 60*time.Second)
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "private, max-age=30")
+		w.Header().Set("X-ClashGO-Cache", "MISS")
 		w.WriteHeader(resp.StatusCode)
 		_, _ = w.Write(body)
 	})
