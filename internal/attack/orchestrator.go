@@ -638,6 +638,33 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				Int("count", count).
 				Msg("Windows deploy: selecting live slot")
 
+			// One-shot cards (heroes / siege / clan castle) must NEVER enter the
+			// generic reconciliation loop. After a hero is deployed its card
+			// remains visible as the hero ability button, so "still active"
+			// does not mean "not deployed". Re-selecting it repeatedly wastes
+			// time and can fire abilities instead of placing troops.
+			if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
+				// Use the furthest known-safe corridor point immediately for
+				// one-shot units. This maximizes legal-placement margin and
+				// avoids spending retries close to the red boundary.
+				safeIdx := len(safeLines) - 1
+				if safeIdx < 0 { safeIdx = 0 }
+				line := safeLines[safeIdx]
+				tapExec.TapSlot(slot, 1)
+				tapExec.HumanSleep(120, 15)
+				pt := image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2)
+				tapExec.TapDeployPoint(pt, 1, 1)
+				tapExec.HumanSleep(180, 20)
+				slotMgr.MarkSlotDeployed(slot)
+				e.logger.Info().
+					Str("unit", slot.UnitName).
+					Str("category", slot.Category).
+					Int("slot_x", slot.X).
+					Interface("deploy_point", pt).
+					Msg("Windows one-shot unit placed once on furthest safe edge; retries disabled")
+				continue
+			}
+
 			deploySlot(slot, count)
 
 			verified := false
@@ -780,6 +807,19 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				// Positive OCR count is the strongest possible evidence that
 				// deployable troops/spells are still sitting in the bar.
 				if count > 0 {
+					// Never treat a hero/siege/CC card with a positive OCR
+					// read as an undeployed multi-count card. After placement,
+					// hero ability art/labels can look like a numeric count.
+					if liveSlot.Category == "Hero" || liveSlot.Category == "Siege" || liveSlot.Category == "CC" {
+						e.logger.Debug().
+							Int("round", sweepRound).
+							Int("slot_x", liveSlot.X).
+							Str("unit", liveSlot.UnitName).
+							Str("category", liveSlot.Category).
+							Int("ocr_count", count).
+							Msg("final sweep ignoring one-shot card after initial placement")
+						continue
+					}
 					if count > 40 { count = 40 }
 					liveRemaining++
 					e.logger.Warn().
@@ -795,27 +835,13 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 					continue
 				}
 
-				// No numeric count: only consider a one-shot card once. This
-				// covers a hero/siege/CC that the first pass genuinely missed,
-				// without repeatedly pressing a hero ability after deployment.
+				// One-shot cards are intentionally never rescued here. They were
+				// already given exactly one placement attempt on the furthest
+				// safe edge during the initial pass. A visible hero card after
+				// that is normally its ability button, not an undeployed hero.
 				if liveSlot.Category == "Hero" || liveSlot.Category == "Siege" || liveSlot.Category == "CC" {
-					if oneShotRescue[liveSlot.X] {
-						continue
-					}
-					activity := GetSlotActivityRatioStatic(fresh, liveSlot.X, liveSlot.Y, w)
-					if activity < 0.10 {
-						continue
-					}
 					oneShotRescue[liveSlot.X] = true
-					liveRemaining++
-					e.logger.Warn().
-						Int("round", sweepRound).
-						Int("slot_x", liveSlot.X).
-						Str("unit", liveSlot.UnitName).
-						Str("category", liveSlot.Category).
-						Msg("final live sweep attempting missed one-shot card")
-					deploySlot(liveSlot, 1)
-					acted++
+					continue
 				}
 			}
 			fresh.Close()
