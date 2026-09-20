@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-core-port-build
+  group: windows-core-port-build-v2
   cancel-in-progress: false
 
 jobs:
