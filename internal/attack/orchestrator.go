@@ -263,19 +263,96 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	if runtime.GOOS == "windows" {
 		e.logger.Info().Int("slots", len(slotMgr.GetAllSlots())).Msg("using Windows live-slot deployment path")
 
-		// Choose a conservative deployment segment from the resolved target edge.
-		// Points stay well inside the playable border and above the troop bar.
+		// Build the Windows deployment line from the LIVE red deployment
+		// boundary, not from fixed percentages. Clash of Clans only accepts
+		// troop drops OUTSIDE the red no-deploy polygon; the previous fixed
+		// 28%-72% / 64%-height line frequently landed inside the village and
+		// produced "You cannot deploy troops on the red area!".
+		//
+		// RedZone is represented as a bounding box, so choose a side that has
+		// actual free screen space and place the line just OUTSIDE that box.
+		// If the strategy's preferred side has no room, use the side with the
+		// most room instead of falling back toward the middle of the base.
 		var p1, p2 image.Point
-		switch strings.ToLower(targetEdge) {
-		case "top", "topleft", "topright":
-			p1, p2 = image.Pt(int(float64(w)*0.28), int(float64(h)*0.18)), image.Pt(int(float64(w)*0.72), int(float64(h)*0.18))
-		case "left":
-			p1, p2 = image.Pt(int(float64(w)*0.16), int(float64(h)*0.25)), image.Pt(int(float64(w)*0.16), int(float64(h)*0.68))
-		case "right":
-			p1, p2 = image.Pt(int(float64(w)*0.84), int(float64(h)*0.25)), image.Pt(int(float64(w)*0.84), int(float64(h)*0.68))
-		default:
-			// Bottom / bottom corners are safest with the troop bar at the bottom.
-			p1, p2 = image.Pt(int(float64(w)*0.28), int(float64(h)*0.64)), image.Pt(int(float64(w)*0.72), int(float64(h)*0.64))
+		deploySide := strings.ToLower(targetEdge)
+		if strings.Contains(deploySide, "top") {
+			deploySide = "top"
+		} else if strings.Contains(deploySide, "bottom") {
+			deploySide = "bottom"
+		} else if strings.Contains(deploySide, "left") {
+			deploySide = "left"
+		} else if strings.Contains(deploySide, "right") {
+			deploySide = "right"
+		}
+
+		if redZone.Valid {
+			const outsidePad = 18
+			const edgeMargin = 24
+			free := map[string]int{
+				"left":   redZone.BBox.Min.X,
+				"right":  w - redZone.BBox.Max.X,
+				"top":    redZone.BBox.Min.Y,
+				"bottom": uiCutoff - redZone.BBox.Max.Y,
+			}
+
+			if free[deploySide] < outsidePad+8 {
+				deploySide = "left"
+				best := free["left"]
+				for _, side := range []string{"right", "top", "bottom"} {
+					if free[side] > best {
+						deploySide = side
+						best = free[side]
+					}
+				}
+			}
+
+			switch deploySide {
+			case "right":
+				x := redZone.BBox.Max.X + outsidePad
+				if x > w-edgeMargin { x = w-edgeMargin }
+				y1 := clamp(redZone.BBox.Min.Y+35, edgeMargin, uiCutoff-edgeMargin)
+				y2 := clamp(redZone.BBox.Max.Y-35, edgeMargin, uiCutoff-edgeMargin)
+				p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
+			case "top":
+				y := redZone.BBox.Min.Y - outsidePad
+				if y < edgeMargin { y = edgeMargin }
+				x1 := clamp(redZone.BBox.Min.X+35, edgeMargin, w-edgeMargin)
+				x2 := clamp(redZone.BBox.Max.X-35, edgeMargin, w-edgeMargin)
+				p1, p2 = image.Pt(x1, y), image.Pt(x2, y)
+			case "bottom":
+				y := redZone.BBox.Max.Y + outsidePad
+				if y > uiCutoff-edgeMargin { y = uiCutoff-edgeMargin }
+				x1 := clamp(redZone.BBox.Min.X+35, edgeMargin, w-edgeMargin)
+				x2 := clamp(redZone.BBox.Max.X-35, edgeMargin, w-edgeMargin)
+				p1, p2 = image.Pt(x1, y), image.Pt(x2, y)
+			default: // left
+				x := redZone.BBox.Min.X - outsidePad
+				if x < edgeMargin { x = edgeMargin }
+				y1 := clamp(redZone.BBox.Min.Y+35, edgeMargin, uiCutoff-edgeMargin)
+				y2 := clamp(redZone.BBox.Max.Y-35, edgeMargin, uiCutoff-edgeMargin)
+				p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
+			}
+
+			e.logger.Info().
+				Str("side", deploySide).
+				Interface("red_bbox", redZone.BBox).
+				Interface("p1", p1).
+				Interface("p2", p2).
+				Msg("Windows deploy line placed outside live red zone")
+		} else if len(deployLine.Points) >= 2 {
+			// Existing calculator already keeps these points near the outer
+			// edge; use them if red-line detection itself was unavailable.
+			p1 = deployLine.Points[0]
+			p2 = deployLine.Points[len(deployLine.Points)-1]
+			e.logger.Warn().
+				Interface("p1", p1).
+				Interface("p2", p2).
+				Msg("Windows red zone unavailable; using calculated outer deploy line")
+		} else {
+			// Last-resort line hugs the LEFT border rather than the middle.
+			p1 = image.Pt(edgeMargin, int(float64(h)*0.25))
+			p2 = image.Pt(edgeMargin, int(float64(h)*0.68))
+			e.logger.Warn().Msg("Windows deploy line fallback: hugging outer left border")
 		}
 
 		tapExec := NewTapExecutor(e.client, e.cal, e.logger)
@@ -308,10 +385,19 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			tapExec.TapSlot(slot, 4)
 			tapExec.HumanSleep(180, 25)
 
-			// Heroes/siege/CC are single-drop cards; troops/spells use their
-			// OCR count across the line. Repeated hero taps could trigger an
-			// ability immediately, so never spam them here.
-			if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
+			// Ground/air troops, heroes, siege and CC must be dropped OUTSIDE
+			// the red boundary. Spells are the opposite: they may target inside
+			// the base, so use the red-zone center for Spell cards.
+			if slot.Category == "Spell" {
+				spellPoint := image.Pt(w/2, int(float64(uiCutoff)*0.50))
+				if redZone.Valid {
+					spellPoint = image.Pt(
+						(redZone.BBox.Min.X+redZone.BBox.Max.X)/2,
+						(redZone.BBox.Min.Y+redZone.BBox.Max.Y)/2,
+					)
+				}
+				tapExec.TapDeployPoint(spellPoint, count, 4)
+			} else if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
 				tapExec.TapDeployPoint(image.Pt((p1.X+p2.X)/2, (p1.Y+p2.Y)/2), 1, 4)
 			} else {
 				tapExec.TapDeployLine(p1, p2, count, 4)
