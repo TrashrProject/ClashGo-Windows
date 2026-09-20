@@ -1,0 +1,179 @@
+name: Windows Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Build version
+        required: true
+        default: 0.6.0-windows-beta
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-core-port-build-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'windows/core-port'
+    runs-on: windows-latest
+    env:
+      BUILD_VERSION: ${{ github.event.inputs.version || '0.6.0-windows-beta' }}
+      CLASHGO_ACCOUNT_API_URL: ${{ vars.CLASHGO_ACCOUNT_API_URL }}
+      CGO_CXXFLAGS: --std=c++11 -DNDEBUG
+      CGO_CPPFLAGS: -IC:/opencv/build/install/include
+      CGO_LDFLAGS: -LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -lopencv_imgproc4130 -lopencv_imgcodecs4130
+      GOFLAGS: -tags=customenv,gocv_specific_modules
+    timeout-minutes: 120
+    steps:
+      - name: Checkout Windows branch
+        uses: actions/checkout@v4
+        with:
+          ref: windows/core-port
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Validate PowerShell scripts
+        shell: powershell
+        run: |
+          $scripts = Get-ChildItem tools,build\windows -Recurse -Filter *.ps1 -ErrorAction SilentlyContinue
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Host "$($script.FullName): $($_.Message)" }
+              throw "PowerShell syntax validation failed"
+            }
+          }
+
+      - name: Install MinGW and CMake
+        shell: powershell
+        run: |
+          choco install mingw cmake nsis -y --no-progress
+          g++ --version
+          cmake --version
+
+      - name: Restore cached OpenCV
+        id: opencv-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: C:\opencv\build\install
+          key: opencv-4.13.0-mingw-gocv043-clashgo-minimal-v1
+
+      - name: Build OpenCV 4.13 for GoCV
+        if: steps.opencv-cache.outputs.cache-hit != 'true'
+        shell: powershell
+        run: |
+          git clone --depth 1 --branch v0.43.0 https://github.com/hybridgroup/gocv.git "$env:RUNNER_TEMP\gocv"
+          Push-Location "$env:RUNNER_TEMP\gocv"
+          cmd /c win_download_opencv.cmd
+          if ($LASTEXITCODE -ne 0) { throw "OpenCV download failed" }
+          (Get-Content .\win_build_opencv.cmd -Raw).Replace("-DBUILD_PERF_TESTS=ON", "-DBUILD_PERF_TESTS=OFF -DBUILD_LIST=core,imgproc,imgcodecs") | Set-Content .\win_build_opencv.cmd -Encoding ASCII
+          $env:CMAKE_BUILD_PARALLEL_LEVEL = [Environment]::ProcessorCount
+          Write-Host "Building OpenCV with $env:CMAKE_BUILD_PARALLEL_LEVEL parallel jobs"
+          cmd /c win_build_opencv.cmd
+          if ($LASTEXITCODE -ne 0) { throw "OpenCV build failed" }
+          Pop-Location
+
+      - name: Save OpenCV cache immediately
+        if: steps.opencv-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: C:\opencv\build\install
+          key: opencv-4.13.0-mingw-gocv043-clashgo-minimal-v1
+
+      - name: Add OpenCV to PATH
+        shell: powershell
+        run: |
+          "C:\opencv\build\install\x64\mingw\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install Wails
+        shell: powershell
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          wails version
+
+      - name: Synchronize audited runtime assets
+        shell: powershell
+        run: .\tools\sync-upstream-runtime.ps1
+
+      - name: Generate Wails bindings and validate frontend
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path web\dist | Out-Null
+          if (-not (Test-Path web\dist\index.html)) {
+            Set-Content web\dist\index.html "<!doctype html><html><body></body></html>" -Encoding UTF8
+          }
+          wails generate module -tags "customenv,gocv_specific_modules"
+          if ($LASTEXITCODE -ne 0) { throw "Wails binding generation failed" }
+          Push-Location web
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
+          Pop-Location
+
+      - name: Backend tests
+        shell: powershell
+        run: go test -tags "customenv,gocv_specific_modules" ./internal/... ./pkg/...
+
+      - name: Build portable Windows bundle
+        shell: powershell
+        run: .\tools\build-windows.ps1 -Version "$env:BUILD_VERSION" -AccountServiceURL "$env:CLASHGO_ACCOUNT_API_URL" -SkipSync -SkipTests
+
+      - name: Upload portable preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClashGO-Windows-Portable-${{ env.BUILD_VERSION }}
+          path: |
+            dist/ClashGO-v*-windows.zip
+            dist/ClashGO-Windows/**
+          if-no-files-found: error
+
+      - name: Build NSIS installer
+        shell: powershell
+        run: .\tools\build-installer.ps1 -Version "$env:BUILD_VERSION"
+
+      - name: Generate distribution checksums
+        shell: powershell
+        run: |
+          $files = Get-ChildItem dist -File | Where-Object {
+            $_.Name -like "ClashGO-v*-windows.zip" -or
+            $_.Name -like "ClashGO-v*-windows-setup.exe"
+          }
+          if (-not $files) { throw "No Windows distributables found for checksum generation" }
+          $lines = foreach ($file in $files) {
+            $sha = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower()
+            "$sha  $($file.Name)"
+          }
+          $lines | Set-Content dist\SHA256SUMS.txt -Encoding ASCII
+
+      - name: Upload Windows portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClashGO-Windows-${{ env.BUILD_VERSION }}
+          path: |
+            dist/ClashGO-v*-windows.zip
+            dist/ClashGO-v*-windows-setup.exe
+            dist/ClashGO-Windows/**
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
