@@ -699,7 +699,44 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		return
 	}
 
+	// The effective wm size reported by Android is not always the same as the
+	// actual screencap matrix dimensions on BlueStacks. Vision and tap scaling
+	// must follow the pixels we are really processing, not a metadata guess.
+	// Recalibrate from the live frame whenever they differ. All consumers keep
+	// a pointer to b.cal, so classifier/navigator/attack executor immediately
+	// use the corrected scale.
+	if screen.Cols() != b.cal.PhysicalW || screen.Rows() != b.cal.PhysicalH {
+		oldW, oldH := b.cal.PhysicalW, b.cal.PhysicalH
+		b.cal.PhysicalW = screen.Cols()
+		b.cal.PhysicalH = screen.Rows()
+		b.cal.ScaleX = float64(screen.Cols()) / float64(game.RefWidth)
+		b.cal.ScaleY = float64(screen.Rows()) / float64(game.RefHeight)
+		b.cal.MidOffsetY = (screen.Rows() - game.RefHeight) / 2
+		b.cal.BottomOffY = screen.Rows() - game.RefHeight
+		b.cal.Verified = true
+
+		b.logger.Warn().
+			Int("reported_w", oldW).
+			Int("reported_h", oldH).
+			Int("capture_w", screen.Cols()).
+			Int("capture_h", screen.Rows()).
+			Str("scale", fmt.Sprintf("%.3fx%.3f", b.cal.ScaleX, b.cal.ScaleY)).
+			Msg("live capture size differed from reported display size; recalibrated to actual frame")
+	}
+
 	state, score := b.classify(screen)
+
+	// Surface the first live-state diagnosis in the normal INFO console so a
+	// Windows user does not have to enable DEBUG just to see what vision is
+	// actually receiving.
+	if time.Since(b.startedAt) < 15*time.Second || state != game.StateUnknown {
+		b.logger.Info().
+			Str("vision_state", state.String()).
+			Int("score", score).
+			Int("capture_w", screen.Cols()).
+			Int("capture_h", screen.Rows()).
+			Msg("vision frame classified")
+	}
 
 	gc.UpdateScreen(screen, captureMs)
 
