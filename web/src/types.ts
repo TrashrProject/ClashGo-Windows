@@ -59,6 +59,8 @@ export interface BotConfig {
   attack: {
     strategy_file: string;
     stall_timer_seconds: number;
+    loot_exit_enabled: boolean;
+    loot_exit_percent: number;
   };
 }
 
