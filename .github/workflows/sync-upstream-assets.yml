@@ -2,17 +2,12 @@ name: Sync upstream runtime assets
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches:
-      - main
-    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   sync:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'windows/core-port'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Windows development branch
@@ -28,13 +23,13 @@ jobs:
           git remote add upstream https://github.com/DSargent21/ClashGo.git || true
           git fetch upstream 4fa82f2cdc3ac4897b1cab0fff29565cd16deef6
 
-      - name: Restore runtime assets and frontend from upstream baseline
+      - name: Restore audited runtime assets
         shell: bash
         run: |
           set -euo pipefail
           git checkout 4fa82f2cdc3ac4897b1cab0fff29565cd16deef6 --             assets             build/appicon.png             internal/game/testdata
 
-      - name: Commit synchronized files
+      - name: Commit synchronized files if needed
         shell: bash
         run: |
           set -euo pipefail
@@ -45,5 +40,5 @@ jobs:
             echo "Runtime assets already synchronized."
             exit 0
           fi
-          git commit -m "chore: sync upstream runtime assets and frontend"
+          git commit -m "chore: sync audited upstream runtime assets"
           git push origin HEAD:windows/core-port
