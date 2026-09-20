@@ -1,4 +1,5 @@
 import React from 'react';
+import FarmCompositionPanel from './FarmCompositionPanel';
 
 interface ConfigViewProps {
   goldThreshold: number;
@@ -289,6 +290,8 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
             </div>
           </div>
         </div>
+
+        <FarmCompositionPanel />
 
         {/* Operational Toggles */}
         <div className="bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none space-y-8 transition-all duration-500">
