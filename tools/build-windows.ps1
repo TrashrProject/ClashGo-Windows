@@ -86,7 +86,6 @@ try {
         "resources\install_update.ps1",
         "WINDOWS_PORT.md",
         "QUICKSTART.md",
-        "opencv_core4130.dll",
         "libstdc++-6.dll",
         "libwinpthread-1.dll"
     )
@@ -96,6 +95,15 @@ try {
             $missingBundleFiles += $rel
         }
     }
+
+    $opencvCoreCandidates = @(
+        (Join-Path $bundle "libopencv_core4130.dll"),
+        (Join-Path $bundle "opencv_core4130.dll")
+    )
+    if (-not ($opencvCoreCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1)) {
+        $missingBundleFiles += "OpenCV core runtime DLL (libopencv_core4130.dll/opencv_core4130.dll)"
+    }
+
     if ($missingBundleFiles.Count -gt 0) {
         throw ("Portable runtime validation failed. Missing: " + ($missingBundleFiles -join ", "))
     }
