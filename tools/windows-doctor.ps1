@@ -4,6 +4,18 @@ param(
 
 $ErrorActionPreference = "SilentlyContinue"
 
+if (-not $Instance) {
+    $savedConfig = Join-Path $env:APPDATA "ClashGO\config.json"
+    if (Test-Path $savedConfig) {
+        try {
+            $saved = Get-Content $savedConfig -Raw | ConvertFrom-Json
+            if ($saved.device.bluestacks_instance) {
+                $Instance = [string]$saved.device.bluestacks_instance
+            }
+        } catch {}
+    }
+}
+
 function Write-Step([string]$Name, [bool]$Ok, [string]$Detail) {
     $mark = if ($Ok) { "[OK]" } else { "[!!]" }
     Write-Host ("{0} {1,-22} {2}" -f $mark, $Name, $Detail)
@@ -58,6 +70,11 @@ if ($ports.Count -gt 0) {
     Write-Step "Instances" $false "no ADB ports found in config"
 }
 
+if ($Instance) {
+    $selected = $ports | Where-Object { $_.Name -ieq $Instance } | Select-Object -First 1
+    Write-Step "Selected instance" ([bool]$selected) $(if ($selected) { "$($selected.Name):$($selected.Port)" } else { "$Instance not found in config" })
+}
+
 $adbPath = $null
 if ($env:CLASHGO_ADB_PATH -and (Test-Path $env:CLASHGO_ADB_PATH)) {
     $adbPath = $env:CLASHGO_ADB_PATH
@@ -87,12 +104,18 @@ if ($adbPath) {
     Write-Step "ADB devices" ($devices -match '\bdevice\b') $devices
 
     $target = $null
-    foreach ($entry in $ports) {
+    $probePorts = @($ports)
+    if ($Instance) {
+        $preferred = @($ports | Where-Object { $_.Name -ieq $Instance })
+        $others = @($ports | Where-Object { $_.Name -ine $Instance })
+        $probePorts = @($preferred + $others)
+    }
+    foreach ($entry in $probePorts) {
         $addr = "127.0.0.1:$($entry.Port)"
         $state = (& $adbPath -s $addr get-state 2>$null)
         if ($state -eq "device") {
             $target = $addr
-            break
+            if (-not $Instance -or $entry.Name -ieq $Instance) { break }
         }
     }
 
