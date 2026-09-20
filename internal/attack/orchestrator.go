@@ -616,9 +616,22 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 			count := GetCountForSlot(troopCounts, slot.X)
 			if count <= 0 {
-				// One is safer than inventing a large count when OCR is
-				// unavailable. Reconciliation below re-reads the live card.
-				count = 1
+				// OCR failure must NOT turn a troop card into a one-tap deploy.
+				// That was the exact live bug: a card with several troops was
+				// read as 0, we substituted 1, then immediately moved on.
+				// Use a bounded burst for ordinary cards; one-shot categories
+				// are handled separately below.
+				switch slot.Category {
+				case "Spell":
+					count = 3
+				default:
+					count = 8
+				}
+				e.logger.Info().
+					Str("unit", slot.UnitName).
+					Str("category", slot.Category).
+					Int("fallback_burst", count).
+					Msg("troop count OCR unavailable; using bounded multi-unit burst instead of single tap")
 			}
 			if count > 40 {
 				count = 40
@@ -690,11 +703,24 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 					deploySlot(slot, liveCount)
 					verified = true // final sweep will catch any true remainder
 				} else {
-					// OCR unknown: do not sit here retrying the same card.
-					// Move on immediately and let the final LIVE sweep decide.
-					e.logger.Warn().
-						Str("unit", slot.UnitName).
-						Msg("Windows fast deploy: verification inconclusive; moving on to keep army flowing")
+					// OCR unknown but the card still looks active. Fire one
+					// small remainder burst now instead of abandoning the card
+					// after a single unit. This keeps deployment fast while
+					// making progress even when digit OCR misses the xN label.
+					if !empty && activity >= 0.10 {
+						const unknownRemainderBurst = 6
+						e.logger.Warn().
+							Str("unit", slot.UnitName).
+							Float64("activity", activity).
+							Int("burst", unknownRemainderBurst).
+							Msg("Windows fast deploy: active card with unknown count; firing bounded remainder burst")
+						deploySlot(slot, unknownRemainderBurst)
+						verified = true // final live sweep still checks leftovers
+					} else {
+						e.logger.Warn().
+							Str("unit", slot.UnitName).
+							Msg("Windows fast deploy: verification inconclusive; moving on")
+					}
 				}
 			} else if !fresh.Empty() {
 				fresh.Close()
@@ -793,6 +819,30 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				if liveSlot.Category == "Hero" || liveSlot.Category == "Siege" || liveSlot.Category == "CC" {
 					oneShotRescue[liveSlot.X] = true
 					continue
+				}
+
+				// OCR can return 0 for a perfectly live troop card. Use the
+				// card's visual activity as a second signal and give it one
+				// bounded burst per sweep. This is what prevents visible x5/x10
+				// cards from being silently left behind.
+				activity := GetSlotActivityRatioStatic(fresh, liveSlot.X, liveSlot.Y, w)
+				empty := isSlotEmptyStatic(fresh, liveSlot.X, liveSlot.Y, w, h)
+				if !empty && activity >= 0.12 {
+					burst := 6
+					if liveSlot.Category == "Spell" {
+						burst = 2
+					}
+					liveRemaining++
+					e.logger.Warn().
+						Int("round", sweepRound).
+						Int("slot_x", liveSlot.X).
+						Str("unit", liveSlot.UnitName).
+						Str("category", liveSlot.Category).
+						Float64("activity", activity).
+						Int("burst", burst).
+						Msg("final live sweep found visually active card with unknown count")
+					deploySlot(liveSlot, burst)
+					acted++
 				}
 			}
 			fresh.Close()
