@@ -8,7 +8,7 @@ import (
 )
 
 func TestHealthCountersAndSnapshot(t *testing.T) {
-	var h Health
+	var h healthTracker
 	h.RecordSuccess(10 * time.Millisecond)
 	h.RecordSuccess(20 * time.Millisecond)
 	h.RecordFailure(errors.New("boom"))
@@ -32,7 +32,7 @@ func TestHealthCountersAndSnapshot(t *testing.T) {
 }
 
 func TestHealthConcurrentSnapshots(t *testing.T) {
-	var h Health
+	var h healthTracker
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
 		wg.Add(1)

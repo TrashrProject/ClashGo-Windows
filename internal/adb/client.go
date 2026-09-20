@@ -39,7 +39,7 @@ type Client struct {
 	zoomInKey  string
 
 	transport *Transport
-	health    Health
+	health    healthTracker
 	mu        sync.Mutex
 	closed    bool
 
