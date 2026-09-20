@@ -1522,6 +1522,8 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	var targetEdge string = "Unknown"
 
 	searchStart := time.Now()
+	consecutiveNextFailures := 0
+	skipsSinceRest := 0
 	for {
 		// Stop check: a user Stop must abort the search loop even
 		// though CaptureToMat below would silently reconnect a closed
@@ -1611,48 +1613,130 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			break
 		}
 
-		b.logger.Info().
-			Msg("loot too low, skipping base...")
-		b.skipsCount.Add(1)
-		if b.OnStatsUpdate != nil {
-			b.OnStatsUpdate()
+		b.logger.Info().Msg("loot too low, skipping base...")
+
+		// BlueStacks stability guard: changing opponents endlessly at full
+		// speed can put sustained pressure on HD-Player.exe. Rest briefly
+		// every few successful skips instead of hammering Next/capture forever.
+		if skipsSinceRest >= 8 {
+			b.logger.Info().Msg("matchmaking stability pause after 8 skips")
+			time.Sleep(1500 * time.Millisecond)
+			skipsSinceRest = 0
 		}
 
-		// Prefer live color/shape detection on the current capture. The old
-		// code closed 'screen' here and then passed that freed cv::Mat into
-		// PixelSearch / DumpDiagnostics when the btn_next template failed.
-		// On Windows/OpenCV that is a native 0xc0000005 access violation.
+		// NEXT is handled as a state transition, not as a blind tap.
+		// A successful ADB tap only means Android received the event; it does
+		// NOT mean Clash accepted it. We click once, then wait until clouds /
+		// loading / Unknown proves that matchmaking actually advanced.
+		clickNextFresh := func() bool {
+			fresh, capErr := b.client.CaptureToMat()
+			if capErr != nil || fresh.Empty() {
+				if !fresh.Empty() { fresh.Close() }
+				return false
+			}
+			defer fresh.Close()
+
+			if x, y, ok := b.locateNextButtonColor(fresh); ok {
+				b.logger.Info().Int("x", x).Int("y", y).Msg("Next button freshly verified; precision clicking")
+				if err := b.client.TapFast(x, y, 0.6); err == nil {
+					b.recordActivity()
+					return true
+				}
+			}
+			return false
+		}
+
+		// Use the already-live frame first.
 		nextClicked := false
 		if x, y, ok := b.locateNextButtonColor(screen); ok {
-			b.logger.Info().Int("x", x).Int("y", y).Msg("Next button verified; clicking detected button center")
-			if err := b.client.TapRandomized(x, y); err == nil {
+			b.logger.Info().Int("x", x).Int("y", y).Msg("Next button verified; precision clicking detected center")
+			if err := b.client.TapFast(x, y, 0.6); err == nil {
 				b.recordActivity()
 				nextClicked = true
 			}
 		}
 		screen.Close()
 
-		if !nextClicked && b.findAndClick("btn_next", "Next Match", 2) {
-			nextClicked = true
-		}
-
 		if !nextClicked {
-			b.logger.Warn().Msg("Next detection failed; using calibrated fallback center")
-			// Capture a FRESH frame for diagnostics. Never reuse the closed
-			// battle frame above.
-			if diag, capErr := b.client.CaptureToMat(); capErr == nil {
-				b.DumpDiagnostics("next_button_not_found", diag, map[string]interface{}{
-					"message": "using calibrated Next fallback after live/template miss",
-				})
-				diag.Close()
-			}
-			nextX, nextY := b.cal.ScaleRef(796, 565)
-			if err := b.client.TapRandomized(nextX, nextY); err == nil {
-				b.recordActivity()
+			nextClicked = clickNextFresh()
+		}
+
+		transitioned := false
+		if nextClicked {
+			deadline := time.Now().Add(2600 * time.Millisecond)
+			for time.Now().Before(deadline) {
+				time.Sleep(220 * time.Millisecond)
+				probe, capErr := b.client.CaptureToMat()
+				if capErr != nil || probe.Empty() {
+					if !probe.Empty() { probe.Close() }
+					continue
+				}
+				st, _ := b.classify(probe)
+				probe.Close()
+
+				// SearchMap / Loading are the normal clouds states. Unknown is
+				// also accepted briefly because animated clouds often have no
+				// stable classifier match.
+				if st == game.StateSearchMap || st == game.StateLoading || st == game.StateUnknown {
+					transitioned = true
+					break
+				}
 			}
 		}
 
-		time.Sleep(850 * time.Millisecond)
+		// If Clash ignored the first tap, reacquire the button and try ONCE.
+		// This replaces the situation where the bot looked "lost" until the
+		// user manually clicked Next, while also preventing rapid tap spam.
+		if !transitioned {
+			b.logger.Warn().Msg("Next tap did not start matchmaking; reacquiring button for one controlled retry")
+			time.Sleep(450 * time.Millisecond)
+			if clickNextFresh() {
+				retryDeadline := time.Now().Add(2800 * time.Millisecond)
+				for time.Now().Before(retryDeadline) {
+					time.Sleep(250 * time.Millisecond)
+					probe, capErr := b.client.CaptureToMat()
+					if capErr != nil || probe.Empty() {
+						if !probe.Empty() { probe.Close() }
+						continue
+					}
+					st, _ := b.classify(probe)
+					probe.Close()
+					if st == game.StateSearchMap || st == game.StateLoading || st == game.StateUnknown {
+						transitioned = true
+						break
+					}
+				}
+			}
+		}
+
+		if transitioned {
+			consecutiveNextFailures = 0
+			skipsSinceRest++
+			b.skipsCount.Add(1)
+			if b.OnStatsUpdate != nil {
+				b.OnStatsUpdate()
+			}
+			b.logger.Info().Msg("matchmaking transition confirmed after Next")
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		// Never fall back to repeated blind coordinates. If two verified
+		// attempts fail, back off. After 3 consecutive failures restart only
+		// Clash (not BlueStacks) to recover a wedged matchmaking UI.
+		consecutiveNextFailures++
+		b.logger.Warn().
+			Int("failures", consecutiveNextFailures).
+			Msg("Next transition not confirmed; backing off instead of spamming taps")
+
+		if consecutiveNextFailures >= 3 {
+			b.logger.Error().Msg("Next remained unresponsive after controlled retries; restarting Clash to recover matchmaking")
+			lootRec.Close()
+			b.restartGame()
+			return
+		}
+
+		time.Sleep(1200 * time.Millisecond)
 	}
 
 	if deployErr != nil || remainingUndeployed > 0 {
