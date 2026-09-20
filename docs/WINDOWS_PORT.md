@@ -83,3 +83,12 @@ full-runtime NSIS installer definition.
 Release gate: Windows CI must generate Wails bindings, pass frontend/backend
 tests, create the portable bundle and upload the artifact before the branch is
 merged into `main`.
+
+
+### Installation location and updater
+
+The NSIS installer is per-user and does not require administrator rights. It
+installs under `%LOCALAPPDATA%\Programs\TrashrProject\ClashGO Windows`.
+This is intentional: ClashGO's verified in-place updater must be able to replace
+the installed runtime after the application exits. Persistent user data remains
+under `%APPDATA%\ClashGO` and is preserved during uninstall/reinstall.

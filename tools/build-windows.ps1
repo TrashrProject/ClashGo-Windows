@@ -52,6 +52,7 @@ try {
     Copy-Item ".\assets" (Join-Path $bundle "assets") -Recurse -Force
     Copy-Item ".\LICENSE" (Join-Path $bundle "LICENSE.txt") -Force
     Copy-Item ".\docs\WINDOWS_PORT.md" (Join-Path $bundle "WINDOWS_PORT.md") -Force
+    Copy-Item ".\docs\WINDOWS_QUICKSTART.md" (Join-Path $bundle "QUICKSTART.md") -Force
     Copy-Item ".\tools\windows-doctor.ps1" (Join-Path $bundle "windows-doctor.ps1") -Force
     Copy-Item ".\build\windows\install_update.ps1" (Join-Path $bundle "resources\install_update.ps1") -Force
 
