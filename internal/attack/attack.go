@@ -52,6 +52,25 @@ type Executor struct {
 	// zone is unconfigured (TH state unknown).
 	thDestroyed bool
 
+	// Initial loot snapshot for the currently selected enemy base. The battle
+	// wait compares live "Available Loot" against this baseline when the
+	// user-enabled loot-exit threshold is active.
+	initialLootGold   int
+	initialLootElixir int
+	initialLootDE     int
+
+	// Accepted live "Available Loot" snapshot during the battle. These values
+	// only update after two consistent OCR reads, so one bad frame cannot
+	// fabricate a giant loot total in the dashboard.
+	lastRemainingGold   int
+	lastRemainingElixir int
+	lastRemainingDE     int
+	remainingLootValid  bool
+
+	// Early battle termination (loot %, destruction threshold, stall-end)
+	// is only allowed after deployment has been verified complete.
+	earlyExitAllowed bool
+
 	OnPhaseStart func(phase string, edge string)
 	OnUnitDeploy func(unit string, slotX int, slotY int)
 
@@ -69,6 +88,41 @@ func (e *Executor) LastDestructionPercent() int {
 // the TH state is unknown).
 func (e *Executor) ThDestroyed() bool {
 	return e.thDestroyed
+}
+
+func (e *Executor) SetEarlyExitAllowed(allowed bool) {
+	e.earlyExitAllowed = allowed
+}
+
+// SetInitialLoot stores the pre-attack Available Loot snapshot used by the
+// optional loot-exit rule. Values are refreshed for every accepted base.
+func (e *Executor) SetInitialLoot(gold, elixir, darkElixir int) {
+	e.initialLootGold = gold
+	e.initialLootElixir = elixir
+	e.initialLootDE = darkElixir
+	e.lastRemainingGold = gold
+	e.lastRemainingElixir = elixir
+	e.lastRemainingDE = darkElixir
+	e.remainingLootValid = false
+}
+
+// EstimatedLootStolen returns loot derived from the live battle counters.
+// It is intentionally independent from the result-screen OCR, which varies
+// heavily across themes. The bool is false until two consistent live reads
+// have been accepted.
+func (e *Executor) EstimatedLootStolen() (game.Resources, bool) {
+	if !e.remainingLootValid {
+		return game.Resources{}, false
+	}
+	clamp := func(v int) int {
+		if v < 0 { return 0 }
+		return v
+	}
+	return game.Resources{
+		Gold:       clamp(e.initialLootGold - e.lastRemainingGold),
+		Elixir:     clamp(e.initialLootElixir - e.lastRemainingElixir),
+		DarkElixir: clamp(e.initialLootDE - e.lastRemainingDE),
+	}, true
 }
 
 // goldPixels counts golden-text pixels (BGR: strong red, mid green, weak
@@ -1643,20 +1697,41 @@ func (e *Executor) ResetBattleOutcome() {
 // dynamic probe (bright red pixel). Returns false when no stall_config is
 // loaded or the probe point is off-screen.
 func (e *Executor) endButtonVisible(screen gocv.Mat, sCfg StallConfig) bool {
-	if sCfg.RefWidth == 0 || sCfg.RefHeight == 0 {
-		return false
+	isRedAt := func(x, y int) bool {
+		if x < 0 || y < 0 || x >= screen.Cols() || y >= screen.Rows() {
+			return false
+		}
+		b := screen.GetUCharAt(y, x*3)
+		g := screen.GetUCharAt(y, x*3+1)
+		r := screen.GetUCharAt(y, x*3+2)
+		return r > 130 && g < 115 && b < 115
 	}
-	scaleX := float64(e.cal.PhysicalW) / float64(sCfg.RefWidth)
-	scaleY := float64(e.cal.PhysicalH) / float64(sCfg.RefHeight)
-	x := int(float64(sCfg.EndButton.X) * scaleX)
-	y := int(float64(sCfg.EndButton.Y) * scaleY)
-	if x < 0 || y < 0 || x >= screen.Cols() || y >= screen.Rows() {
-		return false
+
+	// Prefer the calibrated point when available.
+	if sCfg.RefWidth > 0 && sCfg.RefHeight > 0 {
+		scaleX := float64(e.cal.PhysicalW) / float64(sCfg.RefWidth)
+		scaleY := float64(e.cal.PhysicalH) / float64(sCfg.RefHeight)
+		x := int(float64(sCfg.EndButton.X) * scaleX)
+		y := int(float64(sCfg.EndButton.Y) * scaleY)
+		if isRedAt(x, y) {
+			return true
+		}
 	}
-	b := screen.GetUCharAt(y, x*3)
-	g := screen.GetUCharAt(y, x*3+1)
-	r := screen.GetUCharAt(y, x*3+2)
-	return r > 130 && g < 110 && b < 110
+
+	// Fallbacks cover current "Surrender" / "End Battle" button variants
+	// and make the loot-exit UI setting independent from stall_config.json.
+	for _, ref := range []image.Point{
+		{X: 34, Y: 588},
+		{X: 67, Y: 570},
+		{X: 88, Y: 590},
+		{X: 112, Y: 408},
+	} {
+		x, y := e.cal.ScaleRef(ref.X, ref.Y)
+		if isRedAt(x, y) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duration) bool {
@@ -1672,6 +1747,19 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 	lastPct := 0
 	lastPctTime := time.Now()
 	stallLimit := time.Duration(e.cfg.StallTimerSeconds) * time.Second
+	lootExitConfirmations := 0
+
+	// Live-loot OCR stabilizer used both for the optional loot-exit rule and
+	// for accurate dashboard/history totals.
+	var pendingLoot game.Resources
+	pendingLootHits := 0
+	lootClose := func(a, b, initial int) bool {
+		tol := initial / 20 // 5%
+		if tol < 5000 { tol = 5000 }
+		d := a - b
+		if d < 0 { d = -d }
+		return d <= tol
+	}
 
 	var sCfg StallConfig
 	hasStallROI := false
@@ -1731,6 +1819,115 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			if state == game.StateBattleEnd || state == game.StateReturnHome {
 				screen.Close()
 				return true
+			}
+
+			// Continuously sample the live Available Loot counters. Accept only
+			// two consecutive, mutually-consistent reads and never allow an
+			// accepted remaining amount to increase. This gives the history UI
+			// a stable loot source even when the themed result panel OCR fails.
+			if e.initialLootGold > 0 || e.initialLootElixir > 0 || e.initialLootDE > 0 {
+				liveLoot, _ := lootRec.ReadAvailableLoot(screen)
+				plausible := liveLoot.Gold >= 0 && liveLoot.Gold <= e.initialLootGold &&
+					liveLoot.Elixir >= 0 && liveLoot.Elixir <= e.initialLootElixir &&
+					liveLoot.DarkElixir >= 0 && liveLoot.DarkElixir <= e.initialLootDE
+
+				if plausible {
+					if pendingLootHits > 0 &&
+						lootClose(liveLoot.Gold, pendingLoot.Gold, e.initialLootGold) &&
+						lootClose(liveLoot.Elixir, pendingLoot.Elixir, e.initialLootElixir) &&
+						lootClose(liveLoot.DarkElixir, pendingLoot.DarkElixir, e.initialLootDE) {
+						pendingLootHits++
+					} else {
+						pendingLootHits = 1
+					}
+					pendingLoot = liveLoot
+
+					if pendingLootHits >= 2 {
+						if !e.remainingLootValid || liveLoot.Gold <= e.lastRemainingGold {
+							e.lastRemainingGold = liveLoot.Gold
+						}
+						if !e.remainingLootValid || liveLoot.Elixir <= e.lastRemainingElixir {
+							e.lastRemainingElixir = liveLoot.Elixir
+						}
+						if !e.remainingLootValid || liveLoot.DarkElixir <= e.lastRemainingDE {
+							e.lastRemainingDE = liveLoot.DarkElixir
+						}
+						e.remainingLootValid = true
+						e.logger.Debug().
+							Int("remaining_gold", e.lastRemainingGold).
+							Int("remaining_elixir", e.lastRemainingElixir).
+							Int("remaining_de", e.lastRemainingDE).
+							Msg("accepted stable live loot snapshot")
+					}
+				} else {
+					pendingLootHits = 0
+				}
+			}
+
+			// Optional UI-controlled early exit based on LOOT collected, not
+			// destruction. We compare the live top-left "Available Loot"
+			// counters against the snapshot taken before deployment. Two
+			// consecutive reads must satisfy the threshold to protect against
+			// a single OCR glitch.
+			if e.earlyExitAllowed && e.cfg.LootExitEnabled {
+				threshold := e.cfg.LootExitPercent
+				if threshold < 0 { threshold = 0 }
+				if threshold > 100 { threshold = 100 }
+
+				initialTotal := e.initialLootGold + e.initialLootElixir + e.initialLootDE
+				if initialTotal > 0 {
+					remaining, lootErr := lootRec.ReadAvailableLoot(screen)
+					if lootErr == nil {
+						remainingTotal := remaining.Gold + remaining.Elixir + remaining.DarkElixir
+						if remainingTotal < 0 { remainingTotal = 0 }
+						if remainingTotal > initialTotal {
+							// OCR can transiently read a larger number than the
+							// starting snapshot; never turn that into negative
+							// progress.
+							remainingTotal = initialTotal
+						}
+						lootedPct := int(math.Round((1.0 - float64(remainingTotal)/float64(initialTotal)) * 100.0))
+						if lootedPct < 0 { lootedPct = 0 }
+						if lootedPct > 100 { lootedPct = 100 }
+
+						e.logger.Info().
+							Int("loot_percent", lootedPct).
+							Int("threshold", threshold).
+							Int("remaining_gold", remaining.Gold).
+							Int("remaining_elixir", remaining.Elixir).
+							Int("remaining_de", remaining.DarkElixir).
+							Msg("loot-exit progress")
+
+						if lootedPct >= threshold {
+							lootExitConfirmations++
+						} else {
+							lootExitConfirmations = 0
+						}
+
+						if lootExitConfirmations >= 2 {
+							if !e.endButtonVisible(screen, sCfg) {
+								e.logger.Warn().
+									Int("loot_percent", lootedPct).
+									Int("threshold", threshold).
+									Msg("loot threshold reached but Surrender/End Battle button not verified; waiting")
+							} else {
+								e.logger.Info().
+									Int("loot_percent", lootedPct).
+									Int("threshold", threshold).
+									Msg("loot threshold reached twice; ending battle early")
+								screen.Close()
+								if err := e.EndBattle(); err != nil {
+									e.logger.Warn().Err(err).Msg("loot-threshold EndBattle tap failed")
+									return false
+								}
+								return true
+							}
+						}
+					} else {
+						lootExitConfirmations = 0
+						e.logger.Debug().Err(lootErr).Msg("loot-exit OCR unavailable this tick")
+					}
+				}
 			}
 
 			// Per-strategy auto-end threshold from end_at_percent (0 = off).
@@ -1795,7 +1992,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 					e.logger.Info().Int("percent", currentPct).Int("threshold", endAtPct).Msg("destruction progress toward strategy threshold")
 				}
 
-				if endAtPercentReached(endAtPct, currentPct) {
+				if e.earlyExitAllowed && endAtPercentReached(endAtPct, currentPct) {
 					// End only when the red End Battle button is actually on
 					// screen (army fully spent). A misread percent must not
 					// tap the map mid-fight.
@@ -1809,7 +2006,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 					}
 				}
 
-				if e.cfg.StallTimerSeconds > 0 && endAtPct == 0 {
+				if e.earlyExitAllowed && e.cfg.StallTimerSeconds > 0 && endAtPct == 0 {
 					if currentPct > lastPct {
 						lastPct = currentPct
 						lastPctTime = time.Now()

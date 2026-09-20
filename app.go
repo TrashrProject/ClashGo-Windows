@@ -4,8 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
+	goruntime "runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,7 +21,6 @@ import (
 	"github.com/Ducky705/ClashGO/internal/paths"
 	"github.com/Ducky705/ClashGO/internal/updater"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 	"github.com/rs/zerolog/log"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -27,6 +32,7 @@ type App struct {
 	botCtx    context.Context
 	cancel    context.CancelFunc
 	mu        sync.Mutex
+	stopping  bool
 	lastStats bot.BotStats
 	logBuffer []string
 
@@ -85,13 +91,10 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	// Ensure fresh stats and history every boot
-	_ = os.Remove(paths.ResolveConfig("stats.json"))
-	_ = os.Remove(paths.ResolveConfig("attack_history.json"))
-
 	// Setup log bridge
 	wailsWriter := &WailsLogWriter{app: a}
 	logger.Init(os.Getenv("DEBUG") != "", wailsWriter)
+	a.loadPersistedStats()
 
 	// Bring up the updater service. If NewApp wasn't used (rare
 	// test scaffold), construct lazily.
@@ -123,6 +126,42 @@ func (a *App) startup(ctx context.Context) {
 		// Start Web Server for Remote Access (production-only).
 		go a.startWebServer()
 	}
+}
+
+func (a *App) loadPersistedStats() {
+	data, err := os.ReadFile(paths.ResolveConfig("stats.json"))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Warn().Err(err).Msg("failed to read persisted stats")
+		}
+		return
+	}
+
+	var stats bot.BotStats
+	if err := json.Unmarshal(data, &stats); err != nil {
+		log.Warn().Err(err).Msg("failed to parse persisted stats; starting counters at zero")
+		return
+	}
+
+	// Connection/CPU fields are live process metrics, not durable history.
+	stats.AdbHealth.LastCapture = time.Time{}
+	stats.AdbHealth.AvgCaptureMs = 0
+	stats.AdbHealth.ConsecutiveFails = 0
+	stats.AdbHealth.CapturesTotal = 0
+	stats.AdbHealth.ErrorsTotal = 0
+	stats.AdbHealth.LastError = ""
+	stats.CPUTimeSec = 0
+	stats.CPUCores = 0
+
+	a.mu.Lock()
+	a.lastStats = stats
+	a.mu.Unlock()
+
+	log.Info().
+		Int32("attacks", stats.AttacksCompleted).
+		Int64("gold", stats.TotalGold).
+		Int64("elixir", stats.TotalElixir).
+		Msg("restored persisted session totals")
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -222,26 +261,42 @@ func mergeStats(acc, current bot.BotStats) bot.BotStats {
 		Uptime:           acc.Uptime + current.Uptime,
 		AdbHealth:        current.AdbHealth,
 		CPUTimeSec:       current.CPUTimeSec,
-		CPUCores:         current.CPUCores,
+		CPUCores:          current.CPUCores,
+		RecoveryAttempts:  acc.RecoveryAttempts + current.RecoveryAttempts,
+		RecoverySuccesses: acc.RecoverySuccesses + current.RecoverySuccesses,
+		BlueStacksRestarts: acc.BlueStacksRestarts + current.BlueStacksRestarts,
 	}
 }
 
-func (a *App) ResetStats() {
+func (a *App) ResetStats() error {
 	a.mu.Lock()
-	a.lastStats = bot.BotStats{}
-	if a.bot != nil {
-		// We can't easily reset atomic counters in a running bot without adding a Reset method there too.
-		// For now, stopping the bot might be required for a full reset, or we just clear the persistent part.
+	if a.bot != nil || a.cancel != nil || a.stopping {
+		a.mu.Unlock()
+		return fmt.Errorf("wait for the bot to finish stopping before resetting statistics")
 	}
+	a.lastStats = bot.BotStats{}
 	a.mu.Unlock()
-	// Drop the cached history so the next GetAttackHistory re-reads
-	// (correct empty) state from disk instead of serving stale rows
-	// we'd just deleted from disk but still keep in memory.
+
 	a.cachedHistoryMu.Lock()
 	a.cachedHistory = nil
 	a.cachedHistoryMu.Unlock()
-	_ = os.Remove(paths.ResolveConfig("stats.json"))
-	_ = os.Remove(paths.ResolveConfig("attack_history.json"))
+
+	if err := os.Remove(paths.ResolveConfig("stats.json")); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Remove(paths.ResolveConfig("attack_history.json")); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	_ = os.Remove(paths.ResolveConfig("last_attack_report.json"))
+	_ = os.Remove(paths.ResolveConfig("village_resources.json"))
+	_ = os.Remove(paths.ResolveConfig("village_resource_history.json"))
+	_ = os.Remove(paths.ResolveConfig("current_army.json"))
+	if traces, globErr := filepath.Glob(paths.ResolveConfig("output/attack_traces/*.json")); globErr == nil {
+		for _, trace := range traces {
+			_ = os.Remove(trace)
+		}
+	}
+	return nil
 }
 
 func (a *App) startWebServer() {
@@ -252,7 +307,6 @@ func (a *App) startWebServer() {
 	// suppressing the listen-port banner removes the `http://host:port`
 	// pattern that `wails dev` parses for proxy-target discovery.
 	e.HidePort = true
-	e.Use(middleware.CORS())
 
 	// Basic API for remote control
 	e.GET("/status", func(c echo.Context) error {
@@ -305,8 +359,32 @@ type BotStatus struct {
 // instead of finishing the boot and starting anyway (the old
 // behavior — see the concurrency notes in StopBot).
 func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled bool) BotStatus {
+	diag := collectSystemDiagnostics()
+	if !diag.AssetsReady {
+		return BotStatus{
+			Running: false,
+			Message: "Runtime assets missing: " + strings.Join(diag.MissingAssets, ", "),
+		}
+	}
+
+	if goruntime.GOOS == "windows" {
+		if !diag.Emulator.BlueStacksPlayerFound {
+			return BotStatus{Running: false, Message: "BlueStacks 5 was not detected. Install BlueStacks 5 or configure CLASHGO_BLUESTACKS_PLAYER."}
+		}
+		if !diag.Emulator.ADBFound {
+			return BotStatus{Running: false, Message: "ADB was not detected. ClashGO can use Android platform-tools or BlueStacks HD-Adb.exe."}
+		}
+		if strings.TrimSpace(diag.Emulator.PreferredInstance) == "" {
+			return BotStatus{Running: false, Message: "No BlueStacks instance was detected. Start an instance once from BlueStacks Multi-instance Manager, then retry."}
+		}
+	}
+
 	a.mu.Lock()
 
+	if a.stopping {
+		a.mu.Unlock()
+		return BotStatus{Running: false, Message: "Previous bot session is still closing — retry in a moment"}
+	}
 	if a.bot != nil {
 		a.mu.Unlock()
 		return BotStatus{Running: true, Message: "Bot already running"}
@@ -339,7 +417,10 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 				// NewBotWithContext already closed its client; just
 				// reset the start state. No error events — the stop
 				// was intentional.
-				log.Info().Msg("bot boot cancelled by user (Stop clicked during startup)")
+				log.Info().Msg("bot boot cancelled during startup")
+				runtime.EventsEmit(a.ctx, "bot_boot_cancelled", map[string]interface{}{
+					"message": "Bot startup was cancelled.",
+				})
 				a.mu.Lock()
 				a.clearStartStateLocked()
 				a.mu.Unlock()
@@ -374,13 +455,18 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 		// without burning the bridge. See App.GetLiveScreenshot.
 
 		b.OnStatsUpdate = func() {
-			// Refresh the in-memory history cache once per attack
-			// so React's 2 s GetAttackHistory poll doesn't re-read
-			// attack_history.json from disk every tick. Bounded
-			// to roughly the bot's attack cadence (a few minutes)
-			// — well below the 0.5 Hz poll rate.
+			// Refresh persisted history/stats, then push the fresh history to
+			// React immediately. The dashboard still keeps its low-frequency
+			// polling as a recovery path, but attack rows no longer wait up to
+			// two seconds (or a tab remount) to appear.
 			a.refreshHistory()
 			a.saveStats()
+
+			if a.ctx != nil {
+				history := a.GetAttackHistory()
+				runtime.EventsEmit(a.ctx, "attack_history_updated", history)
+				runtime.EventsEmit(a.ctx, "stats_updated", a.GetStats())
+			}
 		}
 
 		a.mu.Lock()
@@ -391,7 +477,10 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			// starting it behind the user's back.
 			a.clearStartStateLocked()
 			a.mu.Unlock()
-			log.Info().Msg("bot boot finished after Stop was clicked; discarding and shutting down")
+			log.Info().Msg("bot boot finished after startup cancellation; discarding and shutting down")
+			runtime.EventsEmit(a.ctx, "bot_boot_cancelled", map[string]interface{}{
+				"message": "Bot startup was cancelled.",
+			})
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -415,7 +504,10 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 				// the fail-fast client, b.Start() fails on the closed
 				// transport. Intentional stop: no error event, just
 				// tear down the booted bot so the next Start is clean.
-				log.Info().Msg("bot start aborted by stop; discarding")
+				log.Info().Msg("bot start aborted by startup cancellation; discarding")
+				runtime.EventsEmit(a.ctx, "bot_boot_cancelled", map[string]interface{}{
+					"message": "Bot startup was cancelled.",
+				})
 				a.mu.Lock()
 				a.clearStartStateLocked()
 				a.mu.Unlock()
@@ -447,7 +539,17 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 				}()
 				b.Stop()
 			}()
+			return
 		}
+
+		// Startup is now fully complete. The frontend keeps a separate
+		// STARTING state and only switches to RUNNING after this event,
+		// preventing the Start button from becoming an active Stop button
+		// while BlueStacks/ADB are still booting.
+		log.Info().Msg("bot startup complete; runtime active")
+		runtime.EventsEmit(a.ctx, "bot_started", map[string]interface{}{
+			"message": "Bot is running.",
+		})
 	}(bootCtx)
 
 	return BotStatus{Running: true, Message: "Bot initialization started in background"}
@@ -493,6 +595,11 @@ func (a *App) clearStartStateLocked() {
 func (a *App) StopBot() BotStatus {
 	a.mu.Lock()
 
+	if a.stopping {
+		a.mu.Unlock()
+		return BotStatus{Running: false, Message: "Bot teardown already in progress"}
+	}
+
 	if a.cancel != nil {
 		a.cancel()
 	}
@@ -531,6 +638,7 @@ func (a *App) StopBot() BotStatus {
 	//      construct a new bot without observing a half-torn-down one.
 	a.bot = nil
 	a.cancel = nil
+	a.stopping = true
 	a.mu.Unlock()
 
 	// Detach the slow teardown. The captureLoop will exit on its own
@@ -540,6 +648,9 @@ func (a *App) StopBot() BotStatus {
 	// is required for correctness of the user-visible stop signal.
 	go func() {
 		defer func() {
+			a.mu.Lock()
+			a.stopping = false
+			a.mu.Unlock()
 			if r := recover(); r != nil {
 				log.Error().Interface("panic", r).Msg("recovered panic during async bot stop")
 			}
@@ -567,7 +678,313 @@ func (a *App) IsRunning() bool {
 
 // GetConfig returns the current config.json settings
 func (a *App) GetConfig() *config.BotConfig {
-	return config.LoadOrDefault("config.json")
+	cfg := config.LoadOrDefault("config.json")
+	if cfg.Attack.StrategyFile != "" {
+		cfg.Attack.StrategyFile = filepath.Base(cfg.Attack.StrategyFile)
+	}
+	return cfg
+}
+
+type ClashAccountPublicConfig struct {
+	PlayerTag         string `json:"player_tag"`
+	ServiceConfigured bool   `json:"service_configured"`
+	ServiceURL        string `json:"service_url,omitempty"`
+}
+
+type ClashPlayerClan struct {
+	Tag       string `json:"tag"`
+	Name      string `json:"name"`
+	ClanLevel int    `json:"clanLevel"`
+}
+
+type ClashPlayerLeague struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type ClashPlayerUnit struct {
+	Name     string `json:"name"`
+	Level    int    `json:"level"`
+	MaxLevel int    `json:"maxLevel"`
+	Village  string `json:"village"`
+}
+
+type ClashPlayerProfile struct {
+	Tag                 string             `json:"tag"`
+	Name                string             `json:"name"`
+	TownHallLevel       int                `json:"townHallLevel"`
+	TownHallWeaponLevel int                `json:"townHallWeaponLevel,omitempty"`
+	ExpLevel            int                `json:"expLevel"`
+	Trophies            int                `json:"trophies"`
+	BestTrophies        int                `json:"bestTrophies"`
+	WarStars            int                `json:"warStars"`
+	AttackWins          int                `json:"attackWins"`
+	DefenseWins         int                `json:"defenseWins"`
+	Donations           int                `json:"donations"`
+	DonationsReceived   int                `json:"donationsReceived"`
+	Clan                *ClashPlayerClan   `json:"clan,omitempty"`
+	League              *ClashPlayerLeague `json:"league,omitempty"`
+	Troops              []ClashPlayerUnit  `json:"troops"`
+	Heroes              []ClashPlayerUnit  `json:"heroes"`
+	Spells              []ClashPlayerUnit  `json:"spells"`
+	HeroEquipment       []ClashPlayerUnit  `json:"heroEquipment"`
+}
+
+func normalizePlayerTag(tag string) (string, error) {
+	tag = strings.ToUpper(strings.TrimSpace(tag))
+	tag = strings.ReplaceAll(tag, " ", "")
+	if tag == "" {
+		return "", fmt.Errorf("player tag is required")
+	}
+	if !strings.HasPrefix(tag, "#") {
+		tag = "#" + tag
+	}
+	for _, r := range tag[1:] {
+		if !(r >= '0' && r <= '9') && !(r >= 'A' && r <= 'Z') {
+			return "", fmt.Errorf("invalid player tag")
+		}
+	}
+	return tag, nil
+}
+
+func clashAccountServiceURL(cfg *config.BotConfig) string {
+	if raw := strings.TrimSpace(os.Getenv("CLASHGO_ACCOUNT_API_URL")); raw != "" {
+		return strings.TrimRight(raw, "/")
+	}
+	if cfg != nil {
+		if raw := strings.TrimSpace(cfg.Account.ProxyURL); raw != "" {
+			return strings.TrimRight(raw, "/")
+		}
+	}
+	// Development fallback. Production builds should inject
+	// CLASHGO_ACCOUNT_API_URL or persist account.proxy_url.
+	return "http://127.0.0.1:8787"
+}
+
+// GetAccountConfig returns safe account metadata only. End users never see,
+// create, or store a Clash developer API key in the desktop application.
+func (a *App) GetAccountConfig() ClashAccountPublicConfig {
+	cfg := config.LoadOrDefault("config.json")
+	serviceURL := clashAccountServiceURL(cfg)
+	return ClashAccountPublicConfig{
+		PlayerTag:         cfg.Account.PlayerTag,
+		ServiceConfigured: strings.TrimSpace(serviceURL) != "",
+		ServiceURL:        serviceURL,
+	}
+}
+
+func accountProfileCachePath() string {
+	return paths.ResolveConfig("account_profile.json")
+}
+
+// GetCachedPlayerProfile returns the most recent successful account sync.
+// The UI can render this immediately at launch while the network refresh runs
+// in the background, so reopening ClashGO never presents an empty account page.
+func (a *App) GetCachedPlayerProfile() *ClashPlayerProfile {
+	data, err := os.ReadFile(accountProfileCachePath())
+	if err != nil {
+		return nil
+	}
+	var profile ClashPlayerProfile
+	if json.Unmarshal(data, &profile) != nil || strings.TrimSpace(profile.Tag) == "" {
+		return nil
+	}
+	return &profile
+}
+
+func persistPlayerProfile(profile *ClashPlayerProfile) {
+	if profile == nil || strings.TrimSpace(profile.Tag) == "" {
+		return
+	}
+	data, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(accountProfileCachePath(), data, 0600)
+}
+
+// SetSimpleMode toggles the one-click automation experience. Turning it on
+// also enables the dependent automatic behaviors so users do not have to hunt
+// through multiple settings pages to obtain a coherent setup.
+func (a *App) SetSimpleMode(enabled bool) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Automation.SimpleMode = enabled
+	if enabled {
+		cfg.Automation.AutoFarmProfile = true
+		cfg.Automation.AutoArmyGuard = true
+		cfg.Automation.AutoResourceTracking = true
+		cfg.Automation.AutoProfileSync = true
+	}
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(paths.ResolveConfig("config.json"), data, 0600)
+}
+
+// SaveAccountConfig stores only the player's tag. The Clash API credential
+// lives on the ClashGO account service, never in the distributed EXE.
+func (a *App) SaveAccountConfig(playerTag string) error {
+	tag, err := normalizePlayerTag(playerTag)
+	if err != nil {
+		return err
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Account.PlayerTag = tag
+	// Purge legacy desktop keys during the first save after upgrading.
+	cfg.Account.LegacyAPIKey = ""
+
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+
+	bytes, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0600)
+}
+
+// ClearAccount removes the local player link. No developer credential is
+// stored on the client anymore, so unlinking is intentionally lightweight.
+func (a *App) ClearAccount() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Account.PlayerTag = ""
+	cfg.Account.LegacyAPIKey = ""
+	_ = os.Remove(accountProfileCachePath())
+	bytes, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0600)
+}
+
+// GetPlayerProfile asks the ClashGO account service for the linked player.
+// The service owns the official Clash developer key and forwards only the
+// public player payload back to the desktop app.
+func (a *App) GetPlayerProfile() (*ClashPlayerProfile, error) {
+	cfg := config.LoadOrDefault("config.json")
+	tag, err := normalizePlayerTag(cfg.Account.PlayerTag)
+	if err != nil {
+		return nil, err
+	}
+	serviceURL := clashAccountServiceURL(cfg)
+	if strings.TrimSpace(serviceURL) == "" {
+		return nil, fmt.Errorf("ClashGO account service is not configured")
+	}
+
+	endpoint := serviceURL + "/v1/player/" + url.PathEscape(tag)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "ClashGO/"+version)
+
+	client := &http.Client{Timeout: 12 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ClashGO account service unavailable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		var apiErr struct {
+			Reason  string `json:"reason"`
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(body, &apiErr)
+		msg := strings.TrimSpace(apiErr.Message)
+		if msg == "" {
+			msg = strings.TrimSpace(apiErr.Reason)
+		}
+		if msg == "" {
+			msg = resp.Status
+		}
+		return nil, fmt.Errorf("ClashGO account service: %s", msg)
+	}
+
+	var profile ClashPlayerProfile
+	if err := json.Unmarshal(body, &profile); err != nil {
+		return nil, fmt.Errorf("parse Clash player profile: %w", err)
+	}
+
+	persistPlayerProfile(&profile)
+
+	// Simple mode turns the linked account into the source of truth for HDV.
+	// We only select a bundled profile when ClashGO actually has one for that
+	// TH; unsupported/future TH values leave the user's current profile alone.
+	if cfg.Automation.AutoFarmProfile {
+		if _, ok := cfg.Attack.Farm.Profiles[fmt.Sprintf("%d", profile.TownHallLevel)]; ok {
+			cfg.Attack.Farm.TownHall = profile.TownHallLevel
+			cfg.Attack.Farm.Enabled = true
+			if data, marshalErr := json.MarshalIndent(cfg, "", "  "); marshalErr == nil {
+				_ = os.WriteFile(paths.ResolveConfig("config.json"), data, 0600)
+			}
+			a.mu.Lock()
+			if a.bot != nil {
+				a.bot.UpdateConfig(cfg)
+			}
+			a.mu.Unlock()
+		}
+	}
+
+	return &profile, nil
+}
+
+// SetBlueStacksInstance persists the preferred BlueStacks 5 instance.
+// An empty value restores automatic instance selection. The setting is only
+// changed while the bot is stopped so the active ADB transport cannot jump
+// to another emulator mid-session.
+func (a *App) SetBlueStacksInstance(instance string) error {
+	instance = strings.TrimSpace(instance)
+
+	a.mu.Lock()
+	if a.bot != nil || a.cancel != nil || a.stopping {
+		a.mu.Unlock()
+		return fmt.Errorf("wait for the bot to finish stopping before changing BlueStacks instance")
+	}
+	a.mu.Unlock()
+
+	if instance != "" {
+		diag := collectSystemDiagnostics()
+		found := false
+		for _, inst := range diag.Emulator.Instances {
+			if strings.EqualFold(inst.Name, instance) {
+				instance = inst.Name
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("BlueStacks instance %q was not detected", instance)
+		}
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Device.BlueStacksInstance = instance
+	bytes, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644)
 }
 
 // GetStats returns the bot's live runtime statistics
@@ -583,6 +1000,97 @@ func (a *App) GetStats() bot.BotStats {
 }
 
 // GetLogs returns the buffered logs
+type CurrentArmyUnit struct {
+	Name       string  `json:"name"`
+	Category   string  `json:"category"`
+	Count      int     `json:"count"`
+	Confidence float64 `json:"confidence"`
+	SlotX      int     `json:"slot_x"`
+}
+
+type CurrentArmySnapshot struct {
+	Timestamp      time.Time         `json:"timestamp"`
+	Units          []CurrentArmyUnit `json:"units"`
+	TargetTownHall int               `json:"target_town_hall,omitempty"`
+	TargetLabel    string            `json:"target_label,omitempty"`
+	Ready          bool              `json:"ready"`
+	Uncertain      bool              `json:"uncertain"`
+	Warnings       []string          `json:"warnings,omitempty"`
+}
+
+func (a *App) GetCurrentArmy() *CurrentArmySnapshot {
+	data, err := os.ReadFile(paths.ResolveConfig("current_army.json"))
+	if err != nil {
+		return nil
+	}
+	var snap CurrentArmySnapshot
+	if json.Unmarshal(data, &snap) != nil {
+		return nil
+	}
+	if len(snap.Units) == 0 {
+		return nil
+	}
+	return &snap
+}
+
+type VillageResourceSnapshot struct {
+	Timestamp   time.Time `json:"timestamp"`
+	Gold        int       `json:"gold"`
+	Elixir      int       `json:"elixir"`
+	DarkElixir  int       `json:"dark_elixir"`
+	GoldValid   bool      `json:"gold_valid"`
+	ElixirValid bool      `json:"elixir_valid"`
+	DarkValid   bool      `json:"dark_valid"`
+	Valid       bool      `json:"valid"`
+}
+
+// GetVillageResources returns the latest locally observed home-village
+// balances. These values come from the BlueStacks HUD scanner, not from the
+// public Clash player API.
+func (a *App) GetVillageResources() *VillageResourceSnapshot {
+	data, err := os.ReadFile(paths.ResolveConfig("village_resources.json"))
+	if err != nil {
+		return nil
+	}
+	var snap VillageResourceSnapshot
+	if json.Unmarshal(data, &snap) != nil || !snap.Valid {
+		return nil
+	}
+	return &snap
+}
+
+// GetLatestAttackTrace returns the newest structured deployment trace as
+// JSON. It is intended for the advanced diagnostics panel and support export;
+// normal users never need to interact with it.
+func (a *App) GetLatestAttackTrace() string {
+	matches, err := filepath.Glob(paths.ResolveConfig("output/attack_traces/*.json"))
+	if err != nil || len(matches) == 0 {
+		return ""
+	}
+	sort.Strings(matches)
+	latest := matches[len(matches)-1]
+	data, err := os.ReadFile(latest)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func (a *App) GetVillageResourceHistory() []VillageResourceSnapshot {
+	data, err := os.ReadFile(paths.ResolveConfig("village_resource_history.json"))
+	if err != nil {
+		return []VillageResourceSnapshot{}
+	}
+	var history []VillageResourceSnapshot
+	if json.Unmarshal(data, &history) != nil {
+		return []VillageResourceSnapshot{}
+	}
+	if len(history) > 1000 {
+		history = history[len(history)-1000:]
+	}
+	return history
+}
+
 func (a *App) GetLogs() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -680,7 +1188,7 @@ func (a *App) refreshHistory() {
 }
 
 // SaveConfig updates config.json settings
-func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strategyFile string, searchEnabled bool, stall int) error {
+func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strategyFile string, searchEnabled bool, stall int, lootExitEnabled bool, lootExitPercent int) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -691,11 +1199,89 @@ func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strat
 	cfg.Upgrade.UpgradeWalls = upgradeWalls
 	cfg.Search.Enabled = searchEnabled
 	cfg.Attack.StallTimerSeconds = stall
+	cfg.Attack.LootExitEnabled = lootExitEnabled
+	if lootExitPercent < 0 { lootExitPercent = 0 }
+	if lootExitPercent > 100 { lootExitPercent = 100 }
+	cfg.Attack.LootExitPercent = lootExitPercent
 	if strategyFile != "" {
-		cfg.Attack.StrategyFile = strategyFile
+		name := filepath.Base(filepath.Clean(strategyFile))
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext != ".yaml" && ext != ".csv" {
+			return fmt.Errorf("unsupported strategy file %q", name)
+		}
+		resolved := paths.Resolve(filepath.Join("strategies", name))
+		info, err := os.Stat(resolved)
+		if err != nil || info.IsDir() {
+			return fmt.Errorf("strategy %q was not found in packaged assets", name)
+		}
+		cfg.Attack.StrategyFile = resolved
 	}
 
 	// Update running bot in real-time if it exists
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+
+	bytes, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644)
+}
+
+// SaveFarmComposition persists the selected HDV farm profile.
+// profileJSON is used instead of a large Wails struct signature so the UI can
+// edit a profile freely without regenerating a bespoke binding for every field.
+func (a *App) SaveFarmComposition(enabled bool, townHall int, profileJSON string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if townHall < 8 || townHall > 18 {
+		return fmt.Errorf("town hall must be between 8 and 18")
+	}
+
+	var profile config.FarmProfile
+	if err := json.Unmarshal([]byte(profileJSON), &profile); err != nil {
+		return fmt.Errorf("invalid farm composition: %w", err)
+	}
+	profile.TownHall = townHall
+
+	if profile.TroopCapacity <= 0 || profile.SpellCapacity <= 0 {
+		return fmt.Errorf("invalid farm composition capacities")
+	}
+	troopUsed := 0
+	for _, u := range profile.Troops {
+		if strings.TrimSpace(u.Name) == "" || u.Count < 0 || u.Housing <= 0 {
+			return fmt.Errorf("invalid troop entry")
+		}
+		troopUsed += u.Count * u.Housing
+	}
+	if troopUsed > profile.TroopCapacity {
+		return fmt.Errorf("troop composition uses %d/%d housing", troopUsed, profile.TroopCapacity)
+	}
+
+	spellUsed := 0
+	for _, u := range profile.Spells {
+		if strings.TrimSpace(u.Name) == "" || u.Count < 0 || u.Housing <= 0 {
+			return fmt.Errorf("invalid spell entry")
+		}
+		spellUsed += u.Count * u.Housing
+	}
+	if spellUsed > profile.SpellCapacity {
+		return fmt.Errorf("spell composition uses %d/%d housing", spellUsed, profile.SpellCapacity)
+	}
+	if len(profile.Heroes) > 4 {
+		return fmt.Errorf("at most 4 heroes can be selected for the active farm army")
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	if cfg.Attack.Farm.Profiles == nil {
+		cfg.Attack.Farm.Profiles = map[string]config.FarmProfile{}
+	}
+	cfg.Attack.Farm.Enabled = enabled
+	cfg.Attack.Farm.TownHall = townHall
+	cfg.Attack.Farm.Profiles[fmt.Sprintf("%d", townHall)] = profile
+
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
 	}

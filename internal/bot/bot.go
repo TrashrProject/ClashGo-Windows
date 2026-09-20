@@ -32,8 +32,9 @@ type Bot struct {
 	navigator  *game.Navigator
 	graph      *game.StateGraph
 	templates  *game.TemplateStore
-	recognizer *game.Recognizer
-	cfg        *config.BotConfig
+	recognizer     *game.Recognizer
+	resourceReader *game.VillageResourceReader
+	cfg            *config.BotConfig
 
 	classify func(gocv.Mat) (game.GameState, int)
 
@@ -54,10 +55,14 @@ type Bot struct {
 	stars1      atomic.Int32
 	stars2      atomic.Int32
 	stars3      atomic.Int32
-	seqRunning  atomic.Bool
-	zoomedOut   atomic.Bool
+	seqRunning        atomic.Bool
+	zoomedOut         atomic.Bool
+	recoveryAttempts  atomic.Int32
+	recoverySuccesses atomic.Int32
+	blueStacksRestarts atomic.Int32
 
 	chestDismissInFlight  atomic.Bool
+	rewardDismissInFlight atomic.Bool
 	splashDismissInFlight atomic.Bool
 	connLostDismissInFlight atomic.Bool
 	lastArmyCampGuardLog    time.Time
@@ -67,6 +72,8 @@ type Bot struct {
 	lastNav               time.Time
 	lastCapture           time.Time
 	lastIdlePan           time.Time
+	lastVisionLog         time.Time
+	lastResourceScan      time.Time
 	// lastAttackEnd is stamped when a battle fully returns home; the
 	// inter-attack cooldown (cfg.Attack.MinSecondsBetweenAttacks) is
 	// measured from it. Written by the attack goroutine only.
@@ -109,6 +116,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		adb.WithPort(cfg.Device.ADBPort),
 		adb.WithLogger(zl),
 		adb.WithTimeout(30*time.Second),
+		adb.WithBlueStacksInstance(cfg.Device.BlueStacksInstance),
 		adb.WithZoomKeys(cfg.Device.ZoomOutKey, cfg.Device.ZoomInKey),
 		adb.WithJitterTaps(cfg.Debug.JitterTaps),
 		adb.WithJitterDelays(cfg.Debug.JitterDelays),
@@ -238,12 +246,15 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 	// bot without waiting for the App-level bot.Cancel() to be called.
 	ctx, cancel := context.WithCancel(bootCtx)
 
+	resourceReader := game.NewVillageResourceReader(cal, templates, log.Logger)
+
 	b = &Bot{
 		client:            client,
 		cal:               cal,
 		graph:             graph,
 		templates:         templates,
 		recognizer:        recognizer,
+		resourceReader:    resourceReader,
 		cfg:               cfg,
 		attackExec:        attackExec,
 		ctx:               ctx,
@@ -341,7 +352,7 @@ func (b *Bot) Start() error {
 	focusX, focusY := b.cal.ScaleRef(842, 345)
 	b.logger.Info().Int("x", focusX).Int("y", focusY).Msg("performing initial focus click")
 	b.client.Tap(focusX, focusY)
-	b.client.JitteredSleep(1 * time.Second)
+	b.client.JitteredSleep(250 * time.Millisecond)
 
 	go b.captureLoop()
 	return nil
@@ -352,6 +363,9 @@ func (b *Bot) Stop() {
 	b.client.Close()
 	globalAsyncWriter.Close()
 	vision.CloseTemplateCache()
+	if b.resourceReader != nil {
+		b.resourceReader.Close()
+	}
 	if b.dukePicksFile != nil {
 		_ = b.dukePicksFile.Close()
 	}
@@ -387,20 +401,27 @@ func (b *Bot) captureLoop() {
 	frames := make(chan frame, 1)
 
 	getCaptureInterval := func() time.Duration {
+		// While an attack/search sequence is running, that goroutine already
+		// performs its own fresh screenshots for state, loot and deployment.
+		// Keeping the background capture loop at 150ms at the same time meant
+		// BlueStacks was being hammered by two independent screencap streams.
+		// On the user's Pie64 instance this can terminate/restart the emulator
+		// with no Go error at all. Keep one low-rate observer alive for popup /
+		// health handling, but remove the duplicate high-frequency pressure.
+		if b.seqRunning.Load() {
+			// The active attack/search goroutine owns screencaps while a
+			// sequence is running. Keep only a very low-rate observer so
+			// BlueStacks is never hit by two concurrent screencap streams.
+			return 2500 * time.Millisecond
+		}
+
 		switch gc.State {
 		case game.StateBattle, game.StateSearchMap, game.StateLoading:
-			// 250ms (4Hz) instead of the old 10Hz: during an attack the
-			// deploy/battle-end goroutines run their own captures at their
-			// own cadence, so the frame loop's full-screen classify was
-			// mostly redundant (observed: ~55ms captures + classify at 10Hz
-			// pinned one core during every battle). 4Hz still catches the
-			// result overlay fast enough for ReturnHome and the stuck
-			// watchdog.
-			return 250 * time.Millisecond
-		case game.StateMainVillage, game.StateArmySelection, game.StateArmyCamp:
 			return 300 * time.Millisecond
+		case game.StateMainVillage, game.StateArmySelection, game.StateArmyCamp:
+			return 250 * time.Millisecond
 		default:
-			return 1000 * time.Millisecond
+			return 500 * time.Millisecond
 		}
 	}
 
@@ -514,6 +535,17 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 
 	state, _, _ := gc.ReadState()
 
+	// Windows/BlueStacks can spend a while in StateUnknown immediately after
+	// the game becomes visually usable (localized HUD, animated overlays, first
+	// template-cache warmup). The old 35s generic watchdog restarted Clash
+	// before the bot had a chance to obtain a stable village classification,
+	// producing the exact launch -> 35s -> restart loop seen on Windows.
+	// Give only the initial Unknown phase a bounded grace period; once a real
+	// state is observed the normal watchdog rules apply.
+	if state == game.StateUnknown && time.Since(b.startedAt) < 2*time.Minute {
+		return
+	}
+
 	// Post-boot splash states (ТАР! collect splash, castle logo, news)
 	// legitimately sit static for 1-3 minutes while the game connects — the
 	// castle logo has no progress indicator at all. The generic stuck timeout
@@ -612,6 +644,7 @@ func (b *Bot) restartGame() {
 //  4. EnsureBlueStacksMac   — emulator really gone; relaunch at the
 //     configured resolution, then poll up to 2 min for adb
 func (b *Bot) recoverEmulator() {
+	b.recoveryAttempts.Add(1)
 	b.logger.Warn().Msg("capture pipeline dead; beginning device recovery ladder")
 
 	deviceOK := func() bool {
@@ -622,6 +655,7 @@ func (b *Bot) recoverEmulator() {
 	if deviceOK() {
 		b.logger.Info().Msg("device still responsive; restarting game only")
 		b.restartGame()
+		b.recoverySuccesses.Add(1)
 		return
 	}
 
@@ -631,6 +665,7 @@ func (b *Bot) recoverEmulator() {
 	}
 	if deviceOK() {
 		b.restartGame()
+		b.recoverySuccesses.Add(1)
 		return
 	}
 
@@ -642,22 +677,82 @@ func (b *Bot) recoverEmulator() {
 	_ = b.client.Reconnect()
 	if deviceOK() {
 		b.restartGame()
+		b.recoverySuccesses.Add(1)
 		return
 	}
 
 	b.logger.Error().Msg("device unreachable after transport + adb-server recovery; relaunching BlueStacks")
-	if err := b.client.EnsureBlueStacksMac(b.cfg.Device.Width, b.cfg.Device.Height, b.cfg.Device.DPI); err != nil {
+	b.blueStacksRestarts.Add(1)
+	if err := b.client.EnsureBlueStacks(b.cfg.Device.Width, b.cfg.Device.Height, b.cfg.Device.DPI); err != nil {
 		b.logger.Error().Err(err).Msg("BlueStacks relaunch failed; will retry on next stuck check")
 	}
 	// Give the freshly-relaunched emulator up to 2 minutes to expose
 	// its adb daemon (cold VM boot can take 45-70s on this hardware).
+	recovered := false
 	for i := 0; i < 60; i++ {
 		if deviceOK() {
+			recovered = true
 			break
 		}
 		time.Sleep(2 * time.Second)
 	}
+	if !recovered {
+		b.logger.Error().Msg("device remained unreachable after BlueStacks recovery window; deferring until next watchdog cycle")
+		return
+	}
 	b.restartGame()
+	b.recoverySuccesses.Add(1)
+}
+
+// locateRewardPopup detects the seasonal/event "Pick a Reward!" modal.
+// The popup has a wide saturated red banner across the upper-middle of the
+// 860x732 reference frame. We deliberately use a region/color signature
+// rather than English text so it keeps working if the UI language changes.
+// The returned point is the center of the right-most card (gold/resource in
+// current events), which is always a valid selectable reward.
+func (b *Bot) locateRewardPopup(screen gocv.Mat) (int, int, bool) {
+	if screen.Empty() {
+		return 0, 0, false
+	}
+
+	x0, y0 := b.cal.ScaleRef(185, 105)
+	x1, y1 := b.cal.ScaleRef(675, 185)
+	if x0 < 0 { x0 = 0 }
+	if y0 < 0 { y0 = 0 }
+	if x1 > screen.Cols() { x1 = screen.Cols() }
+	if y1 > screen.Rows() { y1 = screen.Rows() }
+	if x1-x0 < 10 || y1-y0 < 10 {
+		return 0, 0, false
+	}
+
+	roi := screen.Region(image.Rect(x0, y0, x1, y1))
+	defer roi.Close()
+	hsv := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC3)
+	defer vision.PutMat(hsv)
+	gocv.CvtColor(roi, &hsv, gocv.ColorBGRToHSV)
+
+	m1 := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(m1)
+	m2 := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(m2)
+	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+
+	gocv.InRangeWithScalar(hsv, gocv.NewScalar(0, 120, 110, 0), gocv.NewScalar(12, 255, 255, 0), &m1)
+	gocv.InRangeWithScalar(hsv, gocv.NewScalar(168, 120, 110, 0), gocv.NewScalar(180, 255, 255, 0), &m2)
+	gocv.BitwiseOr(m1, m2, &mask)
+
+	redPixels := gocv.CountNonZero(mask)
+	total := roi.Rows() * roi.Cols()
+	if total <= 0 || float64(redPixels)/float64(total) < 0.12 {
+		return 0, 0, false
+	}
+
+	// Current modal card centers in the 860x732 reference layout are roughly
+	// x=220/455/705, y=366. Pick the right-most one to avoid event-troop
+	// inventory constraints and keep reward handling deterministic.
+	x, y := b.cal.ScaleRef(705, 366)
+	return x, y, true
 }
 
 func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, captureMs time.Duration) {
@@ -672,27 +767,95 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		return
 	}
 
+	// The effective wm size reported by Android is not always the same as the
+	// actual screencap matrix dimensions on BlueStacks. Vision and tap scaling
+	// must follow the pixels we are really processing, not a metadata guess.
+	// Recalibrate from the live frame whenever they differ. All consumers keep
+	// a pointer to b.cal, so classifier/navigator/attack executor immediately
+	// use the corrected scale.
+	if screen.Cols() != b.cal.PhysicalW || screen.Rows() != b.cal.PhysicalH {
+		oldW, oldH := b.cal.PhysicalW, b.cal.PhysicalH
+		b.cal.PhysicalW = screen.Cols()
+		b.cal.PhysicalH = screen.Rows()
+		b.cal.ScaleX = float64(screen.Cols()) / float64(game.RefWidth)
+		b.cal.ScaleY = float64(screen.Rows()) / float64(game.RefHeight)
+		b.cal.MidOffsetY = (screen.Rows() - game.RefHeight) / 2
+		b.cal.BottomOffY = screen.Rows() - game.RefHeight
+		b.cal.Verified = true
+
+		b.logger.Warn().
+			Int("reported_w", oldW).
+			Int("reported_h", oldH).
+			Int("capture_w", screen.Cols()).
+			Int("capture_h", screen.Rows()).
+			Str("scale", fmt.Sprintf("%.3fx%.3f", b.cal.ScaleX, b.cal.ScaleY)).
+			Msg("live capture size differed from reported display size; recalibrated to actual frame")
+	}
+
 	state, score := b.classify(screen)
+
+	// Keep the console useful without flooding Wails/React at the faster
+	// capture cadence. Log immediately on state changes and at most roughly
+	// once per 750ms while a state remains stable.
+	if state != gc.State || time.Since(b.lastVisionLog) >= 750*time.Millisecond || time.Since(b.startedAt) < 3*time.Second {
+		b.lastVisionLog = time.Now()
+		b.logger.Info().
+			Str("vision_state", state.String()).
+			Int("score", score).
+			Int("capture_w", screen.Cols()).
+			Int("capture_h", screen.Rows()).
+			Msg(fmt.Sprintf("vision frame classified: state=%s score=%d capture=%dx%d", state.String(), score, screen.Cols(), screen.Rows()))
+	}
 
 	gc.UpdateScreen(screen, captureMs)
 
-	if !b.zoomedOut.Load() {
+	// Seasonal/event battles can interrupt combat with a "Pick a Reward!"
+	// overlay. It is not a normal game state and used to leave the attack
+	// sequence waiting behind the modal. Detect the large red reward banner
+	// directly from the live frame and pick the right-most reward card.
+	// Reward cards only exist during an active battle. Never run this detector
+	// on MainVillage/ArmySelection: the broad red-banner signature can match
+	// normal home/menu artwork and was stealing focus from Attack -> Find Match.
+	if state == game.StateBattle || state == game.StateSearchMap {
+		if rewardX, rewardY, ok := b.locateRewardPopup(screen); ok {
+			if b.rewardDismissInFlight.CompareAndSwap(false, true) {
+				b.logger.Info().Int("x", rewardX).Int("y", rewardY).Msg("Pick a Reward popup detected during battle; selecting reward")
+				go func(x, y int) {
+					defer b.rewardDismissInFlight.Store(false)
+					time.Sleep(220 * time.Millisecond)
+					if err := b.client.TapFast(x, y, 0.7); err != nil {
+						b.logger.Warn().Err(err).Msg("reward selection tap failed; will retry")
+						return
+					}
+					b.recordActivity()
+					b.logger.Info().Msg("reward selected; resuming battle")
+				}(rewardX, rewardY)
+			}
+			return
+		}
+	}
 
-		pinX, pinY := b.cal.ScaleRef(60, 695)
+	if !b.zoomedOut.Load() {
+		// Only zoom when we have evidence that this is actually the home
+		// village. The old fallback used a single orange pixel / loose
+		// template hit, which can also occur on the troop bar and battle HUD.
+		// That caused a live battle/search screen to be logged as "village
+		// detected" and consumed the frame before the attack logic could run.
 		isVillage := state == game.StateMainVillage ||
-			state == game.StateArmyCamp ||
-			b.isOrange(screen, pinX, pinY) ||
-			b.templateMatch(screen, "btn_attack", 0.45) ||
-			b.templateMatch(screen, "btn_settings", 0.6)
+			((state == game.StateUnknown || state == game.StateArmyCamp) && b.findAttackButton(screen, 0.30))
 
 		if isVillage {
 			if b.zoomedOut.CompareAndSwap(false, true) {
-				b.logger.Info().Msg("village detected, performing MANDATORY initial zoom out...")
-				b.navigator.ZoomOut()
+				// Windows/BlueStacks: the native sendevent pinch path has proven
+				// unstable on some installations and can terminate the Wails
+				// process immediately after "performing ... zoom out". The bot
+				// already forces the reference 860x732 display override, so the
+				// startup zoom is not required for coordinate calibration.
+				// Mark initialization complete and continue without injecting a
+				// multi-touch gesture; attack-button detection will decide whether
+				// the village is usable.
+				b.logger.Info().Msg("village detected; skipping native startup zoom on Windows-safe path")
 				b.recordActivity()
-
-				time.Sleep(1800 * time.Millisecond)
-
 				return
 			}
 		}
@@ -715,6 +878,10 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			Str("state", state.String()).
 			Int("score", score).
 			Msg("state detected")
+	}
+
+	if !b.seqRunning.Load() && (state == game.StateMainVillage || gc.State == game.StateMainVillage) {
+		b.maybeScanVillageResources(screen)
 	}
 
 	if state == game.StateChestReward {
@@ -846,7 +1013,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		return
 	}
 
-	if b.zoomedOut.Load() && (gc.State == game.StateMainVillage || gc.State == game.StateUnknown) && b.findAttackButton(screen, 0.45) {
+	if b.zoomedOut.Load() && (gc.State == game.StateMainVillage || gc.State == game.StateUnknown) && b.findAttackButton(screen, 0.30) {
 		b.logger.Info().Msg("attack button detected, starting sequence")
 		b.lastSequenceStart = time.Now()
 		go b.executeAttackSequence(gc)
@@ -886,7 +1053,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		// boot-splash grace (5 min) and force-restarted, every cycle
 		// (observed live 11:32–11:43). A frame that still shows the real
 		// Attack! button IS the main village; skip the Back press.
-		if b.findAttackButton(screen, 0.45) {
+		if b.findAttackButton(screen, 0.30) {
 			// Throttle the log: the guard can fire every frame while the
 			// misclassification persists, which would spam 10 lines/sec.
 			if time.Since(b.lastArmyCampGuardLog) > 10*time.Second {
@@ -904,6 +1071,14 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 }
 
 func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
+	// Prefer locating the actual orange button body in the tight bottom-left
+	// HUD ROI. This is robust across language and avoids assuming one fixed
+	// center coordinate.
+	if x, y, ok := b.locateAttackButtonColor(screen); ok {
+		b.logger.Info().Int("x", x).Int("y", y).Msg("attack button verified via localized orange region")
+		return true
+	}
+
 	pinX, pinY := b.cal.ScaleRef(60, 695)
 	if b.isOrange(screen, pinX, pinY) {
 		b.logger.Debug().Msg("attack button confirmed via pinpoint color check")
@@ -915,7 +1090,7 @@ func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
 		return false
 	}
 
-	roi := image.Rect(0, 500, 300, 732)
+	roi := b.buttonROI("btn_attack")
 	physROI := image.Rect(
 		int(float64(roi.Min.X)*b.cal.ScaleX),
 		int(float64(roi.Min.Y)*b.cal.ScaleY),
@@ -932,16 +1107,33 @@ func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
 	}
 
 	best := matches[0]
-	isOrange := b.isOrange(screen, best.Point.X, best.Point.Y)
+	expectedX, expectedY := b.cal.ScaleRef(64, 666)
+	dx := best.Point.X - expectedX
+	if dx < 0 {
+		dx = -dx
+	}
+	dy := best.Point.Y - expectedY
+	if dy < 0 {
+		dy = -dy
+	}
+	if dx > 80 || dy > 60 {
+		b.logger.Debug().
+			Float64("conf", best.Confidence).
+			Int("match_x", best.Point.X).
+			Int("match_y", best.Point.Y).
+			Int("expected_x", expectedX).
+			Int("expected_y", expectedY).
+			Msg("attack-like template rejected: outside safe Attack button area")
+		return false
+	}
 
-	b.logger.Debug().
+	b.logger.Info().
 		Float64("conf", best.Confidence).
 		Int("x", best.Point.X).
 		Int("y", best.Point.Y).
-		Bool("is_orange", isOrange).
-		Msg("attack button detection check")
+		Msg("attack button verified via template and position")
 
-	return isOrange
+	return true
 }
 
 func (b *Bot) isOrange(screen gocv.Mat, x, y int) bool {
@@ -952,13 +1144,301 @@ func (b *Bot) isOrange(screen gocv.Mat, x, y int) bool {
 		20)
 }
 
+// hasAttackButtonColor looks only at the tight bottom-left HUD zone where the
+// village Attack button lives. A region test is much more robust than a single
+// sampled pixel across languages, button animations and text overlays, while
+// the tight ROI keeps it from confusing unrelated orange UI elsewhere.
+func (b *Bot) hasAttackButtonColor(screen gocv.Mat) bool {
+	_, _, ok := b.locateAttackButtonColor(screen)
+	return ok
+}
+
+// locateFindMatchButtonColor finds the large orange/gold "Find Match" button
+// after the village Attack button opens the attack menu. The old flow relied
+// on a text/template match plus StateFindMatch, but the current CoC UI can
+// still classify that overlay as MainVillage because the village remains
+// visible behind it. A tight ROI + large orange blob is a safer signal.
+func (b *Bot) locateFindMatchButtonColor(screen gocv.Mat) (int, int, bool) {
+	x0, y0 := b.cal.ScaleRef(40, 420)
+	x1, y1 := b.cal.ScaleRef(420, 640)
+
+	if x0 < 0 { x0 = 0 }
+	if y0 < 0 { y0 = 0 }
+	if x1 > screen.Cols() { x1 = screen.Cols() }
+	if y1 > screen.Rows() { y1 = screen.Rows() }
+	if x1-x0 < 2 || y1-y0 < 2 {
+		return 0, 0, false
+	}
+
+	roi := screen.Region(image.Rect(x0, y0, x1, y1))
+	defer roi.Close()
+
+	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+
+	gocv.InRangeWithScalar(
+		roi,
+		gocv.NewScalar(0, 70, 110, 0),
+		gocv.NewScalar(210, 255, 255, 0),
+		&mask,
+	)
+
+	contours := gocv.FindContours(mask, gocv.RetrievalExternal, gocv.ChainApproxSimple)
+	defer contours.Close()
+
+	bestArea := 0.0
+	bestRect := image.Rectangle{}
+	for i := 0; i < contours.Size(); i++ {
+		contour := contours.At(i)
+		area := gocv.ContourArea(contour)
+		if area <= bestArea {
+			continue
+		}
+		rect := gocv.BoundingRect(contour)
+		if rect.Dx() < 55 || rect.Dy() < 24 {
+			continue
+		}
+		bestArea = area
+		bestRect = rect
+	}
+
+	if bestArea < 900 || bestRect.Empty() {
+		return 0, 0, false
+	}
+
+	x := x0 + bestRect.Min.X + bestRect.Dx()/2
+	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
+
+	b.logger.Info().
+		Float64("area", bestArea).
+		Int("x", x).
+		Int("y", y).
+		Int("w", bestRect.Dx()).
+		Int("h", bestRect.Dy()).
+		Msg("Find Match button verified via localized orange region")
+
+	return x, y, true
+}
+
+// locateAttackButtonColor returns the center of the largest orange/gold blob
+// inside the tight bottom-left Attack-button ROI. Using the detected blob
+// center is safer than tapping a historical hard-coded point: on the user's
+// Windows/BlueStacks layout the fixed point landed on a neighbouring control.
+// locateNextButtonColor finds the orange "Next" button on the live
+// matchmaking/battle screen. This avoids depending on a localized text
+// template and, importantly, lets us use the still-live capture instead of
+// touching a cv::Mat after screen.Close().
+func (b *Bot) locateNextButtonColor(screen gocv.Mat) (int, int, bool) {
+	x0, y0 := b.cal.ScaleRef(650, 430)
+	x1, y1 := b.cal.ScaleRef(860, 660)
+
+	if x0 < 0 { x0 = 0 }
+	if y0 < 0 { y0 = 0 }
+	if x1 > screen.Cols() { x1 = screen.Cols() }
+	if y1 > screen.Rows() { y1 = screen.Rows() }
+	if x1-x0 < 2 || y1-y0 < 2 {
+		return 0, 0, false
+	}
+
+	roi := screen.Region(image.Rect(x0, y0, x1, y1))
+	defer roi.Close()
+
+	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+
+	// Broad orange/gold BGR range for the current CoC Next button.
+	gocv.InRangeWithScalar(
+		roi,
+		gocv.NewScalar(0, 85, 145, 0),
+		gocv.NewScalar(190, 255, 255, 0),
+		&mask,
+	)
+
+	contours := gocv.FindContours(mask, gocv.RetrievalExternal, gocv.ChainApproxSimple)
+	defer contours.Close()
+
+	bestArea := 0.0
+	bestRect := image.Rectangle{}
+	for i := 0; i < contours.Size(); i++ {
+		contour := contours.At(i)
+		area := gocv.ContourArea(contour)
+		if area <= bestArea {
+			continue
+		}
+		rect := gocv.BoundingRect(contour)
+		if rect.Dx() < 45 || rect.Dy() < 22 {
+			continue
+		}
+		bestArea = area
+		bestRect = rect
+	}
+
+	if bestArea < 700 || bestRect.Empty() {
+		return 0, 0, false
+	}
+
+	x := x0 + bestRect.Min.X + bestRect.Dx()/2
+	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
+
+	b.logger.Info().
+		Float64("area", bestArea).
+		Int("x", x).
+		Int("y", y).
+		Int("w", bestRect.Dx()).
+		Int("h", bestRect.Dy()).
+		Msg("Next button verified via orange region")
+
+	return x, y, true
+}
+
+// locateBattleButtonColor finds the large green "Attack!" button in the
+// army-selection screen. The current CoC layout keeps StateArmySelection
+// visible while the old btn_battle template can match neighboring green UI,
+// causing repeated taps that never leave the screen.
+func (b *Bot) locateBattleButtonColor(screen gocv.Mat) (int, int, bool) {
+	x0, y0 := b.cal.ScaleRef(560, 430)
+	x1, y1 := b.cal.ScaleRef(860, 650)
+
+	if x0 < 0 { x0 = 0 }
+	if y0 < 0 { y0 = 0 }
+	if x1 > screen.Cols() { x1 = screen.Cols() }
+	if y1 > screen.Rows() { y1 = screen.Rows() }
+	if x1-x0 < 2 || y1-y0 < 2 {
+		return 0, 0, false
+	}
+
+	roi := screen.Region(image.Rect(x0, y0, x1, y1))
+	defer roi.Close()
+
+	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+
+	// BGR green/lime family used by the large Attack! button.
+	gocv.InRangeWithScalar(
+		roi,
+		gocv.NewScalar(0, 110, 70, 0),
+		gocv.NewScalar(170, 255, 210, 0),
+		&mask,
+	)
+
+	contours := gocv.FindContours(mask, gocv.RetrievalExternal, gocv.ChainApproxSimple)
+	defer contours.Close()
+
+	bestArea := 0.0
+	bestRect := image.Rectangle{}
+	for i := 0; i < contours.Size(); i++ {
+		contour := contours.At(i)
+		area := gocv.ContourArea(contour)
+		if area <= bestArea {
+			continue
+		}
+		rect := gocv.BoundingRect(contour)
+		if rect.Dx() < 70 || rect.Dy() < 24 {
+			continue
+		}
+		bestArea = area
+		bestRect = rect
+	}
+
+	if bestArea < 1100 || bestRect.Empty() {
+		return 0, 0, false
+	}
+
+	x := x0 + bestRect.Min.X + bestRect.Dx()/2
+	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
+
+	b.logger.Info().
+		Float64("area", bestArea).
+		Int("x", x).
+		Int("y", y).
+		Int("w", bestRect.Dx()).
+		Int("h", bestRect.Dy()).
+		Msg("Battle Attack button verified via green region")
+
+	return x, y, true
+}
+
+func (b *Bot) locateAttackButtonColor(screen gocv.Mat) (int, int, bool) {
+	x0, y0 := b.cal.ScaleRef(0, 600)
+	x1, y1 := b.cal.ScaleRef(145, 731)
+
+	if x0 < 0 {
+		x0 = 0
+	}
+	if y0 < 0 {
+		y0 = 0
+	}
+	if x1 > screen.Cols() {
+		x1 = screen.Cols()
+	}
+	if y1 > screen.Rows() {
+		y1 = screen.Rows()
+	}
+	if x1-x0 < 2 || y1-y0 < 2 {
+		return 0, 0, false
+	}
+
+	roi := screen.Region(image.Rect(x0, y0, x1, y1))
+	defer roi.Close()
+
+	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+
+	gocv.InRangeWithScalar(
+		roi,
+		gocv.NewScalar(0, 70, 110, 0),
+		gocv.NewScalar(200, 255, 255, 0),
+		&mask,
+	)
+
+	contours := gocv.FindContours(mask, gocv.RetrievalExternal, gocv.ChainApproxSimple)
+	defer contours.Close()
+
+	bestArea := 0.0
+	bestRect := image.Rectangle{}
+	for i := 0; i < contours.Size(); i++ {
+		contour := contours.At(i)
+		area := gocv.ContourArea(contour)
+		if area <= bestArea {
+			continue
+		}
+		rect := gocv.BoundingRect(contour)
+		// Ignore tiny orange HUD/text fragments. The Attack button body should
+		// form a materially sized blob in this ROI.
+		if rect.Dx() < 18 || rect.Dy() < 12 {
+			continue
+		}
+		bestArea = area
+		bestRect = rect
+	}
+
+	if bestArea < 180 || bestRect.Empty() {
+		return 0, 0, false
+	}
+
+	x := x0 + bestRect.Min.X + bestRect.Dx()/2
+	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
+
+	b.logger.Debug().
+		Float64("area", bestArea).
+		Int("x", x).
+		Int("y", y).
+		Int("w", bestRect.Dx()).
+		Int("h", bestRect.Dy()).
+		Msg("localized Attack-button blob located")
+
+	return x, y, true
+}
+
 // buttonROI returns the normalized (reference-resolution) region of interest
 // for a known UI button template. Centralized here so the wait-for-button and
 // find-and-click paths share one definition and cannot drift apart.
 func (b *Bot) buttonROI(templateName string) image.Rectangle {
 	switch templateName {
 	case "btn_attack":
-		return image.Rect(0, 500, 300, 732)
+		// Bottom-left HUD only. The previous 300x232 ROI also contained
+		// unrelated action buttons and produced false positives.
+		return image.Rect(0, 600, 150, 732)
 	case "btn_find_match":
 		return image.Rect(50, 400, 400, 600)
 	case "btn_battle":
@@ -1004,9 +1484,16 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 	defer b.seqRunning.Store(false)
 
-	if b.cfg.Debug.UseShellPipe {
+	if b.cfg.Debug.UseShellPipe && runtime.GOOS != "windows" {
 		b.client.EnablePersistentShell(b.cfg.Debug.ShellPipeSyncFlush)
 		defer b.client.ClosePersistentShell()
+	} else if b.cfg.Debug.UseShellPipe && runtime.GOOS == "windows" {
+		// The persistent interactive ADB shell is not reliable enough on
+		// BlueStacks/Windows yet. Live runs showed the pipe closing mid-sequence
+		// ("use of closed network connection"), followed by capture/tap failures.
+		// Use the proven one-shot transport path on Windows until the pipe has a
+		// dedicated Windows implementation.
+		b.logger.Info().Msg("persistent adb shell pipe disabled on Windows-safe path")
 	}
 
 	if b.attackCount.Load() >= int32(b.cfg.Attack.MaxAttackPerSession) {
@@ -1050,6 +1537,8 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	var targetEdge string = "Unknown"
 
 	searchStart := time.Now()
+	consecutiveNextFailures := 0
+	skipsSinceRest := 0
 	for {
 		// Stop check: a user Stop must abort the search loop even
 		// though CaptureToMat below would silently reconnect a closed
@@ -1069,7 +1558,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			return
 		}
 
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(700 * time.Millisecond)
 
 		screen, err := b.client.CaptureToMat()
 		if err != nil {
@@ -1111,12 +1600,18 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 		if meetsReq {
 			b.logger.Info().Msg("loot requirements met, starting attack!")
+			b.attackExec.SetInitialLoot(loot.Gold, loot.Elixir, loot.DarkElixir)
 			if strat, err := strategy.ParseYAML(b.cfg.Attack.StrategyFile); err == nil {
 				stratName = strat.Name
 				targetEdge = strat.TargetEdge
 			}
 			remainingUndeployed, deployErr = b.deployTroops(screen)
+			b.attackExec.SetEarlyExitAllowed(deployErr == nil && remainingUndeployed == 0)
 			if deployErr != nil || remainingUndeployed > 0 {
+				b.logger.Warn().
+					Err(deployErr).
+					Int("remaining", remainingUndeployed).
+					Msg("deployment not complete; keeping battle active and recording diagnostics")
 				failScreen, err := b.client.CaptureToMat()
 				if err == nil {
 					b.DumpDiagnostics("deployment_failed", failScreen, map[string]interface{}{
@@ -1127,44 +1622,150 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 					})
 					failScreen.Close()
 				}
+			} else {
+				b.logger.Info().Msg("all live deployable troop slots verified empty")
 			}
 			screen.Close()
 			break
 		}
 
-		b.logger.Info().
-			Msg("loot too low, skipping base...")
-		b.skipsCount.Add(1)
-		if b.OnStatsUpdate != nil {
-			b.OnStatsUpdate()
+		b.logger.Info().Msg("loot too low, skipping base...")
+
+		// BlueStacks stability guard: changing opponents endlessly at full
+		// speed can put sustained pressure on HD-Player.exe. Rest briefly
+		// every few successful skips instead of hammering Next/capture forever.
+		if skipsSinceRest >= 8 {
+			b.logger.Info().Msg("matchmaking stability pause after 8 skips")
+			time.Sleep(1500 * time.Millisecond)
+			skipsSinceRest = 0
 		}
 
+		// NEXT is handled as a state transition, not as a blind tap.
+		// A successful ADB tap only means Android received the event; it does
+		// NOT mean Clash accepted it. We click once, then wait until clouds /
+		// loading / Unknown proves that matchmaking actually advanced.
+		clickNextFresh := func() bool {
+			fresh, capErr := b.client.CaptureToMat()
+			if capErr != nil || fresh.Empty() {
+				if !fresh.Empty() { fresh.Close() }
+				return false
+			}
+			defer fresh.Close()
+
+			if x, y, ok := b.locateNextButtonColor(fresh); ok {
+				b.logger.Info().Int("x", x).Int("y", y).Msg("Next button freshly verified; precision clicking")
+				if err := b.client.TapFast(x, y, 0.6); err == nil {
+					b.recordActivity()
+					return true
+				}
+			}
+			return false
+		}
+
+		// Use the already-live frame first.
+		nextClicked := false
+		if x, y, ok := b.locateNextButtonColor(screen); ok {
+			b.logger.Info().Int("x", x).Int("y", y).Msg("Next button verified; precision clicking detected center")
+			if err := b.client.TapFast(x, y, 0.6); err == nil {
+				b.recordActivity()
+				nextClicked = true
+			}
+		}
 		screen.Close()
 
-		if !b.findAndClick("btn_next", "Next Match", 2) {
-			b.logger.Warn().Msg("template match failed, forcing skip via color/pinpoint")
+		if !nextClicked {
+			nextClicked = clickNextFresh()
+		}
 
-			searchROI := image.Rect(b.cal.PhysicalW/2, b.cal.PhysicalH/2, b.cal.PhysicalW, b.cal.PhysicalH)
-			orangePt, err := vision.PixelSearch(screen, searchROI, 252, 186, 54, 50)
-			if err == nil {
-				b.logger.Info().Msg("clicking Next via orange color fallback")
-				b.client.TapRandomized(orangePt.X, orangePt.Y)
-				b.recordActivity()
-			} else {
-
-				b.DumpDiagnostics("next_button_not_found", screen, map[string]interface{}{
-					"message": "forcing skip via hardcoded coordinates",
-				})
-				nextX, nextY := b.cal.ScaleRef(796, 565)
-				b.client.TapRandomized(nextX, nextY)
-				b.recordActivity()
+		transitioned := false
+		if nextClicked {
+			// Give Clash/BlueStacks time to start the clouds transition before
+			// asking for another screenshot. The old 220ms polling burst could
+			// issue 8-12 PNG screencaps immediately after every Next tap and
+			// was correlated with HD-Player.exe access-violation crashes.
+			time.Sleep(650 * time.Millisecond)
+			for verify := 0; verify < 3 && !transitioned; verify++ {
+				probe, capErr := b.client.CaptureToMat()
+				if capErr == nil && !probe.Empty() {
+					st, _ := b.classify(probe)
+					probe.Close()
+					if st == game.StateSearchMap || st == game.StateLoading || st == game.StateUnknown {
+						transitioned = true
+						break
+					}
+				} else if !probe.Empty() {
+					probe.Close()
+				}
+				if verify < 2 {
+					time.Sleep(550 * time.Millisecond)
+				}
 			}
 		}
 
-		time.Sleep(600 * time.Millisecond)
+		// If Clash ignored the first tap, reacquire the button and try ONCE.
+		// This replaces the situation where the bot looked "lost" until the
+		// user manually clicked Next, while also preventing rapid tap spam.
+		if !transitioned {
+			b.logger.Warn().Msg("Next tap did not start matchmaking; reacquiring button for one controlled retry")
+			time.Sleep(450 * time.Millisecond)
+			if clickNextFresh() {
+				time.Sleep(700 * time.Millisecond)
+				for verify := 0; verify < 3 && !transitioned; verify++ {
+					probe, capErr := b.client.CaptureToMat()
+					if capErr == nil && !probe.Empty() {
+						st, _ := b.classify(probe)
+						probe.Close()
+						if st == game.StateSearchMap || st == game.StateLoading || st == game.StateUnknown {
+							transitioned = true
+							break
+						}
+					} else if !probe.Empty() {
+						probe.Close()
+					}
+					if verify < 2 {
+						time.Sleep(600 * time.Millisecond)
+					}
+				}
+			}
+		}
+
+		if transitioned {
+			consecutiveNextFailures = 0
+			skipsSinceRest++
+			b.skipsCount.Add(1)
+			if b.OnStatsUpdate != nil {
+				b.OnStatsUpdate()
+			}
+			b.logger.Info().Msg("matchmaking transition confirmed after Next")
+			time.Sleep(1100 * time.Millisecond)
+			continue
+		}
+
+		// Never fall back to repeated blind coordinates. If two verified
+		// attempts fail, back off. After 3 consecutive failures restart only
+		// Clash (not BlueStacks) to recover a wedged matchmaking UI.
+		consecutiveNextFailures++
+		b.logger.Warn().
+			Int("failures", consecutiveNextFailures).
+			Msg("Next transition not confirmed; backing off instead of spamming taps")
+
+		if consecutiveNextFailures >= 3 {
+			b.logger.Error().Msg("Next remained unresponsive after controlled retries; restarting Clash to recover matchmaking")
+			lootRec.Close()
+			b.restartGame()
+			return
+		}
+
+		time.Sleep(1200 * time.Millisecond)
 	}
 
-	b.logger.Info().Msg("battle deployment complete, waiting for battle to end naturally...")
+	if deployErr != nil || remainingUndeployed > 0 {
+		b.logger.Warn().
+			Int("remaining", remainingUndeployed).
+			Msg("deployment ended with units still unverified; battle continues but deployment is NOT marked complete")
+	} else {
+		b.logger.Info().Msg("battle deployment complete: all live deployable units verified, waiting for battle to end naturally...")
+	}
 
 	var battleStars int = 0
 	var battleGold int = 0
@@ -1245,7 +1846,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		}
 
 		if parsedOK {
-			battleStars = parsedResult.Stars
+			visualStars := parsedResult.Stars
 			battleGold = parsedResult.Loot.Gold
 			battleElixir = parsedResult.Loot.Elixir
 			battleDE = parsedResult.Loot.DarkElixir
@@ -1254,65 +1855,102 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			bonusDE = parsedResult.Bonus.DarkElixir
 			parsedResults = true
 
-			// The result panel's star art is the ground truth: the two-pass
-			// defeat-safe read correctly returned 0 stars on the live 32%
-			// defeat (the OCR'd "Defeat" screen). The destruction-rule read
-			// (stall ROI) is only a fallback when the panel parse fails
-			// entirely — see the !parsedOK branch below. This block used to
-			// OVERRIDE the visual stars with the rule whenever any percent
-			// was measured, and a garbage stall-ROI read (381%, later
-			// clamped + per-battle-reset in WaitForBattleEndCtx) turned live
-			// defeats into fabricated 3-star victories. Visual wins now;
-			// the rule comparison is logged for observability only.
-			if finalPct > 0 {
+			// Reconcile stars against the measured destruction. The result
+			// screen remains useful for distinguishing 1 vs 2 stars, but it
+			// may never claim an impossible outcome (e.g. 3 stars below 100%
+			// or 0 stars at >=50%). This removes the "random" history stars
+			// while still preserving a genuine TH star under 50%.
+			battleStars = visualStars
+			if finalPct >= 100 {
+				battleStars = 3
+			} else if finalPct > 0 {
 				ruleStars := game.StarsFromOutcome(finalPct, b.attackExec.ThDestroyed())
-				if ruleStars != battleStars {
-					b.logger.Info().
-						Int("visual_stars", battleStars).
-						Int("rule_stars", ruleStars).
+				if finalPct >= 50 {
+					if visualStars < 1 || visualStars > 2 {
+						battleStars = ruleStars
+					}
+				} else {
+					if visualStars < 0 || visualStars > 1 {
+						battleStars = ruleStars
+					}
+				}
+				if battleStars != visualStars {
+					b.logger.Warn().
+						Int("visual_stars", visualStars).
+						Int("reconciled_stars", battleStars).
 						Int("destruction_pct", finalPct).
 						Bool("th_destroyed", b.attackExec.ThDestroyed()).
-						Msg("battle stars: keeping visual parse over destruction-rule read")
+						Msg("result-screen stars rejected as inconsistent with battle outcome")
 				}
 			}
 
-			b.totalGold.Add(int64(parsedResult.Loot.Gold + parsedResult.Bonus.Gold))
-			b.totalElixir.Add(int64(parsedResult.Loot.Elixir + parsedResult.Bonus.Elixir))
-			b.totalDE.Add(int64(parsedResult.Loot.DarkElixir + parsedResult.Bonus.DarkElixir))
-			b.totalStars.Add(int32(battleStars))
-
-			switch battleStars {
-			case 0:
-				b.stars0.Add(1)
-			case 1:
-				b.stars1.Add(1)
-			case 2:
-				b.stars2.Add(1)
-			case 3:
-				b.stars3.Add(1)
+			// Prefer the battle's live Available-Loot delta over themed
+			// result-screen OCR whenever two stable live reads were accepted.
+			// This directly measures what disappeared from the enemy's loot
+			// counters and is substantially more stable across CoC themes.
+			if liveLoot, ok := b.attackExec.EstimatedLootStolen(); ok {
+				b.logger.Info().
+					Int("live_gold", liveLoot.Gold).
+					Int("ocr_gold", battleGold).
+					Int("live_elixir", liveLoot.Elixir).
+					Int("ocr_elixir", battleElixir).
+					Int("live_de", liveLoot.DarkElixir).
+					Int("ocr_de", battleDE).
+					Msg("using stable live-loot delta as authoritative attack loot")
+				battleGold = liveLoot.Gold
+				battleElixir = liveLoot.Elixir
+				battleDE = liveLoot.DarkElixir
 			}
-
-			b.logger.Info().
-				Int("stars", battleStars).
-				Int("gold", parsedResult.Loot.Gold).
-				Int("bonus_gold", parsedResult.Bonus.Gold).
-				Int("destruction_pct", finalPct).
-				Msg("battle result processed")
 		} else {
-			// OCR failed after retries — still record the rules-derived
-			// star count when the wait measured destruction, so a battle
-			// is never reported as a 0-star defeat merely because the
-			// result panel misparsed.
 			if finalPct > 0 {
 				battleStars = game.StarsFromOutcome(finalPct, b.attackExec.ThDestroyed())
-				b.logger.Error().
+				b.logger.Warn().
 					Int("stars", battleStars).
 					Int("destruction_pct", finalPct).
-					Msg("battle result OCR failed after retries; stars recorded from destruction rules")
+					Msg("result-screen OCR failed; stars derived from measured battle outcome")
 			} else {
-				b.logger.Error().Msg("battle result OCR failed after retries; recording unparsed attack")
+				b.logger.Error().Msg("battle result OCR failed after retries; no reliable destruction read available")
+			}
+
+			if liveLoot, ok := b.attackExec.EstimatedLootStolen(); ok {
+				battleGold = liveLoot.Gold
+				battleElixir = liveLoot.Elixir
+				battleDE = liveLoot.DarkElixir
+				b.logger.Info().
+					Int("gold", battleGold).
+					Int("elixir", battleElixir).
+					Int("de", battleDE).
+					Msg("result-screen OCR failed; using stable live-loot delta")
 			}
 		}
+
+		// Totals always use the reconciled values that are also written to
+		// attack_history.json, so dashboard cards and attack rows can no
+		// longer disagree.
+		b.totalGold.Add(int64(battleGold + bonusGold))
+		b.totalElixir.Add(int64(battleElixir + bonusElixir))
+		b.totalDE.Add(int64(battleDE + bonusDE))
+		b.totalStars.Add(int32(battleStars))
+
+		switch battleStars {
+		case 0:
+			b.stars0.Add(1)
+		case 1:
+			b.stars1.Add(1)
+		case 2:
+			b.stars2.Add(1)
+		case 3:
+			b.stars3.Add(1)
+		}
+
+		b.logger.Info().
+			Int("stars", battleStars).
+			Int("gold", battleGold).
+			Int("elixir", battleElixir).
+			Int("de", battleDE).
+			Int("bonus_gold", bonusGold).
+			Int("destruction_pct", finalPct).
+			Msg("battle result reconciled and ready for history")
 	} else if b.ctx.Err() != nil {
 		// The bot was stopped mid-battle. Exit cleanly — no forced
 		// restart (the ADB client is already being torn down by the
@@ -1471,15 +2109,157 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	b.zoomedOut.Store(false)
 }
 
+// focusedButtonClick trades a tiny amount of latency for much better UI
+// precision. At the faster capture cadence a button can still be moving during
+// its opening animation; clicking the first detected contour can therefore hit
+// an edge or neighboring control. We require two consecutive detections with a
+// stable center, average them, then issue a very-low-jitter TapFast.
+func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, bool), attempts int) bool {
+	if attempts <= 0 {
+		attempts = 1
+	}
+
+	for attempt := 1; attempt <= attempts; attempt++ {
+		first, err := b.client.CaptureToMat()
+		if err != nil || first.Empty() {
+			if !first.Empty() { first.Close() }
+			time.Sleep(70 * time.Millisecond)
+			continue
+		}
+		x1, y1, ok1 := locator(first)
+		first.Close()
+		if !ok1 {
+			time.Sleep(70 * time.Millisecond)
+			continue
+		}
+
+		// Let the button finish a few animation frames, then confirm its center.
+		time.Sleep(85 * time.Millisecond)
+		second, err := b.client.CaptureToMat()
+		if err != nil || second.Empty() {
+			if !second.Empty() { second.Close() }
+			continue
+		}
+		x2, y2, ok2 := locator(second)
+		second.Close()
+		if !ok2 {
+			continue
+		}
+
+		dx := x2 - x1
+		if dx < 0 { dx = -dx }
+		dy := y2 - y1
+		if dy < 0 { dy = -dy }
+
+		// More than ~10 px movement means the UI is still animating or the two
+		// frames latched onto different blobs. Wait for the next stable pair.
+		maxDrift := int(10.0 * b.cal.ScaleX)
+		if maxDrift < 6 { maxDrift = 6 }
+		if dx > maxDrift || dy > maxDrift {
+			b.logger.Debug().
+				Str("button", name).
+				Int("dx", dx).
+				Int("dy", dy).
+				Msg("button center still moving; waiting for stable focus")
+			time.Sleep(70 * time.Millisecond)
+			continue
+		}
+
+		x := (x1 + x2) / 2
+		y := (y1 + y2) / 2
+		b.logger.Info().
+			Str("button", name).
+			Int("x", x).
+			Int("y", y).
+			Int("drift_x", dx).
+			Int("drift_y", dy).
+			Msg("focused click locked on stable button center")
+
+		// 0.6px sigma keeps a microscopic human-like variation without the
+		// several-pixel spread of TapRandomized (3.5px sigma).
+		if err := b.client.TapFast(x, y, 0.6); err != nil {
+			b.logger.Warn().Err(err).Str("button", name).Msg("focused tap failed")
+			continue
+		}
+		b.recordActivity()
+		return true
+	}
+	return false
+}
+
+// waitForStableLocator waits until a target is visible at a stable center.
+// This is intentionally used BETWEEN critical menu clicks so the bot never
+// chains taps into an animation that has not finished opening yet.
+func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int, bool), timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	var lastX, lastY int
+	stable := 0
+
+	for time.Now().Before(deadline) {
+		screen, err := b.client.CaptureToMat()
+		if err != nil || screen.Empty() {
+			if !screen.Empty() { screen.Close() }
+			time.Sleep(90 * time.Millisecond)
+			continue
+		}
+		x, y, ok := locator(screen)
+		screen.Close()
+		if !ok {
+			stable = 0
+			time.Sleep(90 * time.Millisecond)
+			continue
+		}
+
+		if stable > 0 {
+			dx := x-lastX; if dx < 0 { dx = -dx }
+			dy := y-lastY; if dy < 0 { dy = -dy }
+			if dx <= 8 && dy <= 8 {
+				stable++
+			} else {
+				stable = 1
+			}
+		} else {
+			stable = 1
+		}
+		lastX, lastY = x, y
+
+		if stable >= 2 {
+			b.logger.Info().Str("target", name).Int("x", x).Int("y", y).Msg("next UI target is stable and ready")
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	b.logger.Warn().Str("target", name).Dur("timeout", timeout).Msg("next UI target did not become stable in time")
+	return false
+}
+
 func (b *Bot) clickSequence() bool {
 
 	attackClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
-		if b.findAndClick("btn_attack", "Attack", 1) {
+		// findAttackButton already has the Windows-safe localized/color checks.
+		// Do not require the older text/template matcher a second time here:
+		// that created the contradictory "Attack detected" -> "could not find
+		// Attack button" failure seen on localized/animated village frames.
+		if b.focusedButtonClick("Attack", b.locateAttackButtonColor, 2) {
 			attackClicked = true
 			break
 		}
-		b.client.JitteredSleep(500 * time.Millisecond)
+		if screen, err := b.client.CaptureToMat(); err == nil {
+			if b.findAttackButton(screen, 0.30) {
+				x, y := b.cal.ScaleRef(64, 666)
+				screen.Close()
+				b.logger.Info().Int("x", x).Int("y", y).Msg("Attack fallback verified; precision tapping canonical center")
+				if err := b.client.TapFast(x, y, 0.5); err == nil {
+					b.recordActivity()
+					attackClicked = true
+					break
+				}
+			} else {
+				screen.Close()
+			}
+		}
+		b.client.JitteredSleep(650 * time.Millisecond)
 	}
 	if !attackClicked {
 		b.logger.Warn().Msg("could not find or click Attack button")
@@ -1489,25 +2269,77 @@ func (b *Bot) clickSequence() bool {
 		}
 		return false
 	}
-	b.client.JitteredSleep(500 * time.Millisecond)
+	// Do not chain directly into the next tap. Wait for the attack menu to
+	// finish opening and for Find Match to be stable in two consecutive frames.
+	if !b.waitForStableLocator("Find Match", b.locateFindMatchButtonColor, 3*time.Second) {
+		b.logger.Warn().Msg("attack menu did not settle on Find Match after Attack click")
+	}
 
 	findMatchClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
+		if b.focusedButtonClick("Find Match", b.locateFindMatchButtonColor, 2) {
+			findMatchClicked = true
+			break
+		}
+		if screen, err := b.client.CaptureToMat(); err == nil {
+			state, score := b.classify(screen)
+			screen.Close()
+			if state == game.StateFindMatch {
+				x, y := b.cal.ScaleRef(215, 563)
+				b.logger.Info().
+					Int("score", score).
+					Int("x", x).
+					Int("y", y).
+					Msg("Find Match screen verified by classifier; precision tapping canonical center")
+				if err := b.client.TapFast(x, y, 0.5); err == nil {
+					b.recordActivity()
+					findMatchClicked = true
+					break
+				}
+			} else {
+				b.logger.Info().
+					Str("state", state.String()).
+					Int("score", score).
+					Msg("Find Match retry: no stable focused target yet")
+			}
+		}
+
+		// Keep the legacy template path as a final fallback, not the primary
+		// detector for this localized/current CoC screen.
 		if b.findAndClick("btn_find_match", "Find Match", 1) {
 			findMatchClicked = true
 			break
 		}
-		b.client.JitteredSleep(500 * time.Millisecond)
+
+		b.client.JitteredSleep(650 * time.Millisecond)
 	}
 	if !findMatchClicked {
 		b.logger.Warn().Msg("could not find or click Find Match button")
 		if screen, err := b.client.CaptureToMat(); err == nil {
-			b.DumpDiagnostics("click_find_match_failed", screen, nil)
+			state, score := b.classify(screen)
+			b.DumpDiagnostics("click_find_match_failed", screen, map[string]interface{}{
+				"classified_state": state.String(),
+				"classified_score": score,
+			})
 			screen.Close()
 		}
 		return false
 	}
-	b.client.JitteredSleep(500 * time.Millisecond)
+	// Find Match opens a transition/menu. Give it a real state transition
+	// window instead of firing Army Arrow at a stale frame.
+	armyReadyDeadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(armyReadyDeadline) {
+		s, err := b.client.CaptureToMat()
+		if err == nil && !s.Empty() {
+			st, _ := b.classify(s)
+			s.Close()
+			if st == game.StateArmySelection || st == game.StateArmyCamp {
+				b.logger.Info().Str("state", st.String()).Msg("army menu state confirmed before next click")
+				break
+			}
+		}
+		time.Sleep(120 * time.Millisecond)
+	}
 
 	armyArrowClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
@@ -1515,7 +2347,7 @@ func (b *Bot) clickSequence() bool {
 			armyArrowClicked = true
 			break
 		}
-		b.client.JitteredSleep(500 * time.Millisecond)
+		b.client.JitteredSleep(650 * time.Millisecond)
 	}
 	if !armyArrowClicked {
 		b.logger.Warn().Msg("could not find or click Army Arrow button")
@@ -1525,7 +2357,7 @@ func (b *Bot) clickSequence() bool {
 		}
 		return false
 	}
-	b.client.JitteredSleep(500 * time.Millisecond)
+	b.client.JitteredSleep(650 * time.Millisecond)
 
 	armyClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
@@ -1533,7 +2365,7 @@ func (b *Bot) clickSequence() bool {
 			armyClicked = true
 			break
 		}
-		b.client.JitteredSleep(500 * time.Millisecond)
+		b.client.JitteredSleep(650 * time.Millisecond)
 	}
 	if !armyClicked {
 		b.logger.Warn().Int("army_slot", b.armySlot).Msg("army recipe card did not appear, continuing anyway")
@@ -1542,15 +2374,19 @@ func (b *Bot) clickSequence() bool {
 			screen.Close()
 		}
 	}
-	b.client.JitteredSleep(500 * time.Millisecond)
+	b.client.JitteredSleep(650 * time.Millisecond)
 
 	battleClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
+		if b.focusedButtonClick("Battle Attack", b.locateBattleButtonColor, 2) {
+			battleClicked = true
+			break
+		}
 		if b.findAndClick("btn_battle", "Battle", 1) {
 			battleClicked = true
 			break
 		}
-		b.client.JitteredSleep(500 * time.Millisecond)
+		b.client.JitteredSleep(650 * time.Millisecond)
 	}
 	if !battleClicked {
 		b.logger.Warn().Msg("could not find or click Battle button")
@@ -1586,7 +2422,7 @@ func (b *Bot) selectArmySlot() bool {
 	tapX, tapY := b.cal.ScaleRef(430, cardY)
 
 	b.logger.Info().Int("army_slot", slot).Int("x", tapX).Int("y", tapY).Msg("selecting saved army recipe card")
-	if err := b.client.TapRandomized(tapX, tapY); err != nil {
+	if err := b.client.TapFast(tapX, tapY, 0.7); err != nil {
 		b.logger.Warn().Err(err).Msg("army recipe card tap failed")
 		return false
 	}
@@ -1614,20 +2450,14 @@ var villagePinpoints = map[string]Pinpoint{
 }
 
 func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
-
-	if pp, ok := villagePinpoints[templateName]; ok {
-		px, py := b.cal.ScaleRef(pp.X, pp.Y)
-		b.logger.Info().Str("step", stepName).Msg("pinpoint match, clicking...")
-		// TapRandomized = Gaussian jitter + the 180-450ms human reaction
-		// delay, so the bot visibly hesitates before committing to each
-		// decision tap the way a player would.
-		if err := b.client.TapRandomized(px, py); err == nil {
-			time.Sleep(1000 * time.Millisecond)
-			b.recordActivity()
-			return true
-		}
-	}
-
+	// Never treat a hard-coded coordinate as a successful match. On Windows
+	// the old fast path tapped the reference coordinate unconditionally and
+	// returned true even when the expected screen was not visible. That made
+	// clickSequence advance through Attack -> Find Match -> Army -> Battle on
+	// the village screen and then falsely report "searching".
+	//
+	// Coordinates remain useful only as a last-resort diagnostic reference;
+	// normal progression must be backed by an actual template/color match.
 	tpl, ok := b.templates.Get(templateName)
 	if !ok {
 		b.logger.Error().Str("template", templateName).Msg("template not loaded")
@@ -1662,7 +2492,7 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 			if b.isGreen(screen, altX, altY) {
 				screen.Close()
 				b.logger.Info().Str("step", stepName).Msg("secondary pinpoint match (upper battle), clicking...")
-				if err := b.client.TapRandomized(altX, altY); err == nil {
+				if err := b.client.TapFast(altX, altY, 0.6); err == nil {
 					b.recordActivity()
 					return true
 				}
@@ -1670,16 +2500,21 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 			}
 		}
 
-		matches, err := vision.MatchMultiScaleROICached(screen, tpl, templateName, 0.2, 2.0, 5, 0.45, physROI)
-		screen.Close()
+		threshold := float32(0.45)
+		if templateName == "btn_attack" {
+			threshold = 0.35
+		}
+		matches, err := vision.MatchMultiScaleROICached(screen, tpl, templateName, 0.2, 2.0, 5, threshold, physROI)
 
 		if err != nil {
+			screen.Close()
 			b.logger.Warn().Err(err).Str("step", stepName).Msg("match error")
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
 
 		if len(matches) == 0 {
+			screen.Close()
 			if retry == 0 {
 				b.logger.Debug().Str("step", stepName).Msg("not found, retrying...")
 			}
@@ -1691,17 +2526,52 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 		best := matches[0]
 		px, py := best.Point.X, best.Point.Y
 
+		if templateName == "btn_attack" {
+			expectedX, expectedY := b.cal.ScaleRef(64, 666)
+			dx := px - expectedX
+			if dx < 0 {
+				dx = -dx
+			}
+			dy := py - expectedY
+			if dy < 0 {
+				dy = -dy
+			}
+			if dx > 80 || dy > 60 {
+				screen.Close()
+				b.logger.Warn().
+					Float64("conf", best.Confidence).
+					Int("match_x", px).
+					Int("match_y", py).
+					Int("expected_x", expectedX).
+					Int("expected_y", expectedY).
+					Msg("rejected false Attack match outside safe button area")
+				continue
+			}
+
+			// Once the template confirms the Attack button is present in its
+			// tightly constrained ROI, tap the calibrated canonical center.
+			// This prevents an imperfect template center from hitting a
+			// neighboring HUD control.
+			px, py = expectedX, expectedY
+		}
+
 		b.logger.Info().
 			Str("step", stepName).
 			Float64("conf", best.Confidence).
 			Int("x", px).Int("y", py).
-			Msg("clicking (fallback match)")
+			Msg("clicking verified button")
 
+		// IMPORTANT: SaveScreenshots previously called IMWrite after
+		// screen.Close(), handing OpenCV a freed native cv::Mat*. On Windows
+		// that is a process-level access violation (0xc0000005), which exactly
+		// matched the crash immediately after "clicking (fallback match)".
+		// Keep the Mat alive through the optional diagnostic write, then close.
 		if b.cfg.Debug.SaveScreenshots {
 			gocv.IMWrite(paths.ResolveConfig(fmt.Sprintf("diag_fallback_%s.png", templateName)), screen)
 		}
+		screen.Close()
 
-		if err := b.client.TapRandomized(px, py); err != nil {
+		if err := b.client.TapFast(px, py, 0.7); err != nil {
 			b.logger.Error().Err(err).Msg("tap failed")
 			return false
 		}
@@ -1712,11 +2582,11 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 
 	if pp, ok := villagePinpoints[templateName]; ok {
 		px, py := b.cal.ScaleRef(pp.X, pp.Y)
-		b.logger.Warn().Str("step", pp.Name).Msg("pinpoint color check and template match failed; executing blind tap fallback")
-		if err := b.client.TapRandomized(px, py); err == nil {
-			b.recordActivity()
-			return true
-		}
+		b.logger.Warn().
+			Str("step", pp.Name).
+			Int("reference_x", px).
+			Int("reference_y", py).
+			Msg("template/color verification failed; refusing blind tap")
 	}
 
 	b.logger.Error().Str("step", stepName).Int("retries", maxRetries).Msg("failed after retries")
@@ -1878,16 +2748,26 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 			return true
 		case state == game.StateSearchMap || state == game.StateLoading:
 			b.logger.Info().Msg("in clouds/loading...")
-			time.Sleep(1 * time.Second)
+			time.Sleep(300 * time.Millisecond)
 			continue
 		case state == game.StateArmySelection || state == game.StateArmyCamp:
-			b.logger.Info().Msg("in army menu, retrying battle click...")
-			b.findAndClick("btn_battle", "Battle Retry", 1)
-			time.Sleep(1 * time.Second)
+			b.logger.Info().Msg("in army menu, retrying Battle Attack button...")
+			if retryScreen, capErr := b.client.CaptureToMat(); capErr == nil {
+				if x, y, ok := b.locateBattleButtonColor(retryScreen); ok {
+					retryScreen.Close()
+					b.logger.Info().Int("x", x).Int("y", y).Msg("retrying with detected Battle Attack button center")
+					_ = b.client.TapFast(x, y, 0.6)
+					b.recordActivity()
+				} else {
+					retryScreen.Close()
+					b.findAndClick("btn_battle", "Battle Retry", 1)
+				}
+			}
+			time.Sleep(400 * time.Millisecond)
 		default:
 			b.logger.Info().Str("state", state.String()).Msg("waiting for battle state (searching)...")
 			b.dismissInterruptions()
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(250 * time.Millisecond)
 		}
 	}
 
@@ -1907,7 +2787,7 @@ func (b *Bot) deployTroops(screen gocv.Mat) (int, error) {
 		Int("phases", len(strat.Phases)).
 		Msg("executing dynamic attack plan")
 
-	time.Sleep(600 * time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
 
 	remaining, err := b.attackExec.DeployDynamicV2(strat, screen, b.cfg.Attack.StrategyFile)
 	if err != nil {
@@ -1980,7 +2860,7 @@ func (b *Bot) Health() game.SystemHealth {
 		AvgCaptureMs:     b.client.Health().AvgCaptureMs,
 		ConsecutiveFails: b.client.Health().ConsecutiveFails,
 		CPUTimeSec:       CPUTime().Seconds(),
-		CPUCores:         b.cpuSampler.Usage(),
+		CPUCores:          b.cpuSampler.Usage(),
 	}
 }
 
@@ -2008,9 +2888,12 @@ func (b *Bot) Stats() BotStats {
 		Stars2:           b.stars2.Load(),
 		Stars3:           b.stars3.Load(),
 		Uptime:           time.Since(b.startedAt),
-		AdbHealth:        b.client.Health(),
-		CPUTimeSec:       CPUTime().Seconds(),
-		CPUCores:         b.cpuSampler.Usage(),
+		AdbHealth:          b.client.Health(),
+		CPUTimeSec:         CPUTime().Seconds(),
+		CPUCores:           b.cpuSampler.Usage(),
+		RecoveryAttempts:   b.recoveryAttempts.Load(),
+		RecoverySuccesses:  b.recoverySuccesses.Load(),
+		BlueStacksRestarts: b.blueStacksRestarts.Load(),
 	}
 }
 
@@ -2030,6 +2913,10 @@ type BotStats struct {
 	CPUTimeSec float64 `json:"cpu_time_sec"`
 
 	CPUCores float64 `json:"cpu_cores"`
+
+	RecoveryAttempts   int32 `json:"recovery_attempts"`
+	RecoverySuccesses  int32 `json:"recovery_successes"`
+	BlueStacksRestarts int32 `json:"bluestacks_restarts"`
 }
 
 type AttackReport struct {

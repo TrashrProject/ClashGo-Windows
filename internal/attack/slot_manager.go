@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"image"
 	"math"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -84,17 +85,28 @@ func NewSlotManager(
 		logger:    logger.With().Str("component", "slot_manager").Logger(),
 	}
 
-	sm.slotY = mBarY + int(38.0*float64(h)/float64(pCfg.Height))
-	if data, ok := readConfigJSON("manual_slots.json"); ok {
-		var mConf struct {
-			SlotY      int `json:"slot_y"`
-			CardHeight int `json:"card_height"`
-		}
-		if json.Unmarshal(data, &mConf) == nil {
-			if mConf.SlotY > 0 {
-				sm.slotY = mConf.SlotY
-			} else if mConf.CardHeight > 0 {
-				sm.slotY = mBarY + mConf.CardHeight/2
+	// Current Windows/BlueStacks battle bar sits at the bottom of the
+	// 860x732 capture. The historical manual_slots.json contains a stale
+	// slot_y from another layout; using it can send a "select troop" tap
+	// into the upper-left battle HUD (including Surrender).
+	if runtime.GOOS == "windows" {
+		sm.slotY = int(float64(h) * 0.925)
+		sm.barY = int(float64(h) * 0.82)
+	} else {
+		refH := pCfg.Height
+		if refH <= 0 { refH = 732 }
+		sm.slotY = mBarY + int(38.0*float64(h)/float64(refH))
+		if data, ok := readConfigJSON("manual_slots.json"); ok {
+			var mConf struct {
+				SlotY      int `json:"slot_y"`
+				CardHeight int `json:"card_height"`
+			}
+			if json.Unmarshal(data, &mConf) == nil {
+				if mConf.SlotY > 0 {
+					sm.slotY = mConf.SlotY
+				} else if mConf.CardHeight > 0 {
+					sm.slotY = mBarY + mConf.CardHeight/2
+				}
 			}
 		}
 	}
@@ -105,10 +117,19 @@ func NewSlotManager(
 		return sm
 	}
 
-	barROI := image.Rect(0, mBarY, w, h)
+	barROI := image.Rect(0, sm.barY, w, h)
 	sm.classifySlots(screen, activeXs, templates, barROI)
 
-	sm.applyManualLabelsFallback()
+	// Windows must not inherit stale positional/manual classifications.
+	// A wrong "Spell" guess sends a perfectly valid troop into the middle
+	// of the map, which Clash rejects as red-zone deployment. On the live
+	// Windows path we only trust positive template matches; every unknown
+	// card stays a generic Troop and is deployed on the verified outer edge.
+	if runtime.GOOS != "windows" {
+		sm.applyManualLabelsFallback()
+	} else {
+		sm.logger.Debug().Msg("Windows: skipping stale manual labels; unidentified cards remain safe-edge troops")
+	}
 
 	for _, slot := range sm.slots {
 		sm.xIndex[slot.X] = slot
@@ -117,13 +138,18 @@ func NewSlotManager(
 		}
 	}
 
-	sm.logger.Info().Int("total", len(sm.slots)).Msg("slot manager initialized")
+	sm.logger.Debug().Int("total", len(sm.slots)).Msg("slot manager initialized")
 	return sm
 }
 
 // detectActiveSlots finds all non-empty X positions on the troop bar.
 func (sm *SlotManager) detectActiveSlots(screen gocv.Mat) []int {
 
+	// The shipped manual_slots.json belongs to an older army-bar layout.
+	// On Windows/current CoC it can omit live cards (especially heroes and
+	// event troops), so do not let stale calibration decide which cards exist.
+	// Detect the live bar instead and keep manual calibration for non-Windows.
+	if runtime.GOOS != "windows" {
 	if data, ok := readConfigJSON("manual_slots.json"); ok {
 		var mConf struct {
 			SlotXs []int `json:"slot_xs"`
@@ -140,15 +166,72 @@ func (sm *SlotManager) detectActiveSlots(screen gocv.Mat) []int {
 			return activeXs
 		}
 	}
+	} else {
+		sm.logger.Debug().Msg("Windows: ignoring stale manual slot map; detecting every live troop-bar card")
+
+		// Dense live scan instead of a fixed 72px grid. The current CoC bar
+		// does not align to the old grid (the first ED card can sit ~20-30px
+		// away from a nominal center), so a valid troop card could be skipped
+		// entirely while later siege/spell cards were found.
+		type candidate struct {
+			x int
+			a float64
+		}
+		scaleX := float64(sm.w) / 860.0
+		minSep := int(48.0 * scaleX)
+		if minSep < 36 { minSep = 36 }
+
+		var candidates []candidate
+		for x := int(24.0*scaleX); x < sm.w-int(24.0*scaleX); x += 4 {
+			a := GetSlotActivityRatioStatic(screen, x, sm.slotY, sm.w)
+			if a >= 0.085 {
+				candidates = append(candidates, candidate{x: x, a: a})
+			}
+		}
+		sort.Slice(candidates, func(i, j int) bool {
+			return candidates[i].a > candidates[j].a
+		})
+
+		var picked []candidate
+		for _, cand := range candidates {
+			tooClose := false
+			for _, p := range picked {
+				d := cand.x - p.x
+				if d < 0 { d = -d }
+				if d < minSep {
+					tooClose = true
+					break
+				}
+			}
+			if tooClose {
+				continue
+			}
+			picked = append(picked, cand)
+			if len(picked) >= 12 {
+				break
+			}
+		}
+		sort.Slice(picked, func(i, j int) bool { return picked[i].x < picked[j].x })
+		activeXs := make([]int, 0, len(picked))
+		for _, p := range picked {
+			activeXs = append(activeXs, p.x)
+		}
+
+		sm.logger.Debug().
+			Ints("slot_xs", activeXs).
+			Int("count", len(activeXs)).
+			Msg("Windows dense live troop-bar scan detected card centers")
+		return activeXs
+	}
 
 	sm.logger.Info().Msg("manual calibration missing, falling back to grid detection")
 	scaleX := float64(sm.w) / 860.0
-	step := int(75.0 * scaleX)
-	startX := int(40.0 * scaleX)
+	step := int(72.0 * scaleX)
+	startX := int(38.0 * scaleX)
 	var activeXs []int
-	for x := startX; x < sm.w-20; x += step {
-		if !isSlotEmptyStatic(screen, x, sm.slotY, sm.w, sm.h) {
-			activeXs = append(activeXs, x)
+	for nominal := startX; nominal < sm.w-20; nominal += step {
+		if !isSlotEmptyStatic(screen, nominal, sm.slotY, sm.w, sm.h) {
+			activeXs = append(activeXs, nominal)
 		}
 	}
 	return activeXs
@@ -205,24 +288,114 @@ func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates 
 		bestSlot.Confidence = res.match.Confidence
 		bestSlot.State = SlotIdentified
 
-		if isHeroStatic(cleanName) {
-			bestSlot.Category = "Hero"
-		} else if isSiegeStatic(cleanName) {
-			bestSlot.Category = "Siege"
-		} else if isSpellStatic(cleanName) {
-			bestSlot.Category = "Spell"
-		} else if strings.Contains(cleanName, "cc") || strings.Contains(cleanName, "castle") {
-			bestSlot.Category = "CC"
+		if runtime.GOOS == "windows" {
+			// Heroes need a lower confidence floor than spells/siege. Their
+			// portraits vary more with level/skin and the previous global 0.72
+			// gate demoted 3/4 real hero cards to generic Troop, so they were
+			// never given one-shot placement semantics.
+			switch {
+			case isHeroStatic(cleanName):
+				// MatchMultiScale already filters below 0.55. Accept every
+				// surviving hero portrait match on Windows; skins/levels can
+				// legitimately sit in the 0.55-0.58 band and were being
+				// demoted to generic Troop, which caused only 1/4 heroes to
+				// receive one-shot deployment.
+				if res.match.Confidence >= 0.55 {
+					bestSlot.Category = "Hero"
+				}
+			case isSiegeStatic(cleanName):
+				if res.match.Confidence >= 0.66 {
+					bestSlot.Category = "Siege"
+				}
+			case isSpellStatic(cleanName):
+				if res.match.Confidence >= 0.66 {
+					bestSlot.Category = "Spell"
+				}
+			case strings.Contains(cleanName, "cc") || strings.Contains(cleanName, "castle"):
+				if res.match.Confidence >= 0.70 {
+					bestSlot.Category = "CC"
+				}
+			}
+		} else {
+			if isHeroStatic(cleanName) {
+				bestSlot.Category = "Hero"
+			} else if isSiegeStatic(cleanName) {
+				bestSlot.Category = "Siege"
+			} else if isSpellStatic(cleanName) {
+				bestSlot.Category = "Spell"
+			} else if strings.Contains(cleanName, "cc") || strings.Contains(cleanName, "castle") {
+				bestSlot.Category = "CC"
+			}
 		}
 
-		sm.logger.Info().
+		sm.logger.Debug().
 			Str("unit", cleanName).
 			Int("x", bestSlot.X).
 			Float64("conf", res.match.Confidence).
 			Msg("identified unit via template match")
 	}
 
-	sm.applyPositionalClassification(activeXs)
+	if runtime.GOOS != "windows" {
+		sm.applyPositionalClassification(activeXs)
+	} else {
+		// Structural hero fallback: hero cards carry a bright green health bar
+		// near the top of the card. This remains stable across skins and level
+		// changes, unlike portrait templates. Only promote still-generic cards;
+		// confident spell/siege classifications always win.
+		for _, slot := range sm.slots {
+			if slot.Category == "Troop" && looksLikeHeroCardStatic(screen, slot.X, sm.barY, sm.w, sm.h) {
+				slot.Category = "Hero"
+				sm.logger.Debug().
+					Int("x", slot.X).
+					Str("unit", slot.UnitName).
+					Msg("Windows structural hero fallback matched green health bar")
+			}
+		}
+		sm.logger.Debug().Msg("Windows: hero structure fallback enabled; spell/siege remain template-only")
+	}
+}
+
+// looksLikeHeroCardStatic detects the green hero health strip at the top of
+// a battle-bar card. It deliberately does not identify WHICH hero it is; the
+// live deployer only needs the category to enforce one-shot placement and can
+// combine a portrait template when one is available.
+func looksLikeHeroCardStatic(screen gocv.Mat, x, barY, screenW, screenH int) bool {
+	if screen.Empty() || screenW <= 0 || screenH <= 0 {
+		return false
+	}
+	scaleX := float64(screenW) / 860.0
+	scaleY := float64(screenH) / 732.0
+	halfW := int(27.0 * scaleX)
+	y1 := barY + int(3.0*scaleY)
+	y2 := barY + int(22.0*scaleY)
+	if halfW < 18 { halfW = 18 }
+	if y2 <= y1 { y2 = y1 + 12 }
+
+	rect := image.Rect(x-halfW, y1, x+halfW, y2)
+	rect = rect.Intersect(image.Rect(0, 0, screen.Cols(), screen.Rows()))
+	if rect.Dx() < 20 || rect.Dy() < 6 {
+		return false
+	}
+
+	sub := screen.Region(rect)
+	defer sub.Close()
+	mask := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+
+	// BGR: accept bright saturated greens while rejecting gray siege bars,
+	// blue troop art and purple spell cards.
+	gocv.InRangeWithScalar(
+		sub,
+		gocv.NewScalar(0, 120, 0, 0),
+		gocv.NewScalar(155, 255, 155, 0),
+		&mask,
+	)
+	green := gocv.CountNonZero(mask)
+	total := rect.Dx() * rect.Dy()
+	if total <= 0 {
+		return false
+	}
+	return float64(green)/float64(total) >= 0.075
 }
 
 // applyPositionalClassification uses hero/spell anchors to classify unidentified slots.

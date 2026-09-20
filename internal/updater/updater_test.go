@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -355,7 +356,7 @@ func TestServiceDownloadVerifiesSHA(t *testing.T) {
 	manifest := Manifest{
 		Version: "9.9.9",
 		Platforms: map[string]PlatformSpec{
-			"darwin": {AssetName: "asset.zip", AssetURL: srv.URL + "/asset.zip", Size: int64(len(payload)), SHA256: sha},
+			platformKey(runtime.GOOS): {AssetName: "asset.zip", AssetURL: srv.URL + "/asset.zip", Size: int64(len(payload)), SHA256: sha},
 		},
 	}
 	s := newServiceForTest(t, "0.0.1", srv.Client())
@@ -407,7 +408,7 @@ func TestServiceDownloadRejectsBadSHA(t *testing.T) {
 	manifest := Manifest{
 		Version: "9.9.9",
 		Platforms: map[string]PlatformSpec{
-			"darwin": {AssetName: "asset.zip", AssetURL: srv.URL + "/asset.zip", Size: int64(len(payload)), SHA256: "deadbeef"},
+			platformKey(runtime.GOOS): {AssetName: "asset.zip", AssetURL: srv.URL + "/asset.zip", Size: int64(len(payload)), SHA256: "deadbeef"},
 		},
 	}
 	s := newServiceForTest(t, "0.0.1", srv.Client())
@@ -421,6 +422,34 @@ func TestServiceDownloadRejectsBadSHA(t *testing.T) {
 	st := s.GetStatus()
 	if st.State != StateError {
 		t.Errorf("state = %s want error", st.State)
+	}
+}
+
+
+func TestApplyAutoRequiresVerifiedManifestSHA(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "legacy.zip")
+	if err := os.WriteFile(archive, []byte("legacy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newServiceForTest(t, "0.1.0-beta", http.DefaultClient)
+	s.statusMu.Lock()
+	s.status.State = StateReady
+	s.status.DownloadPath = archive
+	s.downloadSpec = downloadSpec{
+		Name:    "legacy.zip",
+		Version: "0.2.0-beta",
+		SHA256:  "",
+	}
+	s.statusMu.Unlock()
+
+	ok, err := s.ApplyAuto()
+	if ok {
+		t.Fatal("ApplyAuto unexpectedly accepted an unverified legacy release")
+	}
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "sha256") {
+		t.Fatalf("expected SHA256 verification error, got %v", err)
 	}
 }
 
@@ -469,8 +498,8 @@ func TestService_UpdateSequenceEndToEnd(t *testing.T) {
 		Notes:        "fixes + formula deploy",
 		MinSupported: "0.1.0-beta",
 		Platforms: map[string]PlatformSpec{
-			"darwin": {
-				AssetName: "ClashGO-v0.2.0-beta-macOS.zip",
+			platformKey(runtime.GOOS): {
+				AssetName: "asset.zip",
 				AssetURL:  "/asset.zip",
 				Size:      int64(len(payload)),
 				SHA256:    sha,
@@ -532,7 +561,7 @@ func TestService_UpdateSequenceEndToEnd(t *testing.T) {
 	if st.State != StateIdle {
 		t.Errorf("expected StateIdle after Check, got %s", st.State)
 	}
-	if st.AssetName != "ClashGO-v0.2.0-beta-macOS.zip" {
+	if st.AssetName != "asset.zip" {
 		t.Errorf("asset name = %q", st.AssetName)
 	}
 	// Confirm the producer/consumer contract: SHA, asset fields,
@@ -625,3 +654,28 @@ func newServiceForTest(t *testing.T, currentVersion string, client *http.Client)
 
 // Ensure io is referenced (used in streamToFile progress reader).
 var _ = io.EOF
+
+
+func TestPrepareWindowsUpdateHelperCopiesSource(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "install_update.ps1")
+	payload := []byte("Write-Host 'update helper'\n")
+	if err := os.WriteFile(source, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tempPath, err := prepareWindowsUpdateHelper(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tempPath)
+	if tempPath == source {
+		t.Fatal("temporary helper must not reuse installed source path")
+	}
+	got, err := os.ReadFile(tempPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("temporary helper contents=%q want %q", got, payload)
+	}
+}

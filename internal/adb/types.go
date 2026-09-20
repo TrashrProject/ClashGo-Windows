@@ -53,6 +53,10 @@ func WithLogger(l Logger) Option {
 	return func(c *Client) { c.log = l }
 }
 
+func WithBlueStacksInstance(instance string) Option {
+	return func(c *Client) { c.blueStacksInstance = instance }
+}
+
 func WithTimeout(d time.Duration) Option {
 	return func(c *Client) {
 		c.timeout = d
@@ -93,6 +97,7 @@ type Health struct {
 
 func (h *Health) RecordSuccess(d time.Duration) {
 	h.LastCapture = time.Now()
+	h.CapturesTotal++
 	ms := d.Seconds() * 1000
 	if h.AvgCaptureMs == 0 {
 		h.AvgCaptureMs = ms
@@ -100,10 +105,12 @@ func (h *Health) RecordSuccess(d time.Duration) {
 		h.AvgCaptureMs = h.AvgCaptureMs*0.9 + ms*0.1
 	}
 	h.ConsecutiveFails = 0
+	h.LastError = ""
 }
 
 func (h *Health) RecordFailure(err error) {
 	h.ConsecutiveFails++
+	h.ErrorsTotal++
 	if err != nil {
 		h.LastError = err.Error()
 	}

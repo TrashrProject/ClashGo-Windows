@@ -115,8 +115,9 @@ type serviceConfig struct {
 	Now            func() time.Time
 }
 
-// DefaultConfig returns the production configuration for a ClashGO app
-// pointing at the public Ducky705/ClashGO repo.
+// DefaultConfig returns the production configuration for the Windows fork.
+// Upstream attribution remains in LICENSE/README; releases are resolved from
+// this repository so Windows users receive Windows-compatible artifacts.
 //
 // HTTPClient.Timeout is generous because it covers both metadata checks
 // (sub-second) AND asset downloads (multi-MB over slow Wi-Fi). If a
@@ -124,8 +125,8 @@ type serviceConfig struct {
 // streamToFile specifically rather than this global knob.
 func DefaultConfig(currentVersion string) serviceConfig {
 	return serviceConfig{
-		RepoOwner:      "Ducky705",
-		RepoName:       "ClashGO",
+		RepoOwner:      "TrashrProject",
+		RepoName:       "ClashGo-Windows",
 		CurrentVersion: currentVersion,
 		HTTPClient:     &http.Client{Timeout: 5 * time.Minute},
 		Now:            time.Now,
@@ -798,15 +799,16 @@ func (s *Service) Apply() error {
 
 	switch runtime.GOOS {
 	case "darwin":
-		// `open -R` reveals the file in Finder with the parent dir
-		// selected. The user double-clicks the dmg/zip and drags the
-		// .app into /Applications as macOS expects.
 		cmd := exec.Command("open", "-R", st.DownloadPath)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		return cmd.Run()
+	case "windows":
+		// Reveal the verified archive in Explorer. This is the safe/manual
+		// fallback when the in-place PowerShell helper cannot be used.
+		cmd := exec.Command("explorer.exe", "/select,"+st.DownloadPath)
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		return cmd.Start()
 	default:
-		// On non-darwin we can't `open`; surface the path so the
-		// user can find it manually.
 		return fmt.Errorf("auto-install not supported on %s; update file at: %s", runtime.GOOS, st.DownloadPath)
 	}
 }
@@ -819,12 +821,71 @@ func (s *Service) Apply() error {
 // and is bundled by the Makefile's package target. If the script is
 // missing, returns an error so the UI can fall back to Finder.
 func (s *Service) ApplyAuto() (bool, error) {
-	if runtime.GOOS != "darwin" {
-		return false, fmt.Errorf("auto-install only supported on macOS")
-	}
 	st := s.GetStatus()
 	if st.State != StateReady || st.DownloadPath == "" {
 		return false, errors.New("download not ready — call Download() first")
+	}
+
+	// Automatic replacement is intentionally stricter than the manual
+	// "reveal archive" fallback: only a release described by latest.json
+	// carries the expected SHA256 and is eligible for one-click install.
+	s.statusMu.RLock()
+	verifiedManifest := strings.TrimSpace(s.downloadSpec.SHA256) != ""
+	s.statusMu.RUnlock()
+	if !verifiedManifest {
+		return false, errors.New("automatic install requires a SHA256-verified release manifest; use the manual update action for legacy releases")
+	}
+
+	if runtime.GOOS == "windows" {
+		exe, err := os.Executable()
+		if err != nil {
+			return false, err
+		}
+		installDir := filepath.Dir(exe)
+		helperCandidates := []string{
+			filepath.Join(installDir, "resources", "install_update.ps1"),
+			filepath.Join(installDir, "install_update.ps1"),
+		}
+		var helper string
+		for _, p := range helperCandidates {
+			if info, err := os.Stat(p); err == nil && !info.IsDir() {
+				helper = p
+				break
+			}
+		}
+		if helper == "" {
+			return false, errors.New("Windows update helper is missing from the installation")
+		}
+		if err := checkInstallDirWritable(installDir); err != nil {
+			return false, err
+		}
+		tempHelperPath, err := prepareWindowsUpdateHelper(helper)
+		if err != nil {
+			return false, err
+		}
+
+		cmd := exec.Command(
+			"powershell.exe",
+			"-NoProfile",
+			"-ExecutionPolicy", "Bypass",
+			"-File", tempHelperPath,
+			"-ZipPath", st.DownloadPath,
+			"-InstallDir", installDir,
+			"-ExePath", exe,
+			"-ParentPID", fmt.Sprintf("%d", os.Getpid()),
+		)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Start(); err != nil {
+			_ = os.Remove(tempHelperPath)
+			return false, fmt.Errorf("start Windows update helper: %w", err)
+		}
+		go func() { _ = cmd.Wait() }()
+		return true, nil
+	}
+
+	if runtime.GOOS != "darwin" {
+		return false, fmt.Errorf("auto-install not supported on %s", runtime.GOOS)
 	}
 
 	exe, err := os.Executable()
@@ -862,6 +923,40 @@ func (s *Service) ApplyAuto() (bool, error) {
 	// Reap async — no need to wait. The helper will wait for our exit itself.
 	go func() { _ = cmd.Wait() }()
 	return true, nil
+}
+
+func prepareWindowsUpdateHelper(source string) (string, error) {
+	helperBytes, err := os.ReadFile(source)
+	if err != nil {
+		return "", fmt.Errorf("read Windows update helper: %w", err)
+	}
+	tempHelper, err := os.CreateTemp("", "clashgo-install-update-*.ps1")
+	if err != nil {
+		return "", fmt.Errorf("create temporary update helper: %w", err)
+	}
+	tempHelperPath := tempHelper.Name()
+	cleanup := func() {
+		_ = tempHelper.Close()
+		_ = os.Remove(tempHelperPath)
+	}
+	if _, err := tempHelper.Write(helperBytes); err != nil {
+		cleanup()
+		return "", fmt.Errorf("write temporary update helper: %w", err)
+	}
+	if err := tempHelper.Close(); err != nil {
+		_ = os.Remove(tempHelperPath)
+		return "", fmt.Errorf("close temporary update helper: %w", err)
+	}
+	return tempHelperPath, nil
+}
+
+func checkInstallDirWritable(dir string) error {
+	tmp := filepath.Join(dir, ".clashgo-write-test")
+	if err := os.WriteFile(tmp, []byte("ok"), 0o644); err != nil {
+		return fmt.Errorf("cannot update installation in %s: %w", dir, err)
+	}
+	_ = os.Remove(tmp)
+	return nil
 }
 
 // checkBundleWritable reports whether the user can replace the .app

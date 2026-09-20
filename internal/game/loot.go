@@ -127,6 +127,20 @@ func (lr *LootRecognizer) ReadDestructionPercentage(screen gocv.Mat, roi image.R
 	return lr.readRow(screen, roi)
 }
 
+// ReadNumberROI exposes the battle-tested digit OCR pipeline for other HUD
+// readers (village resources, army inspector). The caller supplies a physical
+// pixel rectangle; invalid/empty reads return 0.
+func (lr *LootRecognizer) ReadNumberROI(screen gocv.Mat, roi image.Rectangle) int {
+	if screen.Empty() || roi.Empty() {
+		return 0
+	}
+	roi = roi.Intersect(image.Rect(0, 0, screen.Cols(), screen.Rows()))
+	if roi.Dx() < 2 || roi.Dy() < 2 {
+		return 0
+	}
+	return lr.readRow(screen, roi)
+}
+
 // ReadBattleResult reads the loot and star counts shown on the Clash of
 // Clans end-of-battle screen.
 //

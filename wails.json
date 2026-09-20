@@ -1,6 +1,6 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "ClashGO",
+  "name": "ClashGO Windows",
   "outputfilename": "ClashGO",
   "frontend:dir": "web",
   "frontend:install": "npm install",
@@ -8,13 +8,13 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
-    "name": "Ducky705",
+    "name": "TrashrProject",
     "email": ""
   },
   "info": {
-    "companyName": "Ducky705",
-    "productName": "ClashGO",
-    "productVersion": "0.5.0-beta",
-    "copyright": "Copyright 2026"
+    "companyName": "TrashrProject",
+    "productName": "ClashGO Windows",
+    "productVersion": "0.6.0-windows-beta",
+    "copyright": "ClashGO MIT upstream © Diego Sargent; Windows fork © 2026 TrashrProject"
   }
 }

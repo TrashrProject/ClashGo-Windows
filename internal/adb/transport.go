@@ -8,7 +8,6 @@ import (
 	"io"
 	"math/rand"
 	"net"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -199,7 +198,7 @@ func (t *Transport) connectLocked() error {
 	conn, err := net.DialTimeout("tcp", addr, DialTimeout)
 	if err != nil {
 		// Auto-start ADB server if connection is refused
-		_ = exec.Command("adb", "start-server").Run()
+		_ = hiddenCommand(ADBExecutable(), "start-server").Run()
 		time.Sleep(500 * time.Millisecond) // brief wait for startup
 		conn, err = net.DialTimeout("tcp", addr, DialTimeout)
 		if err != nil {
@@ -407,8 +406,9 @@ func (t *Transport) captureViaShellLocked() (*[]byte, int, error) {
 			*bufPtr = buf
 		}
 	}
+	out, n, err := normalizeShellScreencap(buf[:total])
 	bufferPool.Put(bufPtr)
-	return normalizeShellScreencap(buf[:total])
+	return out, n, err
 }
 
 // normalizeShellScreencap converts the raw output of

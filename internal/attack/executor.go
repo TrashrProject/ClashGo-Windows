@@ -3,6 +3,7 @@ package attack
 import (
 	"image"
 	"math/rand"
+	"runtime"
 	"strings"
 	"time"
 
@@ -105,20 +106,86 @@ func (t *TapExecutor) TapSlot(slot *TrackedSlot, jitterPx int) {
 	if strings.Contains(strings.ToLower(slot.UnitName), "warden") {
 		ptY -= int(25.0 * t.cal.ScaleY)
 	}
+
+	// Hard Windows safety rail: a troop-card selection tap is NEVER allowed
+	// outside the bottom battle bar. This protects against stale/manual slot
+	// coordinates accidentally landing on HUD buttons such as Surrender.
+	if runtime.GOOS == "windows" {
+		h := t.cal.PhysicalH
+		if h <= 0 { h = 732 }
+		minY := int(float64(h) * 0.84)
+		maxY := int(float64(h) * 0.975)
+		if ptY < minY || ptY > maxY {
+			safeY := int(float64(h) * 0.925)
+			t.logger.Warn().
+				Int("requested_y", ptY).
+				Int("safe_y", safeY).
+				Str("unit", slot.UnitName).
+				Msg("blocked unsafe troop-slot Y outside bottom battle bar")
+			ptY = safeY
+		}
+	}
+
 	jPt := t.addJitter(image.Pt(slot.X, ptY), jitterPx)
 	t.logger.Debug().
 		Int("x", jPt.X).
 		Int("y", jPt.Y).
 		Str("unit", slot.UnitName).
 		Msg("tapping slot")
-	t.client.TapFast(jPt.X, jPt.Y, 2.0)
+	t.client.TapFast(jPt.X, jPt.Y, 0.8)
+}
+
+// sanitizeDeployPoint prevents deployment taps from ever landing on the
+// lower battle HUD under Windows/BlueStacks. In particular, the Surrender
+// button occupies the lower-left HUD and the Overall Damage panel the
+// lower-right. If a computed point enters that band, move it upward while
+// preserving X so the troop still lands on the same outside edge.
+func (t *TapExecutor) sanitizeDeployPoint(pt image.Point) image.Point {
+	if runtime.GOOS != "windows" {
+		return pt
+	}
+	w := t.cal.PhysicalW
+	h := t.cal.PhysicalH
+	if w <= 0 { w = 860 }
+	if h <= 0 { h = 732 }
+
+	maxBattleY := int(float64(h) * 0.70)
+	if pt.Y > maxBattleY {
+		old := pt
+		pt.Y = maxBattleY
+		t.logger.Warn().
+			Int("old_x", old.X).
+			Int("old_y", old.Y).
+			Int("safe_x", pt.X).
+			Int("safe_y", pt.Y).
+			Msg("blocked deploy tap in lower HUD; moved above Surrender/damage controls")
+	}
+
+	// Extra hard rail for the exact Surrender/End-Battle region on the left.
+	if pt.X < int(float64(w)*0.22) && pt.Y > int(float64(h)*0.64) {
+		old := pt
+		pt.Y = int(float64(h) * 0.62)
+		t.logger.Warn().
+			Int("old_x", old.X).
+			Int("old_y", old.Y).
+			Int("safe_x", pt.X).
+			Int("safe_y", pt.Y).
+			Msg("blocked deploy tap over Surrender button region")
+	}
+	return pt
 }
 
 // TapDeployLine distributes taps along a line from p1 to p2.
+// Deployment taps deliberately use sub-2px transport jitter. The previous
+// 12-15px Gaussian jitter was large enough to throw otherwise-correct
+// red-boundary points back inside the forbidden zone on BlueStacks.
 // Direction alternates per call (boustrophedon): down the line, then
 // back up the next call, so consecutive passes never restart at the top.
 func (t *TapExecutor) TapDeployLine(p1, p2 image.Point, count int, jitterPx int) {
 	points := t.calculateLinePoints(p1, p2, count)
+	for i := range points {
+		points[i] = t.sanitizeDeployPoint(points[i])
+	}
 
 	t.lineForward = !t.lineForward
 	if !t.lineForward {
@@ -133,40 +200,74 @@ func (t *TapExecutor) TapDeployLine(p1, p2 image.Point, count int, jitterPx int)
 			j1 := t.addJitter(points[i], jitterPx)
 			j2 := t.addJitter(points[i+1], jitterPx)
 			j3 := t.addJitter(points[i+2], jitterPx)
-			t.client.TapTriple(j1.X, j1.Y, 15.0, j2.X, j2.Y, 15.0, j3.X, j3.Y, 15.0)
+			t.client.TapTriple(j1.X, j1.Y, 1.2, j2.X, j2.Y, 1.2, j3.X, j3.Y, 1.2)
 			i += 3
 		} else if rem == 2 {
 			j1 := t.addJitter(points[i], jitterPx)
 			j2 := t.addJitter(points[i+1], jitterPx)
-			t.client.TapDual(j1.X, j1.Y, 15.0, j2.X, j2.Y, 15.0)
+			t.client.TapDual(j1.X, j1.Y, 1.2, j2.X, j2.Y, 1.2)
 			i += 2
 		} else {
 			j1 := t.addJitter(points[i], jitterPx)
-			t.client.TapFast(j1.X, j1.Y, 15.0)
+			t.client.TapFast(j1.X, j1.Y, 1.0)
 			i += 1
 		}
 		t.sleepBetweenBatches()
 	}
 }
 
+// TapDeployLineReliable uses individual taps with a larger settle on Windows.
+// It is intentionally slower than TapDeployLine, but far more reliable for
+// expensive multi-capacity troops (e.g. EDrags) where losing 1-2 gestures is
+// worse than spending a few hundred extra milliseconds.
+func (t *TapExecutor) TapDeployLineReliable(p1, p2 image.Point, count int, jitterPx int) {
+	// Do not use the exact line endpoints. On live bases the endpoint pixels
+	// are the first ones to fall outside the legal deployment contour; this
+	// produced the repeatable 7/9 EDrag symptom (two endpoint taps rejected).
+	// Spread troops over the inner 12%-88% of the verified line instead.
+	points := make([]image.Point, 0, count)
+	for i := 0; i < count; i++ {
+		pct := 0.50
+		if count > 1 {
+			pct = 0.12 + 0.76*(float64(i)/float64(count-1))
+		}
+		x, y := intLerp(p1, p2, pct)
+		points = append(points, t.sanitizeDeployPoint(image.Pt(x, y)))
+	}
+	t.lineForward = !t.lineForward
+	if !t.lineForward {
+		for i, j := 0, len(points)-1; i < j; i, j = i+1, j-1 {
+			points[i], points[j] = points[j], points[i]
+		}
+	}
+	for _, pt := range points {
+		j := t.addJitter(pt, jitterPx)
+		_ = t.client.TapFast(j.X, j.Y, 0.8)
+		// 60-70ms is enough separation for CoC while avoiding the visibly
+		// sluggish 95ms cadence on 8-10 heavy troops.
+		t.client.HumanSleep(65, 10)
+	}
+}
+
 // TapDeployPoint clusters taps around a single point.
 func (t *TapExecutor) TapDeployPoint(pt image.Point, count int, jitterPx int) {
+	pt = t.sanitizeDeployPoint(pt)
 	for i := 0; i < count; {
 		rem := count - i
 		if rem >= 3 {
 			j1 := t.addJitter(pt, jitterPx)
 			j2 := t.addJitter(pt, jitterPx)
 			j3 := t.addJitter(pt, jitterPx)
-			t.client.TapTriple(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0, j3.X, j3.Y, 12.0)
+			t.client.TapTriple(j1.X, j1.Y, 1.2, j2.X, j2.Y, 1.2, j3.X, j3.Y, 1.2)
 			i += 3
 		} else if rem == 2 {
 			j1 := t.addJitter(pt, jitterPx)
 			j2 := t.addJitter(pt, jitterPx)
-			t.client.TapDual(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0)
+			t.client.TapDual(j1.X, j1.Y, 1.2, j2.X, j2.Y, 1.2)
 			i += 2
 		} else {
 			j1 := t.addJitter(pt, jitterPx)
-			t.client.TapFast(j1.X, j1.Y, 12.0)
+			t.client.TapFast(j1.X, j1.Y, 1.0)
 			i += 1
 		}
 		t.sleepBetweenBatches()
@@ -200,7 +301,7 @@ func (t *TapExecutor) TapDeployFourSides(pCfg PrecisionConfig, targetEdge string
 				j1 := t.addJitter(image.Pt(tx1, ty1), jitterPx)
 				j2 := t.addJitter(image.Pt(tx2, ty2), jitterPx)
 				j3 := t.addJitter(image.Pt(tx3, ty3), jitterPx)
-				t.client.TapTriple(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0, j3.X, j3.Y, 12.0)
+				t.client.TapTriple(j1.X, j1.Y, 1.2, j2.X, j2.Y, 1.2, j3.X, j3.Y, 1.2)
 			} else if rem == 2 {
 				pct1 := float64(i) / float64(steps-1)
 				pct2 := float64(i+1) / float64(steps-1)
@@ -208,12 +309,12 @@ func (t *TapExecutor) TapDeployFourSides(pCfg PrecisionConfig, targetEdge string
 				tx2, ty2 := intLerp(p1, p2, pct2)
 				j1 := t.addJitter(image.Pt(tx1, ty1), jitterPx)
 				j2 := t.addJitter(image.Pt(tx2, ty2), jitterPx)
-				t.client.TapDual(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0)
+				t.client.TapDual(j1.X, j1.Y, 1.2, j2.X, j2.Y, 1.2)
 			} else {
 				pct := float64(i) / float64(steps-1)
 				tx, ty := intLerp(p1, p2, pct)
 				j1 := t.addJitter(image.Pt(tx, ty), jitterPx)
-				t.client.TapFast(j1.X, j1.Y, 12.0)
+				t.client.TapFast(j1.X, j1.Y, 1.0)
 			}
 			time.Sleep(45 * time.Millisecond)
 		}

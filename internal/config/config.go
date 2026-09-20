@@ -4,24 +4,59 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Ducky705/ClashGO/internal/paths"
 )
 
 type BotConfig struct {
-	Device   DeviceConfig   `json:"device"`
-	Training TrainingConfig `json:"training"`
-	Attack   AttackConfig   `json:"attack"`
-	Search   SearchConfig   `json:"search"`
-	Upgrade  UpgradeConfig  `json:"upgrade"`
-	Debug    DebugConfig    `json:"debug"`
+	Device     DeviceConfig     `json:"device"`
+	Training   TrainingConfig   `json:"training"`
+	Attack     AttackConfig     `json:"attack"`
+	Search     SearchConfig     `json:"search"`
+	Upgrade    UpgradeConfig    `json:"upgrade"`
+	Debug      DebugConfig      `json:"debug"`
+	Account    AccountConfig    `json:"account"`
+	Automation AutomationConfig `json:"automation"`
+}
+
+type AutomationConfig struct {
+	// SimpleMode is the default user experience: ClashGO derives sane values
+	// from the linked account and only exposes a few meaningful controls.
+	SimpleMode bool `json:"simple_mode"`
+
+	// AutoFarmProfile keeps the selected farm HDV aligned with the linked
+	// Clash account after every successful account sync.
+	AutoFarmProfile bool `json:"auto_farm_profile"`
+
+	// AutoArmyGuard blocks/repairs attack flow when the detected deployment
+	// state disagrees with the target farm composition.
+	AutoArmyGuard bool `json:"auto_army_guard"`
+
+	// AutoResourceTracking enables low-rate village resource snapshots.
+	AutoResourceTracking bool `json:"auto_resource_tracking"`
+
+	// AutoProfileSync keeps account data fresh without manual Sync clicks.
+	AutoProfileSync bool `json:"auto_profile_sync"`
+}
+
+type AccountConfig struct {
+	PlayerTag string `json:"player_tag"`
+	// ProxyURL points to the ClashGO account service. End users never need
+	// a Clash developer key; the server owns that credential.
+	ProxyURL string `json:"proxy_url,omitempty"`
+	// LegacyAPIKey is kept only so older config.json files still unmarshal.
+	// The desktop app no longer uses or exposes it.
+	LegacyAPIKey string `json:"api_key,omitempty"`
 }
 
 type DeviceConfig struct {
 	ADBHost               string `json:"adb_host"`
 	ADBPort               int    `json:"adb_port"`
 	DeviceID              string `json:"device_id"`
+	BlueStacksInstance    string `json:"bluestacks_instance,omitempty"`
 	PackageName           string `json:"package_name"`
 	ZoomOutKey            string `json:"zoom_out_key"` // Key to press for zoom out (e.g., "-")
 	ZoomInKey             string `json:"zoom_in_key"`  // Key to press for zoom in (e.g., "+")
@@ -55,6 +90,8 @@ type AttackConfig struct {
 	WardenUseAtPct      int      `json:"warden_use_at_pct"`
 	ReserveDEPercent    int      `json:"reserve_de_percent"`
 	StallTimerSeconds   int      `json:"stall_timer_seconds"`
+	LootExitEnabled     bool     `json:"loot_exit_enabled"`
+	LootExitPercent     int      `json:"loot_exit_percent"`
 	// MinSecondsBetweenAttacks is the minimum pause between the end of one
 	// battle (Return Home) and the start of the next attack sequence.
 	// Armies take real time to retrain; without this gate the bot attacked
@@ -62,6 +99,90 @@ type AttackConfig struct {
 	// three near-identical defeats in under four minutes). 0 disables the
 	// pause.
 	MinSecondsBetweenAttacks int `json:"min_seconds_between_attacks"`
+
+	// FarmComposition gives the Windows live deployer a deterministic army
+	// contract instead of making troop quantity/hero decisions from OCR alone.
+	Farm FarmConfig `json:"farm"`
+}
+
+type FarmUnit struct {
+	Name    string `json:"name"`
+	Count   int    `json:"count"`
+	Housing int    `json:"housing"`
+}
+
+type FarmProfile struct {
+	TownHall                int        `json:"town_hall"`
+	Label                   string     `json:"label"`
+	TroopCapacity           int        `json:"troop_capacity"`
+	SpellCapacity           int        `json:"spell_capacity"`
+	ClanCastleTroopCapacity int        `json:"clan_castle_troop_capacity"`
+	ClanCastleSpellCapacity int        `json:"clan_castle_spell_capacity"`
+	ClanCastleSiegeCapacity int        `json:"clan_castle_siege_capacity"`
+	Troops                  []FarmUnit `json:"troops"`
+	Spells                  []FarmUnit `json:"spells"`
+	Heroes                  []string   `json:"heroes"`
+	Siege                   string     `json:"siege"`
+}
+
+type FarmConfig struct {
+	Enabled  bool                   `json:"enabled"`
+	TownHall int                    `json:"town_hall"`
+	Profiles map[string]FarmProfile `json:"profiles"`
+}
+
+// ActiveProfile returns the selected TH profile.
+func (f FarmConfig) ActiveProfile() (FarmProfile, bool) {
+	if !f.Enabled {
+		return FarmProfile{}, false
+	}
+	p, ok := f.Profiles[fmt.Sprintf("%d", f.TownHall)]
+	return p, ok
+}
+
+// DesiredCount returns the configured amount for a named troop/spell.
+func (p FarmProfile) DesiredCount(name string) int {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, u := range append(append([]FarmUnit{}, p.Troops...), p.Spells...) {
+		if strings.EqualFold(strings.TrimSpace(u.Name), name) {
+			return u.Count
+		}
+	}
+	return 0
+}
+
+func (p FarmProfile) UsesHero(name string) bool {
+	for _, h := range p.Heroes {
+		if strings.EqualFold(strings.TrimSpace(h), strings.TrimSpace(name)) {
+			return true
+		}
+	}
+	return false
+}
+
+func defaultFarmProfiles() map[string]FarmProfile {
+	makeP := func(th, troopCap, spellCap, ccTroop, ccSpell, ccSiege int, troops, spells []FarmUnit, heroes []string, siege string) FarmProfile {
+		return FarmProfile{
+			TownHall: th, Label: fmt.Sprintf("HDV %d - Farm Air", th),
+			TroopCapacity: troopCap, SpellCapacity: spellCap,
+			ClanCastleTroopCapacity: ccTroop, ClanCastleSpellCapacity: ccSpell, ClanCastleSiegeCapacity: ccSiege,
+			Troops: troops, Spells: spells, Heroes: heroes, Siege: siege,
+		}
+	}
+	rage := func(n int) []FarmUnit { return []FarmUnit{{Name:"Rage Spell", Count:n, Housing:2}, {Name:"Ice Spell", Count:1, Housing:1}} }
+	return map[string]FarmProfile{
+		"8":  makeP(8, 200, 7, 25, 1, 0, []FarmUnit{{Name:"Balloon", Count:40, Housing:5}}, rage(3), []string{"Barbarian King","Archer Queen"}, ""),
+		"9":  makeP(9, 220, 9, 30, 1, 0, []FarmUnit{{Name:"Balloon", Count:44, Housing:5}}, rage(4), []string{"Barbarian King","Archer Queen","Minion Prince"}, ""),
+		"10": makeP(10, 240, 11, 35, 1, 1, []FarmUnit{{Name:"Balloon", Count:48, Housing:5}}, rage(5), []string{"Barbarian King","Archer Queen","Minion Prince"}, "Stone Slammer"),
+		"11": makeP(11, 260, 11, 35, 2, 1, []FarmUnit{{Name:"Electro Dragon", Count:8, Housing:30},{Name:"Balloon", Count:4, Housing:5}}, rage(5), []string{"Barbarian King","Archer Queen","Minion Prince","Grand Warden"}, "Stone Slammer"),
+		"12": makeP(12, 280, 11, 40, 2, 1, []FarmUnit{{Name:"Electro Dragon", Count:9, Housing:30},{Name:"Balloon", Count:2, Housing:5}}, rage(5), []string{"Barbarian King","Archer Queen","Minion Prince","Grand Warden"}, "Stone Slammer"),
+		"13": makeP(13, 300, 11, 45, 2, 1, []FarmUnit{{Name:"Electro Dragon", Count:10, Housing:30}}, rage(5), []string{"Barbarian King","Archer Queen","Grand Warden","Royal Champion"}, "Stone Slammer"),
+		"14": makeP(14, 300, 11, 45, 3, 1, []FarmUnit{{Name:"Electro Dragon", Count:10, Housing:30}}, rage(5), []string{"Barbarian King","Archer Queen","Grand Warden","Royal Champion"}, "Stone Slammer"),
+		"15": makeP(15, 320, 11, 50, 3, 1, []FarmUnit{{Name:"Electro Dragon", Count:10, Housing:30},{Name:"Balloon", Count:4, Housing:5}}, rage(5), []string{"Barbarian King","Archer Queen","Grand Warden","Royal Champion"}, "Stone Slammer"),
+		"16": makeP(16, 320, 11, 50, 3, 2, []FarmUnit{{Name:"Electro Dragon", Count:10, Housing:30},{Name:"Balloon", Count:4, Housing:5}}, rage(5), []string{"Barbarian King","Archer Queen","Grand Warden","Royal Champion"}, "Stone Slammer"),
+		"17": makeP(17, 340, 11, 55, 3, 2, []FarmUnit{{Name:"Electro Dragon", Count:11, Housing:30},{Name:"Balloon", Count:2, Housing:5}}, rage(5), []string{"Barbarian King","Archer Queen","Grand Warden","Royal Champion"}, "Stone Slammer"),
+		"18": makeP(18, 352, 11, 55, 4, 2, []FarmUnit{{Name:"Electro Dragon", Count:11, Housing:30},{Name:"Balloon", Count:4, Housing:5}}, rage(5), []string{"Barbarian King","Archer Queen","Grand Warden","Royal Champion"}, "Stone Slammer"),
+	}
 }
 
 type SearchConfig struct {
@@ -112,6 +233,10 @@ type Duration struct {
 	time.Duration
 }
 
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(d.Duration.String())
+}
+
 func (d *Duration) UnmarshalJSON(b []byte) error {
 	s := string(b)
 	s = s[1 : len(s)-1]
@@ -129,6 +254,7 @@ func DefaultConfig() *BotConfig {
 			ADBHost:               "127.0.0.1",
 			ADBPort:               5037,
 			DeviceID:              "localhost:5555",
+			BlueStacksInstance:    "",
 			PackageName:           "com.supercell.clashofclans",
 			ZoomOutKey:            "i",
 			ZoomInKey:             "o",
@@ -154,7 +280,14 @@ func DefaultConfig() *BotConfig {
 			WardenUseAtPct:           30,
 			ReserveDEPercent:         200,
 			StallTimerSeconds:        10,
+			LootExitEnabled:          false,
+			LootExitPercent:          100,
 			MinSecondsBetweenAttacks: 30,
+			Farm: FarmConfig{
+				Enabled:  false,
+				TownHall: 18,
+				Profiles: defaultFarmProfiles(),
+			},
 		},
 		Search: SearchConfig{
 			Enabled:              true,
@@ -183,6 +316,42 @@ func DefaultConfig() *BotConfig {
 			MaxJitterPixels:    2.0,
 			JitterFraction:     0.15,
 		},
+		Account: AccountConfig{},
+		Automation: AutomationConfig{
+			SimpleMode:            true,
+			AutoFarmProfile:       true,
+			AutoArmyGuard:         true,
+			AutoResourceTracking:  true,
+			AutoProfileSync:       true,
+		},
+	}
+}
+
+func normalizeStrategyFile(cfg *BotConfig) {
+	if cfg == nil {
+		return
+	}
+	raw := strings.TrimSpace(cfg.Attack.StrategyFile)
+	if raw == "" {
+		cfg.Attack.StrategyFile = paths.Resolve("strategies/auto_edrag_rush.yaml")
+		return
+	}
+
+	// Relative values are always interpreted as a strategy basename inside
+	// the packaged assets tree. This makes config.json portable.
+	if !filepath.IsAbs(raw) {
+		cfg.Attack.StrategyFile = paths.Resolve(filepath.Join("strategies", filepath.Base(raw)))
+		return
+	}
+
+	// Keep a valid absolute path (older configs), but rebase stale absolute
+	// paths after the portable folder has been moved or updated.
+	if info, err := os.Stat(raw); err == nil && !info.IsDir() {
+		return
+	}
+	candidate := paths.Resolve(filepath.Join("strategies", filepath.Base(raw)))
+	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		cfg.Attack.StrategyFile = candidate
 	}
 }
 
@@ -201,6 +370,7 @@ func Load(path string) (*BotConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	normalizeStrategyFile(&cfg)
 
 	return &cfg, nil
 }

@@ -1,0 +1,1 @@
+This placeholder keeps web/dist present so Go embed and Wails binding generation work before the first frontend build.

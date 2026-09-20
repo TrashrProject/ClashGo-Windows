@@ -9,7 +9,7 @@ func TestButtonROIConsistency(t *testing.T) {
 	b := &Bot{}
 
 	expected := map[string]image.Rectangle{
-		"btn_attack":      image.Rect(0, 500, 300, 732),
+		"btn_attack":      image.Rect(0, 600, 150, 732),
 		"btn_find_match":  image.Rect(50, 400, 400, 600),
 		"btn_battle":      image.Rect(300, 150, 860, 732),
 		"btn_army_arrow":  image.Rect(350, 100, 700, 300),

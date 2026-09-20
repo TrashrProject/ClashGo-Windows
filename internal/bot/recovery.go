@@ -25,13 +25,13 @@
 //     "PackageManager up but CoC crashed"
 //     case.
 //
-//  4. RestartBlueStacks — osascript quit + open -a BlueStacks.
+//  4. RestartBlueStacks — restart the platform BlueStacks player.
 //     ~10-15s for the launch. The last
 //     reasonable option before…
 //
-//  5. NuclearOption   — kill -9 BlueStacks + rewrite config
+//  5. NuclearOption   — full BlueStacks restart/reconfiguration
 //     from scratch. ~20s. Only used when
-//     EnsureBlueStacksMac itself failed
+//     BlueStacks platform ensure itself failed
 //     (config write rejected, etc).
 //
 // Each strategy has metadata: the action function, a "what went
@@ -86,7 +86,7 @@ type adbClient interface {
 	SoftResetAndroid() error
 	ForceStop(pkg string) error
 	StartApp(pkg string) error
-	EnsureBlueStacksMac(w, h, dpi int) error
+	EnsureBlueStacks(w, h, dpi int) error
 }
 
 // NewRecoveryPolicy constructs a policy. The client is the live ADB
@@ -122,7 +122,7 @@ func NewRecoveryPolicy(cfg RecoveryConfig, client adbClient) *RecoveryPolicy {
 //     ~5s. Useless if ADB isn't yet talking
 //     to a device, so in practice only
 //     invoked from the boot-probe ladder.
-//  5. RestartBlueStacks — osascript quit + open -a BlueStacks.
+//  5. RestartBlueStacks — restart the platform BlueStacks player.
 //     ~15s. The nuclear option, only used when
 //     AllowNuclear is true and everything
 //     above has failed.
@@ -166,7 +166,7 @@ func (p *RecoveryPolicy) Strategies(packageName string, w, h, dpi int) []Recover
 			RecoveryStrategy{
 				Name: "RestartBlueStacks",
 				Apply: func(ctx context.Context) error {
-					return p.client.EnsureBlueStacksMac(w, h, dpi)
+					return p.client.EnsureBlueStacks(w, h, dpi)
 				},
 				Cost:        15 * time.Second,
 				Destructive: true,
@@ -259,9 +259,9 @@ func SuggestedAction(lastStep, lastStrategy, lastErr string) string {
 	case "RelaunchGame":
 		return "could not restart Clash of Clans; try launching it manually to clear any crash"
 	case "RestartBlueStacks":
-		return "BlueStacks relaunch did not help — check ~/Library/Application Support/ClashGO/logs/app.log for details"
+		return "BlueStacks relaunch did not help — check the ClashGO logs for details"
 	case "NuclearOption":
-		return "BlueStacks could not be reconfigured; check that you have permission to write to ~/Library/Preferences/com.BlueStacks.AppPlayer.plist"
+		return "BlueStacks could not be reconfigured; check the emulator installation/configuration and ClashGO logs"
 	}
 	return fmt.Sprintf("last error: %s", lastErr)
 }

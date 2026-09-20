@@ -82,17 +82,17 @@ type BootConfig struct {
 func DefaultBootConfig() BootConfig {
 	return BootConfig{
 		AdbConnectTimeout:      90 * time.Second,
-		AdbConnectPoll:         3 * time.Second,
-		AdbPerCallTimeout:      30 * time.Second,
+		AdbConnectPoll:         1 * time.Second,
+		AdbPerCallTimeout:      12 * time.Second,
 		BootProbeTimeout:       90 * time.Second,
-		BootProbePoll:          2 * time.Second,
+		BootProbePoll:          750 * time.Millisecond,
 		BootProbeMinSignals:    2,
-		BootProbePerSignal:     5 * time.Second,
+		BootProbePerSignal:     3 * time.Second,
 		MaxRecoveryAttempts:    5,
 		AllowNuclear:           true,
 		InitialRecoveryBackoff: 500 * time.Millisecond,
 		MaxRecoveryBackoff:     4 * time.Second,
-		WaitForGameSettle:      15 * time.Second,
+		WaitForGameSettle:      5 * time.Second,
 		PackageName:            "com.supercell.clashofclans",
 	}
 }
@@ -247,9 +247,9 @@ func (o *BootOrchestrator) Boot(ctx context.Context) (*BootContext, error) {
 		Dur("budget", budget).
 		Msg("boot orchestrator starting")
 
-	// Phase 1: macOS-only BlueStacks ensure. On non-darwin this is
-	// a no-op. CRITICAL: this MUST run before the ADB connect loop.
-	// EnsureBlueStacksMac force-kills the running BlueStacks process
+	// Phase 1: platform BlueStacks ensure. Each supported OS provides
+	// its own backend. CRITICAL: this MUST run before the ADB connect loop.
+	// EnsureBlueStacks force-kills the running BlueStacks process
 	// when it's at the wrong resolution and relaunches it, which
 	// invalidates any in-flight ADB transport. Doing it after the
 	// connect loop forced the probe to fight a half-dead device for
@@ -267,7 +267,7 @@ func (o *BootOrchestrator) Boot(ctx context.Context) (*BootContext, error) {
 	var ensureErr error
 	if o.cfg.ExpectedDPI > 0 { // heuristic: only call when DPI is configured
 		start := time.Now()
-		if err := o.client.EnsureBlueStacksMacCtx(bctx, o.cfg.ExpectedWidth, o.cfg.ExpectedHeight, o.cfg.ExpectedDPI); err != nil {
+		if err := o.client.EnsureBlueStacksCtx(bctx, o.cfg.ExpectedWidth, o.cfg.ExpectedHeight, o.cfg.ExpectedDPI); err != nil {
 			ensureErr = err
 			o.report.AppendStep("bluestacks.ensure", start, BootResultError, err.Error())
 			o.logger.Warn().Err(err).Msg("BlueStacks ensure reported an error; continuing to ADB connect loop to absorb slow cold boot")
@@ -306,7 +306,7 @@ func (o *BootOrchestrator) Boot(ctx context.Context) (*BootContext, error) {
 	// Phase 4: get the screen size. The probe is ready, but we
 	// still need a verified (w, h) before Calibrate. The screen
 	// size doubles as a sanity check: if it doesn't match the
-	// expected, we re-run EnsureBlueStacksMac and try again.
+	// expected, we re-run EnsureBlueStacks and try again.
 	screenW, screenH, err := o.screenSize(bctx)
 	if err != nil {
 		o.report.Complete("failed", err, SuggestedAction("screen.size", "", err.Error()))

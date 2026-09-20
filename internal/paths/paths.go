@@ -114,6 +114,20 @@ func GetAssetsDir() string {
 		}
 	}
 
+	if runtime.GOOS == "windows" {
+		if execPath, err := os.Executable(); err == nil {
+			exeDir := filepath.Dir(execPath)
+			for _, candidate := range []string{
+				filepath.Join(exeDir, "assets"),
+				filepath.Join(exeDir, "resources", "assets"),
+			} {
+				if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+					return candidate
+				}
+			}
+		}
+	}
+
 	abs, err := filepath.Abs(assetsDir)
 	if err != nil {
 		return assetsDir
@@ -163,6 +177,12 @@ func resolveConfigDir() string {
 		}
 	}
 
+	if runtime.GOOS == "windows" && isPackagedWindows() {
+		if base, err := os.UserConfigDir(); err == nil && base != "" {
+			return ensureDir(filepath.Join(base, "ClashGO"))
+		}
+	}
+
 	// os.UserConfigDir handles mac/linux/windows correctly AND any
 	// sandbox case where raw ~/Library does not work. We pin the
 	// returned basename with our app name + "/dev" so concurrent
@@ -182,6 +202,29 @@ func resolveConfigDir() string {
 // This covers both the production .app (wails build → /Applications)
 // and wails dev's build/bin/ClashGO.app/Contents/MacOS/ClashGO with
 // Resources/assets next to it.
+// isPackagedWindows reports whether the executable has a packaged assets
+// directory next to it. Development runs usually resolve assets from the
+// repository tree instead and therefore keep the /dev config suffix.
+func isPackagedWindows() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	execPath, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	exeDir := filepath.Dir(execPath)
+	for _, candidate := range []string{
+		filepath.Join(exeDir, "assets"),
+		filepath.Join(exeDir, "resources", "assets"),
+	} {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
 func isPackagedApp() bool {
 	execPath, err := os.Executable()
 	if err != nil {
