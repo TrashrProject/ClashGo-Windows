@@ -12,13 +12,34 @@ import (
 )
 
 type BotConfig struct {
-	Device   DeviceConfig   `json:"device"`
-	Training TrainingConfig `json:"training"`
-	Attack   AttackConfig   `json:"attack"`
-	Search   SearchConfig   `json:"search"`
-	Upgrade  UpgradeConfig  `json:"upgrade"`
-	Debug    DebugConfig    `json:"debug"`
-	Account  AccountConfig  `json:"account"`
+	Device     DeviceConfig     `json:"device"`
+	Training   TrainingConfig   `json:"training"`
+	Attack     AttackConfig     `json:"attack"`
+	Search     SearchConfig     `json:"search"`
+	Upgrade    UpgradeConfig    `json:"upgrade"`
+	Debug      DebugConfig      `json:"debug"`
+	Account    AccountConfig    `json:"account"`
+	Automation AutomationConfig `json:"automation"`
+}
+
+type AutomationConfig struct {
+	// SimpleMode is the default user experience: ClashGO derives sane values
+	// from the linked account and only exposes a few meaningful controls.
+	SimpleMode bool `json:"simple_mode"`
+
+	// AutoFarmProfile keeps the selected farm HDV aligned with the linked
+	// Clash account after every successful account sync.
+	AutoFarmProfile bool `json:"auto_farm_profile"`
+
+	// AutoArmyGuard blocks/repairs attack flow when the detected deployment
+	// state disagrees with the target farm composition.
+	AutoArmyGuard bool `json:"auto_army_guard"`
+
+	// AutoResourceTracking enables low-rate village resource snapshots.
+	AutoResourceTracking bool `json:"auto_resource_tracking"`
+
+	// AutoProfileSync keeps account data fresh without manual Sync clicks.
+	AutoProfileSync bool `json:"auto_profile_sync"`
 }
 
 type AccountConfig struct {
@@ -296,6 +317,13 @@ func DefaultConfig() *BotConfig {
 			JitterFraction:     0.15,
 		},
 		Account: AccountConfig{},
+		Automation: AutomationConfig{
+			SimpleMode:            true,
+			AutoFarmProfile:       true,
+			AutoArmyGuard:         true,
+			AutoResourceTracking:  true,
+			AutoProfileSync:       true,
+		},
 	}
 }
 
