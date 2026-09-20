@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { ClearAccount, GetAccountConfig, GetPlayerProfile, SaveAccountConfig } from '../../wailsjs/go/main/App';
+import { ClearAccount, GetAccountConfig, GetPlayerProfile } from '../../wailsjs/go/main/App';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
 type PlayerProfile = {
@@ -19,9 +19,8 @@ interface AccountViewProps {
 
 const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccountChanged }) => {
   const [profile, setProfile] = React.useState<PlayerProfile | null>(null);
-  const [apiConfigured, setApiConfigured] = React.useState(false);
-  const [maskedKey, setMaskedKey] = React.useState('');
-  const [apiKey, setApiKey] = React.useState('');
+  const [serviceConfigured, setServiceConfigured] = React.useState(false);
+  const [serviceURL, setServiceURL] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState('');
   const [error, setError] = React.useState('');
@@ -30,14 +29,10 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
     setBusy(true); setError('');
     try {
       const account = await GetAccountConfig();
-      setApiConfigured(account.api_configured);
-      setMaskedKey(account.masked_api_key || '');
-      if (account.api_configured) {
-        const p = await GetPlayerProfile();
-        setProfile(p as PlayerProfile);
-      } else {
-        setProfile(null);
-      }
+      setServiceConfigured(account.service_configured);
+      setServiceURL(account.service_url || '');
+      const p = await GetPlayerProfile();
+      setProfile(p as PlayerProfile);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -46,21 +41,6 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
   }, []);
 
   React.useEffect(() => { void refresh(); }, [refresh, playerTag]);
-
-  const saveKey = async () => {
-    if (!apiKey.trim()) return;
-    setBusy(true); setError(''); setMessage('');
-    try {
-      await SaveAccountConfig(playerTag, apiKey.trim());
-      setApiKey('');
-      await refresh();
-      setMessage('Profile synchronized');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const unlink = async () => {
     setBusy(true);
@@ -90,11 +70,11 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
               <span className="text-sm font-mono font-bold text-zinc-500">{profile?.tag || playerTag}</span>
             </div>
             <p className="mt-2 text-sm font-medium text-zinc-500">
-              {apiConfigured ? 'Official Clash API linked. ClashGO can use your unlocked troop, spell and hero levels.' : 'Player tag saved. Add an official Clash API key to load your public profile.'}
+              {profile ? 'Account synchronized automatically through ClashGO. No developer API key is required.' : 'Player tag saved. ClashGO will synchronize this account automatically.'}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => void refresh()} disabled={busy || !apiConfigured} className="px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-black disabled:opacity-40">
+            <button type="button" onClick={() => void refresh()} disabled={busy} className="px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-black disabled:opacity-40">
               {busy ? 'Syncing...' : 'Sync profile'}
             </button>
             <button type="button" onClick={() => void unlink()} disabled={busy} className="px-4 py-3 rounded-xl border border-rose-500/20 bg-rose-500/5 text-xs font-black text-rose-500 disabled:opacity-40">
@@ -103,26 +83,15 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
           </div>
         </div>
 
-        {!apiConfigured && (
-          <div className="mt-7 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5">
-            <div className="text-sm font-black text-zinc-950 dark:text-white">Connect the official Clash API</div>
-            <p className="mt-1 text-xs font-medium text-zinc-500">Paste a Clash of Clans developer API key. ClashGO never asks for your Supercell password.</p>
-            <div className="mt-4 flex flex-col sm:flex-row gap-2">
-              <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="Official Clash API key"
-                className="min-w-0 flex-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-4 py-3 text-sm font-mono outline-none focus:ring-4 focus:ring-amber-500/10" />
-              <button type="button" onClick={() => void saveKey()} disabled={busy || !apiKey.trim()} className="px-5 py-3 rounded-xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-black disabled:opacity-40">
-                Connect API
-              </button>
-            </div>
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <div className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${serviceConfigured ? 'text-emerald-500' : 'text-amber-500'}`}>
+            <span className="material-symbols-outlined text-base">{serviceConfigured ? 'cloud_done' : 'cloud_off'}</span>
+            {serviceConfigured ? 'ClashGO account service connected' : 'Account service not configured'}
           </div>
-        )}
-
-        {apiConfigured && (
-          <div className="mt-5 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-emerald-500">
-            <span className="material-symbols-outlined text-base">verified</span>
-            API connected {maskedKey ? '· ' + maskedKey : ''}
-          </div>
-        )}
+          {serviceURL && (
+            <span className="text-[10px] font-mono text-zinc-400">{serviceURL}</span>
+          )}
+        </div>
 
         {(message || error) && (
           <div className={'mt-4 rounded-xl px-4 py-3 text-xs font-bold ' + (error ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500')}>
