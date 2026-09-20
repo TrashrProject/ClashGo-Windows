@@ -452,9 +452,12 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			// free space outside the detected red box, regardless of the
 			// strategy's preferred corner. The old preference could pick a
 			// very narrow strip and force taps back toward the village.
+			// Never choose the bottom side on Windows. The lower battle HUD
+			// contains Surrender/End Battle, Overall Damage and the troop bar.
+			// A geometrically "free" strip there is not a safe tap region.
 			deploySide = "left"
 			best := free["left"]
-			for _, side := range []string{"right", "top", "bottom"} {
+			for _, side := range []string{"right", "top"} {
 				if free[side] > best {
 					deploySide = side
 					best = free[side]
@@ -465,8 +468,10 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			case "right":
 				x := redZone.BBox.Max.X + outsidePad
 				if x > w-edgeMargin { x = w-edgeMargin }
-				y1 := clamp(redZone.BBox.Min.Y+35, edgeMargin, uiCutoff-edgeMargin)
-				y2 := clamp(redZone.BBox.Max.Y-35, edgeMargin, uiCutoff-edgeMargin)
+				hudSafeBottom := int(float64(h) * 0.70)
+				y1 := clamp(redZone.BBox.Min.Y+35, edgeMargin, hudSafeBottom)
+				y2 := clamp(redZone.BBox.Max.Y-35, edgeMargin, hudSafeBottom)
+				if y2 < y1 { y1, y2 = y2, y1 }
 				p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
 			case "top":
 				y := redZone.BBox.Min.Y - outsidePad
@@ -483,8 +488,10 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			default: // left
 				x := redZone.BBox.Min.X - outsidePad
 				if x < edgeMargin { x = edgeMargin }
-				y1 := clamp(redZone.BBox.Min.Y+35, edgeMargin, uiCutoff-edgeMargin)
-				y2 := clamp(redZone.BBox.Max.Y-35, edgeMargin, uiCutoff-edgeMargin)
+				hudSafeBottom := int(float64(h) * 0.70)
+				y1 := clamp(redZone.BBox.Min.Y+35, edgeMargin, hudSafeBottom)
+				y2 := clamp(redZone.BBox.Max.Y-35, edgeMargin, hudSafeBottom)
+				if y2 < y1 { y1, y2 = y2, y1 }
 				p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
 			}
 
