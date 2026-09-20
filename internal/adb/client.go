@@ -47,6 +47,7 @@ type Client struct {
 	// observer can all request frames independently; BlueStacks becomes
 	// unstable when those requests burst together. This gate serializes the
 	// *start* of captures and guarantees a small quiet gap between them.
+	captureExecMu sync.Mutex
 	captureGateMu sync.Mutex
 	lastCaptureStart time.Time
 	minCaptureGap time.Duration
@@ -347,6 +348,11 @@ func (c *Client) waitForCaptureBudget() {
 }
 
 func (c *Client) CaptureToMat() (gocv.Mat, error) {
+	// ADB screencap is a single shared device resource. Serialize the whole
+	// operation so the background observer, search loop and attack verifier
+	// cannot overlap native BlueStacks screencaps.
+	c.captureExecMu.Lock()
+	defer c.captureExecMu.Unlock()
 	c.waitForCaptureBudget()
 	// emptyMat returns a SAFE, properly-allocated zero Mat (not the
 	// nil-backed gocv.Mat{} literal). The literal's native pointer is
