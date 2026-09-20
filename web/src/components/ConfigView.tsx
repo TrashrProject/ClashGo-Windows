@@ -16,6 +16,10 @@ interface ConfigViewProps {
   setUpgradeWalls: (v: boolean) => void;
   stallTimer: number;
   setStallTimer: (v: number) => void;
+  lootExitEnabled: boolean;
+  setLootExitEnabled: (v: boolean) => void;
+  lootExitPercent: number;
+  setLootExitPercent: (v: number) => void;
   // Returns the underlying SaveConfig promise so ConfigView can own
   // the save-status indicator (green flash / red flash + inline
   // "Saved!" / "Save failed" pill) and surface success or failure to
@@ -41,6 +45,8 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   searchEnabled, setSearchEnabled,
   upgradeWalls, setUpgradeWalls,
   stallTimer, setStallTimer,
+  lootExitEnabled, setLootExitEnabled,
+  lootExitPercent, setLootExitPercent,
   onSave
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
@@ -129,7 +135,8 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   ];
 
   const stallInvalid = invalid(stallTimer, STALL_MAX);
-  const anyInvalid = stallInvalid || thresholdItems.some((t) => invalid(t.value, THRESHOLD_MAX));
+  const lootExitInvalid = invalid(lootExitPercent, 100);
+  const anyInvalid = stallInvalid || lootExitInvalid || thresholdItems.some((t) => invalid(t.value, THRESHOLD_MAX));
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -300,6 +307,73 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${searchEnabled ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
             </div>
           </button>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <div className="space-y-5">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={lootExitEnabled}
+              onClick={() => setLootExitEnabled(!lootExitEnabled)}
+              className="w-full flex items-center justify-between group cursor-pointer text-left"
+            >
+              <div className="max-w-[80%]">
+                <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Exit by Loot Collected</span>
+                <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">
+                  End the battle once the configured percentage of the starting available loot has been collected.
+                </span>
+              </div>
+              <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${lootExitEnabled ? 'bg-emerald-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
+                <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${lootExitEnabled ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
+              </div>
+            </button>
+
+            <div className={`rounded-2xl border p-5 transition-all ${lootExitEnabled ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-zinc-100 dark:border-zinc-800 opacity-45'}`}>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <div className="text-[11px] font-black text-zinc-500 uppercase tracking-[0.2em]">Loot exit threshold</div>
+                  <div className="text-xs text-zinc-400 mt-1">0–100% of the base's starting available loot</div>
+                </div>
+                <div className="text-3xl font-black text-zinc-950 dark:text-white tabular-nums">{lootExitPercent}%</div>
+              </div>
+
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={lootExitPercent}
+                disabled={!lootExitEnabled}
+                onChange={(e) => setLootExitPercent(Number(e.target.value))}
+                className="w-full accent-emerald-500 disabled:cursor-not-allowed"
+                aria-label="Loot exit percentage"
+              />
+
+              <div className="mt-4 flex items-center gap-3">
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={lootExitPercent}
+                  disabled={!lootExitEnabled}
+                  aria-invalid={lootExitInvalid}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value);
+                    setLootExitPercent(Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : 0);
+                  }}
+                  className={`w-28 bg-white dark:bg-zinc-950 border rounded-xl py-2.5 px-3 text-sm font-black tabular-nums focus:outline-none focus:ring-4 transition-all ${lootExitInvalid ? 'border-rose-400 focus:ring-rose-500/10' : 'border-zinc-200 dark:border-zinc-700 focus:ring-emerald-500/10'}`}
+                />
+                <span className="text-xs font-medium text-zinc-500">
+                  {lootExitEnabled
+                    ? lootExitPercent === 0
+                      ? 'Exit as soon as the battle monitor confirms the fight can be surrendered.'
+                      : `Exit after about ${lootExitPercent}% of the initial loot has been collected.`
+                    : 'Disabled — battle ends normally.'}
+                </span>
+              </div>
+            </div>
+          </div>
 
           <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
 
