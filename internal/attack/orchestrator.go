@@ -814,25 +814,38 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			desired := 0
 			if farmControlled && strings.TrimSpace(chosen.UnitName) != "" {
 				desired = farmProfile.DesiredCount(chosen.UnitName)
-				// On the first pass for a named farm unit, trust the explicit
-				// composition amount over OCR. Subsequent passes use the live
-				// remaining badge so rejected taps (e.g. 2 EDrags left) are
-				// drained instead of replaying the full profile amount.
+				// Live OCR is authoritative whenever it produced a sane positive
+				// count. Using the profile amount over a smaller live amount can
+				// keep firing battlefield taps after the selected card empties,
+				// at which point CoC may compact/select another card. That is a
+				// direct path to "EDrags skipped, then siege/spells dumped".
+				//
+				// The profile is only a fallback when OCR genuinely failed.
 				if desired > 0 && !profileFirstDeploy[key] {
-					count = desired
 					profileFirstDeploy[key] = true
-					e.logger.Info().
-						Str("unit", chosen.UnitName).
-						Int("profile_count", desired).
-						Int("ocr_count", chosenCount).
-						Msg("farm profile: using configured unit count for first deployment pass")
+					if chosenCount <= 0 {
+						count = desired
+						e.logger.Info().
+							Str("unit", chosen.UnitName).
+							Int("profile_count", desired).
+							Msg("farm profile: OCR unavailable; using configured count as guarded fallback")
+					} else {
+						e.logger.Debug().
+							Str("unit", chosen.UnitName).
+							Int("profile_count", desired).
+							Int("ocr_count", chosenCount).
+							Msg("farm profile: live OCR count wins over configured target")
+					}
 				}
 			}
 			if count <= 0 {
+				// Unknown-count cards use a deliberately bounded burst, then
+				// the next loop recaptures/reacquires the whole bar. Never send
+				// a full profile count blindly through a shifting troop bar.
 				if chosen.Category == "Spell" {
 					count = 2
 				} else {
-					count = 8
+					count = 6
 				}
 			}
 			if count > 40 { count = 40 }
