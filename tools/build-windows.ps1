@@ -78,6 +78,28 @@ try {
     $versionText = "ClashGO Windows`r`nVersion: $Version`r`nCommit: $commit`r`nBuilt: $(Get-Date -Format o)`r`n"
     Set-Content -Path (Join-Path $bundle "VERSION.txt") -Value $versionText -Encoding UTF8
 
+    Write-Host "Validating portable runtime..."
+    $requiredBundleFiles = @(
+        "ClashGO.exe",
+        "assets\templates\btn_attack.png",
+        "assets\strategies\auto_edrag_rush.yaml",
+        "resources\install_update.ps1",
+        "WINDOWS_PORT.md",
+        "QUICKSTART.md",
+        "opencv_core4130.dll",
+        "libstdc++-6.dll",
+        "libwinpthread-1.dll"
+    )
+    $missingBundleFiles = @()
+    foreach ($rel in $requiredBundleFiles) {
+        if (-not (Test-Path (Join-Path $bundle $rel))) {
+            $missingBundleFiles += $rel
+        }
+    }
+    if ($missingBundleFiles.Count -gt 0) {
+        throw ("Portable runtime validation failed. Missing: " + ($missingBundleFiles -join ", "))
+    }
+
     if (-not (Test-Path $distRoot)) { New-Item -ItemType Directory -Force -Path $distRoot | Out-Null }
     $zip = Join-Path $distRoot ("ClashGO-v{0}-windows.zip" -f $Version)
     if (Test-Path $zip) { Remove-Item $zip -Force }
