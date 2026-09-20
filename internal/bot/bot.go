@@ -946,7 +946,7 @@ func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
 		return false
 	}
 
-	roi := image.Rect(0, 500, 300, 732)
+	roi := b.buttonROI("btn_attack")
 	physROI := image.Rect(
 		int(float64(roi.Min.X)*b.cal.ScaleX),
 		int(float64(roi.Min.Y)*b.cal.ScaleY),
@@ -963,17 +963,31 @@ func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
 	}
 
 	best := matches[0]
+	expectedX, expectedY := b.cal.ScaleRef(64, 666)
+	dx := best.Point.X - expectedX
+	if dx < 0 {
+		dx = -dx
+	}
+	dy := best.Point.Y - expectedY
+	if dy < 0 {
+		dy = -dy
+	}
+	if dx > 80 || dy > 60 {
+		b.logger.Debug().
+			Float64("conf", best.Confidence).
+			Int("match_x", best.Point.X).
+			Int("match_y", best.Point.Y).
+			Int("expected_x", expectedX).
+			Int("expected_y", expectedY).
+			Msg("attack-like template rejected: outside safe Attack button area")
+		return false
+	}
 
-	// MatchMultiScaleROICached returns the CENTER of the matched template.
-	// Requiring that exact center pixel to also be orange was too strict for
-	// localized/animated CoC buttons and caused a valid Attack template match
-	// to be discarded. The template is already restricted to the bottom-left
-	// Attack-button ROI and thresholded, so a positive match is sufficient.
 	b.logger.Info().
 		Float64("conf", best.Confidence).
 		Int("x", best.Point.X).
 		Int("y", best.Point.Y).
-		Msg("attack button verified via template")
+		Msg("attack button verified via template and position")
 
 	return true
 }
@@ -992,7 +1006,9 @@ func (b *Bot) isOrange(screen gocv.Mat, x, y int) bool {
 func (b *Bot) buttonROI(templateName string) image.Rectangle {
 	switch templateName {
 	case "btn_attack":
-		return image.Rect(0, 500, 300, 732)
+		// Bottom-left HUD only. The previous 300x232 ROI also contained
+		// unrelated action buttons and produced false positives.
+		return image.Rect(0, 600, 150, 732)
 	case "btn_find_match":
 		return image.Rect(50, 400, 400, 600)
 	case "btn_battle":
@@ -1700,7 +1716,7 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 
 		threshold := float32(0.45)
 		if templateName == "btn_attack" {
-			threshold = 0.30
+			threshold = 0.35
 		}
 		matches, err := vision.MatchMultiScaleROICached(screen, tpl, templateName, 0.2, 2.0, 5, threshold, physROI)
 
@@ -1724,11 +1740,40 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 		best := matches[0]
 		px, py := best.Point.X, best.Point.Y
 
+		if templateName == "btn_attack" {
+			expectedX, expectedY := b.cal.ScaleRef(64, 666)
+			dx := px - expectedX
+			if dx < 0 {
+				dx = -dx
+			}
+			dy := py - expectedY
+			if dy < 0 {
+				dy = -dy
+			}
+			if dx > 80 || dy > 60 {
+				screen.Close()
+				b.logger.Warn().
+					Float64("conf", best.Confidence).
+					Int("match_x", px).
+					Int("match_y", py).
+					Int("expected_x", expectedX).
+					Int("expected_y", expectedY).
+					Msg("rejected false Attack match outside safe button area")
+				continue
+			}
+
+			// Once the template confirms the Attack button is present in its
+			// tightly constrained ROI, tap the calibrated canonical center.
+			// This prevents an imperfect template center from hitting a
+			// neighboring HUD control.
+			px, py = expectedX, expectedY
+		}
+
 		b.logger.Info().
 			Str("step", stepName).
 			Float64("conf", best.Confidence).
 			Int("x", px).Int("y", py).
-			Msg("clicking (fallback match)")
+			Msg("clicking verified button")
 
 		// IMPORTANT: SaveScreenshots previously called IMWrite after
 		// screen.Close(), handing OpenCV a freed native cv::Mat*. On Windows
