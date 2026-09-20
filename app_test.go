@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Ducky705/ClashGO/internal/bot"
+	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/paths"
 )
 
@@ -91,5 +92,31 @@ func TestApp_RefreshHistoryReReadsWarmCache(t *testing.T) {
 	}
 	if got[0].Timestamp != "second" {
 		t.Errorf("latest attack missing from history head: got %+v", got)
+	}
+}
+
+
+func TestClashAccountServiceURLPrecedence(t *testing.T) {
+	oldEmbedded := accountServiceURL
+	defer func() { accountServiceURL = oldEmbedded }()
+
+	cfg := config.DefaultConfig()
+	cfg.Account.ProxyURL = "https://config.example/"
+
+	accountServiceURL = "https://embedded.example/"
+	t.Setenv("CLASHGO_ACCOUNT_API_URL", "")
+	if got := clashAccountServiceURL(cfg); got != "https://embedded.example" {
+		t.Fatalf("embedded service URL=%q", got)
+	}
+
+	t.Setenv("CLASHGO_ACCOUNT_API_URL", "https://env.example/")
+	if got := clashAccountServiceURL(cfg); got != "https://env.example" {
+		t.Fatalf("env service URL should win, got %q", got)
+	}
+
+	t.Setenv("CLASHGO_ACCOUNT_API_URL", "")
+	accountServiceURL = ""
+	if got := clashAccountServiceURL(cfg); got != "https://config.example" {
+		t.Fatalf("config proxy URL fallback=%q", got)
 	}
 }
