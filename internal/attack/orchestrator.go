@@ -357,22 +357,54 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 		tapExec := NewTapExecutor(e.client, e.cal, e.logger)
 		tapExec.StartDeployBudget()
+		unverifiedSlots := 0
+
+		// One helper for initial deploy + reconciliation. Every troop-like card
+		// uses the safe outer line; spells intentionally target inside.
+		deploySlot := func(slot *TrackedSlot, n int) {
+			if n <= 0 {
+				n = 1
+			}
+			if n > 40 {
+				n = 40
+			}
+
+			tapExec.TapSlot(slot, 3)
+			tapExec.HumanSleep(110, 20)
+
+			if slot.Category == "Spell" {
+				spellPoint := image.Pt(w/2, int(float64(uiCutoff)*0.50))
+				if redZone.Valid {
+					spellPoint = image.Pt(
+						(redZone.BBox.Min.X+redZone.BBox.Max.X)/2,
+						(redZone.BBox.Min.Y+redZone.BBox.Max.Y)/2,
+					)
+				}
+				tapExec.TapDeployPoint(spellPoint, n, 3)
+			} else if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
+				tapExec.TapDeployPoint(image.Pt((p1.X+p2.X)/2, (p1.Y+p2.Y)/2), 1, 3)
+			} else {
+				tapExec.TapDeployLine(p1, p2, n, 3)
+			}
+		}
 
 		for _, slot := range slotMgr.GetAllSlots() {
 			if tapExec.DeployBudgetExhausted() {
-				break
+				unverifiedSlots++
+				continue
 			}
 
 			count := GetCountForSlot(troopCounts, slot.X)
 			if count <= 0 {
-				// Heroes/siege/single-charge cards often OCR as unknown on the
-				// first frame. One drop attempt is the safe fallback.
+				// One is safer than inventing a large count when OCR is
+				// unavailable. Reconciliation below re-reads the live card.
 				count = 1
 			}
 			if count > 40 {
-				// Avoid absurd OCR false positives turning into hundreds of taps.
 				count = 40
 			}
+
+			beforeActivity := GetSlotActivityRatioStatic(screen, slot.X, slot.Y, w)
 
 			e.logger.Info().
 				Str("unit", slot.UnitName).
@@ -382,33 +414,102 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				Int("count", count).
 				Msg("Windows deploy: selecting live slot")
 
-			tapExec.TapSlot(slot, 4)
-			tapExec.HumanSleep(180, 25)
+			deploySlot(slot, count)
 
-			// Ground/air troops, heroes, siege and CC must be dropped OUTSIDE
-			// the red boundary. Spells are the opposite: they may target inside
-			// the base, so use the red-zone center for Spell cards.
-			if slot.Category == "Spell" {
-				spellPoint := image.Pt(w/2, int(float64(uiCutoff)*0.50))
-				if redZone.Valid {
-					spellPoint = image.Pt(
-						(redZone.BBox.Min.X+redZone.BBox.Max.X)/2,
-						(redZone.BBox.Min.Y+redZone.BBox.Max.Y)/2,
-					)
+			verified := false
+			remainingCount := count
+			for verifyRound := 1; verifyRound <= 4 && !tapExec.DeployBudgetExhausted(); verifyRound++ {
+				tapExec.HumanSleep(170, 25)
+
+				fresh, capErr := tapExec.CaptureFresh()
+				if capErr != nil || fresh.Empty() {
+					if !fresh.Empty() {
+						fresh.Close()
+					}
+					e.logger.Warn().
+						Str("unit", slot.UnitName).
+						Int("round", verifyRound).
+						Msg("Windows deploy verify capture failed; retrying")
+					continue
 				}
-				tapExec.TapDeployPoint(spellPoint, count, 4)
-			} else if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
-				tapExec.TapDeployPoint(image.Pt((p1.X+p2.X)/2, (p1.Y+p2.Y)/2), 1, 4)
-			} else {
-				tapExec.TapDeployLine(p1, p2, count, 4)
+
+				liveCount := troopCounter.DetectCount(fresh, slot, mBarY)
+				empty := isSlotEmptyStatic(fresh, slot.X, slot.Y, w, h)
+				activity := GetSlotActivityRatioStatic(fresh, slot.X, slot.Y, w)
+				fresh.Close()
+
+				// Strong confirmation: the card is visually empty/disabled, or
+				// a known multi-count card has drained and its visual activity
+				// dropped materially.
+				if empty || (liveCount == 0 && beforeActivity > 0 && activity < beforeActivity*0.58) {
+					verified = true
+					e.logger.Info().
+						Str("unit", slot.UnitName).
+						Int("round", verifyRound).
+						Int("live_count", liveCount).
+						Float64("activity", activity).
+						Msg("Windows deploy verified slot empty")
+					break
+				}
+
+				// Heroes/siege/CC are one-shot cards. If the card changed
+				// substantially after the click, treat the deployment as
+				// confirmed; never spam a hero card and accidentally fire its
+				// ability.
+				if (slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC") &&
+					beforeActivity > 0 && activity < beforeActivity*0.72 {
+					verified = true
+					e.logger.Info().
+						Str("unit", slot.UnitName).
+						Int("round", verifyRound).
+						Msg("Windows one-shot slot visibly transitioned")
+					break
+				}
+
+				if liveCount > 0 {
+					remainingCount = liveCount
+				} else if remainingCount > 1 {
+					// OCR can momentarily miss digits during the card animation.
+					// Keep the last credible remainder, but cap each retry burst.
+					if remainingCount > 8 {
+						remainingCount = 8
+					}
+				} else {
+					remainingCount = 1
+				}
+
+				e.logger.Warn().
+					Str("unit", slot.UnitName).
+					Int("round", verifyRound).
+					Int("remaining", remainingCount).
+					Int("live_count", liveCount).
+					Float64("activity", activity).
+					Msg("slot still appears active; re-selecting and deploying remainder")
+
+				deploySlot(slot, remainingCount)
 			}
-			tapExec.HumanSleep(160, 25)
-			slotMgr.MarkSlotDeployed(slot)
+
+			if verified {
+				slotMgr.MarkSlotDeployed(slot)
+			} else {
+				slotMgr.MarkSlotFailed(slot)
+				unverifiedSlots++
+				e.logger.Error().
+					Str("unit", slot.UnitName).
+					Str("category", slot.Category).
+					Msg("could not verify slot fully deployed after reconciliation")
+			}
 		}
 
-		remaining := len(slotMgr.GetUndeployedSlots())
-		e.logger.Info().Int("remaining", remaining).Msg("Windows live-slot deployment completed")
-		return remaining, nil
+		remaining := unverifiedSlots
+		e.logger.Info().
+			Int("remaining", remaining).
+			Int("slots", len(slotMgr.GetAllSlots())).
+			Msg("Windows live-slot deployment completed with verification")
+		if remaining > 0 {
+			return remaining, fmt.Errorf("%d slot(s) could not be verified fully deployed", remaining)
+		}
+		return 0, nil
 	}
 	// troopCounter is threaded below to NewHeroManager / NewSweeper /
 	// NewVerifier so they can live-OCR per-slot counts at deploy time
