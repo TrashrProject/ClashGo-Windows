@@ -632,9 +632,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			switch cat {
 			case "Troop":
 				return 0
-			case "Hero":
-				return 1
 			case "Siege", "CC":
+				return 1
+			case "Hero":
 				return 2
 			case "Spell":
 				return 3
@@ -642,8 +642,18 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				return 0
 			}
 		}
+		farmProfile, farmControlled := e.cfg.Farm.ActiveProfile()
+		if farmControlled {
+			e.logger.Info().
+				Int("town_hall", farmProfile.TownHall).
+				Str("profile", farmProfile.Label).
+				Int("troop_capacity", farmProfile.TroopCapacity).
+				Int("spell_capacity", farmProfile.SpellCapacity).
+				Msg("Windows deployment controlled by farm composition profile")
+		}
 		oneShotDone := make(map[string]bool)
 		cardAttempts := make(map[string]int)
+		profileFirstDeploy := make(map[string]bool)
 		liveRemaining := 0
 
 		oneShotKey := func(slot *TrackedSlot) string {
@@ -685,12 +695,37 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			chosenActivity := 0.0
 
 			for _, slot := range liveSlots {
+				key := oneShotKey(slot)
 				// Skip every identity explicitly blacklisted for this battle.
-				// Heroes/siege/CC are added here immediately after their one
-				// allowed placement; a stubborn named troop may also be added
-				// after the safety attempt cap.
-				if oneShotDone[oneShotKey(slot)] {
+				if oneShotDone[key] {
 					continue
+				}
+
+				// When the user enabled an HDV farm composition, named cards
+				// outside that composition are deliberately ignored. Unknown
+				// cards still fall back to live OCR so seasonal/event troops
+				// are not accidentally stranded.
+				if farmControlled && strings.TrimSpace(slot.UnitName) != "" {
+					switch slot.Category {
+					case "Hero":
+						if !farmProfile.UsesHero(slot.UnitName) {
+							oneShotDone[key] = true
+							e.logger.Info().Str("unit", slot.UnitName).Msg("farm profile: hero not selected; skipping")
+							continue
+						}
+					case "Siege", "CC":
+						if strings.TrimSpace(farmProfile.Siege) == "" || !strings.EqualFold(strings.TrimSpace(farmProfile.Siege), strings.TrimSpace(slot.UnitName)) {
+							oneShotDone[key] = true
+							e.logger.Info().Str("unit", slot.UnitName).Msg("farm profile: siege not selected; skipping")
+							continue
+						}
+					case "Troop", "Spell":
+						if farmProfile.DesiredCount(slot.UnitName) <= 0 {
+							oneShotDone[key] = true
+							e.logger.Info().Str("unit", slot.UnitName).Str("category", slot.Category).Msg("farm profile: named card not in composition; skipping")
+							continue
+						}
+					}
 				}
 
 				activity := GetSlotActivityRatioStatic(fresh, slot.X, slot.Y, w)
@@ -748,6 +783,23 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			}
 
 			count := chosenCount
+			desired := 0
+			if farmControlled && strings.TrimSpace(chosen.UnitName) != "" {
+				desired = farmProfile.DesiredCount(chosen.UnitName)
+				// On the first pass for a named farm unit, trust the explicit
+				// composition amount over OCR. Subsequent passes use the live
+				// remaining badge so rejected taps (e.g. 2 EDrags left) are
+				// drained instead of replaying the full profile amount.
+				if desired > 0 && !profileFirstDeploy[key] {
+					count = desired
+					profileFirstDeploy[key] = true
+					e.logger.Info().
+						Str("unit", chosen.UnitName).
+						Int("profile_count", desired).
+						Int("ocr_count", chosenCount).
+						Msg("farm profile: using configured unit count for first deployment pass")
+				}
+			}
 			if count <= 0 {
 				if chosen.Category == "Spell" {
 					count = 2
