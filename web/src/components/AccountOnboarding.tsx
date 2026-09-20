@@ -15,7 +15,7 @@ const AccountOnboarding: React.FC<Props> = ({ onLinked }) => {
     if (!raw) return;
     setBusy(true); setError('');
     try {
-      await SaveAccountConfig(raw, '');
+      await SaveAccountConfig(raw);
       const normalized = raw.startsWith('#') ? raw.toUpperCase() : '#' + raw.toUpperCase();
       onLinked(normalized);
     } catch (err) {
