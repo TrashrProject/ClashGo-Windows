@@ -64,7 +64,7 @@ func executablePathExists(path string) bool {
 }
 
 func blueStacksWindowsProcessRunning() bool {
-	out, err := exec.Command(
+	out, err := hiddenCommand(
 		"tasklist",
 		"/FI", "IMAGENAME eq HD-Player.exe",
 		"/FO", "CSV",
