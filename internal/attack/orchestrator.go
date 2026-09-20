@@ -144,22 +144,24 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			Int("required_free_space", minSafeFree).
 			Msg("adaptive camera evaluating battlefield")
 
-		// First preference: zoom out. It exposes legal border on every side
-		// without changing troop-bar geometry.
-		for zoomTry := 1; zoomTry <= 2 && (!redZone.Valid || free < minSafeFree); zoomTry++ {
-			e.logger.Info().Int("attempt", zoomTry).Msg("adaptive camera: zooming out to expose deployment border")
-			if err := e.client.ZoomOut(); err != nil {
-				e.logger.Warn().Err(err).Msg("adaptive camera zoom-out failed; falling back to map pan")
-				break
-			}
-			time.Sleep(420 * time.Millisecond)
-			if !refreshCamera("zoom_out") {
-				break
-			}
-			side, free = freeSpace(redZone)
+		// IMPORTANT (Windows / BlueStacks):
+		// Do NOT use Client.ZoomOut()/ZoomIn() here. Those methods inject
+		// low-level multi-touch sendevent batches. BlueStacks 5 on the user's
+		// Pie64 instance can terminate the emulator process under repeated
+		// synthetic multi-touch. Startup already had a Windows-safe path that
+		// deliberately skipped native zoom for this reason.
+		//
+		// Keep adaptive camera movement to single-pointer map pans only. They
+		// are handled by Android's normal input swipe path and are much more
+		// stable on BlueStacks.
+		if !redZone.Valid || free < minSafeFree {
+			e.logger.Info().
+				Int("free_space", free).
+				Int("required_free_space", minSafeFree).
+				Msg("adaptive camera: native pinch zoom disabled on Windows-safe path; using map pan only")
 		}
 
-		// If zooming is insufficient, drag the MAP toward the opposite
+		// Drag the MAP toward the opposite
 		// direction so the already-best legal side gains even more empty land.
 		// Gestures stay in the playfield, well above the troop bar.
 		for panTry := 1; panTry <= 2 && redZone.Valid && free < minSafeFree; panTry++ {
@@ -199,15 +201,11 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			side, free = freeSpace(redZone)
 		}
 
-		// A failed red-line read after zooming can happen if we zoomed too far
-		// and line fragments became tiny. Restore one zoom level, then re-read
-		// rather than guessing coordinates.
+		// No native pinch-zoom recovery on Windows. If panning lost the red
+		// boundary, keep the failure visible to the caller rather than sending
+		// an unsafe multi-touch gesture that can crash BlueStacks.
 		if !redZone.Valid && cameraFrameOwned {
-			e.logger.Warn().Msg("adaptive camera lost red boundary after zoom; zooming in one step to recover")
-			if err := e.client.ZoomIn(); err == nil {
-				time.Sleep(420 * time.Millisecond)
-				_ = refreshCamera("zoom_in_recovery")
-			}
+			e.logger.Warn().Msg("adaptive camera lost red boundary after pan; refusing unsafe Windows pinch-zoom recovery")
 		}
 
 		side, free = freeSpace(redZone)
