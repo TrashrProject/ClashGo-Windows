@@ -1,0 +1,172 @@
+name: Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without leading v
+        required: true
+        default: 0.6.0-windows-beta
+      notes:
+        description: Release notes
+        required: false
+        default: Windows BlueStacks 5 port beta
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_NOTES: ${{ inputs.notes }}
+      CLASHGO_ACCOUNT_API_URL: ${{ vars.CLASHGO_ACCOUNT_API_URL }}
+      CGO_CXXFLAGS: --std=c++11 -DNDEBUG
+      CGO_CPPFLAGS: -IC:/opencv/build/install/include
+      CGO_LDFLAGS: -LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -lopencv_imgproc4130 -lopencv_imgcodecs4130
+      GOFLAGS: -tags=customenv,gocv_specific_modules
+    steps:
+      - name: Checkout Windows branch
+        uses: actions/checkout@v4
+        with:
+          ref: windows/core-port
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install MinGW, CMake and NSIS
+        shell: powershell
+        run: choco install mingw cmake nsis -y --no-progress
+
+      - name: Restore cached OpenCV
+        id: opencv-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: C:\opencv\build\install
+          key: opencv-4.13.0-mingw-gocv043-clashgo-minimal-v1
+
+      - name: Build OpenCV 4.13 for GoCV
+        if: steps.opencv-cache.outputs.cache-hit != 'true'
+        shell: powershell
+        run: |
+          git clone --depth 1 --branch v0.43.0 https://github.com/hybridgroup/gocv.git "$env:RUNNER_TEMP\gocv"
+          Push-Location "$env:RUNNER_TEMP\gocv"
+          cmd /c win_download_opencv.cmd
+          if ($LASTEXITCODE -ne 0) { throw "OpenCV download failed" }
+          (Get-Content .\win_build_opencv.cmd -Raw).Replace("-DBUILD_PERF_TESTS=ON", "-DBUILD_PERF_TESTS=OFF -DBUILD_LIST=core,imgproc,imgcodecs") | Set-Content .\win_build_opencv.cmd -Encoding ASCII
+          $env:CMAKE_BUILD_PARALLEL_LEVEL = [Environment]::ProcessorCount
+          cmd /c win_build_opencv.cmd
+          if ($LASTEXITCODE -ne 0) { throw "OpenCV build failed" }
+          Pop-Location
+
+      - name: Save OpenCV cache immediately
+        if: steps.opencv-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: C:\opencv\build\install
+          key: opencv-4.13.0-mingw-gocv043-clashgo-minimal-v1
+
+      - name: Add OpenCV to PATH
+        shell: powershell
+        run: |
+          "C:\opencv\build\install\x64\mingw\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install Wails
+        shell: powershell
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          wails version
+
+      - name: Synchronize audited runtime assets
+        shell: powershell
+        run: .\tools\sync-upstream-runtime.ps1
+
+      - name: Generate bindings and validate frontend
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path web\dist | Out-Null
+          if (-not (Test-Path web\dist\index.html)) {
+            Set-Content web\dist\index.html "<!doctype html><html><body></body></html>" -Encoding UTF8
+          }
+          wails generate module -tags "customenv,gocv_specific_modules"
+          if ($LASTEXITCODE -ne 0) { throw "Wails binding generation failed" }
+          Push-Location web
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
+          Pop-Location
+
+      - name: Test backend
+        shell: powershell
+        run: go test -tags "customenv,gocv_specific_modules" ./internal/... ./pkg/...
+
+      - name: Build portable bundle
+        shell: powershell
+        run: .\tools\build-windows.ps1 -Version "$env:RELEASE_VERSION" -AccountServiceURL "$env:CLASHGO_ACCOUNT_API_URL" -SkipSync -SkipTests
+
+      - name: Build NSIS installer
+        shell: powershell
+        run: .\tools\build-installer.ps1 -Version "$env:RELEASE_VERSION"
+
+      - name: Generate checksums and update manifest
+        id: manifest
+        shell: powershell
+        run: |
+          $version = $env:RELEASE_VERSION
+          $zip = Get-ChildItem dist -Filter "ClashGO-v$version-windows.zip" | Select-Object -First 1
+          $setup = Get-ChildItem dist -Filter "ClashGO-v$version-windows-setup.exe" | Select-Object -First 1
+          if (-not $zip) { throw "Release ZIP not found" }
+          if (-not $setup) { throw "Installer EXE not found" }
+
+          $files = @($zip, $setup)
+          $sumLines = foreach ($file in $files) {
+            $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($file.Name)"
+          }
+          $sumLines | Set-Content dist\SHA256SUMS.txt -Encoding ASCII
+
+          $zipSha = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLower()
+          $assetUrl = "https://github.com/TrashrProject/ClashGo-Windows/releases/download/v$version/$($zip.Name)"
+          $manifest = [ordered]@{
+            version = $version
+            release_date = (Get-Date).ToUniversalTime().ToString("o")
+            notes = $env:RELEASE_NOTES
+            min_supported = "0.6.0-windows-beta"
+            platforms = [ordered]@{
+              windows = [ordered]@{
+                asset_name = $zip.Name
+                asset_url = $assetUrl
+                size = $zip.Length
+                sha256 = $zipSha
+              }
+            }
+          }
+          $json = $manifest | ConvertTo-Json -Depth 6
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText((Join-Path $PWD "dist\latest.json"), $json, $utf8NoBom)
+          node -e "JSON.parse(require('fs').readFileSync('dist/latest.json','utf8')); console.log('latest.json valid')"
+          if ($LASTEXITCODE -ne 0) { throw "latest.json validation failed" }
+          "zip=$($zip.FullName)" >> $env:GITHUB_OUTPUT
+          "setup=$($setup.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:RELEASE_VERSION
+          gh release create "v$version" "${{ steps.manifest.outputs.zip }}" "${{ steps.manifest.outputs.setup }}" "dist\latest.json" "dist\SHA256SUMS.txt" --repo TrashrProject/ClashGo-Windows --title "ClashGO Windows v$version" --notes "$env:RELEASE_NOTES" --target windows/core-port
