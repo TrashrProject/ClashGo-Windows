@@ -972,12 +972,11 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 }
 
 func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
-	// Prefer a region-level orange check over one exact pixel. The French
-	// localized village button shifts its label/highlights enough that the
-	// historical point (60,695) can land on text/shadow and fail even though
-	// the large orange Attack button is plainly visible.
-	if b.hasAttackButtonColor(screen) {
-		b.logger.Info().Msg("attack button verified via localized orange region")
+	// Prefer locating the actual orange button body in the tight bottom-left
+	// HUD ROI. This is robust across language and avoids assuming one fixed
+	// center coordinate.
+	if x, y, ok := b.locateAttackButtonColor(screen); ok {
+		b.logger.Info().Int("x", x).Int("y", y).Msg("attack button verified via localized orange region")
 		return true
 	}
 
@@ -1051,6 +1050,15 @@ func (b *Bot) isOrange(screen gocv.Mat, x, y int) bool {
 // sampled pixel across languages, button animations and text overlays, while
 // the tight ROI keeps it from confusing unrelated orange UI elsewhere.
 func (b *Bot) hasAttackButtonColor(screen gocv.Mat) bool {
+	_, _, ok := b.locateAttackButtonColor(screen)
+	return ok
+}
+
+// locateAttackButtonColor returns the center of the largest orange/gold blob
+// inside the tight bottom-left Attack-button ROI. Using the detected blob
+// center is safer than tapping a historical hard-coded point: on the user's
+// Windows/BlueStacks layout the fixed point landed on a neighbouring control.
+func (b *Bot) locateAttackButtonColor(screen gocv.Mat) (int, int, bool) {
 	x0, y0 := b.cal.ScaleRef(0, 600)
 	x1, y1 := b.cal.ScaleRef(145, 731)
 
@@ -1067,7 +1075,7 @@ func (b *Bot) hasAttackButtonColor(screen gocv.Mat) bool {
 		y1 = screen.Rows()
 	}
 	if x1-x0 < 2 || y1-y0 < 2 {
-		return false
+		return 0, 0, false
 	}
 
 	roi := screen.Region(image.Rect(x0, y0, x1, y1))
@@ -1076,9 +1084,6 @@ func (b *Bot) hasAttackButtonColor(screen gocv.Mat) bool {
 	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
 	defer vision.PutMat(mask)
 
-	// BGR bounds: orange/brown/gold family used by the village Attack button.
-	// Deliberately broad enough for localized text/shading, but constrained by
-	// the tiny bottom-left ROI above.
 	gocv.InRangeWithScalar(
 		roi,
 		gocv.NewScalar(0, 70, 110, 0),
@@ -1086,20 +1091,43 @@ func (b *Bot) hasAttackButtonColor(screen gocv.Mat) bool {
 		&mask,
 	)
 
-	orangePixels := gocv.CountNonZero(mask)
-	minPixels := (roi.Rows() * roi.Cols()) / 18 // ~5.5% of the tight ROI
-	if minPixels < 120 {
-		minPixels = 120
+	contours := gocv.FindContours(mask, gocv.RetrievalExternal, gocv.ChainApproxSimple)
+	defer contours.Close()
+
+	bestArea := 0.0
+	bestRect := image.Rectangle{}
+	for i := 0; i < contours.Size(); i++ {
+		contour := contours.At(i)
+		area := gocv.ContourArea(contour)
+		if area <= bestArea {
+			continue
+		}
+		rect := gocv.BoundingRect(contour)
+		// Ignore tiny orange HUD/text fragments. The Attack button body should
+		// form a materially sized blob in this ROI.
+		if rect.Dx() < 18 || rect.Dy() < 12 {
+			continue
+		}
+		bestArea = area
+		bestRect = rect
 	}
 
-	if orangePixels >= minPixels {
-		b.logger.Debug().
-			Int("orange_pixels", orangePixels).
-			Int("min_pixels", minPixels).
-			Msg("localized Attack-button color region matched")
-		return true
+	if bestArea < 180 || bestRect.Empty() {
+		return 0, 0, false
 	}
-	return false
+
+	x := x0 + bestRect.Min.X + bestRect.Dx()/2
+	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
+
+	b.logger.Debug().
+		Float64("area", bestArea).
+		Int("x", x).
+		Int("y", y).
+		Int("w", bestRect.Dx()).
+		Int("h", bestRect.Dy()).
+		Msg("localized Attack-button blob located")
+
+	return x, y, true
 }
 
 // buttonROI returns the normalized (reference-resolution) region of interest
@@ -1639,10 +1667,20 @@ func (b *Bot) clickSequence() bool {
 		// that created the contradictory "Attack detected" -> "could not find
 		// Attack button" failure seen on localized/animated village frames.
 		if screen, err := b.client.CaptureToMat(); err == nil {
-			if b.findAttackButton(screen, 0.30) {
+			if x, y, ok := b.locateAttackButtonColor(screen); ok {
+				screen.Close()
+				b.logger.Info().Int("x", x).Int("y", y).Msg("Attack button verified; clicking detected button center")
+				if err := b.client.TapRandomized(x, y); err == nil {
+					b.recordActivity()
+					attackClicked = true
+					break
+				}
+			} else if b.findAttackButton(screen, 0.30) {
+				// Template/pinpoint verified the button but the orange contour
+				// was not strong enough. Fall back to the historical center.
 				x, y := b.cal.ScaleRef(64, 666)
 				screen.Close()
-				b.logger.Info().Int("x", x).Int("y", y).Msg("Attack button verified; clicking canonical center")
+				b.logger.Info().Int("x", x).Int("y", y).Msg("Attack button verified; clicking calibrated fallback center")
 				if err := b.client.TapRandomized(x, y); err == nil {
 					b.recordActivity()
 					attackClicked = true
