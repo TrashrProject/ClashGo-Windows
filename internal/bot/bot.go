@@ -1578,6 +1578,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			}
 			remainingUndeployed, deployErr = b.deployTroops(screen)
 			if deployErr != nil || remainingUndeployed > 0 {
+				b.logger.Warn().
+					Err(deployErr).
+					Int("remaining", remainingUndeployed).
+					Msg("deployment not complete; keeping battle active and recording diagnostics")
 				failScreen, err := b.client.CaptureToMat()
 				if err == nil {
 					b.DumpDiagnostics("deployment_failed", failScreen, map[string]interface{}{
@@ -1588,6 +1592,8 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 					})
 					failScreen.Close()
 				}
+			} else {
+				b.logger.Info().Msg("all live deployable troop slots verified empty")
 			}
 			screen.Close()
 			break
@@ -1637,7 +1643,13 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		time.Sleep(600 * time.Millisecond)
 	}
 
-	b.logger.Info().Msg("battle deployment complete, waiting for battle to end naturally...")
+	if deployErr != nil || remainingUndeployed > 0 {
+		b.logger.Warn().
+			Int("remaining", remainingUndeployed).
+			Msg("deployment ended with units still unverified; battle continues but deployment is NOT marked complete")
+	} else {
+		b.logger.Info().Msg("battle deployment complete: all live deployable units verified, waiting for battle to end naturally...")
+	}
 
 	var battleStars int = 0
 	var battleGold int = 0
