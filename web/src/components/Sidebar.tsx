@@ -8,6 +8,7 @@ interface SidebarProps {
   expanded: boolean;
   setExpanded: (expanded: boolean) => void;
   running: boolean;
+  starting: boolean;
   onStart: () => void;
   onStop: () => void;
 }
@@ -18,6 +19,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
   expanded,
   setExpanded,
   running,
+  starting,
   onStart,
   onStop
 }) => {
@@ -85,19 +87,24 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
 
         <div className="mt-auto space-y-3">
           <button
-            onClick={running ? onStop : onStart}
-            title={expanded ? undefined : (running ? 'Stop bot' : 'Start bot')}
+            onClick={starting ? undefined : (running ? onStop : onStart)}
+            disabled={starting}
+            title={expanded ? undefined : (starting ? 'Bot starting' : (running ? 'Stop bot' : 'Start bot'))}
             className={`w-full h-12 rounded-2xl font-black text-[10px] tracking-[0.2em] transition-all duration-200 flex items-center relative overflow-hidden group/start ${
-              running
-                ? 'bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/50 border border-rose-100 dark:border-rose-900/30'
-                : 'bg-zinc-950 dark:bg-zinc-800 text-white dark:text-zinc-300 hover:bg-zinc-800 dark:hover:bg-zinc-700 shadow-premium dark:shadow-none border border-transparent dark:border-zinc-700/50'
+              starting
+                ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30 cursor-wait'
+                : running
+                  ? 'bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/50 border border-rose-100 dark:border-rose-900/30'
+                  : 'bg-zinc-950 dark:bg-zinc-800 text-white dark:text-zinc-300 hover:bg-zinc-800 dark:hover:bg-zinc-700 shadow-premium dark:shadow-none border border-transparent dark:border-zinc-700/50'
             }`}
           >
             <div className="w-12 h-12 flex-shrink-0 flex items-center justify-center z-10 transition-transform duration-200 group-hover/start:scale-110">
-              <span className="material-symbols-outlined text-[18px]">{running ? 'stop' : 'play_arrow'}</span>
+              <span className={`material-symbols-outlined text-[18px] ${starting ? 'animate-spin' : ''}`}>
+                {starting ? 'progress_activity' : (running ? 'stop' : 'play_arrow')}
+              </span>
             </div>
             <span className={`transition-[opacity,transform] duration-200 ease-out whitespace-nowrap z-10 ${expanded ? 'opacity-100 translate-x-0' : 'opacity-0 w-0 -translate-x-2 overflow-hidden'}`}>
-              {running ? 'STOP BOT' : 'START BOT'}
+              {starting ? 'STARTING...' : (running ? 'STOP BOT' : 'START BOT')}
             </span>
           </button>
         </div>
