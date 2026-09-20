@@ -518,6 +518,17 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 
 	state, _, _ := gc.ReadState()
 
+	// Windows/BlueStacks can spend a while in StateUnknown immediately after
+	// the game becomes visually usable (localized HUD, animated overlays, first
+	// template-cache warmup). The old 35s generic watchdog restarted Clash
+	// before the bot had a chance to obtain a stable village classification,
+	// producing the exact launch -> 35s -> restart loop seen on Windows.
+	// Give only the initial Unknown phase a bounded grace period; once a real
+	// state is observed the normal watchdog rules apply.
+	if state == game.StateUnknown && time.Since(b.startedAt) < 2*time.Minute {
+		return
+	}
+
 	// Post-boot splash states (ТАР! collect splash, castle logo, news)
 	// legitimately sit static for 1-3 minutes while the game connects — the
 	// castle logo has no progress indicator at all. The generic stuck timeout
@@ -699,7 +710,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		// That caused a live battle/search screen to be logged as "village
 		// detected" and consumed the frame before the attack logic could run.
 		isVillage := state == game.StateMainVillage ||
-			((state == game.StateUnknown || state == game.StateArmyCamp) && b.findAttackButton(screen, 0.45))
+			((state == game.StateUnknown || state == game.StateArmyCamp) && b.findAttackButton(screen, 0.30))
 
 		if isVillage {
 			if b.zoomedOut.CompareAndSwap(false, true) {
@@ -862,7 +873,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		return
 	}
 
-	if b.zoomedOut.Load() && (gc.State == game.StateMainVillage || gc.State == game.StateUnknown) && b.findAttackButton(screen, 0.45) {
+	if b.zoomedOut.Load() && (gc.State == game.StateMainVillage || gc.State == game.StateUnknown) && b.findAttackButton(screen, 0.30) {
 		b.logger.Info().Msg("attack button detected, starting sequence")
 		b.lastSequenceStart = time.Now()
 		go b.executeAttackSequence(gc)
@@ -902,7 +913,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		// boot-splash grace (5 min) and force-restarted, every cycle
 		// (observed live 11:32–11:43). A frame that still shows the real
 		// Attack! button IS the main village; skip the Back press.
-		if b.findAttackButton(screen, 0.45) {
+		if b.findAttackButton(screen, 0.30) {
 			// Throttle the log: the guard can fire every frame while the
 			// misclassification persists, which would spam 10 lines/sec.
 			if time.Since(b.lastArmyCampGuardLog) > 10*time.Second {
@@ -1683,7 +1694,11 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 			}
 		}
 
-		matches, err := vision.MatchMultiScaleROICached(screen, tpl, templateName, 0.2, 2.0, 5, 0.45, physROI)
+		threshold := float32(0.45)
+		if templateName == "btn_attack" {
+			threshold = 0.30
+		}
+		matches, err := vision.MatchMultiScaleROICached(screen, tpl, templateName, 0.2, 2.0, 5, threshold, physROI)
 		screen.Close()
 
 		if err != nil {
