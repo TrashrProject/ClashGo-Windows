@@ -1,12 +1,13 @@
 import React from 'react';
-import { BotStats, VillageResourceSnapshot } from '../types';
+import { AttackReport, BotStats, VillageResourceSnapshot } from '../types';
 
 interface AnalyticsProps {
   stats: BotStats;
   resourceHistory: VillageResourceSnapshot[];
+  history: AttackReport[];
 }
 
-const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory }) => {
+const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory, history }) => {
   // `color` drives Tailwind bar classes; `hex` feeds the conic-gradient
   // (Tailwind class names are NOT valid CSS color values — using them
   // inside the gradient string would silently drop the donut).
@@ -26,6 +27,34 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     dark: firstResource && lastResource ? lastResource.dark_elixir - firstResource.dark_elixir : 0,
   };
   const formatSigned = (v: number) => (v > 0 ? '+' : '') + v.toLocaleString();
+
+  const strategyStats = React.useMemo(() => {
+    const map = new Map<string, {
+      name: string;
+      attacks: number;
+      stars: number;
+      gold: number;
+      elixir: number;
+      dark: number;
+      completeDeploys: number;
+    }>();
+    for (const rep of history ?? []) {
+      const name = rep.strategy || 'Unknown';
+      const row = map.get(name) ?? {
+        name, attacks: 0, stars: 0, gold: 0, elixir: 0, dark: 0, completeDeploys: 0,
+      };
+      row.attacks++;
+      row.stars += rep.stars || 0;
+      row.gold += (rep.gold_stolen || 0) + (rep.bonus_gold || 0);
+      row.elixir += (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+      row.dark += (rep.dark_elixir_stolen || 0) + (rep.bonus_de || 0);
+      if (rep.deploy_success) row.completeDeploys++;
+      map.set(name, row);
+    }
+    return Array.from(map.values())
+      .sort((a, b) => b.attacks - a.attacks)
+      .slice(0, 8);
+  }, [history]);
 
   const totalAttacks = stats.stars_3 + stats.stars_2 + stats.stars_1 + stats.stars_0;
   const getPercent = (count: number) => totalAttacks > 0 ? Math.round((count / totalAttacks) * 100) : 0;
@@ -126,6 +155,51 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             })}
           </div>
         </div>
+        )}
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div>
+            <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Strategy Performance</h3>
+            <p className="text-sm text-zinc-500 mt-1">Built automatically from saved attack history.</p>
+          </div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">{history?.length ?? 0} attacks</div>
+        </div>
+
+        {strategyStats.length === 0 ? (
+          <div className="py-10 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">
+            Waiting for attack history
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                  <th className="pb-3 pr-4">Strategy</th>
+                  <th className="pb-3 px-3">Attacks</th>
+                  <th className="pb-3 px-3">Avg stars</th>
+                  <th className="pb-3 px-3">Full deploy</th>
+                  <th className="pb-3 px-3">Avg gold</th>
+                  <th className="pb-3 px-3">Avg elixir</th>
+                  <th className="pb-3 pl-3">Avg DE</th>
+                </tr>
+              </thead>
+              <tbody>
+                {strategyStats.map((row) => (
+                  <tr key={row.name} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                    <td className="py-4 pr-4 text-sm font-black text-zinc-950 dark:text-white">{row.name}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.stars / Math.max(1, row.attacks)).toFixed(2)}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{Math.round((row.completeDeploys / Math.max(1, row.attacks)) * 100)}%</td>
+                    <td className="py-4 px-3 text-sm font-bold text-amber-500 tabular-nums">{Math.round(row.gold / Math.max(1, row.attacks)).toLocaleString()}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-fuchsia-500 tabular-nums">{Math.round(row.elixir / Math.max(1, row.attacks)).toLocaleString()}</td>
+                    <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{Math.round(row.dark / Math.max(1, row.attacks)).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
