@@ -287,7 +287,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		}
 
 		if redZone.Valid {
-			const outsidePad = 18
+			const outsidePad = 34
 			free := map[string]int{
 				"left":   redZone.BBox.Min.X,
 				"right":  w - redZone.BBox.Max.X,
@@ -359,23 +359,59 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		tapExec.StartDeployBudget()
 		unverifiedSlots := 0
 
-		// Candidate deploy lines hugging the OUTER map border. We start with the
-		// live red-zone-derived line, then rotate through the other edges if a
-		// card does not drain. This directly handles layouts where the red
-		// polygon/bounding box is irregular and one nominal "outside" line is
-		// still rejected by Clash.
-		safeLines := [][2]image.Point{{p1, p2}}
-		safeLines = append(safeLines,
-			[2]image.Point{image.Pt(42, int(float64(h)*0.24)), image.Pt(42, int(float64(h)*0.67))},
-			[2]image.Point{image.Pt(w-42, int(float64(h)*0.24)), image.Pt(w-42, int(float64(h)*0.67))},
-			[2]image.Point{image.Pt(int(float64(w)*0.24), 54), image.Pt(int(float64(w)*0.76), 54)},
-			[2]image.Point{image.Pt(int(float64(w)*0.24), uiCutoff-44), image.Pt(int(float64(w)*0.76), uiCutoff-44)},
-		)
+		// Candidate deploy lines MUST all stay on the SAME verified outside
+		// side of the live red boundary. The previous implementation rotated
+		// retries through hard-coded left/right/top/bottom lines; on irregular
+		// bases those fallback lines could be INSIDE the red no-deploy polygon,
+		// which is exactly why Clash displayed "You cannot deploy troops on the
+		// red area!" even though the first line was correct.
+		//
+		// Build progressively-more-outward variants instead. If the first line
+		// is rejected, every retry moves AWAY from the village / red boundary,
+		// never across it.
+		safeLines := make([][2]image.Point, 0, 4)
+		baseLine := [2]image.Point{p1, p2}
+		safeLines = append(safeLines, baseLine)
+
+		nudgeOutside := func(line [2]image.Point, pixels int) [2]image.Point {
+			out := line
+			switch deploySide {
+			case "right":
+				out[0].X = clamp(out[0].X+pixels, edgeMargin, w-edgeMargin)
+				out[1].X = clamp(out[1].X+pixels, edgeMargin, w-edgeMargin)
+			case "top":
+				out[0].Y = clamp(out[0].Y-pixels, edgeMargin, uiCutoff-edgeMargin)
+				out[1].Y = clamp(out[1].Y-pixels, edgeMargin, uiCutoff-edgeMargin)
+			case "bottom":
+				out[0].Y = clamp(out[0].Y+pixels, edgeMargin, uiCutoff-edgeMargin)
+				out[1].Y = clamp(out[1].Y+pixels, edgeMargin, uiCutoff-edgeMargin)
+			default: // left
+				out[0].X = clamp(out[0].X-pixels, edgeMargin, w-edgeMargin)
+				out[1].X = clamp(out[1].X-pixels, edgeMargin, w-edgeMargin)
+			}
+			return out
+		}
+
+		// Keep three retry bands behind the same red line. This gives enough
+		// clearance for the line thickness, tap jitter and contour error.
+		for _, extra := range []int{16, 32, 48} {
+			line := nudgeOutside(baseLine, extra)
+			if line != safeLines[len(safeLines)-1] {
+				safeLines = append(safeLines, line)
+			}
+		}
 		deployLineIndex := 0
 
+		e.logger.Info().
+			Str("side", deploySide).
+			Int("safe_lines", len(safeLines)).
+			Interface("closest", safeLines[0]).
+			Interface("furthest", safeLines[len(safeLines)-1]).
+			Msg("Windows safe deploy corridor locked behind red boundary")
+
 		// One helper for initial deploy + reconciliation. Every troop-like card
-		// uses a safe outer line; retries rotate edges until Clash accepts the
-		// placement. Spells intentionally target inside.
+		// uses this verified outside corridor. Retries only move farther OUT.
+		// Spells intentionally target inside.
 		deploySlot := func(slot *TrackedSlot, n int) {
 			if n <= 0 {
 				n = 1
@@ -397,8 +433,14 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				}
 				tapExec.TapDeployPoint(spellPoint, n, 2)
 			} else {
-				line := safeLines[deployLineIndex%len(safeLines)]
-				deployLineIndex++
+				lineIdx := deployLineIndex
+				if lineIdx >= len(safeLines) {
+					lineIdx = len(safeLines) - 1
+				}
+				line := safeLines[lineIdx]
+				if deployLineIndex < len(safeLines)-1 {
+					deployLineIndex++
+				}
 				e.logger.Info().
 					Str("unit", slot.UnitName).
 					Str("category", slot.Category).
