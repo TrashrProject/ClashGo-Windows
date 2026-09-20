@@ -237,23 +237,32 @@ function App() {
 
     const fetchData = async () => {
       try {
-        const [s, h, l, rh] = await Promise.all([
+        const [s, h, l] = await Promise.all([
           GetStats(),
           GetAttackHistory(),
           GetLogs(),
-          GetVillageResourceHistory()
         ]);
         setStats(s);
         setHistory(h);
         setLogs(l);
-        setResourceHistory((rh ?? []) as VillageResourceSnapshot[]);
       } catch (err) {
         console.error('Data fetch failed:', err);
       }
     };
 
+    const fetchResourceHistory = async () => {
+      try {
+        const rh = await GetVillageResourceHistory();
+        setResourceHistory((rh ?? []) as VillageResourceSnapshot[]);
+      } catch (err) {
+        console.warn('Resource history refresh failed:', err);
+      }
+    };
+
     fetchData();
+    void fetchResourceHistory();
     const interval = setInterval(fetchData, 2000);
+    const resourceInterval = setInterval(fetchResourceHistory, 15000);
 
     const fetchDiagnostics = async () => {
       try {
@@ -325,6 +334,7 @@ function App() {
 
     return () => {
       clearInterval(interval);
+      clearInterval(resourceInterval);
       clearInterval(diagnosticsInterval);
       unsubUpdater();
       unsubBotError();
