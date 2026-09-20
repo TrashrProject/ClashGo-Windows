@@ -74,6 +74,13 @@ func main() {
 		log.Fatal("COC_API_KEY is required")
 	}
 	apiKey = strings.TrimPrefix(apiKey, "Bearer ")
+	upperKey := strings.ToUpper(apiKey)
+	if strings.Contains(upperKey, "TA_VRAIE_CLE") ||
+		strings.Contains(upperKey, "TA_CLE_API") ||
+		strings.Contains(upperKey, "YOUR_API_KEY") ||
+		len(apiKey) < 40 {
+		log.Fatal("COC_API_KEY looks like a placeholder or invalid token; paste the real Clash of Clans developer API key")
+	}
 
 	addr := strings.TrimSpace(os.Getenv("CLASHGO_ACCOUNT_LISTEN"))
 	if addr == "" {
@@ -132,6 +139,31 @@ func main() {
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"reason": "upstream_read_failed"})
+			return
+		}
+
+		// Translate common authorization failures into a message that makes
+		// sense to ClashGO users. The actual developer credential remains
+		// server-side and is never exposed to the desktop client.
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+			var upstreamErr struct {
+				Reason  string `json:"reason"`
+				Message string `json:"message"`
+			}
+			_ = json.Unmarshal(body, &upstreamErr)
+			reason := strings.ToLower(strings.TrimSpace(upstreamErr.Reason))
+			msg := strings.TrimSpace(upstreamErr.Message)
+			if strings.Contains(reason, "ip") || strings.Contains(strings.ToLower(msg), "ip") {
+				writeJSON(w, http.StatusBadGateway, map[string]string{
+					"reason":  "api_key_ip_mismatch",
+					"message": "Server Clash API key is not authorized for this public IP. Create/update the key with the server public IP.",
+				})
+				return
+			}
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"reason":  "api_key_invalid",
+				"message": "Server Clash API authorization failed. Check COC_API_KEY and its allowed IP.",
+			})
 			return
 		}
 
