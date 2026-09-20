@@ -12,6 +12,11 @@ try {
     if (-not (Test-Path $opencvBin)) { throw "OpenCV runtime was not found at $opencvBin. Run tools\setup-windows-dev.ps1 -InstallOpenCV." }
     $env:PATH = "$opencvBin;$env:PATH"
 
+$gocvTags = "customenv,gocv_specific_modules"
+$env:CGO_CXXFLAGS = "--std=c++11 -DNDEBUG"
+$env:CGO_CPPFLAGS = "-IC:/opencv/build/install/include"
+$env:CGO_LDFLAGS = "-LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -lopencv_imgproc4130 -lopencv_imgcodecs4130"
+
     if (-not (Get-Command wails.exe -ErrorAction SilentlyContinue)) {
         Write-Host "Installing Wails v2.12.0..."
         go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
@@ -26,14 +31,14 @@ try {
 
     if (-not $SkipTests) {
         Write-Host "Running focused tests..."
-        go test ./internal/updater ./internal/paths
+        go test -tags $gocvTags ./internal/updater ./internal/paths
         if ($LASTEXITCODE -ne 0) { throw "Go tests failed" }
     }
 
     $commit = (git rev-parse HEAD).Trim()
     $ldflags = "-X main.version=$Version -X main.commit=$commit"
     Write-Host "Building Wails Windows application..."
-    wails build -clean -webview2 embed -o ClashGO.exe -ldflags $ldflags
+    wails build -clean -webview2 embed -o ClashGO.exe -tags $gocvTags -ldflags $ldflags
     if ($LASTEXITCODE -ne 0) { throw "Wails build failed" }
 
     $exe = ".\build\bin\ClashGO.exe"

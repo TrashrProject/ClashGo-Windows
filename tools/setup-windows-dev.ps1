@@ -33,7 +33,7 @@ if (-not (Test-Path $opencvHeader)) {
             # ClashGO does not need OpenCV's performance-test binaries. Skipping
             # them shortens the one-time native build, and CMake's standard
             # parallel-level environment variable lets MinGW use every core.
-            (Get-Content .\win_build_opencv.cmd -Raw).Replace("-DBUILD_PERF_TESTS=ON", "-DBUILD_PERF_TESTS=OFF") |
+            (Get-Content .\win_build_opencv.cmd -Raw).Replace("-DBUILD_PERF_TESTS=ON", "-DBUILD_PERF_TESTS=OFF -DBUILD_LIST=core,imgproc,imgcodecs") |
                 Set-Content .\win_build_opencv.cmd -Encoding ASCII
             $env:CMAKE_BUILD_PARALLEL_LEVEL = [Environment]::ProcessorCount
             Write-Host "Building OpenCV with $env:CMAKE_BUILD_PARALLEL_LEVEL parallel jobs..."

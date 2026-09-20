@@ -101,3 +101,11 @@ incomplete native build can never be reused accidentally.
 CI generation: v2 — corrected GoCV module set and hardened Windows release pipeline.
 
 CI generation: locked latest-only Windows build pipeline.
+
+
+### Minimal GoCV build
+
+The Windows port only uses OpenCV core, imgproc and imgcodecs at runtime.
+Windows CI and the local setup script therefore build those modules only and
+compile GoCV with `customenv,gocv_specific_modules`. This avoids building and
+linking unused DNN, video, face, tracking and GUI modules.
