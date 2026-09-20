@@ -1658,20 +1658,41 @@ func (e *Executor) ResetBattleOutcome() {
 // dynamic probe (bright red pixel). Returns false when no stall_config is
 // loaded or the probe point is off-screen.
 func (e *Executor) endButtonVisible(screen gocv.Mat, sCfg StallConfig) bool {
-	if sCfg.RefWidth == 0 || sCfg.RefHeight == 0 {
-		return false
+	isRedAt := func(x, y int) bool {
+		if x < 0 || y < 0 || x >= screen.Cols() || y >= screen.Rows() {
+			return false
+		}
+		b := screen.GetUCharAt(y, x*3)
+		g := screen.GetUCharAt(y, x*3+1)
+		r := screen.GetUCharAt(y, x*3+2)
+		return r > 130 && g < 115 && b < 115
 	}
-	scaleX := float64(e.cal.PhysicalW) / float64(sCfg.RefWidth)
-	scaleY := float64(e.cal.PhysicalH) / float64(sCfg.RefHeight)
-	x := int(float64(sCfg.EndButton.X) * scaleX)
-	y := int(float64(sCfg.EndButton.Y) * scaleY)
-	if x < 0 || y < 0 || x >= screen.Cols() || y >= screen.Rows() {
-		return false
+
+	// Prefer the calibrated point when available.
+	if sCfg.RefWidth > 0 && sCfg.RefHeight > 0 {
+		scaleX := float64(e.cal.PhysicalW) / float64(sCfg.RefWidth)
+		scaleY := float64(e.cal.PhysicalH) / float64(sCfg.RefHeight)
+		x := int(float64(sCfg.EndButton.X) * scaleX)
+		y := int(float64(sCfg.EndButton.Y) * scaleY)
+		if isRedAt(x, y) {
+			return true
+		}
 	}
-	b := screen.GetUCharAt(y, x*3)
-	g := screen.GetUCharAt(y, x*3+1)
-	r := screen.GetUCharAt(y, x*3+2)
-	return r > 130 && g < 110 && b < 110
+
+	// Fallbacks cover current "Surrender" / "End Battle" button variants
+	// and make the loot-exit UI setting independent from stall_config.json.
+	for _, ref := range []image.Point{
+		{X: 34, Y: 588},
+		{X: 67, Y: 570},
+		{X: 88, Y: 590},
+		{X: 112, Y: 408},
+	} {
+		x, y := e.cal.ScaleRef(ref.X, ref.Y)
+		if isRedAt(x, y) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duration) bool {
