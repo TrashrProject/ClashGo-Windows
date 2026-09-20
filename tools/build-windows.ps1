@@ -10,9 +10,34 @@ try {
     $opencvBin = "C:\opencv\build\install\x64\mingw\bin"
     if ($env:CLASHGO_OPENCV_BIN) { $opencvBin = $env:CLASHGO_OPENCV_BIN }
     if (-not (Test-Path $opencvBin)) { throw "OpenCV runtime was not found at $opencvBin. Run tools\setup-windows-dev.ps1 -InstallOpenCV." }
-    $mingwBin = "C:\msys64\ucrt64\bin"
-    if (-not (Test-Path (Join-Path $mingwBin "g++.exe"))) {
-        throw "MinGW UCRT64 compiler was not found at $mingwBin. Install mingw-w64-ucrt-x86_64-gcc in MSYS2."
+    # Prefer an explicit override, then the normal MSYS2 UCRT toolchain,
+    # then any working MinGW compiler already available on PATH (including the
+    # Chocolatey toolchain used by GitHub's Windows runner). The old hard-coded
+    # MSYS2-only path made CI fail after every otherwise-green test/build.
+    $mingwBin = $null
+    if ($env:CLASHGO_MINGW_BIN -and (Test-Path (Join-Path $env:CLASHGO_MINGW_BIN "g++.exe"))) {
+        $mingwBin = $env:CLASHGO_MINGW_BIN
+    }
+    if (-not $mingwBin) {
+        $msysCandidate = "C:\msys64\ucrt64\bin"
+        if (Test-Path (Join-Path $msysCandidate "g++.exe")) {
+            $mingwBin = $msysCandidate
+        }
+    }
+    if (-not $mingwBin) {
+        $pathGxx = Get-Command g++.exe -ErrorAction SilentlyContinue
+        if ($pathGxx) {
+            $mingwBin = Split-Path $pathGxx.Source -Parent
+        }
+    }
+    if (-not $mingwBin) {
+        $chocoCandidate = "C:\ProgramData\mingw64\mingw64\bin"
+        if (Test-Path (Join-Path $chocoCandidate "g++.exe")) {
+            $mingwBin = $chocoCandidate
+        }
+    }
+    if (-not $mingwBin -or -not (Test-Path (Join-Path $mingwBin "gcc.exe")) -or -not (Test-Path (Join-Path $mingwBin "g++.exe"))) {
+        throw "A usable MinGW gcc/g++ toolchain was not found. Install MSYS2 UCRT64 or set CLASHGO_MINGW_BIN."
     }
 
     # Wails' binding-generation step invokes the Go toolchain before the final
