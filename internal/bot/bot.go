@@ -935,6 +935,15 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 }
 
 func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
+	// Prefer a region-level orange check over one exact pixel. The French
+	// localized village button shifts its label/highlights enough that the
+	// historical point (60,695) can land on text/shadow and fail even though
+	// the large orange Attack button is plainly visible.
+	if b.hasAttackButtonColor(screen) {
+		b.logger.Info().Msg("attack button verified via localized orange region")
+		return true
+	}
+
 	pinX, pinY := b.cal.ScaleRef(60, 695)
 	if b.isOrange(screen, pinX, pinY) {
 		b.logger.Debug().Msg("attack button confirmed via pinpoint color check")
@@ -998,6 +1007,62 @@ func (b *Bot) isOrange(screen gocv.Mat, x, y int) bool {
 		gocv.NewScalar(0, 100, 150, 0),
 		gocv.NewScalar(150, 255, 255, 0),
 		20)
+}
+
+// hasAttackButtonColor looks only at the tight bottom-left HUD zone where the
+// village Attack button lives. A region test is much more robust than a single
+// sampled pixel across languages, button animations and text overlays, while
+// the tight ROI keeps it from confusing unrelated orange UI elsewhere.
+func (b *Bot) hasAttackButtonColor(screen gocv.Mat) bool {
+	x0, y0 := b.cal.ScaleRef(0, 600)
+	x1, y1 := b.cal.ScaleRef(145, 731)
+
+	if x0 < 0 {
+		x0 = 0
+	}
+	if y0 < 0 {
+		y0 = 0
+	}
+	if x1 > screen.Cols() {
+		x1 = screen.Cols()
+	}
+	if y1 > screen.Rows() {
+		y1 = screen.Rows()
+	}
+	if x1-x0 < 2 || y1-y0 < 2 {
+		return false
+	}
+
+	roi := screen.Region(image.Rect(x0, y0, x1, y1))
+	defer roi.Close()
+
+	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+
+	// BGR bounds: orange/brown/gold family used by the village Attack button.
+	// Deliberately broad enough for localized text/shading, but constrained by
+	// the tiny bottom-left ROI above.
+	gocv.InRangeWithScalar(
+		roi,
+		gocv.NewScalar(0, 70, 110, 0),
+		gocv.NewScalar(200, 255, 255, 0),
+		&mask,
+	)
+
+	orangePixels := gocv.CountNonZero(mask)
+	minPixels := (roi.Rows() * roi.Cols()) / 18 // ~5.5% of the tight ROI
+	if minPixels < 120 {
+		minPixels = 120
+	}
+
+	if orangePixels >= minPixels {
+		b.logger.Debug().
+			Int("orange_pixels", orangePixels).
+			Int("min_pixels", minPixels).
+			Msg("localized Attack-button color region matched")
+		return true
+	}
+	return false
 }
 
 // buttonROI returns the normalized (reference-resolution) region of interest
