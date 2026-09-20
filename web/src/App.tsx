@@ -30,6 +30,7 @@ import {
   SkipCurrentVersion,
   ClearSkippedVersion,
   GetAccountConfig,
+  GetPlayerProfile,
   GetVillageResourceHistory,
   SetSimpleMode,
 } from '../wailsjs/go/main/App';
@@ -202,6 +203,16 @@ function App() {
         setStrategiesList(strats ?? []);
         setAdbPort(conf.device.adb_port);
         setPlayerTag(account?.player_tag || '');
+
+        // Zero-config startup: if the user linked a tag previously, refresh
+        // the public profile immediately in the background. This also lets
+        // the Go backend auto-select the matching farm HDV before the user
+        // ever opens the Account page.
+        if (account?.player_tag) {
+          void GetPlayerProfile().catch((err) => {
+            console.warn('Background account sync failed:', err);
+          });
+        }
       } catch (err) {
         console.error('Init failed:', err);
       } finally {
