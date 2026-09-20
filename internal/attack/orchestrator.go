@@ -656,6 +656,11 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				Msg("Windows deployment controlled by farm composition profile")
 		}
 		oneShotDone := make(map[string]bool)
+		// Structurally detected heroes may not have a portrait-template name.
+		// Their relative left-to-right order remains stable even as troop cards
+		// disappear, so remember how many anonymous hero cards were already
+		// deployed and skip exactly that many on subsequent rescans.
+		unknownHeroesDeployed := 0
 		cardAttempts := make(map[string]int)
 		profileFirstDeploy := make(map[string]bool)
 		liveRemaining := 0
@@ -698,11 +703,19 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			chosenCount := 0
 			chosenActivity := 0.0
 
+			anonymousHeroIndex := 0
 			for _, slot := range liveSlots {
 				key := oneShotKey(slot)
 				// Skip every identity explicitly blacklisted for this battle.
 				if oneShotDone[key] {
 					continue
+				}
+				if slot.Category == "Hero" && strings.TrimSpace(slot.UnitName) == "" {
+					if anonymousHeroIndex < unknownHeroesDeployed {
+						anonymousHeroIndex++
+						continue
+					}
+					anonymousHeroIndex++
 				}
 
 				// When the user enabled an HDV farm composition, named cards
@@ -780,6 +793,12 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				tapExec.HumanSleep(130, 15)
 				tapExec.TapDeployPoint(pt, 1, 1)
 				oneShotDone[key] = true
+				if chosen.Category == "Hero" && strings.TrimSpace(chosen.UnitName) == "" {
+					unknownHeroesDeployed++
+					e.logger.Info().
+						Int("anonymous_heroes_deployed", unknownHeroesDeployed).
+						Msg("Windows anonymous hero deployed once; advancing structural hero cursor")
+				}
 				if armyState != nil && strings.TrimSpace(chosen.UnitName) != "" {
 					armyState.CompleteOneShot(chosen.UnitName)
 				}
