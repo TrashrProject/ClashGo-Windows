@@ -134,7 +134,13 @@ if ($adbPath) {
     Write-Step "ADB devices" ($devices -match '\bdevice\b') $devices
 
     $target = $null
-    foreach ($entry in $ports) {
+    $orderedPorts = @($ports)
+    if ($Instance) {
+        $preferred = @($ports | Where-Object { $_.Name -eq $Instance })
+        $rest = @($ports | Where-Object { $_.Name -ne $Instance })
+        $orderedPorts = @($preferred + $rest)
+    }
+    foreach ($entry in $orderedPorts) {
         $addr = "127.0.0.1:$($entry.Port)"
         $state = (& $adbPath -s $addr get-state 2>$null)
         if ($state -eq "device") {
