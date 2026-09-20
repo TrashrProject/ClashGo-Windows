@@ -30,10 +30,11 @@ import {
   SkipCurrentVersion,
   ClearSkippedVersion,
   GetAccountConfig,
+  GetVillageResourceHistory,
   SetSimpleMode,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
-import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics } from './types';
+import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot } from './types';
 import UpdateBanner from './components/UpdateBanner';
 import './App.css';
 
@@ -143,6 +144,7 @@ function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [history, setHistory] = useState<bot.AttackReport[]>([]);
+  const [resourceHistory, setResourceHistory] = useState<VillageResourceSnapshot[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [adbPort, setAdbPort] = useState(5555);
   const [darkMode, setDarkMode] = useState(getInitialDarkMode);
@@ -224,14 +226,16 @@ function App() {
 
     const fetchData = async () => {
       try {
-        const [s, h, l] = await Promise.all([
+        const [s, h, l, rh] = await Promise.all([
           GetStats(),
           GetAttackHistory(),
-          GetLogs()
+          GetLogs(),
+          GetVillageResourceHistory()
         ]);
         setStats(s);
         setHistory(h);
         setLogs(l);
+        setResourceHistory((rh ?? []) as VillageResourceSnapshot[]);
       } catch (err) {
         console.error('Data fetch failed:', err);
       }
@@ -639,7 +643,7 @@ function App() {
               }}
             />
           )}
-          {tab === 'analytics' && <Analytics stats={stats} />}
+          {tab === 'analytics' && <Analytics stats={stats} resourceHistory={resourceHistory} />}
           {tab === 'config' && <ConfigView {...configProps} />}
           {tab === 'settings' && (
             <SettingsView
