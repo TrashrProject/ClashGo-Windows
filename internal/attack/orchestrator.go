@@ -403,7 +403,12 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	troopCounter := NewTroopCounter(pCfg.Width, pCfg.Height, e.logger)
 	troopCounts := troopCounter.DetectCounts(deployScreen, slotMgr.GetAllSlots(), mBarY)
 	countMap := GetAllCounts(troopCounts)
-	writeArmyInspection(slotMgr.GetAllSlots(), troopCounts)
+	farmProfile, farmControlled := e.cfg.Farm.ActiveProfile()
+	if farmControlled {
+		writeArmyInspection(slotMgr.GetAllSlots(), troopCounts, &farmProfile)
+	} else {
+		writeArmyInspection(slotMgr.GetAllSlots(), troopCounts, nil)
+	}
 	e.logger.Info().Interface("counts", countMap).Msg("detected troop counts")
 
 	// Windows-safe deployment path.
@@ -643,7 +648,6 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				return 0
 			}
 		}
-		farmProfile, farmControlled := e.cfg.Farm.ActiveProfile()
 		var armyState *ArmyStateManager
 		if farmControlled {
 			armyState = NewArmyStateManager(farmProfile)
