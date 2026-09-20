@@ -791,23 +791,26 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 	// overlay. It is not a normal game state and used to leave the attack
 	// sequence waiting behind the modal. Detect the large red reward banner
 	// directly from the live frame and pick the right-most reward card.
-	if rewardX, rewardY, ok := b.locateRewardPopup(screen); ok {
-		if b.rewardDismissInFlight.CompareAndSwap(false, true) {
-			b.logger.Info().Int("x", rewardX).Int("y", rewardY).Msg("Pick a Reward popup detected; selecting reward")
-			go func(x, y int) {
-				defer b.rewardDismissInFlight.Store(false)
-				// Tiny settle only; the popup is already fully visible when its
-				// banner passes detection.
-				time.Sleep(120 * time.Millisecond)
-				if err := b.client.TapRandomized(x, y); err != nil {
-					b.logger.Warn().Err(err).Msg("reward selection tap failed; will retry")
-					return
-				}
-				b.recordActivity()
-				b.logger.Info().Msg("reward selected; resuming battle")
-			}(rewardX, rewardY)
+	// Reward cards only exist during an active battle. Never run this detector
+	// on MainVillage/ArmySelection: the broad red-banner signature can match
+	// normal home/menu artwork and was stealing focus from Attack -> Find Match.
+	if state == game.StateBattle || state == game.StateSearchMap {
+		if rewardX, rewardY, ok := b.locateRewardPopup(screen); ok {
+			if b.rewardDismissInFlight.CompareAndSwap(false, true) {
+				b.logger.Info().Int("x", rewardX).Int("y", rewardY).Msg("Pick a Reward popup detected during battle; selecting reward")
+				go func(x, y int) {
+					defer b.rewardDismissInFlight.Store(false)
+					time.Sleep(220 * time.Millisecond)
+					if err := b.client.TapFast(x, y, 0.7); err != nil {
+						b.logger.Warn().Err(err).Msg("reward selection tap failed; will retry")
+						return
+					}
+					b.recordActivity()
+					b.logger.Info().Msg("reward selected; resuming battle")
+				}(rewardX, rewardY)
+			}
+			return
 		}
-		return
 	}
 
 	if !b.zoomedOut.Load() {
@@ -2019,6 +2022,52 @@ func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, 
 	return false
 }
 
+// waitForStableLocator waits until a target is visible at a stable center.
+// This is intentionally used BETWEEN critical menu clicks so the bot never
+// chains taps into an animation that has not finished opening yet.
+func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int, bool), timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	var lastX, lastY int
+	stable := 0
+
+	for time.Now().Before(deadline) {
+		screen, err := b.client.CaptureToMat()
+		if err != nil || screen.Empty() {
+			if !screen.Empty() { screen.Close() }
+			time.Sleep(90 * time.Millisecond)
+			continue
+		}
+		x, y, ok := locator(screen)
+		screen.Close()
+		if !ok {
+			stable = 0
+			time.Sleep(90 * time.Millisecond)
+			continue
+		}
+
+		if stable > 0 {
+			dx := x-lastX; if dx < 0 { dx = -dx }
+			dy := y-lastY; if dy < 0 { dy = -dy }
+			if dx <= 8 && dy <= 8 {
+				stable++
+			} else {
+				stable = 1
+			}
+		} else {
+			stable = 1
+		}
+		lastX, lastY = x, y
+
+		if stable >= 2 {
+			b.logger.Info().Str("target", name).Int("x", x).Int("y", y).Msg("next UI target is stable and ready")
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	b.logger.Warn().Str("target", name).Dur("timeout", timeout).Msg("next UI target did not become stable in time")
+	return false
+}
+
 func (b *Bot) clickSequence() bool {
 
 	attackClicked := false
@@ -2045,7 +2094,7 @@ func (b *Bot) clickSequence() bool {
 				screen.Close()
 			}
 		}
-		b.client.JitteredSleep(500 * time.Millisecond)
+		b.client.JitteredSleep(650 * time.Millisecond)
 	}
 	if !attackClicked {
 		b.logger.Warn().Msg("could not find or click Attack button")
@@ -2055,7 +2104,11 @@ func (b *Bot) clickSequence() bool {
 		}
 		return false
 	}
-	b.client.JitteredSleep(500 * time.Millisecond)
+	// Do not chain directly into the next tap. Wait for the attack menu to
+	// finish opening and for Find Match to be stable in two consecutive frames.
+	if !b.waitForStableLocator("Find Match", b.locateFindMatchButtonColor, 3*time.Second) {
+		b.logger.Warn().Msg("attack menu did not settle on Find Match after Attack click")
+	}
 
 	findMatchClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
@@ -2093,7 +2146,7 @@ func (b *Bot) clickSequence() bool {
 			break
 		}
 
-		b.client.JitteredSleep(500 * time.Millisecond)
+		b.client.JitteredSleep(650 * time.Millisecond)
 	}
 	if !findMatchClicked {
 		b.logger.Warn().Msg("could not find or click Find Match button")
@@ -2107,7 +2160,21 @@ func (b *Bot) clickSequence() bool {
 		}
 		return false
 	}
-	b.client.JitteredSleep(500 * time.Millisecond)
+	// Find Match opens a transition/menu. Give it a real state transition
+	// window instead of firing Army Arrow at a stale frame.
+	armyReadyDeadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(armyReadyDeadline) {
+		s, err := b.client.CaptureToMat()
+		if err == nil && !s.Empty() {
+			st, _ := b.classify(s)
+			s.Close()
+			if st == game.StateArmySelection || st == game.StateArmyCamp {
+				b.logger.Info().Str("state", st.String()).Msg("army menu state confirmed before next click")
+				break
+			}
+		}
+		time.Sleep(120 * time.Millisecond)
+	}
 
 	armyArrowClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
@@ -2115,7 +2182,7 @@ func (b *Bot) clickSequence() bool {
 			armyArrowClicked = true
 			break
 		}
-		b.client.JitteredSleep(500 * time.Millisecond)
+		b.client.JitteredSleep(650 * time.Millisecond)
 	}
 	if !armyArrowClicked {
 		b.logger.Warn().Msg("could not find or click Army Arrow button")
@@ -2125,7 +2192,7 @@ func (b *Bot) clickSequence() bool {
 		}
 		return false
 	}
-	b.client.JitteredSleep(500 * time.Millisecond)
+	b.client.JitteredSleep(650 * time.Millisecond)
 
 	armyClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
@@ -2133,7 +2200,7 @@ func (b *Bot) clickSequence() bool {
 			armyClicked = true
 			break
 		}
-		b.client.JitteredSleep(500 * time.Millisecond)
+		b.client.JitteredSleep(650 * time.Millisecond)
 	}
 	if !armyClicked {
 		b.logger.Warn().Int("army_slot", b.armySlot).Msg("army recipe card did not appear, continuing anyway")
@@ -2142,7 +2209,7 @@ func (b *Bot) clickSequence() bool {
 			screen.Close()
 		}
 	}
-	b.client.JitteredSleep(500 * time.Millisecond)
+	b.client.JitteredSleep(650 * time.Millisecond)
 
 	battleClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
@@ -2154,7 +2221,7 @@ func (b *Bot) clickSequence() bool {
 			battleClicked = true
 			break
 		}
-		b.client.JitteredSleep(500 * time.Millisecond)
+		b.client.JitteredSleep(650 * time.Millisecond)
 	}
 	if !battleClicked {
 		b.logger.Warn().Msg("could not find or click Battle button")
