@@ -401,7 +401,10 @@ func (b *Bot) captureLoop() {
 		// with no Go error at all. Keep one low-rate observer alive for popup /
 		// health handling, but remove the duplicate high-frequency pressure.
 		if b.seqRunning.Load() {
-			return 700 * time.Millisecond
+			// The active attack/search goroutine owns screencaps while a
+			// sequence is running. Keep only a very low-rate observer so
+			// BlueStacks is never hit by two concurrent screencap streams.
+			return 2500 * time.Millisecond
 		}
 
 		switch gc.State {
@@ -1663,23 +1666,25 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 		transitioned := false
 		if nextClicked {
-			deadline := time.Now().Add(2600 * time.Millisecond)
-			for time.Now().Before(deadline) {
-				time.Sleep(220 * time.Millisecond)
+			// Give Clash/BlueStacks time to start the clouds transition before
+			// asking for another screenshot. The old 220ms polling burst could
+			// issue 8-12 PNG screencaps immediately after every Next tap and
+			// was correlated with HD-Player.exe access-violation crashes.
+			time.Sleep(650 * time.Millisecond)
+			for verify := 0; verify < 3 && !transitioned; verify++ {
 				probe, capErr := b.client.CaptureToMat()
-				if capErr != nil || probe.Empty() {
-					if !probe.Empty() { probe.Close() }
-					continue
+				if capErr == nil && !probe.Empty() {
+					st, _ := b.classify(probe)
+					probe.Close()
+					if st == game.StateSearchMap || st == game.StateLoading || st == game.StateUnknown {
+						transitioned = true
+						break
+					}
+				} else if !probe.Empty() {
+					probe.Close()
 				}
-				st, _ := b.classify(probe)
-				probe.Close()
-
-				// SearchMap / Loading are the normal clouds states. Unknown is
-				// also accepted briefly because animated clouds often have no
-				// stable classifier match.
-				if st == game.StateSearchMap || st == game.StateLoading || st == game.StateUnknown {
-					transitioned = true
-					break
+				if verify < 2 {
+					time.Sleep(550 * time.Millisecond)
 				}
 			}
 		}
@@ -1691,19 +1696,21 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			b.logger.Warn().Msg("Next tap did not start matchmaking; reacquiring button for one controlled retry")
 			time.Sleep(450 * time.Millisecond)
 			if clickNextFresh() {
-				retryDeadline := time.Now().Add(2800 * time.Millisecond)
-				for time.Now().Before(retryDeadline) {
-					time.Sleep(250 * time.Millisecond)
+				time.Sleep(700 * time.Millisecond)
+				for verify := 0; verify < 3 && !transitioned; verify++ {
 					probe, capErr := b.client.CaptureToMat()
-					if capErr != nil || probe.Empty() {
-						if !probe.Empty() { probe.Close() }
-						continue
+					if capErr == nil && !probe.Empty() {
+						st, _ := b.classify(probe)
+						probe.Close()
+						if st == game.StateSearchMap || st == game.StateLoading || st == game.StateUnknown {
+							transitioned = true
+							break
+						}
+					} else if !probe.Empty() {
+						probe.Close()
 					}
-					st, _ := b.classify(probe)
-					probe.Close()
-					if st == game.StateSearchMap || st == game.StateLoading || st == game.StateUnknown {
-						transitioned = true
-						break
+					if verify < 2 {
+						time.Sleep(600 * time.Millisecond)
 					}
 				}
 			}
@@ -1717,7 +1724,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				b.OnStatsUpdate()
 			}
 			b.logger.Info().Msg("matchmaking transition confirmed after Next")
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(1100 * time.Millisecond)
 			continue
 		}
 
