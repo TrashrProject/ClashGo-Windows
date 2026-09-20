@@ -14,6 +14,11 @@ type CurrentArmyUnit = {
 type CurrentArmy = {
   timestamp: string;
   units: CurrentArmyUnit[];
+  target_town_hall?: number;
+  target_label?: string;
+  ready: boolean;
+  uncertain: boolean;
+  warnings?: string[];
 };
 
 type FarmUnit = { name: string; count: number; housing: number };
@@ -236,9 +241,21 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
               <div className="flex items-center justify-between gap-4 mb-5">
                 <div>
                   <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">Last detected army</div>
-                  <h4 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Live battle composition</h4>
+                  <div className="mt-1 flex flex-wrap items-center gap-3">
+                    <h4 className="text-xl font-black text-zinc-950 dark:text-white">Live battle composition</h4>
+                    <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border ${
+                      currentArmy.uncertain
+                        ? 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
+                        : currentArmy.ready
+                          ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-rose-500/10 border-rose-500/20 text-rose-600 dark:text-rose-400'
+                    }`}>
+                      {currentArmy.uncertain ? 'Vision check' : currentArmy.ready ? 'Target matched' : 'Composition differs'}
+                    </span>
+                  </div>
                   <p className="mt-1 text-xs text-zinc-500">
                     Captured automatically from the troop bar before deployment.
+                    {currentArmy.target_label ? ` Target: ${currentArmy.target_label}.` : ''}
                   </p>
                 </div>
                 <div className="text-[10px] font-bold text-zinc-400">
@@ -258,6 +275,18 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
                   </div>
                 ))}
               </div>
+              {!!currentArmy.warnings?.length && (
+                <details className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+                  <summary className="cursor-pointer text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                    Vision notes ({currentArmy.warnings.length})
+                  </summary>
+                  <div className="mt-3 space-y-1">
+                    {currentArmy.warnings.map((warning, idx) => (
+                      <div key={idx} className="text-[11px] font-medium text-zinc-500">{warning}</div>
+                    ))}
+                  </div>
+                </details>
+              )}
             </section>
           )}
 
