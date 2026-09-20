@@ -1703,15 +1703,16 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 			threshold = 0.30
 		}
 		matches, err := vision.MatchMultiScaleROICached(screen, tpl, templateName, 0.2, 2.0, 5, threshold, physROI)
-		screen.Close()
 
 		if err != nil {
+			screen.Close()
 			b.logger.Warn().Err(err).Str("step", stepName).Msg("match error")
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
 
 		if len(matches) == 0 {
+			screen.Close()
 			if retry == 0 {
 				b.logger.Debug().Str("step", stepName).Msg("not found, retrying...")
 			}
@@ -1729,9 +1730,15 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 			Int("x", px).Int("y", py).
 			Msg("clicking (fallback match)")
 
+		// IMPORTANT: SaveScreenshots previously called IMWrite after
+		// screen.Close(), handing OpenCV a freed native cv::Mat*. On Windows
+		// that is a process-level access violation (0xc0000005), which exactly
+		// matched the crash immediately after "clicking (fallback match)".
+		// Keep the Mat alive through the optional diagnostic write, then close.
 		if b.cfg.Debug.SaveScreenshots {
 			gocv.IMWrite(paths.ResolveConfig(fmt.Sprintf("diag_fallback_%s.png", templateName)), screen)
 		}
+		screen.Close()
 
 		if err := b.client.TapRandomized(px, py); err != nil {
 			b.logger.Error().Err(err).Msg("tap failed")
