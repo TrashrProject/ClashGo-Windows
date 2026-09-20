@@ -1630,20 +1630,14 @@ var villagePinpoints = map[string]Pinpoint{
 }
 
 func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
-
-	if pp, ok := villagePinpoints[templateName]; ok {
-		px, py := b.cal.ScaleRef(pp.X, pp.Y)
-		b.logger.Info().Str("step", stepName).Msg("pinpoint match, clicking...")
-		// TapRandomized = Gaussian jitter + the 180-450ms human reaction
-		// delay, so the bot visibly hesitates before committing to each
-		// decision tap the way a player would.
-		if err := b.client.TapRandomized(px, py); err == nil {
-			time.Sleep(1000 * time.Millisecond)
-			b.recordActivity()
-			return true
-		}
-	}
-
+	// Never treat a hard-coded coordinate as a successful match. On Windows
+	// the old fast path tapped the reference coordinate unconditionally and
+	// returned true even when the expected screen was not visible. That made
+	// clickSequence advance through Attack -> Find Match -> Army -> Battle on
+	// the village screen and then falsely report "searching".
+	//
+	// Coordinates remain useful only as a last-resort diagnostic reference;
+	// normal progression must be backed by an actual template/color match.
 	tpl, ok := b.templates.Get(templateName)
 	if !ok {
 		b.logger.Error().Str("template", templateName).Msg("template not loaded")
@@ -1728,11 +1722,11 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 
 	if pp, ok := villagePinpoints[templateName]; ok {
 		px, py := b.cal.ScaleRef(pp.X, pp.Y)
-		b.logger.Warn().Str("step", pp.Name).Msg("pinpoint color check and template match failed; executing blind tap fallback")
-		if err := b.client.TapRandomized(px, py); err == nil {
-			b.recordActivity()
-			return true
-		}
+		b.logger.Warn().
+			Str("step", pp.Name).
+			Int("reference_x", px).
+			Int("reference_y", py).
+			Msg("template/color verification failed; refusing blind tap")
 	}
 
 	b.logger.Error().Str("step", stepName).Int("retries", maxRetries).Msg("failed after retries")
