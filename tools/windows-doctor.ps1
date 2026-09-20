@@ -14,6 +14,30 @@ Write-Host "ClashGO Windows Doctor"
 Write-Host "======================"
 Write-Host ""
 
+if (-not $Instance) {
+    $configCandidates = @()
+    if ($env:CLASHGO_CONFIG_DIR) {
+        $configCandidates += (Join-Path $env:CLASHGO_CONFIG_DIR "config.json")
+    }
+    if ($env:APPDATA) {
+        $configCandidates += (Join-Path $env:APPDATA "ClashGO\config.json")
+        $configCandidates += (Join-Path $env:APPDATA "ClashGO\dev\config.json")
+    }
+    $appConfig = $configCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($appConfig) {
+        try {
+            $parsed = Get-Content $appConfig -Raw | ConvertFrom-Json
+            $savedInstance = [string]$parsed.device.bluestacks_instance
+            if ($savedInstance) { $Instance = $savedInstance.Trim() }
+        } catch {
+            Write-Host "[!!] config.json            could not parse saved instance: $($_.Exception.Message)"
+        }
+    }
+}
+if (-not $Instance -and $env:CLASHGO_BLUESTACKS_INSTANCE) {
+    $Instance = $env:CLASHGO_BLUESTACKS_INSTANCE
+}
+
 $playerCandidates = @()
 if ($env:CLASHGO_BLUESTACKS_PLAYER) { $playerCandidates += $env:CLASHGO_BLUESTACKS_PLAYER }
 if ($env:CLASHGO_BLUESTACKS_HOME) { $playerCandidates += (Join-Path $env:CLASHGO_BLUESTACKS_HOME "HD-Player.exe") }
@@ -48,6 +72,18 @@ if ($conf) {
     }
 }
 if ($ports.Count -gt 0) {
+    if ($Instance) {
+        $preferredPorts = @($ports | Where-Object { $_.Name -ieq $Instance })
+        $otherPorts = @($ports | Where-Object { $_.Name -ine $Instance })
+        if ($preferredPorts.Count -gt 0) {
+            $ports = @($preferredPorts + $otherPorts)
+            Write-Step "Preferred instance" $true $preferredPorts[0].Name
+        } else {
+            Write-Step "Preferred instance" $false "$Instance (not found in bluestacks.conf)"
+        }
+    } else {
+        Write-Step "Preferred instance" $true "Automatic"
+    }
     Write-Step "Instances" $true (($ports | ForEach-Object { "$($_.Name):$($_.Port)" }) -join ", ")
 } else {
     Write-Step "Instances" $false "no ADB ports found in config"
