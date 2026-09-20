@@ -83,3 +83,9 @@ full-runtime NSIS installer definition.
 Release gate: Windows CI must generate Wails bindings, pass frontend/backend
 tests, create the portable bundle and upload the artifact before the branch is
 merged into `main`.
+
+
+## Distribution integrity
+
+Successful Windows CI builds publish the portable ZIP, the NSIS installer and
+a `SHA256SUMS.txt` file so downloaded artifacts can be verified independently.
