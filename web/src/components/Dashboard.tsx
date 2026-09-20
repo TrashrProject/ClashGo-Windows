@@ -46,6 +46,8 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
   const [logFilter, setLogFilter] = React.useState('');
   const [severityFilter, setSeverityFilter] = React.useState<LogSeverity | 'all'>('all');
   const [copiedIdx, setCopiedIdx] = React.useState<number | null>(null);
+  const [historyFilter, setHistoryFilter] = React.useState<'all' | 'complete' | 'partial'>('all');
+  const [historyLimit, setHistoryLimit] = React.useState(10);
   const copiedTimerRef = React.useRef<number | null>(null);
   const uptimeHours = stats.uptime / (1e9 * 3600);
 
@@ -139,6 +141,27 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
     return `+${rate.toFixed(0)}/hr`;
   };
 
+  const filteredHistory = React.useMemo(() => {
+    const source = history ?? [];
+    if (historyFilter === 'complete') return source.filter((rep) => rep.deploy_success);
+    if (historyFilter === 'partial') return source.filter((rep) => !rep.deploy_success);
+    return source;
+  }, [history, historyFilter]);
+
+  const visibleHistory = React.useMemo(
+    () => filteredHistory.slice(0, historyLimit),
+    [filteredHistory, historyLimit],
+  );
+
+  const latestAttack = history?.[0];
+  const totalHistoryLoot = React.useMemo(() => {
+    return (history ?? []).reduce((acc, rep) => ({
+      gold: acc.gold + rep.gold_stolen + rep.bonus_gold,
+      elixir: acc.elixir + rep.elixir_stolen + rep.bonus_elixir,
+      de: acc.de + rep.dark_elixir_stolen + rep.bonus_de,
+    }), { gold: 0, elixir: 0, de: 0 });
+  }, [history]);
+
   const severityChips: { id: LogSeverity | 'all'; label: string; active: string; dot: string }[] = [
     { id: 'all', label: 'All', active: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white border-zinc-200 dark:border-zinc-700', dot: 'bg-zinc-400' },
     { id: 'debug', label: 'Debug', active: 'bg-violet-500/15 text-violet-600 dark:text-violet-400 border-violet-500/40', dot: 'bg-violet-500' },
@@ -174,91 +197,230 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         ))}
       </div>
 
-      {/* Attack Log Table */}
-      <div className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none overflow-hidden transition-all duration-500">
-        <div className="px-6 py-5 border-b border-zinc-50 dark:border-zinc-800/50 flex justify-between items-center bg-zinc-50/30 dark:bg-zinc-800/20">
-          <div>
-            <h3 className="text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Attack History</h3>
-            <p className="text-sm text-zinc-500 dark:text-zinc-500 font-medium">Recent combat deployments and results.</p>
+      {/* Persistent Attack History */}
+      <section className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none overflow-hidden">
+        <div className="px-6 py-5 border-b border-zinc-100 dark:border-zinc-800/70 bg-gradient-to-r from-zinc-50/80 to-white dark:from-zinc-900 dark:to-zinc-900">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center shadow-sm">
+                <span className="material-symbols-outlined">swords</span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Attack History</h3>
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[9px] font-black uppercase tracking-widest border border-emerald-500/20">
+                    Saved
+                  </span>
+                </div>
+                <p className="text-sm text-zinc-500 font-medium">
+                  {history.length.toLocaleString()} persistent battle{history.length === 1 ? '' : 's'} stored locally.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {([
+                ['all', 'All'],
+                ['complete', 'Full deploy'],
+                ['partial', 'Partial'],
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  onClick={() => { setHistoryFilter(id); setHistoryLimit(10); }}
+                  className={`h-9 px-3 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
+                    historyFilter === id
+                      ? 'bg-zinc-950 text-white border-zinc-950 dark:bg-white dark:text-zinc-950 dark:border-white'
+                      : 'bg-white dark:bg-zinc-900 text-zinc-500 border-zinc-200 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
+
+          {latestAttack && (
+            <div className="mt-5 grid grid-cols-1 xl:grid-cols-[1.5fr_1fr] gap-3">
+              <div className="rounded-2xl bg-zinc-950 text-white dark:bg-zinc-800 p-4 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <div className="text-[9px] uppercase tracking-[0.25em] font-black text-zinc-400 mb-1">Latest attack</div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-lg font-bold">{latestAttack.strategy || 'Unknown strategy'}</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                      {latestAttack.target_edge || 'Auto edge'}
+                    </span>
+                    <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider ${
+                      latestAttack.deploy_success
+                        ? 'bg-emerald-500/15 text-emerald-400'
+                        : 'bg-amber-500/15 text-amber-300'
+                    }`}>
+                      {latestAttack.deploy_success ? 'Deploy complete' : `${latestAttack.undeployed_slots} slot(s) left`}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  {[0, 1, 2].map((star) => (
+                    <span
+                      key={star}
+                      className={`material-symbols-outlined text-2xl ${
+                        star < latestAttack.stars ? 'text-amber-400' : 'text-zinc-700'
+                      }`}
+                      style={{ fontVariationSettings: star < latestAttack.stars ? "'FILL' 1" : "'FILL' 0" }}
+                    >
+                      star
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-200 dark:border-zinc-700 p-4 grid grid-cols-3 gap-3 bg-white/70 dark:bg-zinc-900/60">
+                <div>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Gold</div>
+                  <div className="text-sm font-black text-amber-500 tabular-nums">{totalHistoryLoot.gold.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Elixir</div>
+                  <div className="text-sm font-black text-fuchsia-500 tabular-nums">{totalHistoryLoot.elixir.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Dark</div>
+                  <div className="text-sm font-black text-zinc-700 dark:text-zinc-200 tabular-nums">{totalHistoryLoot.de.toLocaleString()}</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr>
-                <th className="px-6 py-4 text-[11px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.2em] bg-zinc-50/10 dark:bg-zinc-800/10">Loot Collected</th>
-                <th className="px-6 py-4 text-[11px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.2em] bg-zinc-50/10 dark:bg-zinc-800/10 text-center">Stars</th>
-                <th className="px-6 py-4 text-[11px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.2em] bg-zinc-50/10 dark:bg-zinc-800/10 text-right">Timestamp</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-50 dark:divide-zinc-800/50">
-              {history.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="px-6 py-24 text-center text-zinc-400 dark:text-zinc-700 text-[11px] font-black uppercase tracking-[0.3em] italic">No data available // Waiting for activity</td>
-                </tr>
-              ) : (
-                history.slice(0, 5).map((rep, i) => (
-                  <tr key={i} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/40 transition-colors group">
-                    <td className="px-6 py-4">
-                      <div className="flex gap-5">
-                        <div className="flex flex-col">
-                          <div className="flex items-center gap-2 text-sm font-bold text-zinc-700 dark:text-zinc-300 tabular-nums">
-                            <span className="material-symbols-outlined text-amber-500 text-base">monetization_on</span>
-                            {(rep.gold_stolen + rep.bonus_gold).toLocaleString()}
-                          </div>
-                          {rep.bonus_gold > 0 && (
-                            <div className="text-[10px] font-black text-amber-500/60 uppercase tracking-widest pl-6">
-                              + {rep.bonus_gold.toLocaleString()} bonus
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex flex-col">
-                          <div className="flex items-center gap-2 text-sm font-bold text-zinc-700 dark:text-zinc-300 tabular-nums">
-                            <span className="material-symbols-outlined text-fuchsia-500 text-base">water_drop</span>
-                            {(rep.elixir_stolen + rep.bonus_elixir).toLocaleString()}
-                          </div>
-                          {rep.bonus_elixir > 0 && (
-                            <div className="text-[10px] font-black text-fuchsia-500/60 uppercase tracking-widest pl-6">
-                              + {rep.bonus_elixir.toLocaleString()} bonus
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex flex-col">
-                          <div className="flex items-center gap-2 text-sm font-bold text-zinc-700 dark:text-zinc-300 tabular-nums">
-                            <span className="material-symbols-outlined text-zinc-900 dark:text-zinc-400 text-base">water_drop</span>
-                            {(rep.dark_elixir_stolen + rep.bonus_de).toLocaleString()}
-                          </div>
-                          {rep.bonus_de > 0 && (
-                            <div className="text-[10px] font-black text-zinc-500/60 uppercase tracking-widest pl-6">
-                              + {rep.bonus_de.toLocaleString()} bonus
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                       <div className="flex justify-center gap-1.5">
-                        {[...Array(3)].map((_, sIdx) => (
-                          <span
-                            key={sIdx}
-                            className={`material-symbols-outlined text-2xl ${sIdx < rep.stars ? 'text-amber-400' : 'text-zinc-200 dark:text-zinc-800'}`}
-                            style={{ fontVariationSettings: sIdx < rep.stars ? "'FILL' 1" : "'FILL' 0" }}
-                          >
-                            star
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-right text-xs font-black text-zinc-500 dark:text-zinc-500 tabular-nums uppercase tracking-widest">
-                      {new Date(rep.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                    </td>
+
+        {filteredHistory.length === 0 ? (
+          <div className="px-6 py-20 text-center">
+            <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+              <span className="material-symbols-outlined text-zinc-400 text-2xl">history</span>
+            </div>
+            <div className="text-sm font-bold text-zinc-600 dark:text-zinc-300">No saved attacks for this filter</div>
+            <div className="text-xs text-zinc-400 mt-1">Completed battles will appear here automatically and survive restarts.</div>
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[980px]">
+                <thead>
+                  <tr className="bg-zinc-50/70 dark:bg-zinc-800/30">
+                    <th className="px-6 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Battle</th>
+                    <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Strategy</th>
+                    <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Loot</th>
+                    <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Deployment</th>
+                    <th className="px-6 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] text-right">Date</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </thead>
+                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/70">
+                  {visibleHistory.map((rep, i) => {
+                    const totalLoot = rep.gold_stolen + rep.bonus_gold + rep.elixir_stolen + rep.bonus_elixir;
+                    const date = new Date(rep.timestamp);
+                    return (
+                      <tr key={`${rep.timestamp}-${i}`} className="group hover:bg-zinc-50/70 dark:hover:bg-zinc-800/30 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                              rep.stars >= 2
+                                ? 'bg-emerald-500/10 text-emerald-500'
+                                : rep.stars === 1
+                                  ? 'bg-amber-500/10 text-amber-500'
+                                  : 'bg-rose-500/10 text-rose-500'
+                            }`}>
+                              <span className="material-symbols-outlined text-xl">military_tech</span>
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-1">
+                                {[0, 1, 2].map((star) => (
+                                  <span
+                                    key={star}
+                                    className={`material-symbols-outlined text-base ${
+                                      star < rep.stars ? 'text-amber-400' : 'text-zinc-200 dark:text-zinc-700'
+                                    }`}
+                                    style={{ fontVariationSettings: star < rep.stars ? "'FILL' 1" : "'FILL' 0" }}
+                                  >
+                                    star
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="text-[9px] font-black text-zinc-400 uppercase tracking-wider mt-0.5">
+                                Attack #{rep.total_attacks_session || history.length - i}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{rep.strategy || 'Unknown'}</div>
+                          <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-1">{rep.target_edge || 'Auto'}</div>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <div className="flex items-center gap-4 text-xs font-bold tabular-nums">
+                            <span className="text-amber-500">{(rep.gold_stolen + rep.bonus_gold).toLocaleString()} G</span>
+                            <span className="text-fuchsia-500">{(rep.elixir_stolen + rep.bonus_elixir).toLocaleString()} E</span>
+                            <span className="text-zinc-600 dark:text-zinc-300">{(rep.dark_elixir_stolen + rep.bonus_de).toLocaleString()} DE</span>
+                          </div>
+                          <div className="text-[9px] text-zinc-400 font-black uppercase tracking-wider mt-1">
+                            {(totalLoot / 1e6).toFixed(2)}M combined
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider border ${
+                            rep.deploy_success
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                          }`}>
+                            <span className="material-symbols-outlined text-sm">{rep.deploy_success ? 'check_circle' : 'warning'}</span>
+                            {rep.deploy_success ? 'Complete' : `${rep.undeployed_slots} left`}
+                          </div>
+                          {!rep.parsed_results && (
+                            <div className="text-[9px] text-rose-500 font-black uppercase tracking-wider mt-1.5">Result OCR incomplete</div>
+                          )}
+                        </td>
+
+                        <td className="px-6 py-4 text-right">
+                          <div className="text-xs font-black text-zinc-600 dark:text-zinc-300 tabular-nums">
+                            {date.toLocaleDateString([], { day: '2-digit', month: '2-digit' })}
+                          </div>
+                          <div className="text-[10px] font-bold text-zinc-400 tabular-nums mt-1">
+                            {date.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="px-6 py-4 border-t border-zinc-100 dark:border-zinc-800/70 flex items-center justify-between gap-4 bg-zinc-50/40 dark:bg-zinc-800/10">
+              <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                Showing {Math.min(historyLimit, filteredHistory.length)} of {filteredHistory.length} saved attacks
+              </div>
+              <div className="flex items-center gap-2">
+                {historyLimit > 10 && (
+                  <button
+                    onClick={() => setHistoryLimit(10)}
+                    className="h-9 px-4 rounded-xl border border-zinc-200 dark:border-zinc-700 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
+                  >
+                    Collapse
+                  </button>
+                )}
+                {historyLimit < filteredHistory.length && (
+                  <button
+                    onClick={() => setHistoryLimit((n) => Math.min(n + 15, filteredHistory.length))}
+                    className="h-9 px-4 rounded-xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-[10px] font-black uppercase tracking-widest transition-transform active:scale-95"
+                  >
+                    Show more
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </section>
 
       {/* Summary Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
