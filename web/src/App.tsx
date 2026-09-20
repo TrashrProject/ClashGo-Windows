@@ -161,6 +161,8 @@ function App() {
   const [searchEnabled, setSearchEnabled] = useState(true);
   const [upgradeWalls, setUpgradeWalls] = useState(false);
   const [stallTimer, setStallTimer] = useState(30);
+  const [lootExitEnabled, setLootExitEnabled] = useState(false);
+  const [lootExitPercent, setLootExitPercent] = useState(100);
 
   useEffect(() => {
     const init = async () => {
@@ -178,6 +180,8 @@ function App() {
         setUpgradeWalls(conf.upgrade.upgrade_walls);
         setSelectedStrategy(conf.attack.strategy_file);
         setStallTimer(conf.attack.stall_timer_seconds);
+        setLootExitEnabled(conf.attack.loot_exit_enabled ?? false);
+        setLootExitPercent(conf.attack.loot_exit_percent ?? 100);
         setIsRunning(running);
         setIsStarting(false);
         // Never let a null from the Go side reach the Config page — a
@@ -335,6 +339,8 @@ function App() {
       selectedStrategy,
       searchEnabled,
       stallTimer,
+      lootExitEnabled,
+      lootExitPercent,
     );
   };
 
@@ -487,6 +493,8 @@ function App() {
     searchEnabled, setSearchEnabled,
     upgradeWalls, setUpgradeWalls,
     stallTimer, setStallTimer,
+    lootExitEnabled, setLootExitEnabled,
+    lootExitPercent, setLootExitPercent,
     onSave: async () => {
       // Errors intentionally bubble so ConfigView's save-status
       // indicator can show a red "Save failed" pill back to the user.
@@ -497,7 +505,8 @@ function App() {
     }
   }), [
     goldThreshold, elixirThreshold, deThreshold,
-    selectedStrategy, strategies, searchEnabled, upgradeWalls, stallTimer
+    selectedStrategy, strategies, searchEnabled, upgradeWalls, stallTimer,
+    lootExitEnabled, lootExitPercent
   ]);
 
   return (
