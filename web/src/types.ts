@@ -28,6 +28,17 @@ export interface BotStats {
   };
 }
 
+export interface VillageResourceSnapshot {
+  timestamp: string;
+  gold: number;
+  elixir: number;
+  dark_elixir: number;
+  gold_valid: boolean;
+  elixir_valid: boolean;
+  dark_valid: boolean;
+  valid: boolean;
+}
+
 export interface AttackReport {
   timestamp: string;
   strategy: string;
