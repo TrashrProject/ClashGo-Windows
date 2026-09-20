@@ -1941,6 +1941,84 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	b.zoomedOut.Store(false)
 }
 
+// focusedButtonClick trades a tiny amount of latency for much better UI
+// precision. At the faster capture cadence a button can still be moving during
+// its opening animation; clicking the first detected contour can therefore hit
+// an edge or neighboring control. We require two consecutive detections with a
+// stable center, average them, then issue a very-low-jitter TapFast.
+func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, bool), attempts int) bool {
+	if attempts <= 0 {
+		attempts = 1
+	}
+
+	for attempt := 1; attempt <= attempts; attempt++ {
+		first, err := b.client.CaptureToMat()
+		if err != nil || first.Empty() {
+			if !first.Empty() { first.Close() }
+			time.Sleep(70 * time.Millisecond)
+			continue
+		}
+		x1, y1, ok1 := locator(first)
+		first.Close()
+		if !ok1 {
+			time.Sleep(70 * time.Millisecond)
+			continue
+		}
+
+		// Let the button finish a few animation frames, then confirm its center.
+		time.Sleep(85 * time.Millisecond)
+		second, err := b.client.CaptureToMat()
+		if err != nil || second.Empty() {
+			if !second.Empty() { second.Close() }
+			continue
+		}
+		x2, y2, ok2 := locator(second)
+		second.Close()
+		if !ok2 {
+			continue
+		}
+
+		dx := x2 - x1
+		if dx < 0 { dx = -dx }
+		dy := y2 - y1
+		if dy < 0 { dy = -dy }
+
+		// More than ~10 px movement means the UI is still animating or the two
+		// frames latched onto different blobs. Wait for the next stable pair.
+		maxDrift := int(10.0 * b.cal.ScaleX)
+		if maxDrift < 6 { maxDrift = 6 }
+		if dx > maxDrift || dy > maxDrift {
+			b.logger.Debug().
+				Str("button", name).
+				Int("dx", dx).
+				Int("dy", dy).
+				Msg("button center still moving; waiting for stable focus")
+			time.Sleep(70 * time.Millisecond)
+			continue
+		}
+
+		x := (x1 + x2) / 2
+		y := (y1 + y2) / 2
+		b.logger.Info().
+			Str("button", name).
+			Int("x", x).
+			Int("y", y).
+			Int("drift_x", dx).
+			Int("drift_y", dy).
+			Msg("focused click locked on stable button center")
+
+		// 0.6px sigma keeps a microscopic human-like variation without the
+		// several-pixel spread of TapRandomized (3.5px sigma).
+		if err := b.client.TapFast(x, y, 0.6); err != nil {
+			b.logger.Warn().Err(err).Str("button", name).Msg("focused tap failed")
+			continue
+		}
+		b.recordActivity()
+		return true
+	}
+	return false
+}
+
 func (b *Bot) clickSequence() bool {
 
 	attackClicked := false
@@ -1949,22 +2027,16 @@ func (b *Bot) clickSequence() bool {
 		// Do not require the older text/template matcher a second time here:
 		// that created the contradictory "Attack detected" -> "could not find
 		// Attack button" failure seen on localized/animated village frames.
+		if b.focusedButtonClick("Attack", b.locateAttackButtonColor, 2) {
+			attackClicked = true
+			break
+		}
 		if screen, err := b.client.CaptureToMat(); err == nil {
-			if x, y, ok := b.locateAttackButtonColor(screen); ok {
-				screen.Close()
-				b.logger.Info().Int("x", x).Int("y", y).Msg("Attack button verified; clicking detected button center")
-				if err := b.client.TapRandomized(x, y); err == nil {
-					b.recordActivity()
-					attackClicked = true
-					break
-				}
-			} else if b.findAttackButton(screen, 0.30) {
-				// Template/pinpoint verified the button but the orange contour
-				// was not strong enough. Fall back to the historical center.
+			if b.findAttackButton(screen, 0.30) {
 				x, y := b.cal.ScaleRef(64, 666)
 				screen.Close()
-				b.logger.Info().Int("x", x).Int("y", y).Msg("Attack button verified; clicking calibrated fallback center")
-				if err := b.client.TapRandomized(x, y); err == nil {
+				b.logger.Info().Int("x", x).Int("y", y).Msg("Attack fallback verified; precision tapping canonical center")
+				if err := b.client.TapFast(x, y, 0.5); err == nil {
 					b.recordActivity()
 					attackClicked = true
 					break
@@ -1987,39 +2059,30 @@ func (b *Bot) clickSequence() bool {
 
 	findMatchClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
+		if b.focusedButtonClick("Find Match", b.locateFindMatchButtonColor, 2) {
+			findMatchClicked = true
+			break
+		}
 		if screen, err := b.client.CaptureToMat(); err == nil {
-			// First prefer the large orange button that appears after opening the
-			// attack menu. This works even when the classifier still reports
-			// MainVillage because the village remains visible behind the overlay.
-			if x, y, ok := b.locateFindMatchButtonColor(screen); ok {
-				screen.Close()
-				b.logger.Info().Int("x", x).Int("y", y).Msg("Find Match button verified; clicking detected button center")
-				if err := b.client.TapRandomized(x, y); err == nil {
+			state, score := b.classify(screen)
+			screen.Close()
+			if state == game.StateFindMatch {
+				x, y := b.cal.ScaleRef(215, 563)
+				b.logger.Info().
+					Int("score", score).
+					Int("x", x).
+					Int("y", y).
+					Msg("Find Match screen verified by classifier; precision tapping canonical center")
+				if err := b.client.TapFast(x, y, 0.5); err == nil {
 					b.recordActivity()
 					findMatchClicked = true
 					break
 				}
 			} else {
-				state, score := b.classify(screen)
-				screen.Close()
-				if state == game.StateFindMatch {
-					x, y := b.cal.ScaleRef(215, 563)
-					b.logger.Info().
-						Int("score", score).
-						Int("x", x).
-						Int("y", y).
-						Msg("Find Match screen verified by classifier; clicking canonical button center")
-					if err := b.client.TapRandomized(x, y); err == nil {
-						b.recordActivity()
-						findMatchClicked = true
-						break
-					}
-				} else {
-					b.logger.Info().
-						Str("state", state.String()).
-						Int("score", score).
-						Msg("Find Match retry: no orange button and current classified state")
-				}
+				b.logger.Info().
+					Str("state", state.String()).
+					Int("score", score).
+					Msg("Find Match retry: no stable focused target yet")
 			}
 		}
 
@@ -2083,18 +2146,9 @@ func (b *Bot) clickSequence() bool {
 
 	battleClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			if x, y, ok := b.locateBattleButtonColor(screen); ok {
-				screen.Close()
-				b.logger.Info().Int("x", x).Int("y", y).Msg("Battle Attack button verified; clicking detected button center")
-				if err := b.client.TapRandomized(x, y); err == nil {
-					b.recordActivity()
-					battleClicked = true
-					break
-				}
-			} else {
-				screen.Close()
-			}
+		if b.focusedButtonClick("Battle Attack", b.locateBattleButtonColor, 2) {
+			battleClicked = true
+			break
 		}
 		if b.findAndClick("btn_battle", "Battle", 1) {
 			battleClicked = true
@@ -2136,7 +2190,7 @@ func (b *Bot) selectArmySlot() bool {
 	tapX, tapY := b.cal.ScaleRef(430, cardY)
 
 	b.logger.Info().Int("army_slot", slot).Int("x", tapX).Int("y", tapY).Msg("selecting saved army recipe card")
-	if err := b.client.TapRandomized(tapX, tapY); err != nil {
+	if err := b.client.TapFast(tapX, tapY, 0.7); err != nil {
 		b.logger.Warn().Err(err).Msg("army recipe card tap failed")
 		return false
 	}
@@ -2206,7 +2260,7 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 			if b.isGreen(screen, altX, altY) {
 				screen.Close()
 				b.logger.Info().Str("step", stepName).Msg("secondary pinpoint match (upper battle), clicking...")
-				if err := b.client.TapRandomized(altX, altY); err == nil {
+				if err := b.client.TapFast(altX, altY, 0.6); err == nil {
 					b.recordActivity()
 					return true
 				}
@@ -2285,7 +2339,7 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 		}
 		screen.Close()
 
-		if err := b.client.TapRandomized(px, py); err != nil {
+		if err := b.client.TapFast(px, py, 0.7); err != nil {
 			b.logger.Error().Err(err).Msg("tap failed")
 			return false
 		}
@@ -2470,7 +2524,7 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 				if x, y, ok := b.locateBattleButtonColor(retryScreen); ok {
 					retryScreen.Close()
 					b.logger.Info().Int("x", x).Int("y", y).Msg("retrying with detected Battle Attack button center")
-					_ = b.client.TapRandomized(x, y)
+					_ = b.client.TapFast(x, y, 0.6)
 					b.recordActivity()
 				} else {
 					retryScreen.Close()
