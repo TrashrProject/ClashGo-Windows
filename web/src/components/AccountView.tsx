@@ -70,6 +70,14 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
 
       const p = await GetPlayerProfile();
       setProfile(p as PlayerProfile);
+
+      // Account sync may auto-switch the farm profile to the player's HDV.
+      // Re-read config once so the visible plan updates immediately.
+      const refreshedCfg = await GetConfig();
+      const refreshedFarm = (refreshedCfg as any)?.attack?.farm;
+      if (refreshedFarm?.enabled && refreshedFarm?.profiles) {
+        setFarmProfile(refreshedFarm.profiles[String(refreshedFarm.town_hall)] || null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -82,6 +90,16 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
   // The local/proxied account service may start a few seconds after ClashGO.
   // Retry automatically while no profile is available so users never have to
   // hammer "Sync profile" after launching the service.
+  React.useEffect(() => {
+    // Keep public progression fresh without asking the user to press Sync.
+    // Fifteen minutes is intentionally conservative for a mostly-static
+    // profile and keeps pressure off the ClashGO account service.
+    const id = window.setInterval(() => {
+      void refresh();
+    }, 15 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [refresh]);
+
   React.useEffect(() => {
     let active = true;
     const loadResources = async () => {
