@@ -146,3 +146,15 @@ func TestChooseBlueStacksWindowsConfiguredInstance(t *testing.T) {
 		t.Fatalf("expected configured Pie64 instance, got %q", got)
 	}
 }
+
+
+func TestWindowsCandidateADBPortsStrictSelection(t *testing.T) {
+	instances := []blueStacksWindowsInstance{
+		{Name: "Pie64", ADBPort: 5555},
+		{Name: "Tiramisu64", ADBPort: 5562},
+	}
+	got := windowsCandidateADBPortsSelected(instances, "Pie64", true)
+	if len(got) != 1 || got[0] != 5555 {
+		t.Fatalf("strict selection must only use Pie64 port, got %v", got)
+	}
+}
