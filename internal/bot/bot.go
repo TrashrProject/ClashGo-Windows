@@ -1572,6 +1572,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 		if meetsReq {
 			b.logger.Info().Msg("loot requirements met, starting attack!")
+			b.attackExec.SetInitialLoot(loot.Gold, loot.Elixir, loot.DarkElixir)
 			if strat, err := strategy.ParseYAML(b.cfg.Attack.StrategyFile); err == nil {
 				stratName = strat.Name
 				targetEdge = strat.TargetEdge
