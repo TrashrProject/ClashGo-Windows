@@ -288,8 +288,30 @@ func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates 
 		bestSlot.Confidence = res.match.Confidence
 		bestSlot.State = SlotIdentified
 
-		specialConfOK := runtime.GOOS != "windows" || res.match.Confidence >= 0.72
-		if specialConfOK {
+		if runtime.GOOS == "windows" {
+			// Heroes need a lower confidence floor than spells/siege. Their
+			// portraits vary more with level/skin and the previous global 0.72
+			// gate demoted 3/4 real hero cards to generic Troop, so they were
+			// never given one-shot placement semantics.
+			switch {
+			case isHeroStatic(cleanName):
+				if res.match.Confidence >= 0.58 {
+					bestSlot.Category = "Hero"
+				}
+			case isSiegeStatic(cleanName):
+				if res.match.Confidence >= 0.66 {
+					bestSlot.Category = "Siege"
+				}
+			case isSpellStatic(cleanName):
+				if res.match.Confidence >= 0.66 {
+					bestSlot.Category = "Spell"
+				}
+			case strings.Contains(cleanName, "cc") || strings.Contains(cleanName, "castle"):
+				if res.match.Confidence >= 0.70 {
+					bestSlot.Category = "CC"
+				}
+			}
+		} else {
 			if isHeroStatic(cleanName) {
 				bestSlot.Category = "Hero"
 			} else if isSiegeStatic(cleanName) {
@@ -299,13 +321,6 @@ func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates 
 			} else if strings.Contains(cleanName, "cc") || strings.Contains(cleanName, "castle") {
 				bestSlot.Category = "CC"
 			}
-		} else if isHeroStatic(cleanName) || isSiegeStatic(cleanName) || isSpellStatic(cleanName) ||
-			strings.Contains(cleanName, "cc") || strings.Contains(cleanName, "castle") {
-			sm.logger.Warn().
-				Str("unit", cleanName).
-				Float64("conf", res.match.Confidence).
-				Int("x", bestSlot.X).
-				Msg("Windows special-category template confidence too low; keeping card as normal troop")
 		}
 
 		sm.logger.Info().
