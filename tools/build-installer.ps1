@@ -13,7 +13,8 @@ if (-not (Test-Path (Join-Path $BundlePath "ClashGO.exe"))) {
 }
 
 $makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue
-if (-not $makensis) {
+$makensisPath = if ($makensis) { $makensis.Source } else { $null }
+if (-not $makensisPath) {
     $candidates = @()
 
     $programFilesX86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
@@ -33,12 +34,12 @@ if (-not $makensis) {
 
     foreach ($candidate in $candidates) {
         if ($candidate -and (Test-Path $candidate)) {
-            $makensis = Get-Item $candidate
+            $makensisPath = $candidate
             break
         }
     }
 }
-if (-not $makensis) { throw "makensis.exe was not found after NSIS installation." }
+if (-not $makensisPath) { throw "makensis.exe was not found after NSIS installation." }
 
 $makensisPath = $null
 if ($makensis.Path) {
