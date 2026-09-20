@@ -145,9 +145,6 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
                     ? 'Account service configured'
                     : 'Account service not configured'}
           </div>
-          {serviceURL && (
-            <span className="text-[10px] font-mono text-zinc-400">{serviceURL}</span>
-          )}
         </div>
 
         {(message || error) && (
