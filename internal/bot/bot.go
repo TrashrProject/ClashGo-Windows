@@ -1125,6 +1125,73 @@ func (b *Bot) locateFindMatchButtonColor(screen gocv.Mat) (int, int, bool) {
 // inside the tight bottom-left Attack-button ROI. Using the detected blob
 // center is safer than tapping a historical hard-coded point: on the user's
 // Windows/BlueStacks layout the fixed point landed on a neighbouring control.
+// locateBattleButtonColor finds the large green "Attack!" button in the
+// army-selection screen. The current CoC layout keeps StateArmySelection
+// visible while the old btn_battle template can match neighboring green UI,
+// causing repeated taps that never leave the screen.
+func (b *Bot) locateBattleButtonColor(screen gocv.Mat) (int, int, bool) {
+	x0, y0 := b.cal.ScaleRef(560, 430)
+	x1, y1 := b.cal.ScaleRef(860, 650)
+
+	if x0 < 0 { x0 = 0 }
+	if y0 < 0 { y0 = 0 }
+	if x1 > screen.Cols() { x1 = screen.Cols() }
+	if y1 > screen.Rows() { y1 = screen.Rows() }
+	if x1-x0 < 2 || y1-y0 < 2 {
+		return 0, 0, false
+	}
+
+	roi := screen.Region(image.Rect(x0, y0, x1, y1))
+	defer roi.Close()
+
+	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+
+	// BGR green/lime family used by the large Attack! button.
+	gocv.InRangeWithScalar(
+		roi,
+		gocv.NewScalar(0, 110, 70, 0),
+		gocv.NewScalar(170, 255, 210, 0),
+		&mask,
+	)
+
+	contours := gocv.FindContours(mask, gocv.RetrievalExternal, gocv.ChainApproxSimple)
+	defer contours.Close()
+
+	bestArea := 0.0
+	bestRect := image.Rectangle{}
+	for i := 0; i < contours.Size(); i++ {
+		contour := contours.At(i)
+		area := gocv.ContourArea(contour)
+		if area <= bestArea {
+			continue
+		}
+		rect := gocv.BoundingRect(contour)
+		if rect.Dx() < 70 || rect.Dy() < 24 {
+			continue
+		}
+		bestArea = area
+		bestRect = rect
+	}
+
+	if bestArea < 1100 || bestRect.Empty() {
+		return 0, 0, false
+	}
+
+	x := x0 + bestRect.Min.X + bestRect.Dx()/2
+	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
+
+	b.logger.Info().
+		Float64("area", bestArea).
+		Int("x", x).
+		Int("y", y).
+		Int("w", bestRect.Dx()).
+		Int("h", bestRect.Dy()).
+		Msg("Battle Attack button verified via green region")
+
+	return x, y, true
+}
+
 func (b *Bot) locateAttackButtonColor(screen gocv.Mat) (int, int, bool) {
 	x0, y0 := b.cal.ScaleRef(0, 600)
 	x1, y1 := b.cal.ScaleRef(145, 731)
@@ -1867,6 +1934,19 @@ func (b *Bot) clickSequence() bool {
 
 	battleClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
+		if screen, err := b.client.CaptureToMat(); err == nil {
+			if x, y, ok := b.locateBattleButtonColor(screen); ok {
+				screen.Close()
+				b.logger.Info().Int("x", x).Int("y", y).Msg("Battle Attack button verified; clicking detected button center")
+				if err := b.client.TapRandomized(x, y); err == nil {
+					b.recordActivity()
+					battleClicked = true
+					break
+				}
+			} else {
+				screen.Close()
+			}
+		}
 		if b.findAndClick("btn_battle", "Battle", 1) {
 			battleClicked = true
 			break
@@ -2236,8 +2316,18 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 			time.Sleep(1 * time.Second)
 			continue
 		case state == game.StateArmySelection || state == game.StateArmyCamp:
-			b.logger.Info().Msg("in army menu, retrying battle click...")
-			b.findAndClick("btn_battle", "Battle Retry", 1)
+			b.logger.Info().Msg("in army menu, retrying Battle Attack button...")
+			if retryScreen, capErr := b.client.CaptureToMat(); capErr == nil {
+				if x, y, ok := b.locateBattleButtonColor(retryScreen); ok {
+					retryScreen.Close()
+					b.logger.Info().Int("x", x).Int("y", y).Msg("retrying with detected Battle Attack button center")
+					_ = b.client.TapRandomized(x, y)
+					b.recordActivity()
+				} else {
+					retryScreen.Close()
+					b.findAndClick("btn_battle", "Battle Retry", 1)
+				}
+			}
 			time.Sleep(1 * time.Second)
 		default:
 			b.logger.Info().Str("state", state.String()).Msg("waiting for battle state (searching)...")
