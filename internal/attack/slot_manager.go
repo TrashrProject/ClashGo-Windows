@@ -109,7 +109,16 @@ func NewSlotManager(
 	barROI := image.Rect(0, mBarY, w, h)
 	sm.classifySlots(screen, activeXs, templates, barROI)
 
-	sm.applyManualLabelsFallback()
+	// Windows must not inherit stale positional/manual classifications.
+	// A wrong "Spell" guess sends a perfectly valid troop into the middle
+	// of the map, which Clash rejects as red-zone deployment. On the live
+	// Windows path we only trust positive template matches; every unknown
+	// card stays a generic Troop and is deployed on the verified outer edge.
+	if runtime.GOOS != "windows" {
+		sm.applyManualLabelsFallback()
+	} else {
+		sm.logger.Info().Msg("Windows: skipping stale manual labels; unidentified cards remain safe-edge troops")
+	}
 
 	for _, slot := range sm.slots {
 		sm.xIndex[slot.X] = slot
@@ -248,7 +257,11 @@ func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates 
 			Msg("identified unit via template match")
 	}
 
-	sm.applyPositionalClassification(activeXs)
+	if runtime.GOOS != "windows" {
+		sm.applyPositionalClassification(activeXs)
+	} else {
+		sm.logger.Info().Msg("Windows: positional hero/spell guessing disabled; using template-only categories")
+	}
 }
 
 // applyPositionalClassification uses hero/spell anchors to classify unidentified slots.
