@@ -403,6 +403,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	troopCounter := NewTroopCounter(pCfg.Width, pCfg.Height, e.logger)
 	troopCounts := troopCounter.DetectCounts(deployScreen, slotMgr.GetAllSlots(), mBarY)
 	countMap := GetAllCounts(troopCounts)
+	writeArmyInspection(slotMgr.GetAllSlots(), troopCounts)
 	e.logger.Info().Interface("counts", countMap).Msg("detected troop counts")
 
 	// Windows-safe deployment path.
