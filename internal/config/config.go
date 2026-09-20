@@ -306,7 +306,7 @@ func DefaultConfig() *BotConfig {
 		},
 		Debug: DebugConfig{
 			CaptureDebug:       false,
-			SaveScreenshots:    true,
+			SaveScreenshots:    false,
 			TemplateDebug:      false,
 			StateDebug:         false,
 			UseShellPipe:       true,
