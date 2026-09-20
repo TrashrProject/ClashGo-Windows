@@ -1,8 +1,19 @@
 
 import React from 'react';
-import { ClearAccount, GetAccountConfig, GetPlayerProfile } from '../../wailsjs/go/main/App';
+import { ClearAccount, GetAccountConfig, GetCachedPlayerProfile, GetPlayerProfile, GetVillageResources } from '../../wailsjs/go/main/App';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
+type VillageResources = {
+  timestamp: string;
+  gold: number;
+  elixir: number;
+  dark_elixir: number;
+  gold_valid: boolean;
+  elixir_valid: boolean;
+  dark_valid: boolean;
+  valid: boolean;
+};
+
 type PlayerProfile = {
   tag: string; name: string; townHallLevel: number; expLevel: number;
   trophies: number; bestTrophies: number; warStars: number;
@@ -19,6 +30,7 @@ interface AccountViewProps {
 
 const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccountChanged }) => {
   const [profile, setProfile] = React.useState<PlayerProfile | null>(null);
+  const [resources, setResources] = React.useState<VillageResources | null>(null);
   const [serviceConfigured, setServiceConfigured] = React.useState(false);
   const [serviceURL, setServiceURL] = React.useState('');
   const [busy, setBusy] = React.useState(false);
@@ -31,6 +43,10 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
       const account = await GetAccountConfig();
       setServiceConfigured(account.service_configured);
       setServiceURL(account.service_url || '');
+
+      const cached = await GetCachedPlayerProfile();
+      if (cached) setProfile(cached as PlayerProfile);
+
       const p = await GetPlayerProfile();
       setProfile(p as PlayerProfile);
     } catch (e) {
@@ -45,6 +61,24 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
   // The local/proxied account service may start a few seconds after ClashGO.
   // Retry automatically while no profile is available so users never have to
   // hammer "Sync profile" after launching the service.
+  React.useEffect(() => {
+    let active = true;
+    const loadResources = async () => {
+      try {
+        const snap = await GetVillageResources();
+        if (active && snap) setResources(snap as VillageResources);
+      } catch {
+        // Resource tracking is best-effort while BlueStacks is unavailable.
+      }
+    };
+    void loadResources();
+    const id = window.setInterval(loadResources, 5000);
+    return () => {
+      active = false;
+      window.clearInterval(id);
+    };
+  }, []);
+
   React.useEffect(() => {
     if (profile || busy || !playerTag) return;
     const id = window.setInterval(() => {
@@ -169,15 +203,28 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
                   <span className="material-symbols-outlined text-amber-500">database</span>
                   <h4 className="text-lg font-black text-zinc-950 dark:text-white">Live resources</h4>
                 </div>
-                <p className="mt-2 text-xs font-medium text-zinc-500">Gold, Elixir and Dark Elixir are not exposed by the public player API. ClashGO will populate these from the BlueStacks village HUD scanner.</p>
+                <p className="mt-2 text-xs font-medium text-zinc-500">
+                  Read automatically from the BlueStacks village HUD. No extra setup is required.
+                </p>
                 <div className="mt-4 space-y-2">
-                  {['Gold', 'Elixir', 'Dark Elixir'].map(name => (
-                    <div key={name} className="flex justify-between items-center rounded-xl bg-zinc-50 dark:bg-zinc-950/40 px-4 py-3">
+                  {[
+                    ['Gold', resources?.gold_valid ? resources.gold : null],
+                    ['Elixir', resources?.elixir_valid ? resources.elixir : null],
+                    ['Dark Elixir', resources?.dark_valid ? resources.dark_elixir : null],
+                  ].map(([name, value]) => (
+                    <div key={String(name)} className="flex justify-between items-center rounded-xl bg-zinc-50 dark:bg-zinc-950/40 px-4 py-3">
                       <span className="text-xs font-black text-zinc-500">{name}</span>
-                      <span className="text-xs font-black text-zinc-400">Waiting for village scan</span>
+                      <span className="text-sm font-black text-zinc-950 dark:text-white tabular-nums">
+                        {typeof value === 'number' ? value.toLocaleString() : 'Waiting for village scan'}
+                      </span>
                     </div>
                   ))}
                 </div>
+                {resources?.timestamp && (
+                  <div className="mt-3 text-[10px] font-bold text-zinc-400">
+                    Last scan: {new Date(resources.timestamp).toLocaleTimeString()}
+                  </div>
+                )}
               </div>
             </div>
           </section>
