@@ -115,6 +115,9 @@ func (t *TapExecutor) TapSlot(slot *TrackedSlot, jitterPx int) {
 }
 
 // TapDeployLine distributes taps along a line from p1 to p2.
+// Deployment taps deliberately use sub-2px transport jitter. The previous
+// 12-15px Gaussian jitter was large enough to throw otherwise-correct
+// red-boundary points back inside the forbidden zone on BlueStacks.
 // Direction alternates per call (boustrophedon): down the line, then
 // back up the next call, so consecutive passes never restart at the top.
 func (t *TapExecutor) TapDeployLine(p1, p2 image.Point, count int, jitterPx int) {
@@ -133,16 +136,16 @@ func (t *TapExecutor) TapDeployLine(p1, p2 image.Point, count int, jitterPx int)
 			j1 := t.addJitter(points[i], jitterPx)
 			j2 := t.addJitter(points[i+1], jitterPx)
 			j3 := t.addJitter(points[i+2], jitterPx)
-			t.client.TapTriple(j1.X, j1.Y, 15.0, j2.X, j2.Y, 15.0, j3.X, j3.Y, 15.0)
+			t.client.TapTriple(j1.X, j1.Y, 1.2, j2.X, j2.Y, 1.2, j3.X, j3.Y, 1.2)
 			i += 3
 		} else if rem == 2 {
 			j1 := t.addJitter(points[i], jitterPx)
 			j2 := t.addJitter(points[i+1], jitterPx)
-			t.client.TapDual(j1.X, j1.Y, 15.0, j2.X, j2.Y, 15.0)
+			t.client.TapDual(j1.X, j1.Y, 1.2, j2.X, j2.Y, 1.2)
 			i += 2
 		} else {
 			j1 := t.addJitter(points[i], jitterPx)
-			t.client.TapFast(j1.X, j1.Y, 15.0)
+			t.client.TapFast(j1.X, j1.Y, 1.0)
 			i += 1
 		}
 		t.sleepBetweenBatches()
@@ -157,16 +160,16 @@ func (t *TapExecutor) TapDeployPoint(pt image.Point, count int, jitterPx int) {
 			j1 := t.addJitter(pt, jitterPx)
 			j2 := t.addJitter(pt, jitterPx)
 			j3 := t.addJitter(pt, jitterPx)
-			t.client.TapTriple(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0, j3.X, j3.Y, 12.0)
+			t.client.TapTriple(j1.X, j1.Y, 1.2, j2.X, j2.Y, 1.2, j3.X, j3.Y, 1.2)
 			i += 3
 		} else if rem == 2 {
 			j1 := t.addJitter(pt, jitterPx)
 			j2 := t.addJitter(pt, jitterPx)
-			t.client.TapDual(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0)
+			t.client.TapDual(j1.X, j1.Y, 1.2, j2.X, j2.Y, 1.2)
 			i += 2
 		} else {
 			j1 := t.addJitter(pt, jitterPx)
-			t.client.TapFast(j1.X, j1.Y, 12.0)
+			t.client.TapFast(j1.X, j1.Y, 1.0)
 			i += 1
 		}
 		t.sleepBetweenBatches()
@@ -200,7 +203,7 @@ func (t *TapExecutor) TapDeployFourSides(pCfg PrecisionConfig, targetEdge string
 				j1 := t.addJitter(image.Pt(tx1, ty1), jitterPx)
 				j2 := t.addJitter(image.Pt(tx2, ty2), jitterPx)
 				j3 := t.addJitter(image.Pt(tx3, ty3), jitterPx)
-				t.client.TapTriple(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0, j3.X, j3.Y, 12.0)
+				t.client.TapTriple(j1.X, j1.Y, 1.2, j2.X, j2.Y, 1.2, j3.X, j3.Y, 1.2)
 			} else if rem == 2 {
 				pct1 := float64(i) / float64(steps-1)
 				pct2 := float64(i+1) / float64(steps-1)
@@ -208,12 +211,12 @@ func (t *TapExecutor) TapDeployFourSides(pCfg PrecisionConfig, targetEdge string
 				tx2, ty2 := intLerp(p1, p2, pct2)
 				j1 := t.addJitter(image.Pt(tx1, ty1), jitterPx)
 				j2 := t.addJitter(image.Pt(tx2, ty2), jitterPx)
-				t.client.TapDual(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0)
+				t.client.TapDual(j1.X, j1.Y, 1.2, j2.X, j2.Y, 1.2)
 			} else {
 				pct := float64(i) / float64(steps-1)
 				tx, ty := intLerp(p1, p2, pct)
 				j1 := t.addJitter(image.Pt(tx, ty), jitterPx)
-				t.client.TapFast(j1.X, j1.Y, 12.0)
+				t.client.TapFast(j1.X, j1.Y, 1.0)
 			}
 			time.Sleep(45 * time.Millisecond)
 		}
