@@ -864,6 +864,70 @@ func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strat
 	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644)
 }
 
+// SaveFarmComposition persists the selected HDV farm profile.
+// profileJSON is used instead of a large Wails struct signature so the UI can
+// edit a profile freely without regenerating a bespoke binding for every field.
+func (a *App) SaveFarmComposition(enabled bool, townHall int, profileJSON string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if townHall < 8 || townHall > 18 {
+		return fmt.Errorf("town hall must be between 8 and 18")
+	}
+
+	var profile config.FarmProfile
+	if err := json.Unmarshal([]byte(profileJSON), &profile); err != nil {
+		return fmt.Errorf("invalid farm composition: %w", err)
+	}
+	profile.TownHall = townHall
+
+	if profile.TroopCapacity <= 0 || profile.SpellCapacity <= 0 {
+		return fmt.Errorf("invalid farm composition capacities")
+	}
+	troopUsed := 0
+	for _, u := range profile.Troops {
+		if strings.TrimSpace(u.Name) == "" || u.Count < 0 || u.Housing <= 0 {
+			return fmt.Errorf("invalid troop entry")
+		}
+		troopUsed += u.Count * u.Housing
+	}
+	if troopUsed > profile.TroopCapacity {
+		return fmt.Errorf("troop composition uses %d/%d housing", troopUsed, profile.TroopCapacity)
+	}
+
+	spellUsed := 0
+	for _, u := range profile.Spells {
+		if strings.TrimSpace(u.Name) == "" || u.Count < 0 || u.Housing <= 0 {
+			return fmt.Errorf("invalid spell entry")
+		}
+		spellUsed += u.Count * u.Housing
+	}
+	if spellUsed > profile.SpellCapacity {
+		return fmt.Errorf("spell composition uses %d/%d housing", spellUsed, profile.SpellCapacity)
+	}
+	if len(profile.Heroes) > 4 {
+		return fmt.Errorf("at most 4 heroes can be selected for the active farm army")
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	if cfg.Attack.Farm.Profiles == nil {
+		cfg.Attack.Farm.Profiles = map[string]config.FarmProfile{}
+	}
+	cfg.Attack.Farm.Enabled = enabled
+	cfg.Attack.Farm.TownHall = townHall
+	cfg.Attack.Farm.Profiles[fmt.Sprintf("%d", townHall)] = profile
+
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+
+	bytes, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644)
+}
+
 // GetStrategies lists available strategy files
 //
 // Returns a non-nil empty slice when no strategies exist. A nil slice
