@@ -948,16 +948,19 @@ func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
 	}
 
 	best := matches[0]
-	isOrange := b.isOrange(screen, best.Point.X, best.Point.Y)
 
-	b.logger.Debug().
+	// MatchMultiScaleROICached returns the CENTER of the matched template.
+	// Requiring that exact center pixel to also be orange was too strict for
+	// localized/animated CoC buttons and caused a valid Attack template match
+	// to be discarded. The template is already restricted to the bottom-left
+	// Attack-button ROI and thresholded, so a positive match is sufficient.
+	b.logger.Info().
 		Float64("conf", best.Confidence).
 		Int("x", best.Point.X).
 		Int("y", best.Point.Y).
-		Bool("is_orange", isOrange).
-		Msg("attack button detection check")
+		Msg("attack button verified via template")
 
-	return isOrange
+	return true
 }
 
 func (b *Bot) isOrange(screen gocv.Mat, x, y int) bool {
