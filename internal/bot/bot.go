@@ -1125,6 +1125,73 @@ func (b *Bot) locateFindMatchButtonColor(screen gocv.Mat) (int, int, bool) {
 // inside the tight bottom-left Attack-button ROI. Using the detected blob
 // center is safer than tapping a historical hard-coded point: on the user's
 // Windows/BlueStacks layout the fixed point landed on a neighbouring control.
+// locateNextButtonColor finds the orange "Next" button on the live
+// matchmaking/battle screen. This avoids depending on a localized text
+// template and, importantly, lets us use the still-live capture instead of
+// touching a cv::Mat after screen.Close().
+func (b *Bot) locateNextButtonColor(screen gocv.Mat) (int, int, bool) {
+	x0, y0 := b.cal.ScaleRef(650, 430)
+	x1, y1 := b.cal.ScaleRef(860, 660)
+
+	if x0 < 0 { x0 = 0 }
+	if y0 < 0 { y0 = 0 }
+	if x1 > screen.Cols() { x1 = screen.Cols() }
+	if y1 > screen.Rows() { y1 = screen.Rows() }
+	if x1-x0 < 2 || y1-y0 < 2 {
+		return 0, 0, false
+	}
+
+	roi := screen.Region(image.Rect(x0, y0, x1, y1))
+	defer roi.Close()
+
+	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+
+	// Broad orange/gold BGR range for the current CoC Next button.
+	gocv.InRangeWithScalar(
+		roi,
+		gocv.NewScalar(0, 85, 145, 0),
+		gocv.NewScalar(190, 255, 255, 0),
+		&mask,
+	)
+
+	contours := gocv.FindContours(mask, gocv.RetrievalExternal, gocv.ChainApproxSimple)
+	defer contours.Close()
+
+	bestArea := 0.0
+	bestRect := image.Rectangle{}
+	for i := 0; i < contours.Size(); i++ {
+		contour := contours.At(i)
+		area := gocv.ContourArea(contour)
+		if area <= bestArea {
+			continue
+		}
+		rect := gocv.BoundingRect(contour)
+		if rect.Dx() < 45 || rect.Dy() < 22 {
+			continue
+		}
+		bestArea = area
+		bestRect = rect
+	}
+
+	if bestArea < 700 || bestRect.Empty() {
+		return 0, 0, false
+	}
+
+	x := x0 + bestRect.Min.X + bestRect.Dx()/2
+	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
+
+	b.logger.Info().
+		Float64("area", bestArea).
+		Int("x", x).
+		Int("y", y).
+		Int("w", bestRect.Dx()).
+		Int("h", bestRect.Dy()).
+		Msg("Next button verified via orange region")
+
+	return x, y, true
+}
+
 // locateBattleButtonColor finds the large green "Attack!" button in the
 // army-selection screen. The current CoC layout keeps StateArmySelection
 // visible while the old btn_battle template can match neighboring green UI,
@@ -1460,24 +1527,36 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			b.OnStatsUpdate()
 		}
 
+		// Prefer live color/shape detection on the current capture. The old
+		// code closed 'screen' here and then passed that freed cv::Mat into
+		// PixelSearch / DumpDiagnostics when the btn_next template failed.
+		// On Windows/OpenCV that is a native 0xc0000005 access violation.
+		nextClicked := false
+		if x, y, ok := b.locateNextButtonColor(screen); ok {
+			b.logger.Info().Int("x", x).Int("y", y).Msg("Next button verified; clicking detected button center")
+			if err := b.client.TapRandomized(x, y); err == nil {
+				b.recordActivity()
+				nextClicked = true
+			}
+		}
 		screen.Close()
 
-		if !b.findAndClick("btn_next", "Next Match", 2) {
-			b.logger.Warn().Msg("template match failed, forcing skip via color/pinpoint")
+		if !nextClicked && b.findAndClick("btn_next", "Next Match", 2) {
+			nextClicked = true
+		}
 
-			searchROI := image.Rect(b.cal.PhysicalW/2, b.cal.PhysicalH/2, b.cal.PhysicalW, b.cal.PhysicalH)
-			orangePt, err := vision.PixelSearch(screen, searchROI, 252, 186, 54, 50)
-			if err == nil {
-				b.logger.Info().Msg("clicking Next via orange color fallback")
-				b.client.TapRandomized(orangePt.X, orangePt.Y)
-				b.recordActivity()
-			} else {
-
-				b.DumpDiagnostics("next_button_not_found", screen, map[string]interface{}{
-					"message": "forcing skip via hardcoded coordinates",
+		if !nextClicked {
+			b.logger.Warn().Msg("Next detection failed; using calibrated fallback center")
+			// Capture a FRESH frame for diagnostics. Never reuse the closed
+			// battle frame above.
+			if diag, capErr := b.client.CaptureToMat(); capErr == nil {
+				b.DumpDiagnostics("next_button_not_found", diag, map[string]interface{}{
+					"message": "using calibrated Next fallback after live/template miss",
 				})
-				nextX, nextY := b.cal.ScaleRef(796, 565)
-				b.client.TapRandomized(nextX, nextY)
+				diag.Close()
+			}
+			nextX, nextY := b.cal.ScaleRef(796, 565)
+			if err := b.client.TapRandomized(nextX, nextY); err == nil {
 				b.recordActivity()
 			}
 		}
