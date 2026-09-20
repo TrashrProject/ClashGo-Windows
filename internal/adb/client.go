@@ -43,6 +43,14 @@ type Client struct {
 	mu        sync.Mutex
 	closed    bool
 
+	// Global screencap budget. Search, battle monitoring and the background
+	// observer can all request frames independently; BlueStacks becomes
+	// unstable when those requests burst together. This gate serializes the
+	// *start* of captures and guarantees a small quiet gap between them.
+	captureGateMu sync.Mutex
+	lastCaptureStart time.Time
+	minCaptureGap time.Duration
+
 	// Persistent shell pipe (lazy-init). When enabled (UseShellPipe == true)
 	// and not broken, Tap/Swipe/KeyEvent/Text route through pipe.Send
 	// (sync flush) or pipe.SendAsync (fire-and-forget). When disabled or
@@ -118,6 +126,7 @@ func NewClient(opts ...Option) *Client {
 		jitterDelays:    true,
 		maxJitterPixels: 2.0,
 		jitterFraction:  0.15,
+		minCaptureGap:   120 * time.Millisecond,
 	}
 	for _, o := range opts {
 		o(c)
@@ -323,7 +332,22 @@ func (c *Client) CaptureScreen() ([]byte, error) {
 	return c.captureScreenRaw()
 }
 
+func (c *Client) waitForCaptureBudget() {
+	c.captureGateMu.Lock()
+	defer c.captureGateMu.Unlock()
+
+	if c.minCaptureGap <= 0 {
+		c.lastCaptureStart = time.Now()
+		return
+	}
+	if wait := c.minCaptureGap - time.Since(c.lastCaptureStart); wait > 0 {
+		time.Sleep(wait)
+	}
+	c.lastCaptureStart = time.Now()
+}
+
 func (c *Client) CaptureToMat() (gocv.Mat, error) {
+	c.waitForCaptureBudget()
 	// emptyMat returns a SAFE, properly-allocated zero Mat (not the
 	// nil-backed gocv.Mat{} literal). The literal's native pointer is
 	// nil, so any subsequent .Cols()/.Rows()/.Empty() call is a hard
