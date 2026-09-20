@@ -18,6 +18,12 @@ type BotConfig struct {
 	Search   SearchConfig   `json:"search"`
 	Upgrade  UpgradeConfig  `json:"upgrade"`
 	Debug    DebugConfig    `json:"debug"`
+	Account  AccountConfig  `json:"account"`
+}
+
+type AccountConfig struct {
+	PlayerTag string `json:"player_tag"`
+	APIKey    string `json:"api_key,omitempty"`
 }
 
 type DeviceConfig struct {
@@ -284,6 +290,7 @@ func DefaultConfig() *BotConfig {
 			MaxJitterPixels:    2.0,
 			JitterFraction:     0.15,
 		},
+		Account: AccountConfig{},
 	}
 }
 
