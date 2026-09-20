@@ -393,13 +393,24 @@ func (b *Bot) captureLoop() {
 	frames := make(chan frame, 1)
 
 	getCaptureInterval := func() time.Duration {
+		// While an attack/search sequence is running, that goroutine already
+		// performs its own fresh screenshots for state, loot and deployment.
+		// Keeping the background capture loop at 150ms at the same time meant
+		// BlueStacks was being hammered by two independent screencap streams.
+		// On the user's Pie64 instance this can terminate/restart the emulator
+		// with no Go error at all. Keep one low-rate observer alive for popup /
+		// health handling, but remove the duplicate high-frequency pressure.
+		if b.seqRunning.Load() {
+			return 700 * time.Millisecond
+		}
+
 		switch gc.State {
 		case game.StateBattle, game.StateSearchMap, game.StateLoading:
-			return 150 * time.Millisecond
+			return 300 * time.Millisecond
 		case game.StateMainVillage, game.StateArmySelection, game.StateArmyCamp:
-			return 180 * time.Millisecond
+			return 250 * time.Millisecond
 		default:
-			return 400 * time.Millisecond
+			return 500 * time.Millisecond
 		}
 	}
 
@@ -1530,7 +1541,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			return
 		}
 
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(700 * time.Millisecond)
 
 		screen, err := b.client.CaptureToMat()
 		if err != nil {
@@ -1641,7 +1652,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			}
 		}
 
-		time.Sleep(600 * time.Millisecond)
+		time.Sleep(850 * time.Millisecond)
 	}
 
 	if deployErr != nil || remainingUndeployed > 0 {
