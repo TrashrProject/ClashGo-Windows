@@ -735,7 +735,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			Int("score", score).
 			Int("capture_w", screen.Cols()).
 			Int("capture_h", screen.Rows()).
-			Msg("vision frame classified")
+			Msg(fmt.Sprintf("vision frame classified: state=%s score=%d capture=%dx%d", state.String(), score, screen.Cols(), screen.Rows()))
 	}
 
 	gc.UpdateScreen(screen, captureMs)
@@ -1649,12 +1649,45 @@ func (b *Bot) clickSequence() bool {
 			findMatchClicked = true
 			break
 		}
+
+		// Localized CoC layouts can make the Find Match template unreliable
+		// even though the state classifier correctly knows we are on the
+		// Find-Match screen. In that case this is NOT a blind tap: the
+		// classifier's StateFindMatch rule has already verified the screen.
+		// Use the rule's own reference anchor as the safe button center.
+		if screen, err := b.client.CaptureToMat(); err == nil {
+			state, score := b.classify(screen)
+			if state == game.StateFindMatch {
+				x, y := b.cal.ScaleRef(215, 563)
+				b.logger.Info().
+					Int("score", score).
+					Int("x", x).
+					Int("y", y).
+					Msg("Find Match screen verified by classifier; clicking canonical button center")
+				screen.Close()
+				if err := b.client.TapRandomized(x, y); err == nil {
+					b.recordActivity()
+					findMatchClicked = true
+					break
+				}
+			} else {
+				b.logger.Info().
+					Str("state", state.String()).
+					Int("score", score).
+					Msg("Find Match retry: current classified state")
+				screen.Close()
+			}
+		}
 		b.client.JitteredSleep(500 * time.Millisecond)
 	}
 	if !findMatchClicked {
 		b.logger.Warn().Msg("could not find or click Find Match button")
 		if screen, err := b.client.CaptureToMat(); err == nil {
-			b.DumpDiagnostics("click_find_match_failed", screen, nil)
+			state, score := b.classify(screen)
+			b.DumpDiagnostics("click_find_match_failed", screen, map[string]interface{}{
+				"classified_state": state.String(),
+				"classified_score": score,
+			})
 			screen.Close()
 		}
 		return false
