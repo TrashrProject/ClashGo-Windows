@@ -25,6 +25,7 @@ type ArmyUnitState struct {
 	Remaining int            `json:"remaining"`
 	Deployed  int            `json:"deployed"`
 	Attempts  int            `json:"attempts"`
+	Seen      bool           `json:"seen"`
 	Status    ArmyUnitStatus `json:"status"`
 	UpdatedAt time.Time      `json:"updated_at"`
 }
@@ -105,6 +106,7 @@ func (m *ArmyStateManager) ObserveRemaining(name string, remaining int) {
 	if remaining > u.Expected {
 		remaining = u.Expected
 	}
+	u.Seen = true
 	u.Remaining = remaining
 	u.Deployed = u.Expected - remaining
 	if u.Deployed < 0 { u.Deployed = 0 }
@@ -123,6 +125,7 @@ func (m *ArmyStateManager) Attempt(name string, sent int) {
 	if u == nil {
 		return
 	}
+	u.Seen = true
 	u.Attempts++
 	if u.Status != ArmyComplete {
 		u.Status = ArmyDeploying
@@ -142,6 +145,7 @@ func (m *ArmyStateManager) CompleteOneShot(name string) {
 	defer m.mu.Unlock()
 	u := m.units[armyKey(name)]
 	if u == nil { return }
+	u.Seen = true
 	u.Attempts++
 	u.Remaining = 0
 	u.Deployed = u.Expected
@@ -153,6 +157,7 @@ func (m *ArmyStateManager) Fail(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if u := m.units[armyKey(name)]; u != nil {
+		u.Seen = true
 		u.Status = ArmyFailed
 		u.UpdatedAt = time.Now()
 	}
@@ -163,7 +168,7 @@ func (m *ArmyStateManager) IncompleteCount() int {
 	defer m.mu.Unlock()
 	n := 0
 	for _, u := range m.units {
-		if u.Status != ArmyComplete && u.Status != ArmyUnavailable {
+		if u.Seen && u.Status != ArmyComplete && u.Status != ArmyUnavailable {
 			n++
 		}
 	}
@@ -175,7 +180,7 @@ func (m *ArmyStateManager) IncompleteUnits() []ArmyUnitState {
 	defer m.mu.Unlock()
 	out := make([]ArmyUnitState, 0)
 	for _, u := range m.units {
-		if u.Status != ArmyComplete && u.Status != ArmyUnavailable {
+		if u.Seen && u.Status != ArmyComplete && u.Status != ArmyUnavailable {
 			out = append(out, *u)
 		}
 	}
