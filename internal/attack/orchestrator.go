@@ -521,8 +521,6 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 		tapExec := NewTapExecutor(e.client, e.cal, e.logger)
 		tapExec.StartDeployBudget()
-		unverifiedSlots := 0
-
 		// Candidate deploy lines MUST all stay on the SAME verified outside
 		// side of the live red boundary. The previous implementation rotated
 		// retries through hard-coded left/right/top/bottom lines; on irregular
