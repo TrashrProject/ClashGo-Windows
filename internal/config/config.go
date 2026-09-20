@@ -58,6 +58,8 @@ type AttackConfig struct {
 	WardenUseAtPct      int      `json:"warden_use_at_pct"`
 	ReserveDEPercent    int      `json:"reserve_de_percent"`
 	StallTimerSeconds   int      `json:"stall_timer_seconds"`
+	LootExitEnabled     bool     `json:"loot_exit_enabled"`
+	LootExitPercent     int      `json:"loot_exit_percent"`
 	// MinSecondsBetweenAttacks is the minimum pause between the end of one
 	// battle (Return Home) and the start of the next attack sequence.
 	// Armies take real time to retrain; without this gate the bot attacked
@@ -162,6 +164,8 @@ func DefaultConfig() *BotConfig {
 			WardenUseAtPct:           30,
 			ReserveDEPercent:         200,
 			StallTimerSeconds:        10,
+			LootExitEnabled:          false,
+			LootExitPercent:          100,
 			MinSecondsBetweenAttacks: 30,
 		},
 		Search: SearchConfig{
