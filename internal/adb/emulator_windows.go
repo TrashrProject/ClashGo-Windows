@@ -65,7 +65,7 @@ func (c *Client) ensureBlueStacksWindows(ctx context.Context, width, height, dpi
 
 	instances := discoverBlueStacksWindowsInstances()
 	preferred := chooseBlueStacksWindowsInstance(instances, c.blueStacksInstance)
-	ports := windowsCandidateADBPortsPreferred(instances, preferred)
+	ports := windowsCandidateADBPortsSelected(instances, preferred, c.strictBlueStacksSelection())
 
 	if !adbSettingChanged {
 		if addr := c.findReachableBlueStacks(ctx, ports); addr != "" {
@@ -264,6 +264,25 @@ func chooseBlueStacksWindowsInstance(instances []blueStacksWindowsInstance, conf
 	return ""
 }
 
+func (c *Client) strictBlueStacksSelection() bool {
+	return strings.TrimSpace(c.blueStacksInstance) != "" ||
+		strings.TrimSpace(os.Getenv("CLASHGO_BLUESTACKS_INSTANCE")) != ""
+}
+
+func windowsCandidateADBPortsSelected(instances []blueStacksWindowsInstance, preferred string, strict bool) []int {
+	if strict && preferred != "" {
+		for _, inst := range instances {
+			if strings.EqualFold(inst.Name, preferred) && inst.ADBPort > 0 {
+				return []int{inst.ADBPort}
+			}
+		}
+		// Advanced env override may name an instance not yet present in the
+		// config snapshot. Do not silently attach a different instance.
+		return nil
+	}
+	return windowsCandidateADBPortsPreferred(instances, preferred)
+}
+
 func windowsCandidateADBPortsPreferred(instances []blueStacksWindowsInstance, preferred string) []int {
 	ordered := make([]blueStacksWindowsInstance, 0, len(instances))
 	for _, inst := range instances {
@@ -345,7 +364,7 @@ func (c *Client) launchBlueStacks(_ bool, width, height, dpi int) error {
 	if err := c.waitForBlueStacksADBWithPorts(
 		context.Background(),
 		90*time.Second,
-		windowsCandidateADBPortsPreferred(instances, instance),
+		windowsCandidateADBPortsSelected(instances, instance, c.strictBlueStacksSelection()),
 	); err != nil {
 		return err
 	}
@@ -414,7 +433,7 @@ func (c *Client) waitForBlueStacksADB(ctx context.Context, timeout time.Duration
 	return c.waitForBlueStacksADBWithPorts(
 		ctx,
 		timeout,
-		windowsCandidateADBPortsPreferred(instances, preferred),
+		windowsCandidateADBPortsSelected(instances, preferred, c.strictBlueStacksSelection()),
 	)
 }
 
