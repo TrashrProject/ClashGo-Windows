@@ -67,6 +67,10 @@ type Executor struct {
 	lastRemainingDE     int
 	remainingLootValid  bool
 
+	// Early battle termination (loot %, destruction threshold, stall-end)
+	// is only allowed after deployment has been verified complete.
+	earlyExitAllowed bool
+
 	OnPhaseStart func(phase string, edge string)
 	OnUnitDeploy func(unit string, slotX int, slotY int)
 
@@ -84,6 +88,10 @@ func (e *Executor) LastDestructionPercent() int {
 // the TH state is unknown).
 func (e *Executor) ThDestroyed() bool {
 	return e.thDestroyed
+}
+
+func (e *Executor) SetEarlyExitAllowed(allowed bool) {
+	e.earlyExitAllowed = allowed
 }
 
 // SetInitialLoot stores the pre-attack Available Loot snapshot used by the
@@ -1861,7 +1869,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			// counters against the snapshot taken before deployment. Two
 			// consecutive reads must satisfy the threshold to protect against
 			// a single OCR glitch.
-			if e.cfg.LootExitEnabled {
+			if e.earlyExitAllowed && e.cfg.LootExitEnabled {
 				threshold := e.cfg.LootExitPercent
 				if threshold < 0 { threshold = 0 }
 				if threshold > 100 { threshold = 100 }
@@ -1984,7 +1992,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 					e.logger.Info().Int("percent", currentPct).Int("threshold", endAtPct).Msg("destruction progress toward strategy threshold")
 				}
 
-				if endAtPercentReached(endAtPct, currentPct) {
+				if e.earlyExitAllowed && endAtPercentReached(endAtPct, currentPct) {
 					// End only when the red End Battle button is actually on
 					// screen (army fully spent). A misread percent must not
 					// tap the map mid-fight.
@@ -1998,7 +2006,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 					}
 				}
 
-				if e.cfg.StallTimerSeconds > 0 && endAtPct == 0 {
+				if e.earlyExitAllowed && e.cfg.StallTimerSeconds > 0 && endAtPct == 0 {
 					if currentPct > lastPct {
 						lastPct = currentPct
 						lastPctTime = time.Now()
