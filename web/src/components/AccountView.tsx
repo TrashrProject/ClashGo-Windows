@@ -170,14 +170,16 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
               {profile ? 'Account synchronized automatically through ClashGO. No developer API key is required.' : 'Player tag saved. ClashGO will synchronize this account automatically.'}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => void refresh()} disabled={busy} className="px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-black disabled:opacity-40">
-              {busy ? 'Syncing...' : 'Sync profile'}
-            </button>
-            <button type="button" onClick={() => void unlink()} disabled={busy} className="px-4 py-3 rounded-xl border border-rose-500/20 bg-rose-500/5 text-xs font-black text-rose-500 disabled:opacity-40">
-              Unlink account
-            </button>
-          </div>
+          <details className="relative">
+            <summary className="list-none cursor-pointer px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-black text-zinc-500 select-none">
+              Account options
+            </summary>
+            <div className="absolute right-0 mt-2 z-20 min-w-[190px] rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-2 shadow-xl">
+              <button type="button" onClick={() => void unlink()} disabled={busy} className="w-full px-3 py-2.5 rounded-lg text-left text-xs font-black text-rose-500 hover:bg-rose-500/5 disabled:opacity-40">
+                Unlink account
+              </button>
+            </div>
+          </details>
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -200,8 +202,11 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
         </div>
 
         {(message || error) && (
-          <div className={'mt-4 rounded-xl px-4 py-3 text-xs font-bold ' + (error ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500')}>
-            {error || message}
+          <div
+            title={error || undefined}
+            className={'mt-4 rounded-xl px-4 py-3 text-xs font-bold ' + (error ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' : 'bg-emerald-500/10 text-emerald-500')}
+          >
+            {error ? 'Account synchronization is temporarily unavailable. ClashGO will retry automatically.' : message}
           </div>
         )}
       </section>
