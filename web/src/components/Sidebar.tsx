@@ -27,7 +27,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
     { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
     { id: 'account', label: 'Account', icon: 'person' },
     { id: 'analytics', label: 'Analytics', icon: 'monitoring' },
-    { id: 'config', label: 'Config', icon: 'tune' },
+    { id: 'config', label: 'Automation', icon: 'auto_awesome' },
     { id: 'settings', label: 'Settings', icon: 'settings' },
   ];
 
