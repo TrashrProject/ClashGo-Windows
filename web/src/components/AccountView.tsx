@@ -42,6 +42,17 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
 
   React.useEffect(() => { void refresh(); }, [refresh, playerTag]);
 
+  // The local/proxied account service may start a few seconds after ClashGO.
+  // Retry automatically while no profile is available so users never have to
+  // hammer "Sync profile" after launching the service.
+  React.useEffect(() => {
+    if (profile || busy || !playerTag) return;
+    const id = window.setInterval(() => {
+      void refresh();
+    }, 4000);
+    return () => window.clearInterval(id);
+  }, [profile, busy, playerTag, refresh]);
+
   const unlink = async () => {
     setBusy(true);
     try {
@@ -84,9 +95,21 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          <div className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${serviceConfigured ? 'text-emerald-500' : 'text-amber-500'}`}>
-            <span className="material-symbols-outlined text-base">{serviceConfigured ? 'cloud_done' : 'cloud_off'}</span>
-            {serviceConfigured ? 'ClashGO account service connected' : 'Account service not configured'}
+          <div className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${
+            profile ? 'text-emerald-500' : error ? 'text-rose-500' : busy ? 'text-amber-500' : serviceConfigured ? 'text-zinc-500' : 'text-amber-500'
+          }`}>
+            <span className="material-symbols-outlined text-base">
+              {profile ? 'cloud_done' : error ? 'cloud_off' : busy ? 'sync' : serviceConfigured ? 'cloud_queue' : 'cloud_off'}
+            </span>
+            {profile
+              ? 'ClashGO account service connected'
+              : error
+                ? 'Account service unavailable — automatic retry enabled'
+                : busy
+                  ? 'Connecting to ClashGO account service'
+                  : serviceConfigured
+                    ? 'Account service configured'
+                    : 'Account service not configured'}
           </div>
           {serviceURL && (
             <span className="text-[10px] font-mono text-zinc-400">{serviceURL}</span>
