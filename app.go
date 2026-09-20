@@ -407,7 +407,10 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 				// NewBotWithContext already closed its client; just
 				// reset the start state. No error events — the stop
 				// was intentional.
-				log.Info().Msg("bot boot cancelled by user (Stop clicked during startup)")
+				log.Info().Msg("bot boot cancelled during startup")
+				runtime.EventsEmit(a.ctx, "bot_boot_cancelled", map[string]interface{}{
+					"message": "Bot startup was cancelled.",
+				})
 				a.mu.Lock()
 				a.clearStartStateLocked()
 				a.mu.Unlock()
@@ -459,7 +462,10 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			// starting it behind the user's back.
 			a.clearStartStateLocked()
 			a.mu.Unlock()
-			log.Info().Msg("bot boot finished after Stop was clicked; discarding and shutting down")
+			log.Info().Msg("bot boot finished after startup cancellation; discarding and shutting down")
+			runtime.EventsEmit(a.ctx, "bot_boot_cancelled", map[string]interface{}{
+				"message": "Bot startup was cancelled.",
+			})
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -483,7 +489,10 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 				// the fail-fast client, b.Start() fails on the closed
 				// transport. Intentional stop: no error event, just
 				// tear down the booted bot so the next Start is clean.
-				log.Info().Msg("bot start aborted by stop; discarding")
+				log.Info().Msg("bot start aborted by startup cancellation; discarding")
+				runtime.EventsEmit(a.ctx, "bot_boot_cancelled", map[string]interface{}{
+					"message": "Bot startup was cancelled.",
+				})
 				a.mu.Lock()
 				a.clearStartStateLocked()
 				a.mu.Unlock()
@@ -515,7 +524,17 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 				}()
 				b.Stop()
 			}()
+			return
 		}
+
+		// Startup is now fully complete. The frontend keeps a separate
+		// STARTING state and only switches to RUNNING after this event,
+		// preventing the Start button from becoming an active Stop button
+		// while BlueStacks/ADB are still booting.
+		log.Info().Msg("bot startup complete; runtime active")
+		runtime.EventsEmit(a.ctx, "bot_started", map[string]interface{}{
+			"message": "Bot is running.",
+		})
 	}(bootCtx)
 
 	return BotStatus{Running: true, Message: "Bot initialization started in background"}
