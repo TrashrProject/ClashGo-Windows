@@ -67,7 +67,7 @@ choco install nsis -y
 powershell -ExecutionPolicy Bypass -File .\\tools\\build-installer.ps1
 ```
 
-The installer copies the complete tested portable bundle (EXE, assets, OpenCV/MinGW DLLs and update helper), creates Start Menu/Desktop shortcuts and registers a normal Windows uninstaller. `%APPDATA%\\ClashGO` is preserved on uninstall so configuration, diagnostics and attack history survive reinstallations.
+The installer copies the complete tested portable bundle (EXE, assets, OpenCV/MinGW DLLs and update helper) into `%LOCALAPPDATA%\\Programs\\ClashGO Windows`, creates per-user shortcuts and stays writable so one-click self-update works without an administrator prompt. `%APPDATA%\\ClashGO` is preserved on uninstall.
 
 
 ## v0.6 Windows beta readiness

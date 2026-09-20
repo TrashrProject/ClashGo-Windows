@@ -407,8 +407,9 @@ func (t *Transport) captureViaShellLocked() (*[]byte, int, error) {
 			*bufPtr = buf
 		}
 	}
+	out, n, err := normalizeShellScreencap(buf[:total])
 	bufferPool.Put(bufPtr)
-	return normalizeShellScreencap(buf[:total])
+	return out, n, err
 }
 
 // normalizeShellScreencap converts the raw output of

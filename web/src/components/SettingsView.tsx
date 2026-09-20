@@ -78,7 +78,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   const runtimeReady = systemDiagnostics?.assets_ready ?? false;
   const playerReady = systemDiagnostics?.emulator.bluestacks_player_found ?? false;
   const adbReady = systemDiagnostics?.emulator.adb_found ?? false;
-  const overallReady = runtimeReady && playerReady && adbReady;
+  const overallReady = runtimeReady && playerReady && adbReady && !!preferredInstance;
 
   return (
     <div className="bg-white dark:bg-zinc-900 p-10 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none max-w-2xl mx-auto transition-all duration-500">

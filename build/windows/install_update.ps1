@@ -37,4 +37,5 @@ catch {
 finally {
     Start-Sleep -Milliseconds 500
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 }

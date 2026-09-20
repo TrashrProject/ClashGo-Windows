@@ -859,11 +859,16 @@ func (s *Service) ApplyAuto() (bool, error) {
 		if err := checkInstallDirWritable(installDir); err != nil {
 			return false, err
 		}
+		tempHelperPath, err := prepareWindowsUpdateHelper(helper)
+		if err != nil {
+			return false, err
+		}
+
 		cmd := exec.Command(
 			"powershell.exe",
 			"-NoProfile",
 			"-ExecutionPolicy", "Bypass",
-			"-File", helper,
+			"-File", tempHelperPath,
 			"-ZipPath", st.DownloadPath,
 			"-InstallDir", installDir,
 			"-ExePath", exe,
@@ -872,6 +877,7 @@ func (s *Service) ApplyAuto() (bool, error) {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Start(); err != nil {
+			_ = os.Remove(tempHelperPath)
 			return false, fmt.Errorf("start Windows update helper: %w", err)
 		}
 		go func() { _ = cmd.Wait() }()
@@ -917,6 +923,31 @@ func (s *Service) ApplyAuto() (bool, error) {
 	// Reap async — no need to wait. The helper will wait for our exit itself.
 	go func() { _ = cmd.Wait() }()
 	return true, nil
+}
+
+func prepareWindowsUpdateHelper(source string) (string, error) {
+	helperBytes, err := os.ReadFile(source)
+	if err != nil {
+		return "", fmt.Errorf("read Windows update helper: %w", err)
+	}
+	tempHelper, err := os.CreateTemp("", "clashgo-install-update-*.ps1")
+	if err != nil {
+		return "", fmt.Errorf("create temporary update helper: %w", err)
+	}
+	tempHelperPath := tempHelper.Name()
+	cleanup := func() {
+		_ = tempHelper.Close()
+		_ = os.Remove(tempHelperPath)
+	}
+	if _, err := tempHelper.Write(helperBytes); err != nil {
+		cleanup()
+		return "", fmt.Errorf("write temporary update helper: %w", err)
+	}
+	if err := tempHelper.Close(); err != nil {
+		_ = os.Remove(tempHelperPath)
+		return "", fmt.Errorf("close temporary update helper: %w", err)
+	}
+	return tempHelperPath, nil
 }
 
 func checkInstallDirWritable(dir string) error {

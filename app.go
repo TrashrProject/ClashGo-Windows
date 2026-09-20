@@ -29,6 +29,7 @@ type App struct {
 	botCtx    context.Context
 	cancel    context.CancelFunc
 	mu        sync.Mutex
+	stopping  bool
 	lastStats bot.BotStats
 	logBuffer []string
 
@@ -266,9 +267,9 @@ func mergeStats(acc, current bot.BotStats) bot.BotStats {
 
 func (a *App) ResetStats() error {
 	a.mu.Lock()
-	if a.bot != nil || a.cancel != nil {
+	if a.bot != nil || a.cancel != nil || a.stopping {
 		a.mu.Unlock()
-		return fmt.Errorf("stop the bot before resetting statistics")
+		return fmt.Errorf("wait for the bot to finish stopping before resetting statistics")
 	}
 	a.lastStats = bot.BotStats{}
 	a.mu.Unlock()
@@ -370,6 +371,10 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 
 	a.mu.Lock()
 
+	if a.stopping {
+		a.mu.Unlock()
+		return BotStatus{Running: false, Message: "Previous bot session is still closing — retry in a moment"}
+	}
 	if a.bot != nil {
 		a.mu.Unlock()
 		return BotStatus{Running: true, Message: "Bot already running"}
@@ -556,6 +561,11 @@ func (a *App) clearStartStateLocked() {
 func (a *App) StopBot() BotStatus {
 	a.mu.Lock()
 
+	if a.stopping {
+		a.mu.Unlock()
+		return BotStatus{Running: false, Message: "Bot teardown already in progress"}
+	}
+
 	if a.cancel != nil {
 		a.cancel()
 	}
@@ -594,6 +604,7 @@ func (a *App) StopBot() BotStatus {
 	//      construct a new bot without observing a half-torn-down one.
 	a.bot = nil
 	a.cancel = nil
+	a.stopping = true
 	a.mu.Unlock()
 
 	// Detach the slow teardown. The captureLoop will exit on its own
@@ -603,6 +614,9 @@ func (a *App) StopBot() BotStatus {
 	// is required for correctness of the user-visible stop signal.
 	go func() {
 		defer func() {
+			a.mu.Lock()
+			a.stopping = false
+			a.mu.Unlock()
 			if r := recover(); r != nil {
 				log.Error().Interface("panic", r).Msg("recovered panic during async bot stop")
 			}
@@ -645,9 +659,9 @@ func (a *App) SetBlueStacksInstance(instance string) error {
 	instance = strings.TrimSpace(instance)
 
 	a.mu.Lock()
-	if a.bot != nil || a.cancel != nil {
+	if a.bot != nil || a.cancel != nil || a.stopping {
 		a.mu.Unlock()
-		return fmt.Errorf("stop the bot before changing BlueStacks instance")
+		return fmt.Errorf("wait for the bot to finish stopping before changing BlueStacks instance")
 	}
 	a.mu.Unlock()
 

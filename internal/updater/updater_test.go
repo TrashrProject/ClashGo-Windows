@@ -653,3 +653,28 @@ func newServiceForTest(t *testing.T, currentVersion string, client *http.Client)
 
 // Ensure io is referenced (used in streamToFile progress reader).
 var _ = io.EOF
+
+
+func TestPrepareWindowsUpdateHelperCopiesSource(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "install_update.ps1")
+	payload := []byte("Write-Host 'update helper'\n")
+	if err := os.WriteFile(source, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tempPath, err := prepareWindowsUpdateHelper(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tempPath)
+	if tempPath == source {
+		t.Fatal("temporary helper must not reuse installed source path")
+	}
+	got, err := os.ReadFile(tempPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("temporary helper contents=%q want %q", got, payload)
+	}
+}
