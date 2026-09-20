@@ -77,7 +77,7 @@ func (c *Client) ensureBlueStacksWindows(ctx context.Context, width, height, dpi
 		// BlueStacks reads this global setting at player startup. Restarting
 		// HD-Player after changing it is more reliable than waiting for a live
 		// instance to notice the file mutation.
-		_ = exec.Command("taskkill", "/F", "/IM", "HD-Player.exe").Run()
+		_ = hiddenCommand("taskkill", "/F", "/IM", "HD-Player.exe").Run()
 		time.Sleep(800 * time.Millisecond)
 	}
 
@@ -312,7 +312,7 @@ func (c *Client) findReachableBlueStacks(ctx context.Context, ports []int) strin
 	for _, port := range c.tcpScanListens(ports, 120*time.Millisecond) {
 		addr := fmt.Sprintf("127.0.0.1:%d", port)
 		pctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		_ = exec.CommandContext(pctx, ADBExecutable(), "connect", addr).Run()
+		_ = hiddenCommandContext(pctx, ADBExecutable(), "connect", addr).Run()
 		cancel()
 		if c.isBlueStacksDevice(addr) {
 			return addr
@@ -324,7 +324,7 @@ func (c *Client) findReachableBlueStacks(ctx context.Context, ports []int) strin
 // launchBlueStacks preserves the upstream recovery API. The first Windows
 // implementation restarts HD-Player and relaunches only the selected instance.
 func (c *Client) launchBlueStacks(_ bool, width, height, dpi int) error {
-	_ = exec.Command("taskkill", "/F", "/IM", "HD-Player.exe").Run()
+	_ = hiddenCommand("taskkill", "/F", "/IM", "HD-Player.exe").Run()
 	time.Sleep(800 * time.Millisecond)
 
 	player, err := findBlueStacksWindowsPlayer()
@@ -368,7 +368,7 @@ func (c *Client) waitForVMProcess(ctx context.Context, timeout time.Duration) er
 }
 
 func (c *Client) firstVMSignal() string {
-	out, err := exec.Command(
+	out, err := hiddenCommand(
 		"tasklist",
 		"/FI", "IMAGENAME eq HD-Player.exe",
 		"/FO", "CSV",

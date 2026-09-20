@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -238,7 +237,7 @@ func (c *Client) AutoDetectDevice() error {
 	// restarted; no-op if already connected. We do this for any
 	// configured DeviceID that looks like a TCP host:port.
 	if c.DeviceID != "" && (strings.Contains(c.DeviceID, ":") || strings.HasPrefix(c.DeviceID, "localhost")) {
-		_ = exec.Command(ADBExecutable(), "connect", c.DeviceID).Run()
+		_ = hiddenCommand(ADBExecutable(), "connect", c.DeviceID).Run()
 	}
 
 	devs, err := c.Devices()
@@ -1187,12 +1186,12 @@ func (c *Client) ResetAdbServer() error {
 	}
 	c.mu.Unlock()
 
-	if err := exec.Command(ADBExecutable(), "kill-server").Run(); err != nil {
+	if err := hiddenCommand(ADBExecutable(), "kill-server").Run(); err != nil {
 		return fmt.Errorf("adb kill-server: %w", err)
 	}
 	// Brief pause so the OS releases the listening socket cleanly.
 	time.Sleep(1 * time.Second)
-	if err := exec.Command(ADBExecutable(), "start-server").Run(); err != nil {
+	if err := hiddenCommand(ADBExecutable(), "start-server").Run(); err != nil {
 		return fmt.Errorf("adb start-server: %w", err)
 	}
 	// Brief pause for the listening socket to be ready before the
