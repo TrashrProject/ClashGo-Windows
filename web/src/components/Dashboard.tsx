@@ -1,6 +1,7 @@
 import React from 'react';
 import { BotStats, AttackReport } from '../types';
 import { formatUptime, parseLogLine, LogSeverity } from '../utils';
+import AutomationOverview from './AutomationOverview';
 
 interface DashboardProps {
   stats: BotStats;
@@ -173,6 +174,8 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
 
   return (
     <div className="space-y-6">
+      <AutomationOverview />
+
       {/* Metrics Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         {[
