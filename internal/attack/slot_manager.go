@@ -138,7 +138,7 @@ func NewSlotManager(
 		}
 	}
 
-	sm.logger.Info().Int("total", len(sm.slots)).Msg("slot manager initialized")
+	sm.logger.Debug().Int("total", len(sm.slots)).Msg("slot manager initialized")
 	return sm
 }
 
