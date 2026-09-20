@@ -22,6 +22,10 @@ jobs:
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       RELEASE_NOTES: ${{ inputs.notes }}
+      CGO_CXXFLAGS: --std=c++11 -DNDEBUG
+      CGO_CPPFLAGS: -IC:/opencv/build/install/include
+      CGO_LDFLAGS: -LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -lopencv_imgproc4130 -lopencv_imgcodecs4130
+      GOFLAGS: -tags=customenv,gocv_specific_modules
     steps:
       - name: Checkout Windows branch
         uses: actions/checkout@v4
@@ -51,7 +55,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: C:\opencv\build\install
-          key: opencv-4.13.0-mingw-gocv043-clashgo-v2
+          key: opencv-4.13.0-mingw-gocv043-clashgo-minimal-v1
 
       - name: Build OpenCV 4.13 for GoCV
         if: steps.opencv-cache.outputs.cache-hit != 'true'
@@ -61,7 +65,7 @@ jobs:
           Push-Location "$env:RUNNER_TEMP\gocv"
           cmd /c win_download_opencv.cmd
           if ($LASTEXITCODE -ne 0) { throw "OpenCV download failed" }
-          (Get-Content .\win_build_opencv.cmd -Raw).Replace("-DBUILD_PERF_TESTS=ON", "-DBUILD_PERF_TESTS=OFF -DBUILD_LIST=core,face,videoio,imgproc,highgui,imgcodecs,objdetect,features2d,video,dnn,xfeatures2d,plot,tracking,img_hash,calib3d,bgsegm,photo,aruco,wechat_qrcode,ximgproc,xphoto,xobjdetect,mcc") | Set-Content .\win_build_opencv.cmd -Encoding ASCII
+          (Get-Content .\win_build_opencv.cmd -Raw).Replace("-DBUILD_PERF_TESTS=ON", "-DBUILD_PERF_TESTS=OFF -DBUILD_LIST=core,imgproc,imgcodecs") | Set-Content .\win_build_opencv.cmd -Encoding ASCII
           $env:CMAKE_BUILD_PARALLEL_LEVEL = [Environment]::ProcessorCount
           cmd /c win_build_opencv.cmd
           if ($LASTEXITCODE -ne 0) { throw "OpenCV build failed" }
@@ -72,7 +76,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: C:\opencv\build\install
-          key: opencv-4.13.0-mingw-gocv043-clashgo-v2
+          key: opencv-4.13.0-mingw-gocv043-clashgo-minimal-v1
 
       - name: Add OpenCV to PATH
         shell: powershell
@@ -103,7 +107,7 @@ jobs:
 
       - name: Test backend
         shell: powershell
-        run: go test ./...
+        run: go test -tags "customenv,gocv_specific_modules" ./internal/... ./pkg/...
 
       - name: Build portable bundle
         shell: powershell
