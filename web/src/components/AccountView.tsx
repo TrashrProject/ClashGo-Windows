@@ -1,8 +1,20 @@
 
 import React from 'react';
-import { ClearAccount, GetAccountConfig, GetCachedPlayerProfile, GetPlayerProfile, GetVillageResources } from '../../wailsjs/go/main/App';
+import { ClearAccount, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetPlayerProfile, GetVillageResources } from '../../wailsjs/go/main/App';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
+type FarmUnit = { name: string; count: number; housing: number };
+type FarmProfile = {
+  town_hall: number;
+  label: string;
+  troop_capacity: number;
+  spell_capacity: number;
+  troops: FarmUnit[];
+  spells: FarmUnit[];
+  heroes: string[];
+  siege: string;
+};
+
 type VillageResources = {
   timestamp: string;
   gold: number;
@@ -31,6 +43,7 @@ interface AccountViewProps {
 const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccountChanged }) => {
   const [profile, setProfile] = React.useState<PlayerProfile | null>(null);
   const [resources, setResources] = React.useState<VillageResources | null>(null);
+  const [farmProfile, setFarmProfile] = React.useState<FarmProfile | null>(null);
   const [serviceConfigured, setServiceConfigured] = React.useState(false);
   const [serviceURL, setServiceURL] = React.useState('');
   const [busy, setBusy] = React.useState(false);
@@ -43,6 +56,14 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
       const account = await GetAccountConfig();
       setServiceConfigured(account.service_configured);
       setServiceURL(account.service_url || '');
+
+      const cfg = await GetConfig();
+      const farm = (cfg as any)?.attack?.farm;
+      if (farm?.enabled && farm?.profiles) {
+        setFarmProfile(farm.profiles[String(farm.town_hall)] || null);
+      } else {
+        setFarmProfile(null);
+      }
 
       const cached = await GetCachedPlayerProfile();
       if (cached) setProfile(cached as PlayerProfile);
@@ -172,6 +193,35 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
             ))}
           </section>
 
+          {farmProfile && (
+            <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">Automatic farm plan</div>
+                  <h4 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">{farmProfile.label}</h4>
+                  <p className="mt-1 text-xs font-medium text-zinc-500">Selected automatically from your linked Town Hall. No manual setup required.</p>
+                </div>
+                <div className="flex gap-3 text-center">
+                  <div className="rounded-xl bg-zinc-50 dark:bg-zinc-950/40 px-4 py-3">
+                    <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Army</div>
+                    <div className="text-lg font-black text-zinc-950 dark:text-white">{farmProfile.troop_capacity}</div>
+                  </div>
+                  <div className="rounded-xl bg-zinc-50 dark:bg-zinc-950/40 px-4 py-3">
+                    <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Spells</div>
+                    <div className="text-lg font-black text-zinc-950 dark:text-white">{farmProfile.spell_capacity}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 grid grid-cols-1 md:grid-cols-4 gap-3">
+                <PlanGroup title="Troops" items={farmProfile.troops.map(u => u.count + '× ' + u.name)} />
+                <PlanGroup title="Spells" items={farmProfile.spells.map(u => u.count + '× ' + u.name)} />
+                <PlanGroup title="Heroes" items={farmProfile.heroes} />
+                <PlanGroup title="Siege" items={farmProfile.siege ? [farmProfile.siege] : ['None']} />
+              </div>
+            </section>
+          )}
+
           <section className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             <div className="lg:col-span-2 rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
               <div className="flex items-center justify-between mb-5">
@@ -230,6 +280,17 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
     </div>
   );
 });
+
+const PlanGroup: React.FC<{ title: string; items: string[] }> = ({ title, items }) => (
+  <div className="rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/30 p-4">
+    <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-400">{title}</div>
+    <div className="mt-2 space-y-1">
+      {items.map((item, i) => (
+        <div key={i} className="text-xs font-black text-zinc-800 dark:text-zinc-200">{item}</div>
+      ))}
+    </div>
+  </div>
+);
 
 const UnitGrid: React.FC<{ title: string; units: Unit[] }> = ({ title, units }) => (
   <div>
