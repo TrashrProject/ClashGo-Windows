@@ -1,5 +1,6 @@
 import React from 'react';
 import { BotStats, UpdateStatus, SystemDiagnostics } from '../types';
+import { GetLatestAttackTrace } from '../../wailsjs/go/main/App';
 
 interface SettingsViewProps {
   stats: BotStats;
@@ -29,6 +30,9 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   const [diagnosticsBusy, setDiagnosticsBusy] = React.useState(false);
   const [instanceBusy, setInstanceBusy] = React.useState(false);
   const [instanceMessage, setInstanceMessage] = React.useState('');
+  const [traceOpen, setTraceOpen] = React.useState(false);
+  const [latestTrace, setLatestTrace] = React.useState('');
+  const [traceBusy, setTraceBusy] = React.useState(false);
   const resetTimerRef = React.useRef<number | null>(null);
 
   React.useEffect(() => () => {
@@ -59,6 +63,21 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
       setDiagnosticsPath('Export failed — check app.log');
     } finally {
       setDiagnosticsBusy(false);
+    }
+  };
+
+  const handleLoadTrace = async () => {
+    if (traceBusy) return;
+    setTraceBusy(true);
+    try {
+      const trace = await GetLatestAttackTrace();
+      setLatestTrace(trace || '');
+      setTraceOpen(true);
+    } catch {
+      setLatestTrace('');
+      setTraceOpen(true);
+    } finally {
+      setTraceBusy(false);
     }
   };
 
@@ -275,6 +294,45 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           </div>
         </div>
 
+
+        <div className="rounded-2xl border border-zinc-100/60 dark:border-zinc-800/60 bg-zinc-50/40 dark:bg-zinc-950/20 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setTraceOpen(v => !v)}
+            className="w-full flex items-center justify-between gap-4 p-5 text-left"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-11 h-11 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 flex items-center justify-center">
+                <span className="material-symbols-outlined text-zinc-500">bug_report</span>
+              </div>
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Advanced diagnostics</div>
+                <div className="text-sm font-bold text-zinc-950 dark:text-white">Latest attack state trace</div>
+                <div className="text-[10px] text-zinc-400 mt-0.5">Only useful for troubleshooting — normal users can ignore this.</div>
+              </div>
+            </div>
+            <span className={`material-symbols-outlined text-zinc-400 transition-transform ${traceOpen ? 'rotate-180' : ''}`}>expand_more</span>
+          </button>
+
+          {traceOpen && (
+            <div className="border-t border-zinc-100 dark:border-zinc-800 p-5">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Structured army trace</span>
+                <button
+                  type="button"
+                  onClick={() => void handleLoadTrace()}
+                  disabled={traceBusy}
+                  className="px-3 py-2 rounded-lg bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-[10px] font-black disabled:opacity-40"
+                >
+                  {traceBusy ? 'Loading…' : 'Refresh trace'}
+                </button>
+              </div>
+              <pre className="max-h-64 overflow-auto rounded-xl bg-zinc-950 text-zinc-300 p-4 text-[10px] leading-relaxed font-mono whitespace-pre-wrap break-words">
+                {latestTrace || 'No attack trace yet. ClashGO creates one automatically after a farm-profile deployment.'}
+              </pre>
+            </div>
+          )}
+        </div>
 
         <button
           type="button"
