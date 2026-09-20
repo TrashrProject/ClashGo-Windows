@@ -19,6 +19,9 @@ jobs:
   release:
     runs-on: windows-latest
     timeout-minutes: 120
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_NOTES: ${{ inputs.notes }}
     steps:
       - name: Checkout Windows branch
         uses: actions/checkout@v4
@@ -39,7 +42,7 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install MinGW and CMake
+      - name: Install MinGW, CMake and NSIS
         shell: powershell
         run: choco install mingw cmake nsis -y --no-progress
 
@@ -60,7 +63,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "OpenCV download failed" }
           (Get-Content .\win_build_opencv.cmd -Raw).Replace("-DBUILD_PERF_TESTS=ON", "-DBUILD_PERF_TESTS=OFF -DBUILD_LIST=core,face,videoio,imgproc,highgui,imgcodecs,objdetect,features2d,video,dnn,xfeatures2d,plot,tracking,img_hash,calib3d,bgsegm,photo,aruco,wechat_qrcode,ximgproc,mcc") | Set-Content .\win_build_opencv.cmd -Encoding ASCII
           $env:CMAKE_BUILD_PARALLEL_LEVEL = [Environment]::ProcessorCount
-          Write-Host "Building OpenCV with $env:CMAKE_BUILD_PARALLEL_LEVEL parallel jobs"
           cmd /c win_build_opencv.cmd
           if ($LASTEXITCODE -ne 0) { throw "OpenCV build failed" }
           Pop-Location
@@ -79,114 +81,83 @@ jobs:
 
       - name: Install Wails
         shell: powershell
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          wails version
 
       - name: Synchronize audited runtime assets
         shell: powershell
         run: .\tools\sync-upstream-runtime.ps1
 
-      - name: Test
+      - name: Generate bindings and validate frontend
+        shell: powershell
+        run: |
+          wails generate module
+          if ($LASTEXITCODE -ne 0) { throw "Wails binding generation failed" }
+          Push-Location web
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
+          Pop-Location
+
+      - name: Test backend
         shell: powershell
         run: go test ./...
 
-      - name: Build
+      - name: Build portable bundle
         shell: powershell
-        run: .\tools\build-windows.ps1 -Version "${{ inputs.version }}" -SkipSync -SkipTests
+        run: .\tools\build-windows.ps1 -Version "$env:RELEASE_VERSION" -SkipSync -SkipTests
 
       - name: Build NSIS installer
         shell: powershell
-        run: .\tools\build-installer.ps1 -Version "${{ inputs.version }}"
+        run: .\tools\build-installer.ps1 -Version "$env:RELEASE_VERSION"
 
-      - name: Generate distribution checksums
-        shell: powershell
-        run: |
-          $files = Get-ChildItem dist -File | Where-Object { $_.Name -match 'windows\.zip$|windows-setup\.exe        id: manifest
-        shell: powershell
-        run: |
-          $version = "${{ inputs.version }}"
-          $zip = Get-ChildItem dist -Filter "ClashGO-v$version-windows.zip" | Select-Object -First 1
-          if (-not $zip) { throw "Release ZIP not found" }
-          $sha = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLower()
-          $size = $zip.Length
-          $assetName = $zip.Name
-          $assetUrl = "https://github.com/TrashrProject/ClashGo-Windows/releases/download/v$version/$assetName"
-          $manifest = [ordered]@{
-            version = $version
-            release_date = (Get-Date).ToUniversalTime().ToString("o")
-            notes = "${{ inputs.notes }}"
-            min_supported = "0.6.0-windows-beta"
-            platforms = [ordered]@{
-              windows = [ordered]@{
-                asset_name = $assetName
-                asset_url = $assetUrl
-                size = $size
-                sha256 = $sha
-              }
-            }
-          }
-          $json = $manifest | ConvertTo-Json -Depth 6
-          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-          [System.IO.File]::WriteAllText((Join-Path $PWD "dist\latest.json"), $json, $utf8NoBom)
-          node -e "JSON.parse(require('fs').readFileSync('dist/latest.json','utf8')); console.log('latest.json: valid UTF-8 JSON')"
-          if ($LASTEXITCODE -ne 0) { throw "latest.json validation failed" }
-          "zip=$($zip.FullName)" >> $env:GITHUB_OUTPUT
-
-      - name: Publish GitHub release
-        shell: powershell
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $version = "${{ inputs.version }}"
-          $zip = "${{ steps.manifest.outputs.zip }}"
-          $setup = Get-ChildItem dist -Filter "ClashGO-v$version-windows-setup.exe" | Select-Object -First 1
-          if (-not $setup) { throw "Installer EXE not found" }
-          gh release create "v$version" "$zip" "$($setup.FullName)" "dist\latest.json" "dist\SHA256SUMS.txt" --repo TrashrProject/ClashGo-Windows --title "ClashGO Windows v$version" --notes "${{ inputs.notes }}" --target windows/core-port
- }
-          $lines = foreach ($file in $files) {
-            $sha = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower()
-            "$sha  $($file.Name)"
-          }
-          $lines | Set-Content dist\SHA256SUMS.txt -Encoding ASCII
-
-      - name: Generate update manifest
+      - name: Generate checksums and update manifest
         id: manifest
         shell: powershell
         run: |
-          $version = "${{ inputs.version }}"
+          $version = $env:RELEASE_VERSION
           $zip = Get-ChildItem dist -Filter "ClashGO-v$version-windows.zip" | Select-Object -First 1
+          $setup = Get-ChildItem dist -Filter "ClashGO-v$version-windows-setup.exe" | Select-Object -First 1
           if (-not $zip) { throw "Release ZIP not found" }
-          $sha = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLower()
-          $size = $zip.Length
-          $assetName = $zip.Name
-          $assetUrl = "https://github.com/TrashrProject/ClashGo-Windows/releases/download/v$version/$assetName"
+          if (-not $setup) { throw "Installer EXE not found" }
+
+          $files = @($zip, $setup)
+          $sumLines = foreach ($file in $files) {
+            $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($file.Name)"
+          }
+          $sumLines | Set-Content dist\SHA256SUMS.txt -Encoding ASCII
+
+          $zipSha = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLower()
+          $assetUrl = "https://github.com/TrashrProject/ClashGo-Windows/releases/download/v$version/$($zip.Name)"
           $manifest = [ordered]@{
             version = $version
             release_date = (Get-Date).ToUniversalTime().ToString("o")
-            notes = "${{ inputs.notes }}"
+            notes = $env:RELEASE_NOTES
             min_supported = "0.6.0-windows-beta"
             platforms = [ordered]@{
               windows = [ordered]@{
-                asset_name = $assetName
+                asset_name = $zip.Name
                 asset_url = $assetUrl
-                size = $size
-                sha256 = $sha
+                size = $zip.Length
+                sha256 = $zipSha
               }
             }
           }
           $json = $manifest | ConvertTo-Json -Depth 6
           $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
           [System.IO.File]::WriteAllText((Join-Path $PWD "dist\latest.json"), $json, $utf8NoBom)
-          node -e "JSON.parse(require('fs').readFileSync('dist/latest.json','utf8')); console.log('latest.json: valid UTF-8 JSON')"
+          node -e "JSON.parse(require('fs').readFileSync('dist/latest.json','utf8')); console.log('latest.json valid')"
           if ($LASTEXITCODE -ne 0) { throw "latest.json validation failed" }
           "zip=$($zip.FullName)" >> $env:GITHUB_OUTPUT
+          "setup=$($setup.FullName)" >> $env:GITHUB_OUTPUT
 
       - name: Publish GitHub release
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $version = "${{ inputs.version }}"
-          $zip = "${{ steps.manifest.outputs.zip }}"
-          $setup = Get-ChildItem dist -Filter "ClashGO-v$version-windows-setup.exe" | Select-Object -First 1
-          if (-not $setup) { throw "Installer EXE not found" }
-          gh release create "v$version" "$zip" "$($setup.FullName)" "dist\latest.json" --repo TrashrProject/ClashGo-Windows --title "ClashGO Windows v$version" --notes "${{ inputs.notes }}" --target windows/core-port
+          $version = $env:RELEASE_VERSION
+          gh release create "v$version" "${{ steps.manifest.outputs.zip }}" "${{ steps.manifest.outputs.setup }}" "dist\latest.json" "dist\SHA256SUMS.txt" --repo TrashrProject/ClashGo-Windows --title "ClashGO Windows v$version" --notes "$env:RELEASE_NOTES" --target windows/core-port
