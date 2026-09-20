@@ -217,7 +217,7 @@ func (sm *SlotManager) detectActiveSlots(screen gocv.Mat) []int {
 			activeXs = append(activeXs, p.x)
 		}
 
-		sm.logger.Info().
+		sm.logger.Debug().
 			Ints("slot_xs", activeXs).
 			Int("count", len(activeXs)).
 			Msg("Windows dense live troop-bar scan detected card centers")
@@ -338,8 +338,64 @@ func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates 
 	if runtime.GOOS != "windows" {
 		sm.applyPositionalClassification(activeXs)
 	} else {
-		sm.logger.Debug().Msg("Windows: positional hero/spell guessing disabled; using template-only categories")
+		// Structural hero fallback: hero cards carry a bright green health bar
+		// near the top of the card. This remains stable across skins and level
+		// changes, unlike portrait templates. Only promote still-generic cards;
+		// confident spell/siege classifications always win.
+		for _, slot := range sm.slots {
+			if slot.Category == "Troop" && looksLikeHeroCardStatic(screen, slot.X, sm.barY, sm.w, sm.h) {
+				slot.Category = "Hero"
+				sm.logger.Debug().
+					Int("x", slot.X).
+					Str("unit", slot.UnitName).
+					Msg("Windows structural hero fallback matched green health bar")
+			}
+		}
+		sm.logger.Debug().Msg("Windows: hero structure fallback enabled; spell/siege remain template-only")
 	}
+}
+
+// looksLikeHeroCardStatic detects the green hero health strip at the top of
+// a battle-bar card. It deliberately does not identify WHICH hero it is; the
+// live deployer only needs the category to enforce one-shot placement and can
+// combine a portrait template when one is available.
+func looksLikeHeroCardStatic(screen gocv.Mat, x, barY, screenW, screenH int) bool {
+	if screen.Empty() || screenW <= 0 || screenH <= 0 {
+		return false
+	}
+	scaleX := float64(screenW) / 860.0
+	scaleY := float64(screenH) / 732.0
+	halfW := int(27.0 * scaleX)
+	y1 := barY + int(3.0*scaleY)
+	y2 := barY + int(22.0*scaleY)
+	if halfW < 18 { halfW = 18 }
+	if y2 <= y1 { y2 = y1 + 12 }
+
+	rect := image.Rect(x-halfW, y1, x+halfW, y2)
+	rect = rect.Intersect(image.Rect(0, 0, screen.Cols(), screen.Rows()))
+	if rect.Dx() < 20 || rect.Dy() < 6 {
+		return false
+	}
+
+	sub := screen.Region(rect)
+	defer sub.Close()
+	mask := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+
+	// BGR: accept bright saturated greens while rejecting gray siege bars,
+	// blue troop art and purple spell cards.
+	gocv.InRangeWithScalar(
+		sub,
+		gocv.NewScalar(0, 120, 0, 0),
+		gocv.NewScalar(155, 255, 155, 0),
+		&mask,
+	)
+	green := gocv.CountNonZero(mask)
+	total := rect.Dx() * rect.Dy()
+	if total <= 0 {
+		return false
+	}
+	return float64(green)/float64(total) >= 0.075
 }
 
 // applyPositionalClassification uses hero/spell anchors to classify unidentified slots.
