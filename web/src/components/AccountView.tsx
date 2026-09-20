@@ -59,7 +59,6 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
   const [farmProfile, setFarmProfile] = React.useState<FarmProfile | null>(null);
   const [currentArmy, setCurrentArmy] = React.useState<CurrentArmy | null>(null);
   const [serviceConfigured, setServiceConfigured] = React.useState(false);
-  const [serviceURL, setServiceURL] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState('');
   const [error, setError] = React.useState('');
@@ -69,7 +68,6 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
     try {
       const account = await GetAccountConfig();
       setServiceConfigured(account.service_configured);
-      setServiceURL(account.service_url || '');
 
       const cfg = await GetConfig();
       const farm = (cfg as any)?.attack?.farm;
