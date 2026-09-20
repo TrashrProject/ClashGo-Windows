@@ -532,13 +532,120 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			}
 		}
 
-		remaining := unverifiedSlots
+		// FINAL LIVE SWEEP
+		// ----------------
+		// Do not trust the initial slot states as the completion criterion.
+		// Hero ability cards can stay visible after a successful deployment,
+		// while ordinary troop cards can remain with a numeric xN count even
+		// after earlier verification failed. Rebuild the slot map from fresh
+		// battle frames and keep draining every card with an actual positive
+		// live count. This is the authoritative "are troops still left?" pass.
+		//
+		// One-shot cards (Hero/Siege/CC) get one rescue attempt per X position
+		// if they were never visibly transitioned; they are never spammed,
+		// because a deployed hero card becomes its ability button.
+		oneShotRescue := make(map[int]bool)
+		for _, slot := range slotMgr.GetAllSlots() {
+			if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
+				if slot.State == SlotDeployed {
+					oneShotRescue[slot.X] = true
+				}
+			}
+		}
+
+		liveRemaining := 0
+		for sweepRound := 1; sweepRound <= 6 && !tapExec.DeployBudgetExhausted(); sweepRound++ {
+			fresh, capErr := tapExec.CaptureFresh()
+			if capErr != nil || fresh.Empty() {
+				if !fresh.Empty() { fresh.Close() }
+				e.logger.Warn().Int("round", sweepRound).Msg("final live sweep capture failed")
+				tapExec.HumanSleep(180, 25)
+				continue
+			}
+
+			liveMgr := NewSlotManager(fresh, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+			liveSlots := liveMgr.GetAllSlots()
+			if len(liveSlots) == 0 {
+				fresh.Close()
+				e.logger.Info().Int("round", sweepRound).Msg("final live sweep: no active troop-bar cards detected")
+				liveRemaining = 0
+				break
+			}
+
+			liveCounts := troopCounter.DetectCounts(fresh, liveSlots, mBarY)
+			acted := 0
+			liveRemaining = 0
+
+			for _, liveSlot := range liveSlots {
+				count := GetCountForSlot(liveCounts, liveSlot.X)
+
+				// Positive OCR count is the strongest possible evidence that
+				// deployable troops/spells are still sitting in the bar.
+				if count > 0 {
+					if count > 40 { count = 40 }
+					liveRemaining++
+					e.logger.Warn().
+						Int("round", sweepRound).
+						Int("slot_x", liveSlot.X).
+						Str("unit", liveSlot.UnitName).
+						Str("category", liveSlot.Category).
+						Int("count", count).
+						Msg("final live sweep found remaining deployable units")
+
+					deploySlot(liveSlot, count)
+					acted++
+					continue
+				}
+
+				// No numeric count: only consider a one-shot card once. This
+				// covers a hero/siege/CC that the first pass genuinely missed,
+				// without repeatedly pressing a hero ability after deployment.
+				if liveSlot.Category == "Hero" || liveSlot.Category == "Siege" || liveSlot.Category == "CC" {
+					if oneShotRescue[liveSlot.X] {
+						continue
+					}
+					activity := GetSlotActivityRatioStatic(fresh, liveSlot.X, liveSlot.Y, w)
+					if activity < 0.10 {
+						continue
+					}
+					oneShotRescue[liveSlot.X] = true
+					liveRemaining++
+					e.logger.Warn().
+						Int("round", sweepRound).
+						Int("slot_x", liveSlot.X).
+						Str("unit", liveSlot.UnitName).
+						Str("category", liveSlot.Category).
+						Msg("final live sweep attempting missed one-shot card")
+					deploySlot(liveSlot, 1)
+					acted++
+				}
+			}
+			fresh.Close()
+
+			if acted == 0 {
+				// There may still be hero ability cards visible, but no
+				// positively-counted deployable troops remain and no untried
+				// one-shot card was found.
+				liveRemaining = 0
+				e.logger.Info().Int("round", sweepRound).Msg("final live sweep confirms no deployable units remain")
+				break
+			}
+
+			e.logger.Info().
+				Int("round", sweepRound).
+				Int("actions", acted).
+				Msg("final live sweep fired remaining units; rechecking bar")
+			tapExec.HumanSleep(320, 35)
+		}
+
+		remaining := liveRemaining
 		e.logger.Info().
 			Int("remaining", remaining).
+			Int("initial_unverified", unverifiedSlots).
 			Int("slots", len(slotMgr.GetAllSlots())).
-			Msg("Windows live-slot deployment completed with verification")
+			Msg("Windows deployment final live verification complete")
 		if remaining > 0 {
-			return remaining, fmt.Errorf("%d slot(s) could not be verified fully deployed", remaining)
+			return remaining, fmt.Errorf("%d live deployable slot(s) still remain after final sweep", remaining)
 		}
 		return 0, nil
 	}
