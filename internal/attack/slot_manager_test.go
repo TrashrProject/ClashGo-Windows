@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rs/zerolog"
+	"gocv.io/x/gocv"
 )
 
 // newTestSlotManager builds a SlotManager with the given pre-assigned
@@ -114,5 +115,28 @@ func TestApplyManualLabels_InvalidJSON(t *testing.T) {
 	sm.applyManualLabels([]byte(`not json`))
 	if slot.UnitName != "" {
 		t.Fatalf("invalid config labeled a slot: %q", slot.UnitName)
+	}
+}
+
+
+func TestLooksLikeHeroCardStaticGreenHealthBar(t *testing.T) {
+	screen := gocv.NewMatWithSize(732, 860, gocv.MatTypeCV8UC3)
+	defer screen.Close()
+
+	// Synthetic green health strip inside the structural hero ROI.
+	for y := 604; y < 616; y++ {
+		for x := 280; x < 320; x++ {
+			screen.SetUCharAt(y, x*3+0, 30)
+			screen.SetUCharAt(y, x*3+1, 220)
+			screen.SetUCharAt(y, x*3+2, 40)
+		}
+	}
+
+	if !looksLikeHeroCardStatic(screen, 300, 600, 860, 732) {
+		t.Fatal("expected green hero health strip to classify as hero")
+	}
+
+	if looksLikeHeroCardStatic(screen, 500, 600, 860, 732) {
+		t.Fatal("empty generic card region should not classify as hero")
 	}
 }
