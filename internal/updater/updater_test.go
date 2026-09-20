@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -355,7 +356,7 @@ func TestServiceDownloadVerifiesSHA(t *testing.T) {
 	manifest := Manifest{
 		Version: "9.9.9",
 		Platforms: map[string]PlatformSpec{
-			"darwin": {AssetName: "asset.zip", AssetURL: srv.URL + "/asset.zip", Size: int64(len(payload)), SHA256: sha},
+			platformKey(runtime.GOOS): {AssetName: "asset.zip", AssetURL: srv.URL + "/asset.zip", Size: int64(len(payload)), SHA256: sha},
 		},
 	}
 	s := newServiceForTest(t, "0.0.1", srv.Client())
@@ -407,7 +408,7 @@ func TestServiceDownloadRejectsBadSHA(t *testing.T) {
 	manifest := Manifest{
 		Version: "9.9.9",
 		Platforms: map[string]PlatformSpec{
-			"darwin": {AssetName: "asset.zip", AssetURL: srv.URL + "/asset.zip", Size: int64(len(payload)), SHA256: "deadbeef"},
+			platformKey(runtime.GOOS): {AssetName: "asset.zip", AssetURL: srv.URL + "/asset.zip", Size: int64(len(payload)), SHA256: "deadbeef"},
 		},
 	}
 	s := newServiceForTest(t, "0.0.1", srv.Client())
@@ -497,8 +498,8 @@ func TestService_UpdateSequenceEndToEnd(t *testing.T) {
 		Notes:        "fixes + formula deploy",
 		MinSupported: "0.1.0-beta",
 		Platforms: map[string]PlatformSpec{
-			"darwin": {
-				AssetName: "ClashGO-v0.2.0-beta-macOS.zip",
+			platformKey(runtime.GOOS): {
+				AssetName: "asset.zip",
 				AssetURL:  "/asset.zip",
 				Size:      int64(len(payload)),
 				SHA256:    sha,
@@ -560,7 +561,7 @@ func TestService_UpdateSequenceEndToEnd(t *testing.T) {
 	if st.State != StateIdle {
 		t.Errorf("expected StateIdle after Check, got %s", st.State)
 	}
-	if st.AssetName != "ClashGO-v0.2.0-beta-macOS.zip" {
+	if st.AssetName != "asset.zip" {
 		t.Errorf("asset name = %q", st.AssetName)
 	}
 	// Confirm the producer/consumer contract: SHA, asset fields,
