@@ -616,7 +616,11 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			}
 		}
 
-		windowsSlots := append([]*TrackedSlot(nil), slotMgr.GetAllSlots()...)
+		// Windows live deployment MUST re-read the troop bar after every card.
+		// CoC compacts the bar when a troop/siege/spell card is emptied. Keeping
+		// the initial X positions therefore makes every later tap drift onto the
+		// next card (and eventually onto hero ability buttons). This is exactly
+		// the observed "select ED -> jump to siege -> hammer last hero" failure.
 		categoryPriority := func(cat string) int {
 			switch cat {
 			case "Troop":
@@ -631,276 +635,158 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				return 0
 			}
 		}
-		sort.SliceStable(windowsSlots, func(i, j int) bool {
-			pi := categoryPriority(windowsSlots[i].Category)
-			pj := categoryPriority(windowsSlots[j].Category)
-			if pi != pj { return pi < pj }
-			return windowsSlots[i].X < windowsSlots[j].X
-		})
-
-		for _, slot := range windowsSlots {
-			if tapExec.DeployBudgetExhausted() {
-				unverifiedSlots++
-				continue
-			}
-
-			count := GetCountForSlot(troopCounts, slot.X)
-			if count <= 0 {
-				// OCR failure must NOT turn a troop card into a one-tap deploy.
-				// That was the exact live bug: a card with several troops was
-				// read as 0, we substituted 1, then immediately moved on.
-				// Use a bounded burst for ordinary cards; one-shot categories
-				// are handled separately below.
-				switch slot.Category {
-				case "Spell":
-					count = 3
-				default:
-					count = 8
-				}
-				e.logger.Info().
-					Str("unit", slot.UnitName).
-					Str("category", slot.Category).
-					Int("fallback_burst", count).
-					Msg("troop count OCR unavailable; using bounded multi-unit burst instead of single tap")
-			}
-			if count > 40 {
-				count = 40
-			}
-
-			beforeActivity := GetSlotActivityRatioStatic(deployScreen, slot.X, slot.Y, w)
-
-			e.logger.Info().
-				Str("unit", slot.UnitName).
-				Str("category", slot.Category).
-				Int("slot_x", slot.X).
-				Int("slot_y", slot.Y).
-				Int("count", count).
-				Msg("Windows deploy: selecting live slot")
-
-			// One-shot cards (heroes / siege / clan castle) must NEVER enter the
-			// generic reconciliation loop. After a hero is deployed its card
-			// remains visible as the hero ability button, so "still active"
-			// does not mean "not deployed". Re-selecting it repeatedly wastes
-			// time and can fire abilities instead of placing troops.
-			if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
-				// Use the furthest known-safe corridor point immediately for
-				// one-shot units. This maximizes legal-placement margin and
-				// avoids spending retries close to the red boundary.
-				safeIdx := len(safeLines) - 1
-				if safeIdx < 0 { safeIdx = 0 }
-				line := safeLines[safeIdx]
-				tapExec.TapSlot(slot, 1)
-				tapExec.HumanSleep(120, 15)
-				pt := image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2)
-				tapExec.TapDeployPoint(pt, 1, 1)
-				tapExec.HumanSleep(180, 20)
-				slotMgr.MarkSlotDeployed(slot)
-				e.logger.Info().
-					Str("unit", slot.UnitName).
-					Str("category", slot.Category).
-					Int("slot_x", slot.X).
-					Interface("deploy_point", pt).
-					Msg("Windows one-shot unit placed once on furthest safe edge; retries disabled")
-				continue
-			}
-
-			deploySlot(slot, count)
-
-			// FAST VERIFY: one fresh read, at most one top-up. Spending four
-			// reconciliation rounds on every card was the main reason attacks
-			// stalled for tens of seconds while troops were visibly left.
-			tapExec.HumanSleep(120, 15)
-			verified := false
-			fresh, capErr := tapExec.CaptureFresh()
-			if capErr == nil && !fresh.Empty() {
-				liveCount := troopCounter.DetectCount(fresh, slot, mBarY)
-				empty := isSlotEmptyStatic(fresh, slot.X, slot.Y, w, h)
-				activity := GetSlotActivityRatioStatic(fresh, slot.X, slot.Y, w)
-				fresh.Close()
-
-				if empty || (liveCount == 0 && beforeActivity > 0 && activity < beforeActivity*0.60) {
-					verified = true
-					e.logger.Info().
-						Str("unit", slot.UnitName).
-						Int("live_count", liveCount).
-						Msg("Windows fast deploy verified slot drained")
-				} else if liveCount > 0 {
-					if liveCount > 40 { liveCount = 40 }
-					e.logger.Warn().
-						Str("unit", slot.UnitName).
-						Int("remaining", liveCount).
-						Msg("Windows fast deploy: one immediate remainder top-up")
-					deploySlot(slot, liveCount)
-					verified = true // final sweep will catch any true remainder
-				} else {
-					// OCR unknown but the card still looks active. Fire one
-					// small remainder burst now instead of abandoning the card
-					// after a single unit. This keeps deployment fast while
-					// making progress even when digit OCR misses the xN label.
-					if !empty && activity >= 0.10 {
-						const unknownRemainderBurst = 6
-						e.logger.Warn().
-							Str("unit", slot.UnitName).
-							Float64("activity", activity).
-							Int("burst", unknownRemainderBurst).
-							Msg("Windows fast deploy: active card with unknown count; firing bounded remainder burst")
-						deploySlot(slot, unknownRemainderBurst)
-						verified = true // final live sweep still checks leftovers
-					} else {
-						e.logger.Warn().
-							Str("unit", slot.UnitName).
-							Msg("Windows fast deploy: verification inconclusive; moving on")
-					}
-				}
-			} else if !fresh.Empty() {
-				fresh.Close()
-			}
-
-			if verified {
-				slotMgr.MarkSlotDeployed(slot)
-			} else {
-				slotMgr.MarkSlotFailed(slot)
-				unverifiedSlots++
-			}
-		}
-
-		// FINAL LIVE SWEEP
-		// ----------------
-		// Do not trust the initial slot states as the completion criterion.
-		// Hero ability cards can stay visible after a successful deployment,
-		// while ordinary troop cards can remain with a numeric xN count even
-		// after earlier verification failed. Rebuild the slot map from fresh
-		// battle frames and keep draining every card with an actual positive
-		// live count. This is the authoritative "are troops still left?" pass.
-		//
-		// One-shot cards (Hero/Siege/CC) get one rescue attempt per X position
-		// if they were never visibly transitioned; they are never spammed,
-		// because a deployed hero card becomes its ability button.
-		oneShotRescue := make(map[int]bool)
-		for _, slot := range slotMgr.GetAllSlots() {
-			if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
-				if slot.State == SlotDeployed {
-					oneShotRescue[slot.X] = true
-				}
-			}
-		}
-
+		oneShotDone := make(map[string]bool)
+		cardAttempts := make(map[string]int)
 		liveRemaining := 0
-		for sweepRound := 1; sweepRound <= 2 && !tapExec.DeployBudgetExhausted(); sweepRound++ {
+
+		oneShotKey := func(slot *TrackedSlot) string {
+			name := strings.ToLower(strings.TrimSpace(slot.UnitName))
+			if name == "" {
+				name = fmt.Sprintf("x%d", slot.X)
+			}
+			return slot.Category + ":" + name
+		}
+
+		for liveRound := 1; liveRound <= 36 && !tapExec.DeployBudgetExhausted(); liveRound++ {
 			fresh, capErr := tapExec.CaptureFresh()
 			if capErr != nil || fresh.Empty() {
 				if !fresh.Empty() { fresh.Close() }
-				e.logger.Warn().Int("round", sweepRound).Msg("final live sweep capture failed")
-				tapExec.HumanSleep(180, 25)
+				e.logger.Warn().Int("round", liveRound).Msg("Windows live deployment capture failed")
+				tapExec.HumanSleep(140, 20)
 				continue
 			}
 
 			liveMgr := NewSlotManager(fresh, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
-			liveSlots := liveMgr.GetAllSlots()
+			liveSlots := append([]*TrackedSlot(nil), liveMgr.GetAllSlots()...)
 			if len(liveSlots) == 0 {
 				fresh.Close()
-				e.logger.Info().Int("round", sweepRound).Msg("final live sweep: no active troop-bar cards detected")
 				liveRemaining = 0
+				e.logger.Info().Int("round", liveRound).Msg("Windows live deployment: no active cards remain")
 				break
 			}
 
-			liveCounts := troopCounter.DetectCounts(fresh, liveSlots, mBarY)
-			acted := 0
-			liveRemaining = 0
+			sort.SliceStable(liveSlots, func(i, j int) bool {
+				pi := categoryPriority(liveSlots[i].Category)
+				pj := categoryPriority(liveSlots[j].Category)
+				if pi != pj { return pi < pj }
+				return liveSlots[i].X < liveSlots[j].X
+			})
 
-			for _, liveSlot := range liveSlots {
-				count := GetCountForSlot(liveCounts, liveSlot.X)
+			liveCounts := troopCounter.DetectCounts(fresh, liveSlots, liveMgr.GetBarY())
+			var chosen *TrackedSlot
+			chosenCount := 0
+			chosenActivity := 0.0
 
-				// Positive OCR count is the strongest possible evidence that
-				// deployable troops/spells are still sitting in the bar.
-				if count > 0 {
-					// Never treat a hero/siege/CC card with a positive OCR
-					// read as an undeployed multi-count card. After placement,
-					// hero ability art/labels can look like a numeric count.
-					if liveSlot.Category == "Hero" || liveSlot.Category == "Siege" || liveSlot.Category == "CC" {
-						e.logger.Debug().
-							Int("round", sweepRound).
-							Int("slot_x", liveSlot.X).
-							Str("unit", liveSlot.UnitName).
-							Str("category", liveSlot.Category).
-							Int("ocr_count", count).
-							Msg("final sweep ignoring one-shot card after initial placement")
+			for _, slot := range liveSlots {
+				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
+					if oneShotDone[oneShotKey(slot)] {
 						continue
 					}
-					if count > 40 { count = 40 }
-					liveRemaining++
-					e.logger.Warn().
-						Int("round", sweepRound).
-						Int("slot_x", liveSlot.X).
-						Str("unit", liveSlot.UnitName).
-						Str("category", liveSlot.Category).
-						Int("count", count).
-						Msg("final live sweep found remaining deployable units")
+				}
 
-					deploySlot(liveSlot, count)
-					acted++
+				activity := GetSlotActivityRatioStatic(fresh, slot.X, slot.Y, w)
+				if activity < 0.08 {
 					continue
 				}
 
-				// One-shot cards are intentionally never rescued here. They were
-				// already given exactly one placement attempt on the furthest
-				// safe edge during the initial pass. A visible hero card after
-				// that is normally its ability button, not an undeployed hero.
-				if liveSlot.Category == "Hero" || liveSlot.Category == "Siege" || liveSlot.Category == "CC" {
-					oneShotRescue[liveSlot.X] = true
-					continue
-				}
+				count := GetCountForSlot(liveCounts, slot.X)
+				if count > 50 { count = 0 }
 
-				// OCR can return 0 for a perfectly live troop card. Use the
-				// card's visual activity as a second signal and give it one
-				// bounded burst per sweep. This is what prevents visible x5/x10
-				// cards from being silently left behind.
-				activity := GetSlotActivityRatioStatic(fresh, liveSlot.X, liveSlot.Y, w)
-				empty := isSlotEmptyStatic(fresh, liveSlot.X, liveSlot.Y, w, h)
-				if !empty && activity >= 0.12 {
-					burst := 6
-					if liveSlot.Category == "Spell" {
-						burst = 2
-					}
-					liveRemaining++
-					e.logger.Warn().
-						Int("round", sweepRound).
-						Int("slot_x", liveSlot.X).
-						Str("unit", liveSlot.UnitName).
-						Str("category", liveSlot.Category).
-						Float64("activity", activity).
-						Int("burst", burst).
-						Msg("final live sweep found visually active card with unknown count")
-					deploySlot(liveSlot, burst)
-					acted++
-				}
-			}
-			fresh.Close()
-
-			if acted == 0 {
-				// There may still be hero ability cards visible, but no
-				// positively-counted deployable troops remain and no untried
-				// one-shot card was found.
-				liveRemaining = 0
-				e.logger.Info().Int("round", sweepRound).Msg("final live sweep confirms no deployable units remain")
+				chosen = slot
+				chosenCount = count
+				chosenActivity = activity
 				break
 			}
 
+			if chosen == nil {
+				fresh.Close()
+				liveRemaining = 0
+				e.logger.Info().Int("round", liveRound).Msg("Windows live deployment: only spent/ability cards remain")
+				break
+			}
+
+			key := oneShotKey(chosen)
+			cardAttempts[key]++
 			e.logger.Info().
-				Int("round", sweepRound).
-				Int("actions", acted).
-				Msg("final live sweep fired remaining units; rechecking bar")
-			tapExec.HumanSleep(140, 20)
+				Int("round", liveRound).
+				Str("unit", chosen.UnitName).
+				Str("category", chosen.Category).
+				Int("slot_x", chosen.X).
+				Int("slot_y", chosen.Y).
+				Int("ocr_count", chosenCount).
+				Float64("activity", chosenActivity).
+				Int("attempt", cardAttempts[key]).
+				Msg("Windows live deployment: freshly reacquired current card")
+
+			// Use the current fresh coordinates only. Close the frame before
+			// sending ADB input; the card will be reacquired again afterwards.
+			fresh.Close()
+
+			if chosen.Category == "Hero" || chosen.Category == "Siege" || chosen.Category == "CC" {
+				line := safeLines[len(safeLines)-1]
+				pt := image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2)
+				tapExec.TapSlot(chosen, 1)
+				tapExec.HumanSleep(130, 15)
+				tapExec.TapDeployPoint(pt, 1, 1)
+				oneShotDone[key] = true
+				e.logger.Info().
+					Str("unit", chosen.UnitName).
+					Str("category", chosen.Category).
+					Interface("deploy_point", pt).
+					Msg("Windows one-shot card deployed once and permanently blacklisted from re-selection")
+				tapExec.HumanSleep(180, 20)
+				continue
+			}
+
+			count := chosenCount
+			if count <= 0 {
+				if chosen.Category == "Spell" {
+					count = 2
+				} else {
+					count = 8
+				}
+			}
+			if count > 40 { count = 40 }
+
+			deploySlot(chosen, count)
+			tapExec.HumanSleep(150, 20)
+
+			// Do not trust old coordinates after this point. On the next loop
+			// the whole bar is captured and re-indexed from scratch.
+			if cardAttempts[key] >= 8 && chosen.UnitName != "" {
+				e.logger.Warn().
+					Str("unit", chosen.UnitName).
+					Str("category", chosen.Category).
+					Msg("Windows live deployment card persisted after 8 bursts; moving on to avoid a stuck ability/card loop")
+				oneShotDone["Troop:"+strings.ToLower(strings.TrimSpace(chosen.UnitName))] = true
+			}
 		}
 
-		remaining := liveRemaining
+		// One final read decides whether genuinely deployable normal/spell cards
+		// remain. Deployed hero ability cards are intentionally ignored.
+		finalFrame, finalErr := tapExec.CaptureFresh()
+		if finalErr == nil && !finalFrame.Empty() {
+			finalMgr := NewSlotManager(finalFrame, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+			finalCounts := troopCounter.DetectCounts(finalFrame, finalMgr.GetAllSlots(), finalMgr.GetBarY())
+			liveRemaining = 0
+			for _, slot := range finalMgr.GetAllSlots() {
+				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
+					continue
+				}
+				count := GetCountForSlot(finalCounts, slot.X)
+				activity := GetSlotActivityRatioStatic(finalFrame, slot.X, slot.Y, w)
+				if count > 0 || activity >= 0.12 {
+					liveRemaining++
+				}
+			}
+			finalFrame.Close()
+		}
+
 		e.logger.Info().
-			Int("remaining", remaining).
-			Int("initial_unverified", unverifiedSlots).
-			Int("slots", len(slotMgr.GetAllSlots())).
-			Msg("Windows deployment final live verification complete")
-		if remaining > 0 {
-			return remaining, fmt.Errorf("%d live deployable slot(s) still remain after final sweep", remaining)
+			Int("remaining", liveRemaining).
+			Msg("Windows dynamic live-bar deployment complete")
+		if liveRemaining > 0 {
+			return liveRemaining, fmt.Errorf("%d deployable card(s) still visible after dynamic live deployment", liveRemaining)
 		}
 		return 0, nil
 	}
