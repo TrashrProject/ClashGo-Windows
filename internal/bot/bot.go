@@ -1594,6 +1594,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				targetEdge = strat.TargetEdge
 			}
 			remainingUndeployed, deployErr = b.deployTroops(screen)
+			b.attackExec.SetEarlyExitAllowed(deployErr == nil && remainingUndeployed == 0)
 			if deployErr != nil || remainingUndeployed > 0 {
 				b.logger.Warn().
 					Err(deployErr).
