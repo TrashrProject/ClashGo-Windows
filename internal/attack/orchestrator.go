@@ -678,10 +678,12 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			chosenActivity := 0.0
 
 			for _, slot := range liveSlots {
-				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
-					if oneShotDone[oneShotKey(slot)] {
-						continue
-					}
+				// Skip every identity explicitly blacklisted for this battle.
+				// Heroes/siege/CC are added here immediately after their one
+				// allowed placement; a stubborn named troop may also be added
+				// after the safety attempt cap.
+				if oneShotDone[oneShotKey(slot)] {
+					continue
 				}
 
 				activity := GetSlotActivityRatioStatic(fresh, slot.X, slot.Y, w)
