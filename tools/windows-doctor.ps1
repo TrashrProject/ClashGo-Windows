@@ -4,6 +4,18 @@ param(
 
 $ErrorActionPreference = "SilentlyContinue"
 
+if (-not $Instance) {
+    $savedConfig = Join-Path $env:APPDATA "ClashGO\config.json"
+    if (Test-Path $savedConfig) {
+        try {
+            $saved = Get-Content $savedConfig -Raw | ConvertFrom-Json
+            if ($saved.device.bluestacks_instance) {
+                $Instance = [string]$saved.device.bluestacks_instance
+            }
+        } catch {}
+    }
+}
+
 function Write-Step([string]$Name, [bool]$Ok, [string]$Detail) {
     $mark = if ($Ok) { "[OK]" } else { "[!!]" }
     Write-Host ("{0} {1,-22} {2}" -f $mark, $Name, $Detail)
@@ -34,6 +46,11 @@ if ($env:ProgramData) {
     $confCandidates += (Join-Path $env:ProgramData "BlueStacks_nxt\bluestacks.conf")
     $confCandidates += (Join-Path $env:ProgramData "BlueStacks\bluestacks.conf")
 }
+
+foreach ($regPath in @("HKLM:\SOFTWARE\BlueStacks_nxt", "HKLM:\SOFTWARE\BlueStacks_msi5", "HKLM:\SOFTWARE\WOW6432Node\BlueStacks_nxt")) {
+    $dataDir = (Get-ItemProperty -Path $regPath -Name DataDir -ErrorAction SilentlyContinue).DataDir
+    if ($dataDir) { $confCandidates += (Join-Path $dataDir "bluestacks.conf") }
+}
 $conf = $confCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 Write-Step "bluestacks.conf" ([bool]$conf) $(if ($conf) { $conf } else { "not found" })
 
@@ -53,6 +70,11 @@ if ($ports.Count -gt 0) {
     Write-Step "Instances" $false "no ADB ports found in config"
 }
 
+if ($Instance) {
+    $selected = $ports | Where-Object { $_.Name -ieq $Instance } | Select-Object -First 1
+    Write-Step "Selected instance" ([bool]$selected) $(if ($selected) { "$($selected.Name):$($selected.Port)" } else { "$Instance not found in config" })
+}
+
 $adbPath = $null
 if ($env:CLASHGO_ADB_PATH -and (Test-Path $env:CLASHGO_ADB_PATH)) {
     $adbPath = $env:CLASHGO_ADB_PATH
@@ -60,6 +82,13 @@ if ($env:CLASHGO_ADB_PATH -and (Test-Path $env:CLASHGO_ADB_PATH)) {
 if (-not $adbPath) {
     $adbCmd = Get-Command adb.exe -ErrorAction SilentlyContinue
     if ($adbCmd) { $adbPath = $adbCmd.Source }
+}
+if (-not $adbPath) {
+    $sdkCandidates = @()
+    if ($env:ANDROID_HOME) { $sdkCandidates += (Join-Path $env:ANDROID_HOME "platform-tools\adb.exe") }
+    if ($env:ANDROID_SDK_ROOT) { $sdkCandidates += (Join-Path $env:ANDROID_SDK_ROOT "platform-tools\adb.exe") }
+    if ($env:LOCALAPPDATA) { $sdkCandidates += (Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe") }
+    $adbPath = $sdkCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 }
 if (-not $adbPath) {
     $adbCandidates = @()
@@ -82,7 +111,11 @@ if ($adbPath) {
     Write-Step "ADB devices" ($devices -match '\bdevice\b') $devices
 
     $target = $null
-    foreach ($entry in $ports) {
+    $probePorts = @($ports)
+    if ($Instance) {
+        $probePorts = @($ports | Where-Object { $_.Name -ieq $Instance })
+    }
+    foreach ($entry in $probePorts) {
         $addr = "127.0.0.1:$($entry.Port)"
         $state = (& $adbPath -s $addr get-state 2>$null)
         if ($state -eq "device") {
@@ -107,7 +140,8 @@ if ($adbPath) {
 
 Write-Host ""
 Write-Host "Environment overrides supported:"
-Write-Host "  CLASHGO_ADB_PATH"`nWrite-Host "  CLASHGO_BLUESTACKS_PLAYER"
+Write-Host "  CLASHGO_ADB_PATH"
+Write-Host "  CLASHGO_BLUESTACKS_PLAYER"
 Write-Host "  CLASHGO_BLUESTACKS_HOME"
 Write-Host "  CLASHGO_BLUESTACKS_DATA"
 Write-Host "  CLASHGO_BLUESTACKS_CONF"

@@ -43,6 +43,25 @@ func ADBExecutable() string {
 		}
 
 		if runtime.GOOS == "windows" {
+			// Standard Android SDK locations first. Some Windows setups have
+			// platform-tools installed but do not add it to PATH.
+			for _, envName := range []string{"ANDROID_HOME", "ANDROID_SDK_ROOT"} {
+				if sdk := strings.TrimSpace(os.Getenv(envName)); sdk != "" {
+					p := filepath.Join(sdk, "platform-tools", "adb.exe")
+					if info, err := os.Stat(p); err == nil && !info.IsDir() {
+						adbExecutablePath = p
+						return
+					}
+				}
+			}
+			if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
+				p := filepath.Join(local, "Android", "Sdk", "platform-tools", "adb.exe")
+				if info, err := os.Stat(p); err == nil && !info.IsDir() {
+					adbExecutablePath = p
+					return
+				}
+			}
+
 			var roots []string
 			if home := strings.TrimSpace(os.Getenv("CLASHGO_BLUESTACKS_HOME")); home != "" {
 				roots = append(roots, home)

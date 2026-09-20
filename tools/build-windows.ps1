@@ -52,6 +52,7 @@ try {
     Copy-Item ".\assets" (Join-Path $bundle "assets") -Recurse -Force
     Copy-Item ".\LICENSE" (Join-Path $bundle "LICENSE.txt") -Force
     Copy-Item ".\docs\WINDOWS_PORT.md" (Join-Path $bundle "WINDOWS_PORT.md") -Force
+    Copy-Item ".\docs\WINDOWS_QUICKSTART.md" (Join-Path $bundle "QUICKSTART.md") -Force
     Copy-Item ".\tools\windows-doctor.ps1" (Join-Path $bundle "windows-doctor.ps1") -Force
     Copy-Item ".\build\windows\install_update.ps1" (Join-Path $bundle "resources\install_update.ps1") -Force
 
@@ -60,7 +61,15 @@ try {
     $gxx = Get-Command g++.exe -ErrorAction SilentlyContinue
     if ($gxx) {
         $mingwBin = Split-Path $gxx.Source -Parent
-        foreach ($dll in @("libgcc_s_seh-1.dll","libgcc_s_sjlj-1.dll","libstdc++-6.dll","libwinpthread-1.dll")) {
+        foreach ($dll in @(
+            "libgcc_s_seh-1.dll",
+            "libgcc_s_sjlj-1.dll",
+            "libstdc++-6.dll",
+            "libwinpthread-1.dll",
+            "libgomp-1.dll",
+            "libquadmath-0.dll",
+            "libssp-0.dll"
+        )) {
             $p = Join-Path $mingwBin $dll
             if (Test-Path $p) { Copy-Item $p $bundle -Force }
         }
@@ -68,6 +77,28 @@ try {
 
     $versionText = "ClashGO Windows`r`nVersion: $Version`r`nCommit: $commit`r`nBuilt: $(Get-Date -Format o)`r`n"
     Set-Content -Path (Join-Path $bundle "VERSION.txt") -Value $versionText -Encoding UTF8
+
+    Write-Host "Validating portable runtime..."
+    $requiredBundleFiles = @(
+        "ClashGO.exe",
+        "assets\templates\btn_attack.png",
+        "assets\strategies\auto_edrag_rush.yaml",
+        "resources\install_update.ps1",
+        "WINDOWS_PORT.md",
+        "QUICKSTART.md",
+        "opencv_core4130.dll",
+        "libstdc++-6.dll",
+        "libwinpthread-1.dll"
+    )
+    $missingBundleFiles = @()
+    foreach ($rel in $requiredBundleFiles) {
+        if (-not (Test-Path (Join-Path $bundle $rel))) {
+            $missingBundleFiles += $rel
+        }
+    }
+    if ($missingBundleFiles.Count -gt 0) {
+        throw ("Portable runtime validation failed. Missing: " + ($missingBundleFiles -join ", "))
+    }
 
     if (-not (Test-Path $distRoot)) { New-Item -ItemType Directory -Force -Path $distRoot | Out-Null }
     $zip = Join-Path $distRoot ("ClashGO-v{0}-windows.zip" -f $Version)

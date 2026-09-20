@@ -1,159 +1,180 @@
 # ClashGO Windows
 
-Windows-first fork of [ClashGO](https://github.com/DSargent21/ClashGo), based on the audited upstream `0.5.0-beta` codebase and preserving the original MIT license/copyright.
+Windows-first fork of [ClashGO](https://github.com/DSargent21/ClashGo), based on
+the audited upstream `0.5.0-beta` codebase. The original MIT license and
+copyright are preserved.
 
-## Windows status
+> Current Windows target: **Windows 10/11 x64 + BlueStacks 5**.
 
-The `windows/core-port` branch targets Windows 10/11 + BlueStacks 5. It now includes automatic BlueStacks discovery/startup, instance-specific ADB port discovery, optional safe ADB enablement, 860×732/160-DPI setup, Windows CPU metrics, Wails Windows UI settings, portable packaging, Windows self-update support, a live readiness panel, and diagnostic export.
+## What works in the Windows port
 
-### Fast path for a development machine
+- BlueStacks 5 discovery and startup.
+- Multi-instance discovery from `bluestacks.conf`.
+- Persistent instance selection from the GUI.
+- BlueStacks data-directory discovery through the Windows registry.
+- ADB discovery from PATH, Android SDK locations or BlueStacks `HD-Adb.exe`.
+- Automatic ADB/device recovery.
+- 860×732 / 160-DPI Android display setup.
+- Persistent ADB shell for low-latency taps.
+- OpenCV / GoCV vision pipeline.
+- Search → loot filtering → attack → result → return-home farming loop.
+- YAML attack strategies.
+- Automatic wall upgrades inherited from upstream.
+- Wails/React desktop UI.
+- Windows Readiness panel and diagnostic ZIP export.
+- Persistent statistics and attack history.
+- Windows CPU / ADB health / recovery telemetry.
+- Portable ZIP packaging.
+- Per-user NSIS installer.
+- SHA256-verified GitHub update manifest and in-place Windows updater.
+
+The first beta intentionally focuses on one controlled emulator target before
+adding more Windows emulators.
+
+## First run
+
+The packaged release includes `QUICKSTART.md`. The short version is:
+
+1. Install BlueStacks 5.
+2. Create and start one BlueStacks instance.
+3. Install Clash of Clans in that instance and open it once manually.
+4. Start ClashGO.
+5. Open **Settings → Windows Readiness**.
+6. Select the correct BlueStacks instance if you have more than one.
+7. Configure loot thresholds / strategy and press **Start Bot**.
+
+If startup fails, use **Export diagnostics** in ClashGO or run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\windows-doctor.ps1
+```
+
+The Doctor checks BlueStacks, its configuration, ADB, instance ports, Android
+identity/display state and whether `com.supercell.clashofclans` is installed.
+
+## Development setup
 
 ```powershell
 git clone https://github.com/TrashrProject/ClashGo-Windows.git
 cd ClashGo-Windows
 git checkout windows/core-port
-powershell -ExecutionPolicy Bypass -File .\tools\setup-windows-dev.ps1
+
+powershell -ExecutionPolicy Bypass -File .\tools\setup-windows-dev.ps1 -InstallOpenCV
 powershell -ExecutionPolicy Bypass -File .\tools\sync-upstream-runtime.ps1
 powershell -ExecutionPolicy Bypass -File .\tools\run-windows-dev.ps1
 ```
 
-To install/build OpenCV automatically when it is not already present:
+The one-time OpenCV setup uses GoCV 0.43 / OpenCV 4.13, builds only the modules
+GoCV links on Windows, and uses all available CPU cores.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\setup-windows-dev.ps1 -InstallOpenCV
-```
-
-To produce a portable release ZIP:
+## Build a portable release
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\build-windows.ps1
 ```
 
-The packaged app searches for runtime assets beside `ClashGO.exe`, stores writable state under `%APPDATA%\ClashGO`, and can discover BlueStacks' bundled ADB when a standalone Android platform-tools install is not in PATH.
+Output:
 
-See `docs/WINDOWS_PORT.md` and run `tools\windows-doctor.ps1` for a host preflight.
+- `dist\ClashGO-Windows\`
+- `dist\ClashGO-v0.6.0-windows-beta-windows.zip` (version depends on the build argument)
 
----
+The bundle contains the executable, runtime assets, OpenCV/MinGW DLLs,
+Windows Doctor, quickstart documentation and the Windows update helper.
 
-# ClashGO ⚔️
+## Build the installer
 
-This is **ClashGO**, a super lightweight Clash of Clans bot written in Go.
+Install NSIS once, then build from the tested portable runtime:
 
-I basically vibe-coded this in like 3 days because I wanted a bot that actually worked on my Mac (Apple Silicon). It's built from scratch using Go and OpenCV.
+```powershell
+choco install nsis -y
+powershell -ExecutionPolicy Bypass -File .\tools\build-installer.ps1
+```
 
-### ⚠️ WARNING: It's Buggy
-Look, I made this fast. It's rough around the edges, probably has bugs, and might crash. Use it at your own risk.
+The installer is per-user and installs under:
 
-### 🚀 Why it's cool
-- **Mac Native**: Works great on Apple Silicon.
-- **Fast**: Uses a persistent ADB connection, so screen captures and taps are instant.
-- **Lightweight**: Just a single binary, with a recent perf audit cutting battle-state CPU ~10–20% and transient RSS ~10–20 MB. See [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) for the per-change breakdown and how to verify on your machine.
-- **Customizable strategies**: Drop a YAML strategy + matching `formula.json` (per-unit deploy coords) into `assets/strategies/` and the bot deploys each unit where you want. See `assets/strategies/auto_edrag_rush.yaml` + `assets/strategies/auto_edrag_rush_formula.json` for an end-to-end example (Balloon + EDrag + Rage + Ice).
-- **Per-corner formula workflow**: `target_edge: "Random"` (the default in `auto_edrag_rush.yaml`) picks a random corner per attack. `cmd/design_attack -live -corner BR|BL|TR|TL` authors the per-corner deploy coords; per-corner overrides in `formula.corner_overrides[<CORNER>]` are used as-authored (the mirror is only a fallback). See [`docs/formula-authoring.md`](docs/formula-authoring.md) for the full walkthrough.
-- **Self-healing boot sequence**: the bot auto-dismisses the post-boot
-  splash chain ("ТАР!" tap-to-continue → castle logo → news splash)
-  instead of force-restarting in a loop, so unattended runs survive game
-  relaunches.
-- **Unattended-run resilience**: if the emulator dies mid-session the bot
-  escalates through transport reconnect → adb-server reset → BlueStacks
-  relaunch instead of spinning; a bad frame or missing asset can't crash
-  the process (panic guards + nil-template fallback); and
-  `tools/run_bot_keepalive.sh` respawns the bot ~10s after any exit so it
-  keeps farming unattended.
-- **Text-based observability**: `./tools/observe.sh` captures the emulator
-  screen, classifies it with the bot's real vision layer, and OCRs the
-  on-screen text — a terminal-only "eye view" for debugging without a
-  GUI. See [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
-- **Replayable attacks**: `make attack-record` records a deploy you perform on the emulator; `make attack-replay` re-fires that JSON on the device with classification + extras. Useful for sharing working attacks without re-engineering.
-  - **In-app updater (auto-pop)**: New releases ship through GitHub
-    Releases. When a version is published, ClashGO **pops up the update
-    window on its own** (no click needed) offering one-click
-    *Update & Restart*: it downloads the zip, verifies the SHA256
-    against `latest.json`, swaps the running app in place, and relaunches.
-    No new servers, no manual checks. "Later" silences it for the session;
-    "Skip version" silences it permanently.
+```text
+%LOCALAPPDATA%\Programs\TrashrProject\ClashGO Windows
+```
 
-### 🛠️ How to use
-1. **Emulator**: Set your emulator (like BlueStacks) to **860x732** resolution and **160 DPI**.
-2. **Config**: Point `config.json` to your ADB device.
-3. **Run**:
-   - CLI: `make build-cli && ./build/bin/bot_cli`
-   - GUI: `make build-gui` and run `build/bin/ClashGO.app`
+Writable data lives separately under:
 
-### 💾 Resource usage (estimates)
+```text
+%APPDATA%\ClashGO
+```
 
-All numbers below are **principled estimates from code analysis** (frame
-sizing, mat pool, template cache, capture-loop cadence), not live
-measurements. They assume an **Apple Silicon Mac**, **BlueStacks at
-860×732 / 160 DPI**, and the bot running at the configured capture rate.
-The recipe in [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md#how-to-verify-on-your-machine)
-validates them on your machine.
+Keeping the program directory per-user lets the verified in-place updater
+replace the runtime without requiring administrator rights.
 
-**Frame math (860×732, RGB):**
-- Full capture frame: `860 × 732 × 3 ≈ 1.80 MB`
-- Half-size frame (Live View JPEG encode): `430 × 366 × 3 ≈ 0.47 MB`
+## Windows CI
 
-| Scenario | ClashGO (Go) RSS | ClashGO CPU¹ | + BlueStacks RSS² | Combined RSS (est.) |
-|----------|----------------:|-------------:|------------------:|--------------------:|
-| **Idle / UI only** (1 FPS capture) | ~60–90 MB | ~1–3% (1 core) | ~800 MB–1.2 GB | ~0.9–1.3 GB |
-| **Active battle @ 15 FPS** | ~90–140 MB | ~15–25% (1 core) | ~1.0–1.5 GB | ~1.1–1.7 GB |
+Pull request builds for `windows/core-port` run on `windows-latest` and:
 
-¹ CPU is single-core; the bot is largely single-threaded per capture frame
-(classify + template match + tap). Higher FPS = proportionally more CPU.
-At 15 FPS the per-frame vision work (~7–15 ms) consumes ~15–25% of one core.
-The bot also reports **`cpu_time_sec`** — absolute CPU time since process
-start — which is the device-independent metric: it means the same on an M1 or
-an M3 Max, so you can compare efficiency across machines without normalizing
-by core count. The "% CPU" shown in the UI is derived by multiplying the
-per-core fraction (`cpu_cores`) by the host's logical core count; treat that
-number as host-relative only.
-² BlueStacks footprint is driven by the emulator + Android guest, not the
-bot. It scales with emulator window size / DPI and the guest's own memory
-pressure, not with ClashGO's FPS.
+1. restore/build the GoCV-compatible OpenCV runtime;
+2. generate Wails TypeScript bindings;
+3. build the React frontend;
+4. run `go test ./...`;
+5. build `ClashGO.exe`;
+6. validate the portable runtime;
+7. build the NSIS installer;
+8. upload both as workflow artifacts.
 
-**Where the bot's RAM goes:**
-- Capture + working Mats (mat pool): ~2–4 MB retained (serial capture keeps
-  only 1–2 mats per size alive).
-- `ScaledTemplateCache` (6 classifier rules × several scales): ~1–3 MB.
-- Live View base64 frame buffer (`lastFrame`): a few hundred KB.
-- Wails/WebKit GUI harness: the bulk of the idle ~60–90 MB is the embedded
-  browser, not the Go bot logic.
+OpenCV is cached after the first successful native build so later runs avoid the
+large one-time compilation cost.
 
-ClashGO itself is tiny; the dominant memory cost when running is almost
-always **BlueStacks**, not the bot.
+## Releases and updates
 
-### 🚢 Releasing a new version
+The **Windows Release** workflow creates:
 
-Updates are powered by GitHub Releases — no extra infrastructure.
+- `ClashGO-v<version>-windows.zip`
+- `ClashGO-v<version>-windows-setup.exe`
+- `latest.json`
 
-1. Bump `productVersion` in `wails.json` (e.g. `0.3.0-beta`).
-2. Commit + push, then tag it:
+`latest.json` contains the Windows asset URL, size and SHA256. ClashGO checks
+releases from `TrashrProject/ClashGo-Windows`, verifies the downloaded ZIP,
+then uses the bundled PowerShell helper for the in-place update.
 
-   ```sh
-   git tag v0.3.0-beta && git push origin v0.3.0-beta
-   ```
+## Architecture
 
-   Pushing a `v*` tag runs the **Release** workflow
-   (`.github/workflows/release.yml`), which builds the macOS zip, the
-   DMG, and `latest.json` on a fresh runner and publishes them to a
-   GitHub Release automatically. No manual upload, no secrets — the
-   workflow uses GitHub's built-in `GITHUB_TOKEN`, and the app itself
-   checks the public GitHub API unauthenticated.
-3. Existing users get an auto-popping update window within 6h (or on
-   next launch) offering one-click *Update & Restart*.
+```text
+BlueStacks 5
+   │
+   ├─ ADB server / HD-Adb
+   │    ├─ direct screencap transport
+   │    └─ persistent shell for input
+   │
+ClashGO (Go)
+   ├─ boot / recovery orchestrator
+   ├─ OpenCV / GoCV vision
+   ├─ game state classifier
+   ├─ loot recognition
+   ├─ strategy + attack executor
+   ├─ wall upgrade automation
+   └─ stats / diagnostics / updater
+        │
+        └─ Wails + React UI
+```
 
-Manual fallback (no CI):
+## Strategies
 
-1. `make release VERSION=0.3.0-beta` — produces the zip, the DMG,
-   and `latest.json`.
-2. Publish a GitHub release tagged `v0.3.0-beta`, and attach:
-   - `ClashGO-v0.3.0-beta-macOS.zip`
-   - `latest.json`
+Runtime strategies live in `assets/strategies`. The current example is
+`auto_edrag_rush.yaml` with its matching formula JSON. Strategy paths stored in
+config are normalized to the packaged assets directory, so moving the portable
+folder does not invalidate the selected strategy.
 
-### 🤝 HELP WANTED (Porting to Windows)
-Right now, this is heavily tested on macOS. I'd love some help **porting/testing this for Windows**. If you're a dev and want to help me make this not-just-a-Mac-thing, open a PR or hit me up!
+## Diagnostics and logs
 
-Also, if you find bugs (you will), just open an issue.
+Useful state is stored under `%APPDATA%\ClashGO`, including logs, statistics,
+attack history and exported diagnostics. Diagnostic ZIPs deliberately exclude
+screenshots, emulator userdata, credentials and account tokens.
 
-### 📄 License
-MIT. Do whatever you want with it.
+## Upstream
+
+Original project: [DSargent21/ClashGo](https://github.com/DSargent21/ClashGo)
+
+The Windows port keeps upstream runtime assets and attack logic synchronized
+from the audited baseline while Windows-specific lifecycle, packaging,
+diagnostics and release work lives in this fork.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
