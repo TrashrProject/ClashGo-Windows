@@ -82,17 +82,17 @@ type BootConfig struct {
 func DefaultBootConfig() BootConfig {
 	return BootConfig{
 		AdbConnectTimeout:      90 * time.Second,
-		AdbConnectPoll:         3 * time.Second,
-		AdbPerCallTimeout:      30 * time.Second,
+		AdbConnectPoll:         1 * time.Second,
+		AdbPerCallTimeout:      12 * time.Second,
 		BootProbeTimeout:       90 * time.Second,
-		BootProbePoll:          2 * time.Second,
+		BootProbePoll:          750 * time.Millisecond,
 		BootProbeMinSignals:    2,
-		BootProbePerSignal:     5 * time.Second,
+		BootProbePerSignal:     3 * time.Second,
 		MaxRecoveryAttempts:    5,
 		AllowNuclear:           true,
 		InitialRecoveryBackoff: 500 * time.Millisecond,
 		MaxRecoveryBackoff:     4 * time.Second,
-		WaitForGameSettle:      15 * time.Second,
+		WaitForGameSettle:      5 * time.Second,
 		PackageName:            "com.supercell.clashofclans",
 	}
 }
