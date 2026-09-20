@@ -259,3 +259,30 @@ func BenchmarkPersistentVsProcessSpawn(b *testing.B) {
 		}
 	})
 }
+
+
+func TestNormalizeShellScreencapOwnsOutputBuffer(t *testing.T) {
+	const w, h = 2, 1
+	prefix := []byte("userdebug\n")
+	payload := make([]byte, 16+w*h*4)
+	binary.LittleEndian.PutUint32(payload[0:4], uint32(w))
+	binary.LittleEndian.PutUint32(payload[4:8], uint32(h))
+	for i := 16; i < len(payload); i++ {
+		payload[i] = byte(i)
+	}
+	source := append(prefix, payload...)
+
+	outPtr, n, err := normalizeShellScreencap(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotBefore := append([]byte(nil), (*outPtr)[:n]...)
+
+	for i := range source {
+		source[i] = 0xff
+	}
+	gotAfter := (*outPtr)[:n]
+	if !bytes.Equal(gotBefore, gotAfter) {
+		t.Fatal("normalized screencap aliases source buffer")
+	}
+}
