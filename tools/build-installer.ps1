@@ -40,13 +40,25 @@ if (-not $makensis) {
 }
 if (-not $makensis) { throw "makensis.exe was not found after NSIS installation." }
 
+$makensisPath = $null
+if ($makensis.Path) {
+    $makensisPath = $makensis.Path
+} elseif ($makensis.Source) {
+    $makensisPath = $makensis.Source
+} elseif ($makensis.FullName) {
+    $makensisPath = $makensis.FullName
+}
+if (-not $makensisPath -or -not (Test-Path $makensisPath)) {
+    throw "makensis.exe command was found but its executable path could not be resolved."
+}
+
 $dist = Join-Path $repoRoot "dist"
 if (-not (Test-Path $dist)) { New-Item -ItemType Directory -Force -Path $dist | Out-Null }
 if (-not $OutputPath) { $OutputPath = Join-Path $dist ("ClashGO-v{0}-windows-setup.exe" -f $Version) }
 if (Test-Path $OutputPath) { Remove-Item $OutputPath -Force }
 
 $script = Join-Path $repoRoot "build\windows\installer-portable.nsi"
-& $makensis.Source "/DVERSION=$Version" "/DBUNDLE_DIR=$BundlePath" "/DOUTPUT_PATH=$OutputPath" $script
+& $makensisPath "/DVERSION=$Version" "/DBUNDLE_DIR=$BundlePath" "/DOUTPUT_PATH=$OutputPath" $script
 if ($LASTEXITCODE -ne 0) { throw "NSIS installer build failed with exit code $LASTEXITCODE" }
 if (-not (Test-Path $OutputPath)) { throw "NSIS reported success but installer was not created at $OutputPath" }
 
