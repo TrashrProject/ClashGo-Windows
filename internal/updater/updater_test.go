@@ -43,6 +43,8 @@ func TestCompareVersions(t *testing.T) {
 		// Equal
 		{"0.1.0-beta", "0.1.0-beta", 0},
 		{"v0.1.0", "0.1.0", 0},
+		{"v0.6.0-windows-beta", "0.6.0-windows-beta", 0},
+		{"0.6.0-windows-beta", "0.6.0", -1},
 
 		// Core ordering
 		{"0.1.0", "0.2.0", -1},
