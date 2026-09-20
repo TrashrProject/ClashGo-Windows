@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { SaveAccountConfig } from '../../wailsjs/go/main/App';
+import { GetPlayerProfile, SaveAccountConfig } from '../../wailsjs/go/main/App';
 
 interface Props { onLinked: (tag: string) => void }
 
@@ -16,6 +16,17 @@ const AccountOnboarding: React.FC<Props> = ({ onLinked }) => {
     setBusy(true); setError('');
     try {
       await SaveAccountConfig(raw);
+
+      // Best-effort first sync before closing onboarding. A successful sync
+      // lets the backend select the correct HDV farm profile immediately, so
+      // the user's next action can simply be START BOT. Linking still works
+      // offline: the profile call may fail and background retry will handle it.
+      try {
+        await GetPlayerProfile();
+      } catch (syncErr) {
+        console.warn('Initial account sync deferred:', syncErr);
+      }
+
       const normalized = raw.startsWith('#') ? raw.toUpperCase() : '#' + raw.toUpperCase();
       onLinked(normalized);
     } catch (err) {
@@ -45,7 +56,7 @@ const AccountOnboarding: React.FC<Props> = ({ onLinked }) => {
         <p className="mt-2 text-[11px] font-medium text-zinc-400">Found in your Clash of Clans profile. No Supercell password is requested.</p>
         {error && <div className="mt-4 rounded-xl bg-rose-500/10 px-4 py-3 text-xs font-bold text-rose-500">{error}</div>}
         <button type="submit" disabled={busy || !tag.trim()} className="mt-7 w-full rounded-2xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 py-4 text-sm font-black tracking-wide disabled:opacity-40">
-          {busy ? 'Linking...' : 'Continue'}
+          {busy ? 'Preparing ClashGO...' : 'Continue'}
         </button>
       </form>
     </div>
