@@ -121,6 +121,26 @@ jobs:
         shell: powershell
         run: .\tools\build-installer.ps1 -Version "$env:BUILD_VERSION"
 
+      - name: Generate distribution checksums
+        shell: powershell
+        run: |
+          $files = Get-ChildItem dist -File | Where-Object { $_.Name -match 'windows\.(zip|exe)$|windows-setup\.exe        uses: actions/upload-artifact@v4
+        with:
+          name: ClashGO-Windows-${{ env.BUILD_VERSION }}
+          path: |
+            dist/ClashGO-v*-windows.zip
+            dist/ClashGO-v*-windows-setup.exe
+            dist/ClashGO-Windows/**
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+ }
+          if (-not $files) { throw "No Windows distributables found for checksum generation" }
+          $lines = foreach ($file in $files) {
+            $sha = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower()
+            "$sha  $($file.Name)"
+          }
+          $lines | Set-Content dist\SHA256SUMS.txt -Encoding ASCII
+
       - name: Upload Windows portable build
         uses: actions/upload-artifact@v4
         with:
