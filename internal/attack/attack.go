@@ -52,6 +52,13 @@ type Executor struct {
 	// zone is unconfigured (TH state unknown).
 	thDestroyed bool
 
+	// Initial loot snapshot for the currently selected enemy base. The battle
+	// wait compares live "Available Loot" against this baseline when the
+	// user-enabled loot-exit threshold is active.
+	initialLootGold   int
+	initialLootElixir int
+	initialLootDE     int
+
 	OnPhaseStart func(phase string, edge string)
 	OnUnitDeploy func(unit string, slotX int, slotY int)
 
@@ -69,6 +76,14 @@ func (e *Executor) LastDestructionPercent() int {
 // the TH state is unknown).
 func (e *Executor) ThDestroyed() bool {
 	return e.thDestroyed
+}
+
+// SetInitialLoot stores the pre-attack Available Loot snapshot used by the
+// optional loot-exit rule. Values are refreshed for every accepted base.
+func (e *Executor) SetInitialLoot(gold, elixir, darkElixir int) {
+	e.initialLootGold = gold
+	e.initialLootElixir = elixir
+	e.initialLootDE = darkElixir
 }
 
 // goldPixels counts golden-text pixels (BGR: strong red, mid green, weak
@@ -1672,6 +1687,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 	lastPct := 0
 	lastPctTime := time.Now()
 	stallLimit := time.Duration(e.cfg.StallTimerSeconds) * time.Second
+	lootExitConfirmations := 0
 
 	var sCfg StallConfig
 	hasStallROI := false
@@ -1731,6 +1747,72 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			if state == game.StateBattleEnd || state == game.StateReturnHome {
 				screen.Close()
 				return true
+			}
+
+			// Optional UI-controlled early exit based on LOOT collected, not
+			// destruction. We compare the live top-left "Available Loot"
+			// counters against the snapshot taken before deployment. Two
+			// consecutive reads must satisfy the threshold to protect against
+			// a single OCR glitch.
+			if e.cfg.LootExitEnabled {
+				threshold := e.cfg.LootExitPercent
+				if threshold < 0 { threshold = 0 }
+				if threshold > 100 { threshold = 100 }
+
+				initialTotal := e.initialLootGold + e.initialLootElixir + e.initialLootDE
+				if initialTotal > 0 {
+					remaining, lootErr := lootRec.ReadAvailableLoot(screen)
+					if lootErr == nil {
+						remainingTotal := remaining.Gold + remaining.Elixir + remaining.DarkElixir
+						if remainingTotal < 0 { remainingTotal = 0 }
+						if remainingTotal > initialTotal {
+							// OCR can transiently read a larger number than the
+							// starting snapshot; never turn that into negative
+							// progress.
+							remainingTotal = initialTotal
+						}
+						lootedPct := int(math.Round((1.0 - float64(remainingTotal)/float64(initialTotal)) * 100.0))
+						if lootedPct < 0 { lootedPct = 0 }
+						if lootedPct > 100 { lootedPct = 100 }
+
+						e.logger.Info().
+							Int("loot_percent", lootedPct).
+							Int("threshold", threshold).
+							Int("remaining_gold", remaining.Gold).
+							Int("remaining_elixir", remaining.Elixir).
+							Int("remaining_de", remaining.DarkElixir).
+							Msg("loot-exit progress")
+
+						if lootedPct >= threshold {
+							lootExitConfirmations++
+						} else {
+							lootExitConfirmations = 0
+						}
+
+						if lootExitConfirmations >= 2 {
+							if !e.endButtonVisible(screen, sCfg) {
+								e.logger.Warn().
+									Int("loot_percent", lootedPct).
+									Int("threshold", threshold).
+									Msg("loot threshold reached but Surrender/End Battle button not verified; waiting")
+							} else {
+								e.logger.Info().
+									Int("loot_percent", lootedPct).
+									Int("threshold", threshold).
+									Msg("loot threshold reached twice; ending battle early")
+								screen.Close()
+								if err := e.EndBattle(); err != nil {
+									e.logger.Warn().Err(err).Msg("loot-threshold EndBattle tap failed")
+									return false
+								}
+								return true
+							}
+						}
+					} else {
+						lootExitConfirmations = 0
+						e.logger.Debug().Err(lootErr).Msg("loot-exit OCR unavailable this tick")
+					}
+				}
 			}
 
 			// Per-strategy auto-end threshold from end_at_percent (0 = off).
