@@ -766,6 +766,61 @@ func (a *App) GetAccountConfig() ClashAccountPublicConfig {
 	}
 }
 
+func accountProfileCachePath() string {
+	return paths.ResolveConfig("account_profile.json")
+}
+
+// GetCachedPlayerProfile returns the most recent successful account sync.
+// The UI can render this immediately at launch while the network refresh runs
+// in the background, so reopening ClashGO never presents an empty account page.
+func (a *App) GetCachedPlayerProfile() *ClashPlayerProfile {
+	data, err := os.ReadFile(accountProfileCachePath())
+	if err != nil {
+		return nil
+	}
+	var profile ClashPlayerProfile
+	if json.Unmarshal(data, &profile) != nil || strings.TrimSpace(profile.Tag) == "" {
+		return nil
+	}
+	return &profile
+}
+
+func persistPlayerProfile(profile *ClashPlayerProfile) {
+	if profile == nil || strings.TrimSpace(profile.Tag) == "" {
+		return
+	}
+	data, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(accountProfileCachePath(), data, 0600)
+}
+
+// SetSimpleMode toggles the one-click automation experience. Turning it on
+// also enables the dependent automatic behaviors so users do not have to hunt
+// through multiple settings pages to obtain a coherent setup.
+func (a *App) SetSimpleMode(enabled bool) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Automation.SimpleMode = enabled
+	if enabled {
+		cfg.Automation.AutoFarmProfile = true
+		cfg.Automation.AutoArmyGuard = true
+		cfg.Automation.AutoResourceTracking = true
+		cfg.Automation.AutoProfileSync = true
+	}
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(paths.ResolveConfig("config.json"), data, 0600)
+}
+
 // SaveAccountConfig stores only the player's tag. The Clash API credential
 // lives on the ClashGO account service, never in the distributed EXE.
 func (a *App) SaveAccountConfig(playerTag string) error {
@@ -802,6 +857,7 @@ func (a *App) ClearAccount() error {
 	cfg := config.LoadOrDefault("config.json")
 	cfg.Account.PlayerTag = ""
 	cfg.Account.LegacyAPIKey = ""
+	_ = os.Remove(accountProfileCachePath())
 	bytes, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -862,6 +918,27 @@ func (a *App) GetPlayerProfile() (*ClashPlayerProfile, error) {
 	if err := json.Unmarshal(body, &profile); err != nil {
 		return nil, fmt.Errorf("parse Clash player profile: %w", err)
 	}
+
+	persistPlayerProfile(&profile)
+
+	// Simple mode turns the linked account into the source of truth for HDV.
+	// We only select a bundled profile when ClashGO actually has one for that
+	// TH; unsupported/future TH values leave the user's current profile alone.
+	if cfg.Automation.AutoFarmProfile {
+		if _, ok := cfg.Attack.Farm.Profiles[fmt.Sprintf("%d", profile.TownHallLevel)]; ok {
+			cfg.Attack.Farm.TownHall = profile.TownHallLevel
+			cfg.Attack.Farm.Enabled = true
+			if data, marshalErr := json.MarshalIndent(cfg, "", "  "); marshalErr == nil {
+				_ = os.WriteFile(paths.ResolveConfig("config.json"), data, 0600)
+			}
+			a.mu.Lock()
+			if a.bot != nil {
+				a.bot.UpdateConfig(cfg)
+			}
+			a.mu.Unlock()
+		}
+	}
+
 	return &profile, nil
 }
 
