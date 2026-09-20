@@ -99,3 +99,5 @@ incomplete native build can never be reused accidentally.
 
 
 CI generation: v2 — corrected GoCV module set and hardened Windows release pipeline.
+
+CI generation: locked latest-only Windows build pipeline.
