@@ -359,8 +359,23 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		tapExec.StartDeployBudget()
 		unverifiedSlots := 0
 
+		// Candidate deploy lines hugging the OUTER map border. We start with the
+		// live red-zone-derived line, then rotate through the other edges if a
+		// card does not drain. This directly handles layouts where the red
+		// polygon/bounding box is irregular and one nominal "outside" line is
+		// still rejected by Clash.
+		safeLines := [][2]image.Point{{p1, p2}}
+		safeLines = append(safeLines,
+			[2]image.Point{image.Pt(42, int(float64(h)*0.24)), image.Pt(42, int(float64(h)*0.67))},
+			[2]image.Point{image.Pt(w-42, int(float64(h)*0.24)), image.Pt(w-42, int(float64(h)*0.67))},
+			[2]image.Point{image.Pt(int(float64(w)*0.24), 54), image.Pt(int(float64(w)*0.76), 54)},
+			[2]image.Point{image.Pt(int(float64(w)*0.24), uiCutoff-44), image.Pt(int(float64(w)*0.76), uiCutoff-44)},
+		)
+		deployLineIndex := 0
+
 		// One helper for initial deploy + reconciliation. Every troop-like card
-		// uses the safe outer line; spells intentionally target inside.
+		// uses a safe outer line; retries rotate edges until Clash accepts the
+		// placement. Spells intentionally target inside.
 		deploySlot := func(slot *TrackedSlot, n int) {
 			if n <= 0 {
 				n = 1
@@ -380,11 +395,22 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 						(redZone.BBox.Min.Y+redZone.BBox.Max.Y)/2,
 					)
 				}
-				tapExec.TapDeployPoint(spellPoint, n, 3)
-			} else if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
-				tapExec.TapDeployPoint(image.Pt((p1.X+p2.X)/2, (p1.Y+p2.Y)/2), 1, 3)
+				tapExec.TapDeployPoint(spellPoint, n, 2)
 			} else {
-				tapExec.TapDeployLine(p1, p2, n, 3)
+				line := safeLines[deployLineIndex%len(safeLines)]
+				deployLineIndex++
+				e.logger.Info().
+					Str("unit", slot.UnitName).
+					Str("category", slot.Category).
+					Interface("p1", line[0]).
+					Interface("p2", line[1]).
+					Msg("Windows deploy: using outer-edge line")
+
+				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
+					tapExec.TapDeployPoint(image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2), 1, 2)
+				} else {
+					tapExec.TapDeployLine(line[0], line[1], n, 2)
+				}
 			}
 		}
 
@@ -456,14 +482,19 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				// substantially after the click, treat the deployment as
 				// confirmed; never spam a hero card and accidentally fire its
 				// ability.
-				if (slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC") &&
-					beforeActivity > 0 && activity < beforeActivity*0.72 {
-					verified = true
-					e.logger.Info().
-						Str("unit", slot.UnitName).
-						Int("round", verifyRound).
-						Msg("Windows one-shot slot visibly transitioned")
-					break
+				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
+					delta := beforeActivity - activity
+					if delta < 0 { delta = -delta }
+					if beforeActivity > 0 && (activity < beforeActivity*0.86 || delta > 0.05) {
+						verified = true
+						e.logger.Info().
+							Str("unit", slot.UnitName).
+							Int("round", verifyRound).
+							Float64("before_activity", beforeActivity).
+							Float64("after_activity", activity).
+							Msg("Windows one-shot slot visibly transitioned")
+						break
+					}
 				}
 
 				if liveCount > 0 {
