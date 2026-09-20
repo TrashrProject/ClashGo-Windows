@@ -10,7 +10,23 @@ try {
     $opencvBin = "C:\opencv\build\install\x64\mingw\bin"
     if ($env:CLASHGO_OPENCV_BIN) { $opencvBin = $env:CLASHGO_OPENCV_BIN }
     if (-not (Test-Path $opencvBin)) { throw "OpenCV runtime was not found at $opencvBin. Run tools\setup-windows-dev.ps1 -InstallOpenCV." }
-    $env:PATH = "$opencvBin;$env:PATH"
+    $mingwBin = "C:\msys64\ucrt64\bin"
+    if (-not (Test-Path (Join-Path $mingwBin "g++.exe"))) {
+        throw "MinGW UCRT64 compiler was not found at $mingwBin. Install mingw-w64-ucrt-x86_64-gcc in MSYS2."
+    }
+
+    # Wails' binding-generation step invokes the Go toolchain before the final
+    # application compile. On Windows, if CGO is disabled (or GCC is not on
+    # PATH), Go silently excludes GoCV's files that import "C" while keeping
+    # generated *_string.go files. The resulting symptom is misleading errors
+    # such as "undefined: MatType" / "undefined: CompareType".
+    #
+    # Make the Windows build self-contained instead of relying on whatever PATH
+    # happened to be present in the interactive PowerShell session.
+    $env:PATH = "$mingwBin;$opencvBin;$env:PATH"
+    $env:CGO_ENABLED = "1"
+    $env:CC = (Join-Path $mingwBin "gcc.exe")
+    $env:CXX = (Join-Path $mingwBin "g++.exe")
 
 $gocvTags = "customenv,gocv_specific_modules"
 $env:CGO_CXXFLAGS = "--std=c++11 -DNDEBUG"
