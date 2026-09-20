@@ -89,3 +89,10 @@ merged into `main`.
 
 Successful Windows CI builds publish the portable ZIP, the NSIS installer and
 a `SHA256SUMS.txt` file so downloaded artifacts can be verified independently.
+
+
+### GoCV Windows link set
+
+CI builds OpenCV 4.13 with the full module set linked by GoCV 0.43 on Windows,
+including `xphoto` and `xobjdetect`; the cache key is versioned so an
+incomplete native build can never be reused accidentally.
