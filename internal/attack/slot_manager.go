@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"image"
 	"math"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -124,6 +125,11 @@ func NewSlotManager(
 // detectActiveSlots finds all non-empty X positions on the troop bar.
 func (sm *SlotManager) detectActiveSlots(screen gocv.Mat) []int {
 
+	// The shipped manual_slots.json belongs to an older army-bar layout.
+	// On Windows/current CoC it can omit live cards (especially heroes and
+	// event troops), so do not let stale calibration decide which cards exist.
+	// Detect the live bar instead and keep manual calibration for non-Windows.
+	if runtime.GOOS != "windows" {
 	if data, ok := readConfigJSON("manual_slots.json"); ok {
 		var mConf struct {
 			SlotXs []int `json:"slot_xs"`
@@ -140,17 +146,37 @@ func (sm *SlotManager) detectActiveSlots(screen gocv.Mat) []int {
 			return activeXs
 		}
 	}
+	} else {
+		sm.logger.Info().Msg("Windows: ignoring stale manual slot map; detecting every live troop-bar card")
+	}
 
 	sm.logger.Info().Msg("manual calibration missing, falling back to grid detection")
 	scaleX := float64(sm.w) / 860.0
-	step := int(75.0 * scaleX)
-	startX := int(40.0 * scaleX)
+	step := int(72.0 * scaleX)
+	startX := int(38.0 * scaleX)
 	var activeXs []int
-	for x := startX; x < sm.w-20; x += step {
-		if !isSlotEmptyStatic(screen, x, sm.slotY, sm.w, sm.h) {
-			activeXs = append(activeXs, x)
+	for nominal := startX; nominal < sm.w-20; nominal += step {
+		bestX := nominal
+		bestActivity := 0.0
+		searchRadius := int(12.0 * scaleX)
+		if searchRadius < 6 { searchRadius = 6 }
+		for x := nominal-searchRadius; x <= nominal+searchRadius; x += 3 {
+			if x < 8 || x >= sm.w-8 { continue }
+			a := GetSlotActivityRatioStatic(screen, x, sm.slotY, sm.w)
+			if a > bestActivity {
+				bestActivity = a
+				bestX = x
+			}
+		}
+		if bestActivity >= 0.08 {
+			// Avoid duplicate centers when neighboring nominal cells converge
+			// on the same wide card.
+			if len(activeXs) == 0 || bestX-activeXs[len(activeXs)-1] > int(42.0*scaleX) {
+				activeXs = append(activeXs, bestX)
+			}
 		}
 	}
+	sm.logger.Info().Ints("slot_xs", activeXs).Msg("live troop-bar slots detected")
 	return activeXs
 }
 
