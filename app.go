@@ -289,6 +289,14 @@ func (a *App) ResetStats() error {
 		return err
 	}
 	_ = os.Remove(paths.ResolveConfig("last_attack_report.json"))
+	_ = os.Remove(paths.ResolveConfig("village_resources.json"))
+	_ = os.Remove(paths.ResolveConfig("village_resource_history.json"))
+	_ = os.Remove(paths.ResolveConfig("current_army.json"))
+	if traces, globErr := filepath.Glob(paths.ResolveConfig("output/attack_traces/*.json")); globErr == nil {
+		for _, trace := range traces {
+			_ = os.Remove(trace)
+		}
+	}
 	return nil
 }
 
