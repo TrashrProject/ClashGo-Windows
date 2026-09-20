@@ -14,11 +14,23 @@ if (-not (Test-Path (Join-Path $BundlePath "ClashGO.exe"))) {
 
 $makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue
 if (-not $makensis) {
-    $candidates = @(
-        "$env:ProgramFiles(x86)\NSIS\makensis.exe",
-        "$env:ProgramFiles\NSIS\makensis.exe",
-        "$env:ChocolateyInstall\bin\makensis.exe"
-    )
+    $candidates = @()
+
+    $programFilesX86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+    if ($programFilesX86) {
+        $candidates += (Join-Path $programFilesX86 "NSIS\makensis.exe")
+    }
+
+    $programFiles = [Environment]::GetEnvironmentVariable("ProgramFiles")
+    if ($programFiles) {
+        $candidates += (Join-Path $programFiles "NSIS\makensis.exe")
+    }
+
+    $choco = [Environment]::GetEnvironmentVariable("ChocolateyInstall")
+    if ($choco) {
+        $candidates += (Join-Path $choco "bin\makensis.exe")
+    }
+
     foreach ($candidate in $candidates) {
         if ($candidate -and (Test-Path $candidate)) {
             $makensis = Get-Item $candidate
