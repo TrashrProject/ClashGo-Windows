@@ -158,6 +158,30 @@ func (m *ArmyStateManager) Fail(name string) {
 	}
 }
 
+func (m *ArmyStateManager) IncompleteCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, u := range m.units {
+		if u.Status != ArmyComplete && u.Status != ArmyUnavailable {
+			n++
+		}
+	}
+	return n
+}
+
+func (m *ArmyStateManager) IncompleteUnits() []ArmyUnitState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]ArmyUnitState, 0)
+	for _, u := range m.units {
+		if u.Status != ArmyComplete && u.Status != ArmyUnavailable {
+			out = append(out, *u)
+		}
+	}
+	return out
+}
+
 func (m *ArmyStateManager) Snapshot() ArmyStateSnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
