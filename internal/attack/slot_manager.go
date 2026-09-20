@@ -85,17 +85,28 @@ func NewSlotManager(
 		logger:    logger.With().Str("component", "slot_manager").Logger(),
 	}
 
-	sm.slotY = mBarY + int(38.0*float64(h)/float64(pCfg.Height))
-	if data, ok := readConfigJSON("manual_slots.json"); ok {
-		var mConf struct {
-			SlotY      int `json:"slot_y"`
-			CardHeight int `json:"card_height"`
-		}
-		if json.Unmarshal(data, &mConf) == nil {
-			if mConf.SlotY > 0 {
-				sm.slotY = mConf.SlotY
-			} else if mConf.CardHeight > 0 {
-				sm.slotY = mBarY + mConf.CardHeight/2
+	// Current Windows/BlueStacks battle bar sits at the bottom of the
+	// 860x732 capture. The historical manual_slots.json contains a stale
+	// slot_y from another layout; using it can send a "select troop" tap
+	// into the upper-left battle HUD (including Surrender).
+	if runtime.GOOS == "windows" {
+		sm.slotY = int(float64(h) * 0.925)
+		sm.barY = int(float64(h) * 0.82)
+	} else {
+		refH := pCfg.Height
+		if refH <= 0 { refH = 732 }
+		sm.slotY = mBarY + int(38.0*float64(h)/float64(refH))
+		if data, ok := readConfigJSON("manual_slots.json"); ok {
+			var mConf struct {
+				SlotY      int `json:"slot_y"`
+				CardHeight int `json:"card_height"`
+			}
+			if json.Unmarshal(data, &mConf) == nil {
+				if mConf.SlotY > 0 {
+					sm.slotY = mConf.SlotY
+				} else if mConf.CardHeight > 0 {
+					sm.slotY = mBarY + mConf.CardHeight/2
+				}
 			}
 		}
 	}
@@ -106,7 +117,7 @@ func NewSlotManager(
 		return sm
 	}
 
-	barROI := image.Rect(0, mBarY, w, h)
+	barROI := image.Rect(0, sm.barY, w, h)
 	sm.classifySlots(screen, activeXs, templates, barROI)
 
 	// Windows must not inherit stale positional/manual classifications.
