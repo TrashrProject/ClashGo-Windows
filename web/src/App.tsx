@@ -122,6 +122,9 @@ function App() {
     stars_2: 0,
     stars_3: 0,
     uptime: 0,
+    recovery_attempts: 0,
+    recovery_successes: 0,
+    bluestacks_restarts: 0,
     adb_health: {
       avg_capture_ms: 0,
       consecutive_fails: 0,

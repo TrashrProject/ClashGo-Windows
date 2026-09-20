@@ -65,7 +65,7 @@ func (c *Client) ensureBlueStacksWindows(ctx context.Context, width, height, dpi
 
 	instances := discoverBlueStacksWindowsInstances()
 	preferred := chooseBlueStacksWindowsInstance(instances, c.blueStacksInstance)
-	ports := windowsCandidateADBPortsPreferred(instances, preferred)
+	ports := windowsCandidateADBPortsForSelection(instances, preferred, c.blueStacksInstance)
 
 	if !adbSettingChanged {
 		if addr := c.findReachableBlueStacks(ctx, ports); addr != "" {
@@ -279,6 +279,21 @@ func windowsCandidateADBPortsPreferred(instances []blueStacksWindowsInstance, pr
 	return windowsCandidateADBPorts(ordered)
 }
 
+func windowsCandidateADBPortsForSelection(instances []blueStacksWindowsInstance, preferred, configured string) []int {
+	configured = strings.TrimSpace(configured)
+	if configured != "" {
+		for _, inst := range instances {
+			if strings.EqualFold(inst.Name, configured) && inst.ADBPort > 0 {
+				// A UI-persisted selection is explicit. Never fall through to
+				// another live BlueStacks instance just because its ADB port
+				// responds first.
+				return []int{inst.ADBPort}
+			}
+		}
+	}
+	return windowsCandidateADBPortsPreferred(instances, preferred)
+}
+
 func windowsCandidateADBPorts(instances []blueStacksWindowsInstance) []int {
 	seen := map[int]bool{}
 	out := make([]int, 0, len(instances)+len(fallbackWindowsADBPorts))
@@ -345,7 +360,7 @@ func (c *Client) launchBlueStacks(_ bool, width, height, dpi int) error {
 	if err := c.waitForBlueStacksADBWithPorts(
 		context.Background(),
 		90*time.Second,
-		windowsCandidateADBPortsPreferred(instances, instance),
+		windowsCandidateADBPortsForSelection(instances, instance, c.blueStacksInstance),
 	); err != nil {
 		return err
 	}
@@ -414,7 +429,7 @@ func (c *Client) waitForBlueStacksADB(ctx context.Context, timeout time.Duration
 	return c.waitForBlueStacksADBWithPorts(
 		ctx,
 		timeout,
-		windowsCandidateADBPortsPreferred(instances, preferred),
+		windowsCandidateADBPortsForSelection(instances, preferred, c.blueStacksInstance),
 	)
 }
 

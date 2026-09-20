@@ -88,7 +88,6 @@ func WithJitterFraction(v float64) Option {
 }
 
 type Health struct {
-	mu               sync.Mutex
 	LastCapture      time.Time `json:"last_capture"`
 	AvgCaptureMs     float64   `json:"avg_capture_ms"`
 	ConsecutiveFails int       `json:"consecutive_fails"`
@@ -97,48 +96,51 @@ type Health struct {
 	LastError        string    `json:"last_error"`
 }
 
-func (h *Health) RecordSuccess(d time.Duration) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	h.LastCapture = time.Now()
-	h.CapturesTotal++
-	ms := d.Seconds() * 1000
-	if h.AvgCaptureMs == 0 {
-		h.AvgCaptureMs = ms
-	} else {
-		h.AvgCaptureMs = h.AvgCaptureMs*0.9 + ms*0.1
-	}
-	h.ConsecutiveFails = 0
-	h.LastError = ""
-}
-
-func (h *Health) RecordFailure(err error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	h.ConsecutiveFails++
-	h.ErrorsTotal++
-	if err != nil {
-		h.LastError = err.Error()
-	}
-}
-
-func (h *Health) IsHealthy() bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+// Health is the immutable/copyable snapshot exposed to BotStats / JSON.
+// Synchronization lives in healthTracker so copying a Health value never
+// copies a sync.Mutex (which would trigger go vet copylocks and be unsafe).
+func (h Health) IsHealthy() bool {
 	return h.ConsecutiveFails < 3
 }
 
-func (h *Health) Snapshot() Health {
+type healthTracker struct {
+	mu    sync.Mutex
+	state Health
+}
+
+func (h *healthTracker) RecordSuccess(d time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return Health{
-		LastCapture:      h.LastCapture,
-		AvgCaptureMs:     h.AvgCaptureMs,
-		ConsecutiveFails: h.ConsecutiveFails,
-		CapturesTotal:    h.CapturesTotal,
-		ErrorsTotal:      h.ErrorsTotal,
-		LastError:        h.LastError,
+
+	h.state.LastCapture = time.Now()
+	h.state.CapturesTotal++
+	ms := d.Seconds() * 1000
+	if h.state.AvgCaptureMs == 0 {
+		h.state.AvgCaptureMs = ms
+	} else {
+		h.state.AvgCaptureMs = h.state.AvgCaptureMs*0.9 + ms*0.1
 	}
+	h.state.ConsecutiveFails = 0
+	h.state.LastError = ""
+}
+
+func (h *healthTracker) RecordFailure(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.state.ConsecutiveFails++
+	h.state.ErrorsTotal++
+	if err != nil {
+		h.state.LastError = err.Error()
+	}
+}
+
+func (h *healthTracker) IsHealthy() bool {
+	return h.Snapshot().IsHealthy()
+}
+
+func (h *healthTracker) Snapshot() Health {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.state
 }
