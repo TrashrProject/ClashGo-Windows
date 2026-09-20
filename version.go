@@ -12,4 +12,8 @@ var (
 	// commit is read only by cli.go (//go:build cli); staticcheck flags it
 	// as unused in the GUI build — that is a build-tag false positive.
 	commit = "none"
+	// accountServiceURL is injected once at build/release time. End users
+	// therefore only enter their player tag; they never configure service
+	// URLs or developer credentials.
+	accountServiceURL = ""
 )
