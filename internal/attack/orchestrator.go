@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"math/rand"
+	"runtime"
 	"strings"
 	"time"
 
@@ -249,6 +250,80 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	troopCounts := troopCounter.DetectCounts(screen, slotMgr.GetAllSlots(), mBarY)
 	countMap := GetAllCounts(troopCounts)
 	e.logger.Info().Interface("counts", countMap).Msg("detected troop counts")
+
+	// Windows-safe deployment path.
+	//
+	// The legacy dynamic planner depends on historical manual_slots /
+	// manual_labels / formula mappings that were calibrated on another
+	// layout. On BlueStacks Windows the bot can reach Battle correctly but
+	// then repeatedly select/reconcile the wrong cards, which is exactly what
+	// the live logs show ("unit not found in bar", repeated top-up taps, heroes
+	// never transitioning). For Windows, prefer the slots we just detected on
+	// THIS live 860x732 battle frame and deploy them directly along a safe edge.
+	if runtime.GOOS == "windows" {
+		e.logger.Info().Int("slots", len(slotMgr.GetAllSlots())).Msg("using Windows live-slot deployment path")
+
+		// Choose a conservative deployment segment from the resolved target edge.
+		// Points stay well inside the playable border and above the troop bar.
+		var p1, p2 image.Point
+		switch strings.ToLower(targetEdge) {
+		case "top", "topleft", "topright":
+			p1, p2 = image.Pt(int(float64(w)*0.28), int(float64(h)*0.18)), image.Pt(int(float64(w)*0.72), int(float64(h)*0.18))
+		case "left":
+			p1, p2 = image.Pt(int(float64(w)*0.16), int(float64(h)*0.25)), image.Pt(int(float64(w)*0.16), int(float64(h)*0.68))
+		case "right":
+			p1, p2 = image.Pt(int(float64(w)*0.84), int(float64(h)*0.25)), image.Pt(int(float64(w)*0.84), int(float64(h)*0.68))
+		default:
+			// Bottom / bottom corners are safest with the troop bar at the bottom.
+			p1, p2 = image.Pt(int(float64(w)*0.28), int(float64(h)*0.64)), image.Pt(int(float64(w)*0.72), int(float64(h)*0.64))
+		}
+
+		tapExec := NewTapExecutor(e.client, e.cal, e.logger)
+		tapExec.StartDeployBudget()
+
+		for _, slot := range slotMgr.GetAllSlots() {
+			if tapExec.DeployBudgetExhausted() {
+				break
+			}
+
+			count := GetCountForSlot(troopCounts, slot.X)
+			if count <= 0 {
+				// Heroes/siege/single-charge cards often OCR as unknown on the
+				// first frame. One drop attempt is the safe fallback.
+				count = 1
+			}
+			if count > 40 {
+				// Avoid absurd OCR false positives turning into hundreds of taps.
+				count = 40
+			}
+
+			e.logger.Info().
+				Str("unit", slot.UnitName).
+				Str("category", slot.Category).
+				Int("slot_x", slot.X).
+				Int("slot_y", slot.Y).
+				Int("count", count).
+				Msg("Windows deploy: selecting live slot")
+
+			tapExec.TapSlot(slot, 4)
+			tapExec.HumanSleep(180, 25)
+
+			// Heroes/siege/CC are single-drop cards; troops/spells use their
+			// OCR count across the line. Repeated hero taps could trigger an
+			// ability immediately, so never spam them here.
+			if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
+				tapExec.TapDeployPoint(image.Pt((p1.X+p2.X)/2, (p1.Y+p2.Y)/2), 1, 4)
+			} else {
+				tapExec.TapDeployLine(p1, p2, count, 4)
+			}
+			tapExec.HumanSleep(160, 25)
+			slotMgr.MarkSlotDeployed(slot)
+		}
+
+		remaining := len(slotMgr.GetUndeployedSlots())
+		e.logger.Info().Int("remaining", remaining).Msg("Windows live-slot deployment completed")
+		return remaining, nil
+	}
 	// troopCounter is threaded below to NewHeroManager / NewSweeper /
 	// NewVerifier so they can live-OCR per-slot counts at deploy time
 	// and reconcile until the slot is truly empty (fixes the
