@@ -137,6 +137,7 @@ function App() {
     }
   }));
   const [isRunning, setIsRunning] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const [history, setHistory] = useState<bot.AttackReport[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [adbPort, setAdbPort] = useState(5555);
@@ -178,6 +179,7 @@ function App() {
         setSelectedStrategy(conf.attack.strategy_file);
         setStallTimer(conf.attack.stall_timer_seconds);
         setIsRunning(running);
+        setIsStarting(false);
         // Never let a null from the Go side reach the Config page — a
         // nil slice marshals to JSON null, and ConfigView dereferences
         // `strategies.length`. `?? []` keeps the UI resilient even if a
@@ -259,12 +261,24 @@ function App() {
     // "STOP BOT" forever and Stop becomes a confusing no-op (there's
     // no bot to stop). Flip the button back to START on either event.
     const unsubBotError = safeEventsOn("bot_error", (payload: unknown) => {
+      setIsStarting(false);
       setIsRunning(false);
       setBotError(normalizeBotErrorMessage(payload, 'The bot failed to start.'));
     });
     const unsubBotInitFailed = safeEventsOn("bot_init_failed", (payload: unknown) => {
+      setIsStarting(false);
       setIsRunning(false);
       setBotError(normalizeBotErrorMessage(payload, 'BlueStacks / ADB initialization failed.'));
+    });
+    const unsubBotStarted = safeEventsOn("bot_started", () => {
+      setIsStarting(false);
+      setIsRunning(true);
+      setBotError('');
+    });
+    const unsubBotBootCancelled = safeEventsOn("bot_boot_cancelled", (payload: unknown) => {
+      setIsStarting(false);
+      setIsRunning(false);
+      setBotError(normalizeBotErrorMessage(payload, 'Bot startup was cancelled.'));
     });
 
     return () => {
@@ -273,6 +287,8 @@ function App() {
       unsubUpdater();
       unsubBotError();
       unsubBotInitFailed();
+      unsubBotStarted();
+      unsubBotBootCancelled();
     };
   }, []);
 
@@ -314,12 +330,22 @@ function App() {
     setBotDiagnosticPath('');
     try {
       const res = await StartBot(goldThreshold, elixirThreshold, deThreshold, upgradeWalls, searchEnabled);
-      setIsRunning(res.running);
-      if (!res.running && res.message) {
-        setBotError(res.message);
+      if (res.running) {
+        // "running=true" from StartBot means the asynchronous boot was
+        // accepted, not that the runtime is already active. Keep the UI in
+        // STARTING until Go emits bot_started after b.Start() succeeds.
+        setIsStarting(true);
+        setIsRunning(false);
+      } else {
+        setIsStarting(false);
+        setIsRunning(false);
+        if (res.message) {
+          setBotError(res.message);
+        }
       }
     } catch (err) {
       console.error('Start failed:', err);
+      setIsStarting(false);
       setIsRunning(false);
       setBotError(err instanceof Error ? err.message : String(err));
     }
@@ -328,6 +354,7 @@ function App() {
   const handleStop = async () => {
     try {
       const res = await StopBot();
+      setIsStarting(false);
       setIsRunning(res.running);
     } catch (err) {
       console.error('Stop failed:', err);
@@ -468,6 +495,7 @@ function App() {
         expanded={sidebarExpanded}
         setExpanded={setSidebarExpanded}
         running={isRunning}
+        starting={isStarting}
         onStart={handleStart}
         onStop={handleStop}
       />
