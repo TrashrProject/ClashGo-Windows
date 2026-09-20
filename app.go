@@ -993,6 +993,34 @@ func (a *App) GetStats() bot.BotStats {
 }
 
 // GetLogs returns the buffered logs
+type CurrentArmyUnit struct {
+	Name       string  `json:"name"`
+	Category   string  `json:"category"`
+	Count      int     `json:"count"`
+	Confidence float64 `json:"confidence"`
+	SlotX      int     `json:"slot_x"`
+}
+
+type CurrentArmySnapshot struct {
+	Timestamp time.Time         `json:"timestamp"`
+	Units     []CurrentArmyUnit `json:"units"`
+}
+
+func (a *App) GetCurrentArmy() *CurrentArmySnapshot {
+	data, err := os.ReadFile(paths.ResolveConfig("current_army.json"))
+	if err != nil {
+		return nil
+	}
+	var snap CurrentArmySnapshot
+	if json.Unmarshal(data, &snap) != nil {
+		return nil
+	}
+	if len(snap.Units) == 0 {
+		return nil
+	}
+	return &snap
+}
+
 type VillageResourceSnapshot struct {
 	Timestamp   time.Time `json:"timestamp"`
 	Gold        int       `json:"gold"`
