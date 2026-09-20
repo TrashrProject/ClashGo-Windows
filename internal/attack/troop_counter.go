@@ -173,6 +173,22 @@ func (tc *TroopCounter) detectSlotCount(screen gocv.Mat, slotX, slotY, barY int,
 	result.Digits = detectedDigits
 	result.Confidence = totalConf / float64(len(detectedDigits))
 
+	// Windows battle bars show hero LEVEL numbers inside the hero cards
+	// (e.g. 91, 95, 69, 42). They are not troop quantities, but the broad
+	// OCR ROI can accidentally interpret them as "remaining count" and make
+	// the deploy loop hammer hero cards repeatedly. Treat implausibly large
+	// reads as non-counts; normal live troop-card quantities on this path are
+	// far below that range and true large armies are split across cards.
+	if count > 50 {
+		tc.logger.Debug().
+			Int("x", slotX).
+			Int("raw_count", count).
+			Float64("conf", result.Confidence).
+			Msg("ignoring implausible card count (likely hero level)")
+		result.Count = 0
+		return result
+	}
+
 	tc.logger.Debug().
 		Int("x", slotX).
 		Int("count", count).
