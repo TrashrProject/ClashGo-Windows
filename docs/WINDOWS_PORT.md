@@ -117,3 +117,5 @@ CI binding generation now passes GoCV reduced-module tags explicitly to Wails.
 CI generation: explicit minimal GoCV tags for Wails bindings.
 
 CI generation: cross-platform tests fixed; independent cached run.
+
+CI generation: NSIS-enabled cached artifact verification.
