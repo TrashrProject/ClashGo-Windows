@@ -184,15 +184,17 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <div className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${
-            profile ? 'text-emerald-500' : error ? 'text-rose-500' : busy ? 'text-amber-500' : serviceConfigured ? 'text-zinc-500' : 'text-amber-500'
+            error ? 'text-amber-500' : profile ? 'text-emerald-500' : busy ? 'text-amber-500' : serviceConfigured ? 'text-zinc-500' : 'text-amber-500'
           }`}>
             <span className="material-symbols-outlined text-base">
-              {profile ? 'cloud_done' : error ? 'cloud_off' : busy ? 'sync' : serviceConfigured ? 'cloud_queue' : 'cloud_off'}
+              {error ? 'cloud_off' : profile ? 'cloud_done' : busy ? 'sync' : serviceConfigured ? 'cloud_queue' : 'cloud_off'}
             </span>
-            {profile
-              ? 'ClashGO account service connected'
-              : error
-                ? 'Account service unavailable — automatic retry enabled'
+            {error
+              ? profile
+                ? 'Offline profile cache — background sync will retry'
+                : 'Account service unavailable — automatic retry enabled'
+              : profile
+                ? 'ClashGO account service connected'
                 : busy
                   ? 'Connecting to ClashGO account service'
                   : serviceConfigured
