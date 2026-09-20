@@ -295,7 +295,12 @@ func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates 
 			// never given one-shot placement semantics.
 			switch {
 			case isHeroStatic(cleanName):
-				if res.match.Confidence >= 0.58 {
+				// MatchMultiScale already filters below 0.55. Accept every
+				// surviving hero portrait match on Windows; skins/levels can
+				// legitimately sit in the 0.55-0.58 band and were being
+				// demoted to generic Troop, which caused only 1/4 heroes to
+				// receive one-shot deployment.
+				if res.match.Confidence >= 0.55 {
 					bestSlot.Category = "Hero"
 				}
 			case isSiegeStatic(cleanName):
