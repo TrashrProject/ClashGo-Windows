@@ -46,6 +46,20 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      - name: Validate PowerShell scripts
+        shell: powershell
+        run: |
+          $scripts = Get-ChildItem tools,build\windows -Recurse -Filter *.ps1 -ErrorAction SilentlyContinue
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Host "$($script.FullName): $($_.Message)" }
+              throw "PowerShell syntax validation failed"
+            }
+          }
+
       - name: Install MinGW and CMake
         shell: powershell
         run: |
