@@ -1,4 +1,9 @@
-param([string]$Version = "0.6.0-windows-beta", [switch]$SkipSync, [switch]$SkipTests)
+param(
+    [string]$Version = "0.6.0-windows-beta",
+    [string]$AccountServiceURL = $env:CLASHGO_ACCOUNT_API_URL,
+    [switch]$SkipSync,
+    [switch]$SkipTests
+)
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -78,6 +83,21 @@ $env:CGO_LDFLAGS = "-LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -l
 
     $commit = (git rev-parse HEAD).Trim()
     $ldflags = "-X main.version=$Version -X main.commit=$commit"
+    if ($AccountServiceURL) {
+        $service = $AccountServiceURL.Trim().TrimEnd("/")
+        if ($service -notmatch '^https?://') {
+            throw "AccountServiceURL must begin with http:// or https://"
+        }
+        # -X values cannot safely carry spaces; service URLs should never
+        # contain them anyway.
+        if ($service -match '\s') {
+            throw "AccountServiceURL cannot contain spaces"
+        }
+        $ldflags += " -X main.accountServiceURL=$service"
+        Write-Host "Embedding hosted account service URL for zero-config linking."
+    } else {
+        Write-Host "No hosted account service URL embedded; local development fallback will be used."
+    }
     Write-Host "Building Wails Windows application..."
     wails build -clean -webview2 embed -o ClashGO.exe -tags $gocvTags -ldflags $ldflags
     if ($LASTEXITCODE -ne 0) { throw "Wails build failed" }
