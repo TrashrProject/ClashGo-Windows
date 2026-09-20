@@ -281,6 +281,17 @@ function App() {
       setBotError(normalizeBotErrorMessage(payload, 'Bot startup was cancelled.'));
     });
 
+    const unsubAttackHistory = safeEventsOn("attack_history_updated", (payload: bot.AttackReport[]) => {
+      if (Array.isArray(payload)) {
+        setHistory(payload);
+      }
+    });
+    const unsubStatsUpdated = safeEventsOn("stats_updated", (payload: bot.BotStats) => {
+      if (payload && typeof payload === 'object') {
+        setStats(payload);
+      }
+    });
+
     return () => {
       clearInterval(interval);
       clearInterval(diagnosticsInterval);
@@ -289,6 +300,8 @@ function App() {
       unsubBotInitFailed();
       unsubBotStarted();
       unsubBotBootCancelled();
+      unsubAttackHistory();
+      unsubStatsUpdated();
     };
   }, []);
 
