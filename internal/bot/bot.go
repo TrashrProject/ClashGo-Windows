@@ -71,6 +71,7 @@ type Bot struct {
 	lastNav               time.Time
 	lastCapture           time.Time
 	lastIdlePan           time.Time
+	lastVisionLog         time.Time
 	// lastAttackEnd is stamped when a battle fully returns home; the
 	// inter-attack cooldown (cfg.Attack.MinSecondsBetweenAttacks) is
 	// measured from it. Written by the attack goroutine only.
@@ -771,10 +772,11 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 
 	state, score := b.classify(screen)
 
-	// Surface the first live-state diagnosis in the normal INFO console so a
-	// Windows user does not have to enable DEBUG just to see what vision is
-	// actually receiving.
-	if time.Since(b.startedAt) < 15*time.Second || state != game.StateUnknown {
+	// Keep the console useful without flooding Wails/React at the faster
+	// capture cadence. Log immediately on state changes and at most roughly
+	// once per 750ms while a state remains stable.
+	if state != gc.State || time.Since(b.lastVisionLog) >= 750*time.Millisecond || time.Since(b.startedAt) < 3*time.Second {
+		b.lastVisionLog = time.Now()
 		b.logger.Info().
 			Str("vision_state", state.String()).
 			Int("score", score).
@@ -2460,7 +2462,7 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 			return true
 		case state == game.StateSearchMap || state == game.StateLoading:
 			b.logger.Info().Msg("in clouds/loading...")
-			time.Sleep(1 * time.Second)
+			time.Sleep(300 * time.Millisecond)
 			continue
 		case state == game.StateArmySelection || state == game.StateArmyCamp:
 			b.logger.Info().Msg("in army menu, retrying Battle Attack button...")
@@ -2475,11 +2477,11 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 					b.findAndClick("btn_battle", "Battle Retry", 1)
 				}
 			}
-			time.Sleep(1 * time.Second)
+			time.Sleep(400 * time.Millisecond)
 		default:
 			b.logger.Info().Str("state", state.String()).Msg("waiting for battle state (searching)...")
 			b.dismissInterruptions()
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(250 * time.Millisecond)
 		}
 	}
 
@@ -2499,7 +2501,7 @@ func (b *Bot) deployTroops(screen gocv.Mat) (int, error) {
 		Int("phases", len(strat.Phases)).
 		Msg("executing dynamic attack plan")
 
-	time.Sleep(600 * time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
 
 	remaining, err := b.attackExec.DeployDynamicV2(strat, screen, b.cfg.Attack.StrategyFile)
 	if err != nil {
