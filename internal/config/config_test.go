@@ -72,3 +72,17 @@ func TestLoadRebasesStaleAbsoluteStrategy(t *testing.T) {
 		t.Fatalf("strategy path=%q want %q", got.Attack.StrategyFile, want)
 	}
 }
+
+func TestDefaultAutomationIsSimpleAndAutomatic(t *testing.T) {
+	cfg := DefaultConfig()
+	if !cfg.Automation.SimpleMode {
+		t.Fatal("simple mode should be enabled by default")
+	}
+	if !cfg.Automation.AutoFarmProfile || !cfg.Automation.AutoArmyGuard ||
+		!cfg.Automation.AutoResourceTracking || !cfg.Automation.AutoProfileSync {
+		t.Fatalf("automatic behaviors should default on: %+v", cfg.Automation)
+	}
+	if _, ok := cfg.Attack.Farm.Profiles["18"]; !ok {
+		t.Fatal("expected default TH18 farm profile")
+	}
+}
