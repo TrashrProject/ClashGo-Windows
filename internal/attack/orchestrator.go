@@ -556,8 +556,6 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				safeLines = append(safeLines, line)
 			}
 		}
-		deployLineIndex := 0
-
 		e.logger.Info().
 			Str("side", deploySide).
 			Int("safe_lines", len(safeLines)).
@@ -589,14 +587,12 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				}
 				tapExec.TapDeployPoint(spellPoint, n, 2)
 			} else {
-				lineIdx := deployLineIndex
-				if lineIdx >= len(safeLines) {
-					lineIdx = len(safeLines) - 1
-				}
-				line := safeLines[lineIdx]
-				if deployLineIndex < len(safeLines)-1 {
-					deployLineIndex++
-				}
+				// Keep the whole army on one coherent deployment line. The old
+				// code advanced to another parallel band for every retry/card,
+				// which made the attack look like scattered "balls" and could
+				// waste taps near the red boundary. Use the furthest verified
+				// safe line consistently for normal troops.
+				line := safeLines[len(safeLines)-1]
 				e.logger.Info().
 					Str("unit", slot.UnitName).
 					Str("category", slot.Category).
@@ -667,82 +663,41 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 			deploySlot(slot, count)
 
+			// FAST VERIFY: one fresh read, at most one top-up. Spending four
+			// reconciliation rounds on every card was the main reason attacks
+			// stalled for tens of seconds while troops were visibly left.
+			tapExec.HumanSleep(120, 15)
 			verified := false
-			remainingCount := count
-			for verifyRound := 1; verifyRound <= 4 && !tapExec.DeployBudgetExhausted(); verifyRound++ {
-				tapExec.HumanSleep(170, 25)
-
-				fresh, capErr := tapExec.CaptureFresh()
-				if capErr != nil || fresh.Empty() {
-					if !fresh.Empty() {
-						fresh.Close()
-					}
-					e.logger.Warn().
-						Str("unit", slot.UnitName).
-						Int("round", verifyRound).
-						Msg("Windows deploy verify capture failed; retrying")
-					continue
-				}
-
+			fresh, capErr := tapExec.CaptureFresh()
+			if capErr == nil && !fresh.Empty() {
 				liveCount := troopCounter.DetectCount(fresh, slot, mBarY)
 				empty := isSlotEmptyStatic(fresh, slot.X, slot.Y, w, h)
 				activity := GetSlotActivityRatioStatic(fresh, slot.X, slot.Y, w)
 				fresh.Close()
 
-				// Strong confirmation: the card is visually empty/disabled, or
-				// a known multi-count card has drained and its visual activity
-				// dropped materially.
-				if empty || (liveCount == 0 && beforeActivity > 0 && activity < beforeActivity*0.58) {
+				if empty || (liveCount == 0 && beforeActivity > 0 && activity < beforeActivity*0.60) {
 					verified = true
 					e.logger.Info().
 						Str("unit", slot.UnitName).
-						Int("round", verifyRound).
 						Int("live_count", liveCount).
-						Float64("activity", activity).
-						Msg("Windows deploy verified slot empty")
-					break
-				}
-
-				// Heroes/siege/CC are one-shot cards. If the card changed
-				// substantially after the click, treat the deployment as
-				// confirmed; never spam a hero card and accidentally fire its
-				// ability.
-				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
-					delta := beforeActivity - activity
-					if delta < 0 { delta = -delta }
-					if beforeActivity > 0 && (activity < beforeActivity*0.86 || delta > 0.05) {
-						verified = true
-						e.logger.Info().
-							Str("unit", slot.UnitName).
-							Int("round", verifyRound).
-							Float64("before_activity", beforeActivity).
-							Float64("after_activity", activity).
-							Msg("Windows one-shot slot visibly transitioned")
-						break
-					}
-				}
-
-				if liveCount > 0 {
-					remainingCount = liveCount
-				} else if remainingCount > 1 {
-					// OCR can momentarily miss digits during the card animation.
-					// Keep the last credible remainder, but cap each retry burst.
-					if remainingCount > 8 {
-						remainingCount = 8
-					}
+						Msg("Windows fast deploy verified slot drained")
+				} else if liveCount > 0 {
+					if liveCount > 40 { liveCount = 40 }
+					e.logger.Warn().
+						Str("unit", slot.UnitName).
+						Int("remaining", liveCount).
+						Msg("Windows fast deploy: one immediate remainder top-up")
+					deploySlot(slot, liveCount)
+					verified = true // final sweep will catch any true remainder
 				} else {
-					remainingCount = 1
+					// OCR unknown: do not sit here retrying the same card.
+					// Move on immediately and let the final LIVE sweep decide.
+					e.logger.Warn().
+						Str("unit", slot.UnitName).
+						Msg("Windows fast deploy: verification inconclusive; moving on to keep army flowing")
 				}
-
-				e.logger.Warn().
-					Str("unit", slot.UnitName).
-					Int("round", verifyRound).
-					Int("remaining", remainingCount).
-					Int("live_count", liveCount).
-					Float64("activity", activity).
-					Msg("slot still appears active; re-selecting and deploying remainder")
-
-				deploySlot(slot, remainingCount)
+			} else if !fresh.Empty() {
+				fresh.Close()
 			}
 
 			if verified {
@@ -750,10 +705,6 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			} else {
 				slotMgr.MarkSlotFailed(slot)
 				unverifiedSlots++
-				e.logger.Error().
-					Str("unit", slot.UnitName).
-					Str("category", slot.Category).
-					Msg("could not verify slot fully deployed after reconciliation")
 			}
 		}
 
@@ -779,7 +730,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		}
 
 		liveRemaining := 0
-		for sweepRound := 1; sweepRound <= 6 && !tapExec.DeployBudgetExhausted(); sweepRound++ {
+		for sweepRound := 1; sweepRound <= 2 && !tapExec.DeployBudgetExhausted(); sweepRound++ {
 			fresh, capErr := tapExec.CaptureFresh()
 			if capErr != nil || fresh.Empty() {
 				if !fresh.Empty() { fresh.Close() }
@@ -859,7 +810,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				Int("round", sweepRound).
 				Int("actions", acted).
 				Msg("final live sweep fired remaining units; rechecking bar")
-			tapExec.HumanSleep(320, 35)
+			tapExec.HumanSleep(140, 20)
 		}
 
 		remaining := liveRemaining
