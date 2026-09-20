@@ -25,6 +25,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
 }) => {
   const menuItems: { id: TabType; label: string; icon: string }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+    { id: 'account', label: 'Account', icon: 'person' },
     { id: 'analytics', label: 'Analytics', icon: 'monitoring' },
     { id: 'config', label: 'Config', icon: 'tune' },
     { id: 'settings', label: 'Settings', icon: 'settings' },
