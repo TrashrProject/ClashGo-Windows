@@ -679,15 +679,15 @@ func (a *App) GetConfig() *config.BotConfig {
 }
 
 type ClashAccountPublicConfig struct {
-	PlayerTag        string `json:"player_tag"`
-	APIConfigured    bool   `json:"api_configured"`
-	MaskedAPIKey     string `json:"masked_api_key,omitempty"`
+	PlayerTag         string `json:"player_tag"`
+	ServiceConfigured bool   `json:"service_configured"`
+	ServiceURL        string `json:"service_url,omitempty"`
 }
 
 type ClashPlayerClan struct {
-	Tag      string `json:"tag"`
-	Name     string `json:"name"`
-	ClanLevel int   `json:"clanLevel"`
+	Tag       string `json:"tag"`
+	Name      string `json:"name"`
+	ClanLevel int    `json:"clanLevel"`
 }
 
 type ClashPlayerLeague struct {
@@ -696,31 +696,31 @@ type ClashPlayerLeague struct {
 }
 
 type ClashPlayerUnit struct {
-	Name        string `json:"name"`
-	Level       int    `json:"level"`
-	MaxLevel    int    `json:"maxLevel"`
-	Village     string `json:"village"`
+	Name     string `json:"name"`
+	Level    int    `json:"level"`
+	MaxLevel int    `json:"maxLevel"`
+	Village  string `json:"village"`
 }
 
 type ClashPlayerProfile struct {
-	Tag              string            `json:"tag"`
-	Name             string            `json:"name"`
-	TownHallLevel    int               `json:"townHallLevel"`
-	TownHallWeaponLevel int            `json:"townHallWeaponLevel,omitempty"`
-	ExpLevel         int               `json:"expLevel"`
-	Trophies         int               `json:"trophies"`
-	BestTrophies     int               `json:"bestTrophies"`
-	WarStars         int               `json:"warStars"`
-	AttackWins       int               `json:"attackWins"`
-	DefenseWins      int               `json:"defenseWins"`
-	Donations        int               `json:"donations"`
-	DonationsReceived int              `json:"donationsReceived"`
-	Clan             *ClashPlayerClan  `json:"clan,omitempty"`
-	League           *ClashPlayerLeague `json:"league,omitempty"`
-	Troops           []ClashPlayerUnit `json:"troops"`
-	Heroes           []ClashPlayerUnit `json:"heroes"`
-	Spells           []ClashPlayerUnit `json:"spells"`
-	HeroEquipment    []ClashPlayerUnit `json:"heroEquipment"`
+	Tag                 string             `json:"tag"`
+	Name                string             `json:"name"`
+	TownHallLevel       int                `json:"townHallLevel"`
+	TownHallWeaponLevel int                `json:"townHallWeaponLevel,omitempty"`
+	ExpLevel            int                `json:"expLevel"`
+	Trophies            int                `json:"trophies"`
+	BestTrophies        int                `json:"bestTrophies"`
+	WarStars            int                `json:"warStars"`
+	AttackWins          int                `json:"attackWins"`
+	DefenseWins         int                `json:"defenseWins"`
+	Donations           int                `json:"donations"`
+	DonationsReceived   int                `json:"donationsReceived"`
+	Clan                *ClashPlayerClan   `json:"clan,omitempty"`
+	League              *ClashPlayerLeague `json:"league,omitempty"`
+	Troops              []ClashPlayerUnit  `json:"troops"`
+	Heroes              []ClashPlayerUnit  `json:"heroes"`
+	Spells              []ClashPlayerUnit  `json:"spells"`
+	HeroEquipment       []ClashPlayerUnit  `json:"heroEquipment"`
 }
 
 func normalizePlayerTag(tag string) (string, error) {
@@ -740,28 +740,35 @@ func normalizePlayerTag(tag string) (string, error) {
 	return tag, nil
 }
 
-// GetAccountConfig returns only safe account metadata. The raw Clash API key
-// is never sent back to the webview after it has been saved.
-func (a *App) GetAccountConfig() ClashAccountPublicConfig {
-	cfg := config.LoadOrDefault("config.json")
-	masked := ""
-	if cfg.Account.APIKey != "" {
-		masked = "••••••••"
-		if len(cfg.Account.APIKey) >= 4 {
-			masked += cfg.Account.APIKey[len(cfg.Account.APIKey)-4:]
+func clashAccountServiceURL(cfg *config.BotConfig) string {
+	if raw := strings.TrimSpace(os.Getenv("CLASHGO_ACCOUNT_API_URL")); raw != "" {
+		return strings.TrimRight(raw, "/")
+	}
+	if cfg != nil {
+		if raw := strings.TrimSpace(cfg.Account.ProxyURL); raw != "" {
+			return strings.TrimRight(raw, "/")
 		}
 	}
+	// Development fallback. Production builds should inject
+	// CLASHGO_ACCOUNT_API_URL or persist account.proxy_url.
+	return "http://127.0.0.1:8787"
+}
+
+// GetAccountConfig returns safe account metadata only. End users never see,
+// create, or store a Clash developer API key in the desktop application.
+func (a *App) GetAccountConfig() ClashAccountPublicConfig {
+	cfg := config.LoadOrDefault("config.json")
+	serviceURL := clashAccountServiceURL(cfg)
 	return ClashAccountPublicConfig{
-		PlayerTag: cfg.Account.PlayerTag,
-		APIConfigured: strings.TrimSpace(cfg.Account.APIKey) != "",
-		MaskedAPIKey: masked,
+		PlayerTag:         cfg.Account.PlayerTag,
+		ServiceConfigured: strings.TrimSpace(serviceURL) != "",
+		ServiceURL:        serviceURL,
 	}
 }
 
-// SaveAccountConfig stores the player tag and optionally replaces the API key.
-// Passing an empty apiKey keeps the existing key, which lets the onboarding
-// screen save only the tag without exposing or erasing credentials.
-func (a *App) SaveAccountConfig(playerTag, apiKey string) error {
+// SaveAccountConfig stores only the player's tag. The Clash API credential
+// lives on the ClashGO account service, never in the distributed EXE.
+func (a *App) SaveAccountConfig(playerTag string) error {
 	tag, err := normalizePlayerTag(playerTag)
 	if err != nil {
 		return err
@@ -772,11 +779,8 @@ func (a *App) SaveAccountConfig(playerTag, apiKey string) error {
 
 	cfg := config.LoadOrDefault("config.json")
 	cfg.Account.PlayerTag = tag
-	if strings.TrimSpace(apiKey) != "" {
-		key := strings.TrimSpace(apiKey)
-		key = strings.TrimPrefix(key, "Bearer ")
-		cfg.Account.APIKey = key
-	}
+	// Purge legacy desktop keys during the first save after upgrading.
+	cfg.Account.LegacyAPIKey = ""
 
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
@@ -789,13 +793,15 @@ func (a *App) SaveAccountConfig(playerTag, apiKey string) error {
 	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0600)
 }
 
-// ClearAccount removes the local account link and API credential.
+// ClearAccount removes the local player link. No developer credential is
+// stored on the client anymore, so unlinking is intentionally lightweight.
 func (a *App) ClearAccount() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	cfg := config.LoadOrDefault("config.json")
-	cfg.Account = config.AccountConfig{}
+	cfg.Account.PlayerTag = ""
+	cfg.Account.LegacyAPIKey = ""
 	bytes, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -803,32 +809,32 @@ func (a *App) ClearAccount() error {
 	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0600)
 }
 
-// GetPlayerProfile fetches the linked player from the official Clash of Clans
-// API. The API key belongs to ClashGO's local configuration; the player's
-// Supercell password is never requested or used.
+// GetPlayerProfile asks the ClashGO account service for the linked player.
+// The service owns the official Clash developer key and forwards only the
+// public player payload back to the desktop app.
 func (a *App) GetPlayerProfile() (*ClashPlayerProfile, error) {
 	cfg := config.LoadOrDefault("config.json")
 	tag, err := normalizePlayerTag(cfg.Account.PlayerTag)
 	if err != nil {
 		return nil, err
 	}
-	key := strings.TrimSpace(cfg.Account.APIKey)
-	if key == "" {
-		return nil, fmt.Errorf("Clash API key is not configured")
+	serviceURL := clashAccountServiceURL(cfg)
+	if strings.TrimSpace(serviceURL) == "" {
+		return nil, fmt.Errorf("ClashGO account service is not configured")
 	}
 
-	endpoint := "https://api.clashofclans.com/v1/players/" + url.PathEscape(tag)
+	endpoint := serviceURL + "/v1/player/" + url.PathEscape(tag)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "ClashGO/"+version)
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 12 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Clash API request failed: %w", err)
+		return nil, fmt.Errorf("ClashGO account service unavailable: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -849,7 +855,7 @@ func (a *App) GetPlayerProfile() (*ClashPlayerProfile, error) {
 		if msg == "" {
 			msg = resp.Status
 		}
-		return nil, fmt.Errorf("Clash API: %s", msg)
+		return nil, fmt.Errorf("ClashGO account service: %s", msg)
 	}
 
 	var profile ClashPlayerProfile
