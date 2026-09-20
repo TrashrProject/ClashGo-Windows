@@ -96,6 +96,10 @@ jobs:
       - name: Generate bindings and validate frontend
         shell: powershell
         run: |
+          New-Item -ItemType Directory -Force -Path web\dist | Out-Null
+          if (-not (Test-Path web\dist\index.html)) {
+            Set-Content web\dist\index.html "<!doctype html><html><body></body></html>" -Encoding UTF8
+          }
           wails generate module
           if ($LASTEXITCODE -ne 0) { throw "Wails binding generation failed" }
           Push-Location web
