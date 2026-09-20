@@ -96,3 +96,6 @@ a `SHA256SUMS.txt` file so downloaded artifacts can be verified independently.
 CI builds OpenCV 4.13 with the full module set linked by GoCV 0.43 on Windows,
 including `xphoto` and `xobjdetect`; the cache key is versioned so an
 incomplete native build can never be reused accidentally.
+
+
+CI generation: v2 — corrected GoCV module set and hardened Windows release pipeline.
