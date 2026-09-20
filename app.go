@@ -21,7 +21,6 @@ import (
 	"github.com/Ducky705/ClashGO/internal/paths"
 	"github.com/Ducky705/ClashGO/internal/updater"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 	"github.com/rs/zerolog/log"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -308,7 +307,6 @@ func (a *App) startWebServer() {
 	// suppressing the listen-port banner removes the `http://host:port`
 	// pattern that `wails dev` parses for proxy-target discovery.
 	e.HidePort = true
-	e.Use(middleware.CORS())
 
 	// Basic API for remote control
 	e.GET("/status", func(c echo.Context) error {
