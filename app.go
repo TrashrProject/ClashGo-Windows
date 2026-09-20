@@ -751,6 +751,9 @@ func clashAccountServiceURL(cfg *config.BotConfig) string {
 	if raw := strings.TrimSpace(os.Getenv("CLASHGO_ACCOUNT_API_URL")); raw != "" {
 		return strings.TrimRight(raw, "/")
 	}
+	if raw := strings.TrimSpace(accountServiceURL); raw != "" {
+		return strings.TrimRight(raw, "/")
+	}
 	if cfg != nil {
 		if raw := strings.TrimSpace(cfg.Account.ProxyURL); raw != "" {
 			return strings.TrimRight(raw, "/")
