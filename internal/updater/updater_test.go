@@ -289,10 +289,12 @@ func TestServiceCheckETag304(t *testing.T) {
 	}
 	// Prime ETag.
 	_, _ = s.fetchManifest(context.Background(), srv.URL+"/x")
-	// Subsequent request should 304 and return nil manifest, nil.
+	// Subsequent request should 304 and return the explicit sentinel so
+	// Service.Check can preserve the verified downloadSpec instead of
+	// downgrading to the checksum-less Releases API fallback.
 	m, err := s.fetchManifest(context.Background(), srv.URL+"/x")
-	if err != nil || m != nil {
-		t.Errorf("expected 304 (nil manifest), got m=%v err=%v", m, err)
+	if !errors.Is(err, errManifestNotModified) || m != nil {
+		t.Errorf("expected 304 sentinel, got m=%v err=%v", m, err)
 	}
 	if calls.Load() != 2 {
 		t.Errorf("expected 2 HTTP calls (200 + 304), got %d", calls.Load())

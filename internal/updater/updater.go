@@ -59,6 +59,12 @@ const minCheckDelay = 5 * time.Second
 // launch for repos that haven't cut a release yet.
 var errNoReleases = errors.New("no releases published for this repository")
 
+// errManifestNotModified distinguishes a valid HTTP 304 from a missing
+// manifest. A 304 must preserve the previously verified downloadSpec (SHA256,
+// asset URL and ready/download state) instead of falling back to the Releases
+// API, which does not carry the checksum.
+var errManifestNotModified = errors.New("release manifest not modified")
+
 // errBodyLimit caps how much of a non-JSON error body we surface
 // to the UI. GitHub's error payloads are small (<300 B) but a
 // misconfigured proxy could dump megabytes; 512 B is plenty for
@@ -320,17 +326,34 @@ func (s *Service) Check(ctx context.Context) (Status, error) {
 	s.lastCheckMu.Unlock()
 
 	s.statusMu.Lock()
+	previousState := s.status.State
+	if previousState == StateChecking {
+		previousState = StateIdle
+	}
 	s.status.State = StateChecking
 	s.status.Error = ""
 	s.statusMu.Unlock()
 
 	// 1. Try the manifest first (carries SHA256 + min-supported).
 	manifestURL := s.manifestURL()
-	if manifest, err := s.fetchManifest(ctx, manifestURL); err == nil && manifest != nil {
+	manifest, manifestErr := s.fetchManifest(ctx, manifestURL)
+	if manifestErr == nil && manifest != nil {
 		return s.absorbManifest(*manifest), nil
-	} else if err != nil {
-		// Network / 404 — fall through to the API path.
-		log.Debug().Err(err).Str("url", manifestURL).Msg("manifest fetch failed, falling back to GitHub API")
+	}
+	if errors.Is(manifestErr, errManifestNotModified) {
+		// Keep the previously absorbed manifest/downloadSpec exactly as-is.
+		// In particular, do NOT fall through to the GitHub Releases API:
+		// that path has no SHA256 and would silently downgrade a verified
+		// one-click update after the first ETag hit.
+		s.statusMu.Lock()
+		s.status.State = previousState
+		s.status.LastCheckedUnix = s.cfg.Now().Unix()
+		s.statusMu.Unlock()
+		return s.GetStatus(), nil
+	}
+	if manifestErr != nil {
+		// Network / malformed manifest — fall through to the API path.
+		log.Debug().Err(manifestErr).Str("url", manifestURL).Msg("manifest fetch failed, falling back to GitHub API")
 	}
 
 	// 2. Fallback: GitHub releases API. No SHA256 (we can't verify
@@ -368,7 +391,9 @@ func (s *Service) manifestURL() string {
 }
 
 // fetchManifest GETs latest.json with ETag-304 caching. Returns
-// (manifest, nil) on 200, (nil, nil) on 304, (nil, error) otherwise.
+// (manifest, nil) on 200, (nil, errManifestNotModified) on 304,
+// (nil, nil) on 404 (legacy release without a manifest), and an error
+// for other failures.
 func (s *Service) fetchManifest(ctx context.Context, url string) (*Manifest, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -390,7 +415,7 @@ func (s *Service) fetchManifest(ctx context.Context, url string) (*Manifest, err
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotModified {
-		return nil, nil
+		return nil, errManifestNotModified
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		// Older release without latest.json — not an error.
