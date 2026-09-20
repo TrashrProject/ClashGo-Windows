@@ -407,8 +407,14 @@ func (t *Transport) captureViaShellLocked() (*[]byte, int, error) {
 			*bufPtr = buf
 		}
 	}
+
+	// normalizeShellScreencap reads from the pooled bytes and copies them
+	// into a fresh normalized frame. Do not return the source buffer to the
+	// pool until that copy is complete: another capture could otherwise
+	// reuse/mutate the same backing array while normalization is reading it.
+	out, n, err := normalizeShellScreencap(buf[:total])
 	bufferPool.Put(bufPtr)
-	return normalizeShellScreencap(buf[:total])
+	return out, n, err
 }
 
 // normalizeShellScreencap converts the raw output of
