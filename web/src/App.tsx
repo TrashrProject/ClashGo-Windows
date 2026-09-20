@@ -30,6 +30,7 @@ import {
   SkipCurrentVersion,
   ClearSkippedVersion,
   GetAccountConfig,
+  SetSimpleMode,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
 import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics } from './types';
@@ -168,6 +169,7 @@ function App() {
   const [stallTimer, setStallTimer] = useState(30);
   const [lootExitEnabled, setLootExitEnabled] = useState(false);
   const [lootExitPercent, setLootExitPercent] = useState(100);
+  const [simpleMode, setSimpleMode] = useState(true);
 
   useEffect(() => {
     const init = async () => {
@@ -188,6 +190,7 @@ function App() {
         setStallTimer(conf.attack.stall_timer_seconds);
         setLootExitEnabled(conf.attack.loot_exit_enabled ?? false);
         setLootExitPercent(conf.attack.loot_exit_percent ?? 100);
+        setSimpleMode(conf.automation?.simple_mode ?? true);
         setIsRunning(running);
         setIsStarting(false);
         // Never let a null from the Go side reach the Config page — a
@@ -504,6 +507,11 @@ function App() {
     stallTimer, setStallTimer,
     lootExitEnabled, setLootExitEnabled,
     lootExitPercent, setLootExitPercent,
+    simpleMode,
+    onSetSimpleMode: async (enabled: boolean) => {
+      await SetSimpleMode(enabled);
+      setSimpleMode(enabled);
+    },
     onSave: async () => {
       // Errors intentionally bubble so ConfigView's save-status
       // indicator can show a red "Save failed" pill back to the user.
@@ -515,7 +523,7 @@ function App() {
   }), [
     goldThreshold, elixirThreshold, deThreshold,
     selectedStrategy, strategies, searchEnabled, upgradeWalls, stallTimer,
-    lootExitEnabled, lootExitPercent
+    lootExitEnabled, lootExitPercent, simpleMode
   ]);
 
   return (
