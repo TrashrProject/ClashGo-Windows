@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	goruntime "runtime"
 	"strings"
 	"sync"
@@ -1045,6 +1046,23 @@ func (a *App) GetVillageResources() *VillageResourceSnapshot {
 		return nil
 	}
 	return &snap
+}
+
+// GetLatestAttackTrace returns the newest structured deployment trace as
+// JSON. It is intended for the advanced diagnostics panel and support export;
+// normal users never need to interact with it.
+func (a *App) GetLatestAttackTrace() string {
+	matches, err := filepath.Glob(paths.ResolveConfig("output/attack_traces/*.json"))
+	if err != nil || len(matches) == 0 {
+		return ""
+	}
+	sort.Strings(matches)
+	latest := matches[len(matches)-1]
+	data, err := os.ReadFile(latest)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func (a *App) GetVillageResourceHistory() []VillageResourceSnapshot {
