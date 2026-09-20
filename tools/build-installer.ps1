@@ -41,18 +41,6 @@ if (-not $makensisPath) {
 }
 if (-not $makensisPath) { throw "makensis.exe was not found after NSIS installation." }
 
-$makensisPath = $null
-if ($makensis.Path) {
-    $makensisPath = $makensis.Path
-} elseif ($makensis.Source) {
-    $makensisPath = $makensis.Source
-} elseif ($makensis.FullName) {
-    $makensisPath = $makensis.FullName
-}
-if (-not $makensisPath -or -not (Test-Path $makensisPath)) {
-    throw "makensis.exe command was found but its executable path could not be resolved."
-}
-
 $dist = Join-Path $repoRoot "dist"
 if (-not (Test-Path $dist)) { New-Item -ItemType Directory -Force -Path $dist | Out-Null }
 if (-not $OutputPath) { $OutputPath = Join-Path $dist ("ClashGO-v{0}-windows-setup.exe" -f $Version) }
