@@ -395,6 +395,7 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 	}
 
 	cfg := config.LoadOrDefault("config.json")
+	applySimpleAutomationDefaults(cfg)
 	cfg.Search.MinLootGold = gold
 	cfg.Search.MinLootElixir = elixir
 	cfg.Search.MinLootDarkElixir = dark
@@ -780,6 +781,35 @@ func accountProfileCachePath() string {
 	return paths.ResolveConfig("account_profile.json")
 }
 
+func applySimpleAutomationDefaults(cfg *config.BotConfig) {
+	if cfg == nil || !cfg.Automation.SimpleMode {
+		return
+	}
+
+	cfg.Automation.AutoFarmProfile = true
+	cfg.Automation.AutoArmyGuard = true
+	cfg.Automation.AutoResourceTracking = true
+	cfg.Automation.AutoProfileSync = true
+
+	// Keep automatic mode quiet and stable. Explicit failure diagnostics still
+	// write their targeted captures when something goes wrong.
+	cfg.Debug.SaveScreenshots = false
+	cfg.Debug.TemplateDebug = false
+	cfg.Debug.StateDebug = false
+
+	// A cached public profile is enough to recover the correct HDV farm
+	// profile even when the account service is temporarily offline.
+	if data, err := os.ReadFile(accountProfileCachePath()); err == nil {
+		var profile ClashPlayerProfile
+		if json.Unmarshal(data, &profile) == nil && profile.TownHallLevel > 0 {
+			if _, ok := cfg.Attack.Farm.Profiles[fmt.Sprintf("%d", profile.TownHallLevel)]; ok {
+				cfg.Attack.Farm.TownHall = profile.TownHallLevel
+				cfg.Attack.Farm.Enabled = true
+			}
+		}
+	}
+}
+
 // GetCachedPlayerProfile returns the most recent successful account sync.
 // The UI can render this immediately at launch while the network refresh runs
 // in the background, so reopening ClashGO never presents an empty account page.
@@ -816,15 +846,7 @@ func (a *App) SetSimpleMode(enabled bool) error {
 	cfg := config.LoadOrDefault("config.json")
 	cfg.Automation.SimpleMode = enabled
 	if enabled {
-		cfg.Automation.AutoFarmProfile = true
-		cfg.Automation.AutoArmyGuard = true
-		cfg.Automation.AutoResourceTracking = true
-		cfg.Automation.AutoProfileSync = true
-		// Simple mode favors runtime stability and low disk/CPU overhead.
-		// Failure diagnostics are still captured explicitly when needed.
-		cfg.Debug.SaveScreenshots = false
-		cfg.Debug.TemplateDebug = false
-		cfg.Debug.StateDebug = false
+		applySimpleAutomationDefaults(cfg)
 	}
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
