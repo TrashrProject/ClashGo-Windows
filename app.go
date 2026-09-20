@@ -1011,8 +1011,13 @@ type CurrentArmyUnit struct {
 }
 
 type CurrentArmySnapshot struct {
-	Timestamp time.Time         `json:"timestamp"`
-	Units     []CurrentArmyUnit `json:"units"`
+	Timestamp      time.Time         `json:"timestamp"`
+	Units          []CurrentArmyUnit `json:"units"`
+	TargetTownHall int               `json:"target_town_hall,omitempty"`
+	TargetLabel    string            `json:"target_label,omitempty"`
+	Ready          bool              `json:"ready"`
+	Uncertain      bool              `json:"uncertain"`
+	Warnings       []string          `json:"warnings,omitempty"`
 }
 
 func (a *App) GetCurrentArmy() *CurrentArmySnapshot {
