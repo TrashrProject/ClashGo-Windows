@@ -820,6 +820,11 @@ func (a *App) SetSimpleMode(enabled bool) error {
 		cfg.Automation.AutoArmyGuard = true
 		cfg.Automation.AutoResourceTracking = true
 		cfg.Automation.AutoProfileSync = true
+		// Simple mode favors runtime stability and low disk/CPU overhead.
+		// Failure diagnostics are still captured explicitly when needed.
+		cfg.Debug.SaveScreenshots = false
+		cfg.Debug.TemplateDebug = false
+		cfg.Debug.StateDebug = false
 	}
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
