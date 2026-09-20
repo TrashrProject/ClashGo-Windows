@@ -1156,9 +1156,16 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 	defer b.seqRunning.Store(false)
 
-	if b.cfg.Debug.UseShellPipe {
+	if b.cfg.Debug.UseShellPipe && runtime.GOOS != "windows" {
 		b.client.EnablePersistentShell(b.cfg.Debug.ShellPipeSyncFlush)
 		defer b.client.ClosePersistentShell()
+	} else if b.cfg.Debug.UseShellPipe && runtime.GOOS == "windows" {
+		// The persistent interactive ADB shell is not reliable enough on
+		// BlueStacks/Windows yet. Live runs showed the pipe closing mid-sequence
+		// ("use of closed network connection"), followed by capture/tap failures.
+		// Use the proven one-shot transport path on Windows until the pipe has a
+		// dedicated Windows implementation.
+		b.logger.Info().Msg("persistent adb shell pipe disabled on Windows-safe path")
 	}
 
 	if b.attackCount.Load() >= int32(b.cfg.Attack.MaxAttackPerSession) {
@@ -1627,9 +1634,23 @@ func (b *Bot) clickSequence() bool {
 
 	attackClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
-		if b.findAndClick("btn_attack", "Attack", 1) {
-			attackClicked = true
-			break
+		// findAttackButton already has the Windows-safe localized/color checks.
+		// Do not require the older text/template matcher a second time here:
+		// that created the contradictory "Attack detected" -> "could not find
+		// Attack button" failure seen on localized/animated village frames.
+		if screen, err := b.client.CaptureToMat(); err == nil {
+			if b.findAttackButton(screen, 0.30) {
+				x, y := b.cal.ScaleRef(64, 666)
+				screen.Close()
+				b.logger.Info().Int("x", x).Int("y", y).Msg("Attack button verified; clicking canonical center")
+				if err := b.client.TapRandomized(x, y); err == nil {
+					b.recordActivity()
+					attackClicked = true
+					break
+				}
+			} else {
+				screen.Close()
+			}
 		}
 		b.client.JitteredSleep(500 * time.Millisecond)
 	}
