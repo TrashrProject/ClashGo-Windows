@@ -61,6 +61,7 @@ type Bot struct {
 	blueStacksRestarts atomic.Int32
 
 	chestDismissInFlight  atomic.Bool
+	rewardDismissInFlight atomic.Bool
 	splashDismissInFlight atomic.Bool
 	connLostDismissInFlight atomic.Bool
 	lastArmyCampGuardLog    time.Time
@@ -345,7 +346,7 @@ func (b *Bot) Start() error {
 	focusX, focusY := b.cal.ScaleRef(842, 345)
 	b.logger.Info().Int("x", focusX).Int("y", focusY).Msg("performing initial focus click")
 	b.client.Tap(focusX, focusY)
-	b.client.JitteredSleep(1 * time.Second)
+	b.client.JitteredSleep(250 * time.Millisecond)
 
 	go b.captureLoop()
 	return nil
@@ -393,18 +394,11 @@ func (b *Bot) captureLoop() {
 	getCaptureInterval := func() time.Duration {
 		switch gc.State {
 		case game.StateBattle, game.StateSearchMap, game.StateLoading:
-			// 250ms (4Hz) instead of the old 10Hz: during an attack the
-			// deploy/battle-end goroutines run their own captures at their
-			// own cadence, so the frame loop's full-screen classify was
-			// mostly redundant (observed: ~55ms captures + classify at 10Hz
-			// pinned one core during every battle). 4Hz still catches the
-			// result overlay fast enough for ReturnHome and the stuck
-			// watchdog.
-			return 250 * time.Millisecond
+			return 150 * time.Millisecond
 		case game.StateMainVillage, game.StateArmySelection, game.StateArmyCamp:
-			return 300 * time.Millisecond
+			return 180 * time.Millisecond
 		default:
-			return 1000 * time.Millisecond
+			return 400 * time.Millisecond
 		}
 	}
 
@@ -687,6 +681,57 @@ func (b *Bot) recoverEmulator() {
 	b.recoverySuccesses.Add(1)
 }
 
+// locateRewardPopup detects the seasonal/event "Pick a Reward!" modal.
+// The popup has a wide saturated red banner across the upper-middle of the
+// 860x732 reference frame. We deliberately use a region/color signature
+// rather than English text so it keeps working if the UI language changes.
+// The returned point is the center of the right-most card (gold/resource in
+// current events), which is always a valid selectable reward.
+func (b *Bot) locateRewardPopup(screen gocv.Mat) (int, int, bool) {
+	if screen.Empty() {
+		return 0, 0, false
+	}
+
+	x0, y0 := b.cal.ScaleRef(185, 105)
+	x1, y1 := b.cal.ScaleRef(675, 185)
+	if x0 < 0 { x0 = 0 }
+	if y0 < 0 { y0 = 0 }
+	if x1 > screen.Cols() { x1 = screen.Cols() }
+	if y1 > screen.Rows() { y1 = screen.Rows() }
+	if x1-x0 < 10 || y1-y0 < 10 {
+		return 0, 0, false
+	}
+
+	roi := screen.Region(image.Rect(x0, y0, x1, y1))
+	defer roi.Close()
+	hsv := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC3)
+	defer vision.PutMat(hsv)
+	gocv.CvtColor(roi, &hsv, gocv.ColorBGRToHSV)
+
+	m1 := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(m1)
+	m2 := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(m2)
+	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+
+	gocv.InRangeWithScalar(hsv, gocv.NewScalar(0, 120, 110, 0), gocv.NewScalar(12, 255, 255, 0), &m1)
+	gocv.InRangeWithScalar(hsv, gocv.NewScalar(168, 120, 110, 0), gocv.NewScalar(180, 255, 255, 0), &m2)
+	gocv.BitwiseOr(m1, m2, &mask)
+
+	redPixels := gocv.CountNonZero(mask)
+	total := roi.Rows() * roi.Cols()
+	if total <= 0 || float64(redPixels)/float64(total) < 0.12 {
+		return 0, 0, false
+	}
+
+	// Current modal card centers in the 860x732 reference layout are roughly
+	// x=220/455/705, y=366. Pick the right-most one to avoid event-troop
+	// inventory constraints and keep reward handling deterministic.
+	x, y := b.cal.ScaleRef(705, 366)
+	return x, y, true
+}
+
 func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, captureMs time.Duration) {
 	if err != nil {
 		gc.RecordCaptureError()
@@ -739,6 +784,29 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 	}
 
 	gc.UpdateScreen(screen, captureMs)
+
+	// Seasonal/event battles can interrupt combat with a "Pick a Reward!"
+	// overlay. It is not a normal game state and used to leave the attack
+	// sequence waiting behind the modal. Detect the large red reward banner
+	// directly from the live frame and pick the right-most reward card.
+	if rewardX, rewardY, ok := b.locateRewardPopup(screen); ok {
+		if b.rewardDismissInFlight.CompareAndSwap(false, true) {
+			b.logger.Info().Int("x", rewardX).Int("y", rewardY).Msg("Pick a Reward popup detected; selecting reward")
+			go func(x, y int) {
+				defer b.rewardDismissInFlight.Store(false)
+				// Tiny settle only; the popup is already fully visible when its
+				// banner passes detection.
+				time.Sleep(120 * time.Millisecond)
+				if err := b.client.TapRandomized(x, y); err != nil {
+					b.logger.Warn().Err(err).Msg("reward selection tap failed; will retry")
+					return
+				}
+				b.recordActivity()
+				b.logger.Info().Msg("reward selected; resuming battle")
+			}(rewardX, rewardY)
+		}
+		return
+	}
 
 	if !b.zoomedOut.Load() {
 		// Only zoom when we have evidence that this is actually the home
