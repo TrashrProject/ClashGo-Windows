@@ -252,7 +252,7 @@ func DefaultConfig() *BotConfig {
 			LootExitPercent:          100,
 			MinSecondsBetweenAttacks: 30,
 			Farm: FarmConfig{
-				Enabled:  true,
+				Enabled:  false,
 				TownHall: 18,
 				Profiles: defaultFarmProfiles(),
 			},
