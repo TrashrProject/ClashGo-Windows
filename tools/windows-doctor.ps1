@@ -84,6 +84,13 @@ if (-not $adbPath) {
     if ($adbCmd) { $adbPath = $adbCmd.Source }
 }
 if (-not $adbPath) {
+    $sdkCandidates = @()
+    if ($env:ANDROID_HOME) { $sdkCandidates += (Join-Path $env:ANDROID_HOME "platform-tools\adb.exe") }
+    if ($env:ANDROID_SDK_ROOT) { $sdkCandidates += (Join-Path $env:ANDROID_SDK_ROOT "platform-tools\adb.exe") }
+    if ($env:LOCALAPPDATA) { $sdkCandidates += (Join-Path $env:LOCALAPPDATA "Android\Sdk\platform-tools\adb.exe") }
+    $adbPath = $sdkCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+if (-not $adbPath) {
     $adbCandidates = @()
     if ($env:CLASHGO_BLUESTACKS_HOME) { $adbCandidates += (Join-Path $env:CLASHGO_BLUESTACKS_HOME "HD-Adb.exe") }
     if ($env:ProgramFiles) {
@@ -106,16 +113,14 @@ if ($adbPath) {
     $target = $null
     $probePorts = @($ports)
     if ($Instance) {
-        $preferred = @($ports | Where-Object { $_.Name -ieq $Instance })
-        $others = @($ports | Where-Object { $_.Name -ine $Instance })
-        $probePorts = @($preferred + $others)
+        $probePorts = @($ports | Where-Object { $_.Name -ieq $Instance })
     }
     foreach ($entry in $probePorts) {
         $addr = "127.0.0.1:$($entry.Port)"
         $state = (& $adbPath -s $addr get-state 2>$null)
         if ($state -eq "device") {
             $target = $addr
-            if (-not $Instance -or $entry.Name -ieq $Instance) { break }
+            break
         }
     }
 
