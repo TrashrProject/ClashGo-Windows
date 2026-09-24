@@ -2470,23 +2470,11 @@ func (b *Bot) clickSequence() bool {
 						Int("training_items", len(plan.Items)).
 						Msg("army confidently below configured farm profile; aborting matchmaking before Battle")
 
-					// Walk back toward the village with bounded, state-aware
-					// Back presses instead of restarting Clash.
-					for i := 0; i < 3; i++ {
-						_ = b.client.Back()
-						if !b.sleepResponsive(300 * time.Millisecond) { return false }
-						probe, capErr := b.client.CaptureToMat()
-						if capErr == nil && !probe.Empty() {
-							st, _ := b.classify(probe)
-							atVillage := st == game.StateMainVillage || b.findAttackButton(probe, 0.30)
-							probe.Close()
-							if atVillage {
-								b.logger.Info().Msg("returned to village after army readiness block")
-								break
-							}
-						} else if !probe.Empty() {
-							probe.Close()
-						}
+					// Return with proof after every Back press. This shares the
+					// same bounded safety rule as donation cleanup and never
+					// assumes that N Back presses are harmless.
+					if b.returnToVillageVerified(3, "army readiness block") {
+						b.logger.Info().Msg("returned to village after army readiness block")
 					}
 					return false
 
@@ -2542,20 +2530,68 @@ func (b *Bot) selectArmySlot() bool {
 		return b.findAndClick("btn_army_1", "Army 1", 1)
 	}
 
-	// Card rows in the saved-recipes list (reference resolution).
-	// cardY is the vertical center of the Nth card body; tapping the
-	// card body sets it as the active army (verified live: slot 4 at
-	// y≈403 fired the "Recipe ... set as active army!" toast).
+	// Slots 2+ do not have dedicated templates yet. Never treat a coordinate
+	// tap alone as success: first prove we are still on an army menu, then
+	// require a local visual change around the selected recipe card.
+	before, err := b.client.CaptureToMat()
+	if err != nil || before.Empty() {
+		if !before.Empty() { before.Close() }
+		b.logger.Warn().Err(err).Int("army_slot", slot).Msg("cannot verify army recipe before selection")
+		return false
+	}
+	stateBefore, _ := b.classify(before)
+	if stateBefore != game.StateArmySelection && stateBefore != game.StateArmyCamp {
+		before.Close()
+		b.logger.Warn().Str("state", stateBefore.String()).Int("army_slot", slot).Msg("refusing army recipe tap outside verified army menu")
+		return false
+	}
+
 	cardY := 227 + (slot-1)*54
+	if cardY < 180 || cardY > 590 {
+		before.Close()
+		b.logger.Warn().Int("army_slot", slot).Int("card_y", cardY).Msg("army recipe slot outside safe visible card range")
+		return false
+	}
 	tapX, tapY := b.cal.ScaleRef(430, cardY)
 
-	b.logger.Info().Int("army_slot", slot).Int("x", tapX).Int("y", tapY).Msg("selecting saved army recipe card")
+	b.logger.Info().Int("army_slot", slot).Int("x", tapX).Int("y", tapY).Msg("selecting saved army recipe card with visual verification")
 	if err := b.client.TapFast(tapX, tapY, 0.7); err != nil {
+		before.Close()
 		b.logger.Warn().Err(err).Msg("army recipe card tap failed")
 		return false
 	}
-	_ = b.sleepResponsive(120 * time.Millisecond)
+	if !b.sleepResponsive(180 * time.Millisecond) {
+		before.Close()
+		return false
+	}
+
+	after, capErr := b.client.CaptureToMat()
+	if capErr != nil || after.Empty() {
+		before.Close()
+		if !after.Empty() { after.Close() }
+		b.logger.Warn().Err(capErr).Int("army_slot", slot).Msg("army recipe selection could not be visually confirmed")
+		return false
+	}
+
+	delta := localVisualDelta(before, after, image.Pt(tapX, tapY), int(70*b.cal.ScaleX), int(30*b.cal.ScaleY))
+	stateAfter, _ := b.classify(after)
+	before.Close()
+	after.Close()
+
+	// Either the card/toast changed materially, or the menu transitioned to a
+	// different known army state. Anything else is an unproven tap.
+	verified := delta >= 0.012 || stateAfter != stateBefore
+	if !verified {
+		b.logger.Warn().
+			Int("army_slot", slot).
+			Float64("visual_delta", delta).
+			Str("state", stateAfter.String()).
+			Msg("army recipe tap produced no verified UI progress")
+		return false
+	}
+
 	b.recordActivity()
+	b.logger.Info().Int("army_slot", slot).Float64("visual_delta", delta).Msg("army recipe selection verified")
 	return true
 }
 
