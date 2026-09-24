@@ -56,3 +56,24 @@ func TestCaptureHeartbeatTimestampRoundTrip(t *testing.T) {
 		t.Fatalf("heartbeat timestamp lost precision: %s", delta)
 	}
 }
+
+
+func TestAutomationTaskTimeoutBudgets(t *testing.T) {
+	tests := []struct {
+		name string
+		min  time.Duration
+		max  time.Duration
+	}{
+		{"resource scan", 10 * time.Second, 30 * time.Second},
+		{"donation", 45 * time.Second, 90 * time.Second},
+		{"army check", 60 * time.Second, 2 * time.Minute},
+		{"wall upgrades", 90 * time.Second, 3 * time.Minute},
+		{"attack", 8 * time.Minute, 15 * time.Minute},
+	}
+	for _, tc := range tests {
+		got := automationTaskTimeout(tc.name)
+		if got < tc.min || got > tc.max {
+			t.Fatalf("%s timeout=%s want between %s and %s", tc.name, got, tc.min, tc.max)
+		}
+	}
+}
