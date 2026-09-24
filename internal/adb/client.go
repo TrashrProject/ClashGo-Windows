@@ -458,7 +458,9 @@ func (c *Client) Tap(x, y int) error {
 		actualY += oy
 	}
 	c.log.Debugf("ADB TAP: (%d, %d) actual: (%d, %d)", x, y, actualX, actualY)
+	c.mu.Lock()
 	err := c.routeTap("input tap", actualX, actualY, false)
+	c.mu.Unlock()
 	c.fireTapHook(TapEvent{Type: "tap", X: x, Y: y, ActualX: actualX, ActualY: actualY, StdDev: stdDev, Error: errStr(err)})
 	return err
 }
@@ -479,7 +481,9 @@ func (c *Client) TapAsync(x, y int) error {
 		actualY += oy
 	}
 	c.log.Debugf("ADB TAP-ASYNC: (%d, %d) actual: (%d, %d)", x, y, actualX, actualY)
+	c.mu.Lock()
 	err := c.routeTap("input tap", actualX, actualY, true)
+	c.mu.Unlock()
 	c.fireTapHook(TapEvent{Type: "tap_async", X: x, Y: y, ActualX: actualX, ActualY: actualY, StdDev: stdDev, Error: errStr(err)})
 	return err
 }
@@ -556,7 +560,9 @@ func (c *Client) TapFastAsync(x, y int, stdDev float64) error {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	ox := int(r.NormFloat64() * stdDev)
 	oy := int(r.NormFloat64() * stdDev)
+	c.mu.Lock()
 	err := c.routeTap("input tap", x+ox, y+oy, true)
+	c.mu.Unlock()
 	c.fireTapHook(TapEvent{Type: "tap_fast_async", X: x, Y: y, ActualX: x + ox, ActualY: y + oy, StdDev: stdDev, Error: errStr(err)})
 	return err
 }
