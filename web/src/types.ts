@@ -27,7 +27,7 @@ export interface BotStats {
   training_housing_pending: number;
   training_plan_uncertain: boolean;
   army_check_pending: boolean;
-  army_verified_until_nano: number;
+  army_verified_until_unix: number;
   army_repair_attempts: number;
   army_repair_successes: number;
   training_pending: Array<{
