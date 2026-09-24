@@ -83,6 +83,10 @@ type Bot struct {
 	automationTaskInFlight   atomic.Bool
 	automationTaskMu         sync.RWMutex
 	automationTaskName       string
+	automationLastTask       string
+	automationTaskStarted    atomic.Int64
+	automationTasksStarted   atomic.Int32
+	automationTasksCompleted atomic.Int32
 	donationChecks          atomic.Int32
 	donationsSent           atomic.Int32
 	lastDonationUnix        atomic.Int64
@@ -1186,28 +1190,51 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 // Enabling several capabilities means they are eligible for scheduling; it
 // never means ClashGO may click through several flows simultaneously.
 func (b *Bot) tryBeginAutomationTask(name string) bool {
+	if name == "" {
+		return false
+	}
 	if !b.automationTaskInFlight.CompareAndSwap(false, true) {
 		return false
 	}
 	b.automationTaskMu.Lock()
 	b.automationTaskName = name
 	b.automationTaskMu.Unlock()
+	b.automationTaskStarted.Store(time.Now().Unix())
+	b.automationTasksStarted.Add(1)
+	b.logger.Debug().Str("task", name).Msg("automation task lease acquired")
 	return true
 }
 
 func (b *Bot) endAutomationTask(name string) {
 	b.automationTaskMu.Lock()
-	if b.automationTaskName == name {
-		b.automationTaskName = ""
+	if b.automationTaskName != name {
+		current := b.automationTaskName
+		b.automationTaskMu.Unlock()
+		b.logger.Error().
+			Str("ending_task", name).
+			Str("current_task", current).
+			Msg("refusing to release automation lease owned by another task")
+		return
 	}
+	b.automationLastTask = name
+	b.automationTaskName = ""
 	b.automationTaskMu.Unlock()
+	b.automationTaskStarted.Store(0)
+	b.automationTasksCompleted.Add(1)
 	b.automationTaskInFlight.Store(false)
+	b.logger.Debug().Str("task", name).Msg("automation task lease released")
 }
 
 func (b *Bot) currentAutomationTask() string {
 	b.automationTaskMu.RLock()
 	defer b.automationTaskMu.RUnlock()
 	return b.automationTaskName
+}
+
+func (b *Bot) automationTaskSnapshot() (current, last string) {
+	b.automationTaskMu.RLock()
+	defer b.automationTaskMu.RUnlock()
+	return b.automationTaskName, b.automationLastTask
 }
 
 func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
@@ -3258,6 +3285,7 @@ func (b *Bot) Stats() BotStats {
 	villageNextAt := b.villageNextAt
 	lastDonationResult := b.lastDonationResult
 	b.statusMu.RUnlock()
+	automationTask, automationLastTask := b.automationTaskSnapshot()
 	state := game.GameState(b.runtimeState.Load())
 	phase := RuntimePhase(b.runtimePhase.Load())
 	stateAge := time.Duration(0)
@@ -3302,6 +3330,13 @@ func (b *Bot) Stats() BotStats {
 			if villageNextAt.IsZero() { return 0 }
 			return villageNextAt.Unix()
 		}(),
+		AutomationBusy:        b.automationTaskInFlight.Load(),
+		AutomationTask:        automationTask,
+		AutomationLastTask:    automationLastTask,
+		AutomationTaskStarted: b.automationTaskStarted.Load(),
+		AutomationTasksStarted: b.automationTasksStarted.Load(),
+		AutomationTasksCompleted: b.automationTasksCompleted.Load(),
+		WallUpgradePending:    b.wallUpgradePending.Load(),
 		RuntimeState:          state.String(),
 		RuntimePhase:       phase.String(),
 		RuntimeStateAge:    stateAge,
@@ -3343,6 +3378,13 @@ type BotStats struct {
 	VillageAction          string                    `json:"village_action"`
 	VillageReason          string                    `json:"village_reason"`
 	VillageNextUnix        int64                     `json:"village_next_unix"`
+	AutomationBusy          bool                      `json:"automation_busy"`
+	AutomationTask          string                    `json:"automation_task"`
+	AutomationLastTask      string                    `json:"automation_last_task"`
+	AutomationTaskStarted   int64                     `json:"automation_task_started_unix"`
+	AutomationTasksStarted  int32                     `json:"automation_tasks_started"`
+	AutomationTasksCompleted int32                    `json:"automation_tasks_completed"`
+	WallUpgradePending      bool                      `json:"wall_upgrade_pending"`
 
 	RuntimeState    string        `json:"runtime_state"`
 	RuntimePhase    string        `json:"runtime_phase"`
