@@ -1457,8 +1457,14 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 		}
 
 		if isHero {
+			safe := resolveDeploy([]image.Point{p1})
+			if len(safe) == 0 {
+				e.logger.Warn().Str("unit", unit.Name).Msg("hero deployment blocked by red no-deploy zone")
+				return false
+			}
+			p1 = safe[0]
 			jPt := e.addJitter(p1, 10)
-			e.logger.Info().Str("unit", unit.Name).Int("x", jPt.X).Int("y", jPt.Y).Msg("deploying hero")
+			e.logger.Info().Str("unit", unit.Name).Int("x", jPt.X).Int("y", jPt.Y).Msg("deploying hero on verified safe point")
 
 			j2 := e.addJitter(p1, 10)
 			j3 := e.addJitter(p1, 10)
@@ -1480,7 +1486,13 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 			}
 
 			if p1 == p2 {
-				e.logger.Info().Str("unit", unit.Name).Int("count", maxTaps).Msg("deploying troop point batch")
+				safe := resolveDeploy([]image.Point{p1})
+				if len(safe) == 0 {
+					e.logger.Warn().Str("unit", unit.Name).Msg("troop point deployment blocked by red no-deploy zone")
+					return false
+				}
+				p1 = safe[0]
+				e.logger.Info().Str("unit", unit.Name).Int("count", maxTaps).Interface("safe_point", p1).Msg("deploying troop point batch")
 				for i := 0; i < maxTaps; {
 					rem := maxTaps - i
 					if rem >= 3 {
@@ -1511,7 +1523,15 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 					}
 					tx := int(float64(p1.X) + float64(p2.X-p1.X)*pct)
 					ty := int(float64(p1.Y) + float64(p2.Y-p1.Y)*pct)
-					points = append(points, e.addJitter(image.Pt(tx, ty), 10))
+					points = append(points, image.Pt(tx, ty))
+				}
+				points = resolveDeploy(points)
+				if len(points) == 0 {
+					e.logger.Warn().Str("unit", unit.Name).Msg("all troop line points blocked by red no-deploy zone")
+					return false
+				}
+				for i := range points {
+					points[i] = e.addJitter(points[i], 10)
 				}
 
 				if rand.Float64() < 0.5 {
