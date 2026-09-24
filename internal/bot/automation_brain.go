@@ -1,0 +1,100 @@
+package bot
+
+import "time"
+
+// VillageAction is the single decision emitted by the village automation
+// coordinator. Keeping arbitration in one place prevents donations, resource
+// scans and matchmaking from racing each other.
+type VillageAction int
+
+const (
+	VillageActionIdle VillageAction = iota
+	VillageActionHold
+	VillageActionDonate
+	VillageActionScanResources
+	VillageActionWaitArmy
+	VillageActionAttack
+)
+
+func (a VillageAction) String() string {
+	switch a {
+	case VillageActionHold:
+		return "holding"
+	case VillageActionDonate:
+		return "donating"
+	case VillageActionScanResources:
+		return "reading resources"
+	case VillageActionWaitArmy:
+		return "waiting for army"
+	case VillageActionAttack:
+		return "starting attack"
+	default:
+		return "idle"
+	}
+}
+
+type VillageDecisionInput struct {
+	Now                 time.Time
+	VillageVerified     bool
+	SequenceRunning     bool
+	DonationInFlight    bool
+	DonationEnabled     bool
+	LastDonationScan    time.Time
+	DonationInterval    time.Duration
+	ResourceEnabled     bool
+	LastResourceScan    time.Time
+	ResourceInterval    time.Duration
+	ArmyWaitUntil       time.Time
+	AttackButtonVisible bool
+}
+
+type VillageDecision struct {
+	Action VillageAction
+	Reason string
+}
+
+// decideVillageAction is deliberately pure so priority rules are testable.
+//
+// Priority:
+//   1. never overlap an existing sequence/action;
+//   2. donation opportunity (short and bounded);
+//   3. periodic resource read;
+//   4. explicit army-ready gate;
+//   5. matchmaking.
+//
+// This means useful village housekeeping can happen while troops are training,
+// but nothing competes with an active donation or attack.
+func decideVillageAction(in VillageDecisionInput) VillageDecision {
+	if !in.VillageVerified {
+		return VillageDecision{Action: VillageActionIdle, Reason: "village not positively verified"}
+	}
+	if in.SequenceRunning || in.DonationInFlight {
+		return VillageDecision{Action: VillageActionHold, Reason: "another automation action is already running"}
+	}
+
+	donationInterval := in.DonationInterval
+	if donationInterval <= 0 {
+		donationInterval = 90 * time.Second
+	}
+	if in.DonationEnabled && (in.LastDonationScan.IsZero() || in.Now.Sub(in.LastDonationScan) >= donationInterval) {
+		return VillageDecision{Action: VillageActionDonate, Reason: "clan donation check is due"}
+	}
+
+	resourceInterval := in.ResourceInterval
+	if resourceInterval <= 0 {
+		resourceInterval = 15 * time.Second
+	}
+	if in.ResourceEnabled && (in.LastResourceScan.IsZero() || in.Now.Sub(in.LastResourceScan) >= resourceInterval) {
+		return VillageDecision{Action: VillageActionScanResources, Reason: "resource snapshot is due"}
+	}
+
+	if !in.ArmyWaitUntil.IsZero() && in.Now.Before(in.ArmyWaitUntil) {
+		return VillageDecision{Action: VillageActionWaitArmy, Reason: "army readiness gate is active"}
+	}
+
+	if in.AttackButtonVisible {
+		return VillageDecision{Action: VillageActionAttack, Reason: "village ready and attack entry is available"}
+	}
+
+	return VillageDecision{Action: VillageActionIdle, Reason: "no action due"}
+}
