@@ -61,6 +61,7 @@ type VillageDecisionInput struct {
 type VillageDecision struct {
 	Action VillageAction
 	Reason string
+	NextAt time.Time
 }
 
 // decideVillageAction is deliberately pure so priority rules are testable.
@@ -106,7 +107,7 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 	}
 
 	if !in.ArmyWaitUntil.IsZero() && in.Now.Before(in.ArmyWaitUntil) {
-		return VillageDecision{Action: VillageActionWaitArmy, Reason: "army readiness gate is active"}
+		return VillageDecision{Action: VillageActionWaitArmy, Reason: "army readiness gate is active", NextAt: in.ArmyWaitUntil}
 	}
 
 	if !in.AttackEnabled {
@@ -116,7 +117,7 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 		return VillageDecision{Action: VillageActionSessionComplete, Reason: "session attack limit reached"}
 	}
 	if !in.AttackNotBefore.IsZero() && in.Now.Before(in.AttackNotBefore) {
-		return VillageDecision{Action: VillageActionCooldown, Reason: "waiting between attacks"}
+		return VillageDecision{Action: VillageActionCooldown, Reason: "waiting between attacks", NextAt: in.AttackNotBefore}
 	}
 
 	if in.AttackButtonVisible {
