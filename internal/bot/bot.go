@@ -936,8 +936,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			return
 		}
 		if b.chestDismissInFlight.CompareAndSwap(false, true) {
-			b.logger.Info().Msg("chest reward screen detected; dispatching dismiss goroutine")
-			go func() {
+			started := b.startAutomationTask("chest reward", func() {
 				defer b.chestDismissInFlight.Store(false)
 				start := time.Now()
 				if err := b.navigator.DismissChestReward(); err != nil {
@@ -949,7 +948,10 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 						Dur("elapsed", time.Since(start)).
 						Msg("chest dismissed")
 				}
-			}()
+			})
+			if !started {
+				b.chestDismissInFlight.Store(false)
+			}
 		}
 		return
 	}
@@ -1191,30 +1193,9 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		}
 	}
 
-	// Idle humanization: while confirmed on the main village with no
-	// scheduled UI task in progress, drift the
-	// camera the way a waiting player would. Throttled so the wander
-	// never overlaps an attack sequence, and deliberately NOT
-	// recordActivity — a genuinely stuck bot must still trip the
-	// stuck-watchdog and cycle the game.
-	//
-	// Dispatched in a goroutine (mirroring the chest-dismiss pattern)
-	// so the ~3s sendevent gesture can't freeze the capture loop's UI
-	// frame stream; the seqRunning re-check keeps it from colliding
-	// with a freshly-started attack sequence. The pan swipes the map
-	// center, never the fixed HUD chrome, so a mid-pan capture still
-	// sees the attack button.
-	if gc.State == game.StateMainVillage && time.Since(b.lastIdlePan) > 18*time.Second {
-		b.lastIdlePan = time.Now()
-		b.logger.Debug().Msg("idle in village, wandering camera")
-		go func() {
-			if b.seqRunning.Load() {
-				return
-			}
-			b.navigator.IdlePan()
-		}()
-	}
-
+	// No cosmetic village panning here. Every injected gesture is reserved for
+	// a functional scheduler task or an explicit recovery action, which keeps
+	// automation deterministic and prevents idle gestures racing real work.
 	if gc.State == game.StateArmyCamp && time.Since(b.lastNav) > 3*time.Second {
 		// Guard against a misclassification, not a real camp: a dim or
 		// zoomed village frame can pass the ArmyCamp rule's single loose
@@ -1318,6 +1299,8 @@ func (b *Bot) automationTaskSnapshot() (current, last string) {
 
 func automationPhaseForTask(name string) RuntimePhase {
 	switch name {
+	case "chest reward":
+		return PhaseChestReward
 	case "donation":
 		return PhaseDonation
 	case "resource scan":
