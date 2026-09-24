@@ -131,6 +131,29 @@ func ActionableTrainingItems(plan TrainingPlan) []TrainingPlanItem {
 	return out
 }
 
+func ReadTrainingPlan() (TrainingPlan, error) {
+	data, err := os.ReadFile(paths.ResolveConfig("pending_training.json"))
+	if err != nil {
+		return TrainingPlan{}, err
+	}
+	var plan TrainingPlan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		return TrainingPlan{}, err
+	}
+	return plan, nil
+}
+
+func (p TrainingPlan) Stale(now time.Time, maxAge time.Duration) bool {
+	if p.CreatedAt.IsZero() {
+		return true
+	}
+	if maxAge <= 0 {
+		maxAge = 15 * time.Minute
+	}
+	age := now.Sub(p.CreatedAt)
+	return age < 0 || age > maxAge
+}
+
 func WriteTrainingPlan(plan TrainingPlan) error {
 	data, err := json.MarshalIndent(plan, "", "  ")
 	if err != nil {
