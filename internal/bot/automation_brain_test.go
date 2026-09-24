@@ -49,3 +49,45 @@ func TestVillageBrainNeverActsWithoutVerifiedVillage(t *testing.T) {
 		t.Fatalf("action=%v want idle", got.Action)
 	}
 }
+
+func TestVillageBrainHoldsDuringDonationOrAttack(t *testing.T) {
+	now := time.Unix(2000, 0)
+	for _, tc := range []struct {
+		name string
+		seq  bool
+		don  bool
+	}{
+		{name: "attack running", seq: true},
+		{name: "donation running", don: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := decideVillageAction(VillageDecisionInput{
+				Now:                 now,
+				VillageVerified:     true,
+				SequenceRunning:     tc.seq,
+				DonationInFlight:    tc.don,
+				DonationEnabled:     true,
+				ResourceEnabled:     true,
+				AttackButtonVisible: true,
+			})
+			if got.Action != VillageActionHold {
+				t.Fatalf("action=%v want hold", got.Action)
+			}
+		})
+	}
+}
+
+func TestVillageBrainUsesHousekeepingWhileArmyWaits(t *testing.T) {
+	now := time.Unix(3000, 0)
+	got := decideVillageAction(VillageDecisionInput{
+		Now:                 now,
+		VillageVerified:     true,
+		ResourceEnabled:     true,
+		LastResourceScan:    now.Add(-time.Minute),
+		ArmyWaitUntil:       now.Add(5 * time.Minute),
+		AttackButtonVisible: true,
+	})
+	if got.Action != VillageActionScanResources {
+		t.Fatalf("action=%v want resource scan before army wait", got.Action)
+	}
+}
