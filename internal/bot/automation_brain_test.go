@@ -392,3 +392,23 @@ func TestAutomationTaskWrongReleasePreservesOwnerAndCounters(t *testing.T) {
 		t.Fatalf("correct release completion count=%d want 1", got)
 	}
 }
+
+
+func TestArmyPreflightDueFreshness(t *testing.T) {
+	now := time.Unix(10000, 0)
+	if armyPreflightDue(false, true, 0, now) {
+		t.Fatal("disabled army preflight must never be due")
+	}
+	if !armyPreflightDue(true, true, now.Add(time.Minute).UnixNano(), now) {
+		t.Fatal("explicit pending flag must force a preflight")
+	}
+	if !armyPreflightDue(true, false, 0, now) {
+		t.Fatal("missing proof must require a preflight")
+	}
+	if !armyPreflightDue(true, false, now.Add(-time.Second).UnixNano(), now) {
+		t.Fatal("expired proof must require a preflight")
+	}
+	if armyPreflightDue(true, false, now.Add(time.Minute).UnixNano(), now) {
+		t.Fatal("fresh proof must suppress duplicate preflight")
+	}
+}
