@@ -242,7 +242,10 @@ func (b *Bot) matchDonationTroops(screen gocv.Mat, roi image.Rectangle) []string
 	names := []string{"electro_dragon", "balloon"}
 	var found []string
 	for _, name := range names {
-		tpl, ok := b.templates.Get(name)
+		tpl, ok := b.templates.Get("attack/" + name)
+		if !ok {
+			tpl, ok = b.templates.Get(name)
+		}
 		if !ok || tpl.Empty() {
 			continue
 		}
@@ -256,7 +259,10 @@ func (b *Bot) matchDonationTroops(screen gocv.Mat, roi image.Rectangle) []string
 
 func (b *Bot) findDonationTroopInPicker(screen gocv.Mat, name string) (image.Point, bool) {
 	key := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(name)), " ", "_")
-	tpl, ok := b.templates.Get(key)
+	tpl, ok := b.templates.Get("attack/" + key)
+	if !ok {
+		tpl, ok = b.templates.Get(key)
+	}
 	if !ok || tpl.Empty() {
 		return image.Point{}, false
 	}
