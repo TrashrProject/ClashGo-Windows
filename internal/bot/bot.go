@@ -917,6 +917,13 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 	}
 
 	if state == game.StateChestReward {
+		// Chest collection is ordinary village housekeeping, not a recovery
+		// action. If another task owns the UI, leave the chest untouched until
+		// that task exits so a background chest tap cannot race a donation,
+		// army preflight, wall flow or attack.
+		if b.seqRunning.Load() || b.automationTaskInFlight.Load() {
+			return
+		}
 		if b.cfg.Device.DisableChestDismissal {
 
 			b.logger.Debug().Msg("chest detected but dismissal disabled by config; deferring to stuck-watchdog")
@@ -983,10 +990,6 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		return
 	}
 
-	if b.seqRunning.Load() {
-		return
-	}
-
 	// Connection-lost dialog. CoC shows this whenever the game's own
 	// server link drops (emulator network blip, server restart); the
 	// classifier used to misread it as StateBattleEnd — the dialog's
@@ -1035,6 +1038,13 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 				b.logger.Info().Msg("quit-confirm Cancel tapped")
 			}()
 		}
+		return
+	}
+
+	// Attack/search owns normal navigation, but the safety dialogs above are
+	// allowed to interrupt it. This keeps a lost connection recoverable without
+	// letting the background frame loop navigate elsewhere mid-attack.
+	if b.seqRunning.Load() {
 		return
 	}
 
