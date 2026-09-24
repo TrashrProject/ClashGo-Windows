@@ -144,6 +144,7 @@ function App() {
     training_pending: [],
     village_action: 'idle',
     village_reason: '',
+    village_next_unix: 0,
     adb_health: {
       last_capture: null,
       avg_capture_ms: 0,
