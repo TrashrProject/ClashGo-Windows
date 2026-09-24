@@ -176,7 +176,9 @@ func (b *Bot) runDonationCycle() {
 	if err != nil || picker.Empty() {
 		if !picker.Empty() { picker.Close() }
 		report.SkippedReason = "donation picker capture failed"
-		_ = b.client.Back()
+		// Do not guess the current UI state with a blind Back after a failed
+		// capture. The verified cleanup helper will re-capture first and only
+		// navigate when village evidence is absent.
 		b.returnToVillageAfterDonation(3)
 		return
 	}
@@ -248,8 +250,11 @@ func (b *Bot) runDonationCycle() {
 	// fixed two-Back sequence: if the donation picker auto-closes after a
 	// successful donation, the second blind Back would hit the village and open
 	// Clash's quit-confirm dialog.
-	b.returnToVillageAfterDonation(3)
-	b.recordActivity()
+	if b.returnToVillageAfterDonation(3) {
+		b.recordActivity()
+	} else {
+		b.logger.Warn().Msg("donation cycle ended without verified village cleanup")
+	}
 }
 
 func (b *Bot) returnToVillageAfterDonation(maxBacks int) bool {
