@@ -1048,6 +1048,12 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			LastResourceScan:    b.lastResourceScan,
 			ResourceInterval:    15 * time.Second,
 			ArmyWaitUntil:       armyUntil,
+			AttackEnabled:       b.cfg.Attack.Enabled,
+			AttackCapReached:    int(b.attackCount.Load()) >= b.cfg.Attack.MaxAttackPerSession,
+			AttackNotBefore: func() time.Time {
+				if b.cfg.Attack.MinSecondsBetweenAttacks <= 0 || b.lastAttackEnd.IsZero() { return time.Time{} }
+				return b.lastAttackEnd.Add(time.Duration(b.cfg.Attack.MinSecondsBetweenAttacks) * time.Second)
+			}(),
 			AttackButtonVisible: attackVisible,
 		})
 		b.villageAction.Store(int32(decision.Action))
@@ -1070,6 +1076,10 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 					Time("retry_after", armyUntil).
 					Msg("automation brain: army not ready yet; using village time for safe housekeeping")
 			}
+			return
+		case VillageActionCooldown:
+			return
+		case VillageActionSessionComplete:
 			return
 		case VillageActionAttack:
 			b.logger.Info().
