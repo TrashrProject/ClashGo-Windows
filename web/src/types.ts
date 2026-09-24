@@ -22,6 +22,9 @@ export interface BotStats {
   donation_checks: number;
   donations_sent: number;
   last_donation_unix: number;
+  training_items_pending: number;
+  training_housing_pending: number;
+  training_plan_uncertain: boolean;
   village_action: string;
   adb_health: {
     avg_capture_ms: number;
