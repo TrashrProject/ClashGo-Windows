@@ -34,8 +34,14 @@ func (b *Bot) maybeStartDonationCycle(state gocv.Mat) bool {
 	if !b.cfg.Automation.Preferences.AutoDonate || b.seqRunning.Load() {
 		return false
 	}
-	if b.donationInFlight.Load() || time.Since(b.lastDonationScan) < 90*time.Second {
-		return b.donationInFlight.Load()
+	if b.donationInFlight.Load() {
+		return true
+	}
+	if next := b.donationNextCheck.Load(); next > 0 && time.Now().UnixNano() < next {
+		return false
+	}
+	if time.Since(b.lastDonationScan) < 90*time.Second {
+		return false
 	}
 
 	// Only touch the chat handle from a positively-verified village frame.
@@ -59,6 +65,30 @@ func (b *Bot) runDonationCycle() {
 		if data, err := json.MarshalIndent(report, "", "  "); err == nil {
 			_ = AsyncWriteFile(paths.ResolveConfig("last_donation_report.json"), data, 0o600)
 		}
+
+		// Adaptive retry: no-request scans are naturally low priority, while
+		// technical failures should retry sooner. This avoids opening chat every
+		// 90 seconds forever when the clan is quiet.
+		delay := 90 * time.Second
+		result := "check complete"
+		switch {
+		case len(report.Donated) > 0:
+			delay = 90 * time.Second
+			result = "donation verified"
+		case report.SkippedReason == "no donation request found":
+			delay = 3 * time.Minute
+			result = "no requests"
+		case report.SkippedReason == "request found but troop type was not recognized":
+			delay = 60 * time.Second
+			result = "request needs better recognition"
+		case report.SkippedReason != "":
+			delay = 30 * time.Second
+			result = report.SkippedReason
+		}
+		b.donationNextCheck.Store(time.Now().Add(delay).UnixNano())
+		b.statusMu.Lock()
+		b.lastDonationResult = result
+		b.statusMu.Unlock()
 	}()
 
 	if b.ctx.Err() != nil || b.seqRunning.Load() {
