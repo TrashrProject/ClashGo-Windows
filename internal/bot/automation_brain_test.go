@@ -50,30 +50,23 @@ func TestVillageBrainNeverActsWithoutVerifiedVillage(t *testing.T) {
 	}
 }
 
-func TestVillageBrainHoldsDuringDonationOrAttack(t *testing.T) {
+func TestVillageBrainReportsActiveWork(t *testing.T) {
 	now := time.Unix(2000, 0)
-	for _, tc := range []struct {
-		name string
-		seq  bool
-		don  bool
-	}{
-		{name: "attack running", seq: true},
-		{name: "donation running", don: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := decideVillageAction(VillageDecisionInput{
-				Now:                 now,
-				VillageVerified:     true,
-				SequenceRunning:     tc.seq,
-				DonationInFlight:    tc.don,
-				DonationEnabled:     true,
-				ResourceEnabled:     true,
-				AttackButtonVisible: true,
-			})
-			if got.Action != VillageActionHold {
-				t.Fatalf("action=%v want hold", got.Action)
-			}
-		})
+
+	attack := decideVillageAction(VillageDecisionInput{
+		Now: now, VillageVerified: true, SequenceRunning: true,
+		DonationEnabled: true, ResourceEnabled: true, AttackButtonVisible: true,
+	})
+	if attack.Action != VillageActionHold {
+		t.Fatalf("attack action=%v want hold", attack.Action)
+	}
+
+	donation := decideVillageAction(VillageDecisionInput{
+		Now: now, VillageVerified: true, DonationInFlight: true,
+		DonationEnabled: true, ResourceEnabled: true, AttackButtonVisible: true,
+	})
+	if donation.Action != VillageActionDonate {
+		t.Fatalf("donation action=%v want donate", donation.Action)
 	}
 }
 
