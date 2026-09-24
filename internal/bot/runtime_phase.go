@@ -15,6 +15,7 @@ const (
 	PhaseResourceScan
 	PhaseWallUpgrade
 	PhaseArmyCheck
+	PhaseVillageNavigation
 	PhaseAttackNavigation
 	PhaseSearching
 	PhaseDeploying
@@ -37,6 +38,8 @@ func (p RuntimePhase) String() string {
 		return "WallUpgrade"
 	case PhaseArmyCheck:
 		return "ArmyCheck"
+	case PhaseVillageNavigation:
+		return "VillageNavigation"
 	case PhaseAttackNavigation:
 		return "AttackNavigation"
 	case PhaseSearching:
