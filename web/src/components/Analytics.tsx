@@ -191,6 +191,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
                 <div className="mt-1 text-[10px] text-zinc-500">
                   {stats.wall_upgrade_pending ? 'Wall maintenance is queued. ' : ''}
                   {stats.automation_last_task ? `Last completed: ${stats.automation_last_task}.` : 'No completed task yet.'}
+                  {stats.automation_busy && (stats.automation_task_age_sec ?? 0) > 0 ? ` Running for ${stats.automation_task_age_sec}s.` : ''}
                 </div>
               </div>
               <div className="text-right">
@@ -202,6 +203,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
           <div className="grid grid-cols-2 gap-3">
             {[
               { label: 'Scheduler starts', value: stats.automation_tasks_started ?? 0, detail: stats.automation_busy ? `Running ${stats.automation_task || 'task'}` : 'No overlapping UI tasks' },
+              { label: 'Recovered task panics', value: stats.automation_task_panics ?? 0, detail: (stats.automation_task_panics ?? 0) === 0 ? 'No scheduler panics recovered' : 'See activity log for details' },
               { label: 'Donation checks', value: stats.donation_checks ?? 0, detail: stats.last_donation_result || 'No check yet' },
               { label: 'Verified donations', value: stats.donations_sent ?? 0, detail: stats.last_donation_unix ? new Date(stats.last_donation_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'None yet' },
               { label: 'Army preflight', value: stats.army_check_pending ? 'Queued' : 'Ready', detail: stats.army_check_pending ? 'Will run before matchmaking' : 'Latest required check completed' },
