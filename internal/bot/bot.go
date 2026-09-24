@@ -1065,9 +1065,14 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 	}
 
 	if gc.State == game.StateBattleEnd || gc.State == game.StateReturnHome {
-		b.logger.Info().Str("state", gc.State.String()).Msg("detected terminal state without active sequence, returning home...")
-		go b.attackExec.ReturnHome()
-		b.recordActivity()
+		b.startAutomationTask("return home recovery", func() {
+			b.logger.Info().Str("state", gc.State.String()).Msg("detected terminal state without active sequence, returning home...")
+			if err := b.attackExec.ReturnHome(); err != nil {
+				b.logger.Warn().Err(err).Msg("standalone return-home recovery failed")
+				return
+			}
+			b.recordActivity()
+		})
 		return
 	}
 
@@ -1216,8 +1221,14 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			return
 		}
 		b.lastNav = time.Now()
-		b.logger.Info().Msg("in ArmyCamp, returning to main village...")
-		go b.navigator.NavigateToMainVillage(gc)
+		b.startAutomationTask("village navigation", func() {
+			b.logger.Info().Msg("in ArmyCamp, returning to main village...")
+			if err := b.navigator.NavigateToMainVillage(gc); err != nil {
+				b.logger.Warn().Err(err).Msg("village navigation failed")
+				return
+			}
+			b.recordActivity()
+		})
 		return
 	}
 }
@@ -1309,6 +1320,10 @@ func automationPhaseForTask(name string) RuntimePhase {
 		return PhaseWallUpgrade
 	case "army check":
 		return PhaseArmyCheck
+	case "village navigation":
+		return PhaseVillageNavigation
+	case "return home recovery":
+		return PhaseReturningHome
 	default:
 		return PhaseIdle
 	}
