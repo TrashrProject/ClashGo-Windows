@@ -1176,7 +1176,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 	}
 
 	// Idle humanization: while confirmed on the main village with no
-	// attack button in sight (army still training / waiting), drift the
+	// scheduled UI task in progress, drift the
 	// camera the way a waiting player would. Throttled so the wander
 	// never overlaps an attack sequence, and deliberately NOT
 	// recordActivity — a genuinely stuck bot must still trip the
@@ -1795,12 +1795,11 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		return
 	}
 
-	// Inter-attack cooldown. Armies need real time to retrain; without a
-	// gate the bot re-attacked ~8s after every Return Home with whatever
-	// the camps held (observed live: three near-identical defeats in <4
-	// minutes). min_seconds_between_attacks is the human-real pause;
-	// waiting inside the sequence goroutine (seqRunning is already held)
-	// keeps the capture loop from starting a second sequence meanwhile.
+	// Defensive inter-attack settle. Modern Clash applies saved army recipes
+	// immediately, so this is NOT a troop-training timer. The scheduler already
+	// owns the normal cooldown; this duplicate check is a final safety rail for
+	// direct/legacy callers and gives the returned village UI a moment to settle
+	// before another matchmaking navigation begins.
 	gap := time.Duration(b.cfg.Attack.MinSecondsBetweenAttacks) * time.Second
 	if gap > 0 && !b.lastAttackEnd.IsZero() {
 		if wait := gap - time.Since(b.lastAttackEnd); wait > 0 {
