@@ -87,6 +87,7 @@ type Bot struct {
 	automationTaskStarted    atomic.Int64
 	automationTasksStarted   atomic.Int32
 	automationTasksCompleted atomic.Int32
+	automationTaskPanics     atomic.Int32
 	donationChecks          atomic.Int32
 	donationsSent           atomic.Int32
 	lastDonationUnix        atomic.Int64
@@ -1316,6 +1317,7 @@ func (b *Bot) startAutomationTask(name string, work func()) bool {
 		}
 		defer func() {
 			if r := recover(); r != nil {
+				b.automationTaskPanics.Add(1)
 				b.logger.Error().Interface("panic", r).Str("task", name).
 					Msg("recovered panic in asynchronous automation task")
 				b.recordActivity()
@@ -3488,6 +3490,14 @@ func (b *Bot) Stats() BotStats {
 		AutomationTaskStarted: b.automationTaskStarted.Load(),
 		AutomationTasksStarted: b.automationTasksStarted.Load(),
 		AutomationTasksCompleted: b.automationTasksCompleted.Load(),
+		AutomationTaskPanics:     b.automationTaskPanics.Load(),
+		AutomationTaskAgeSec: func() int64 {
+			if n := b.automationTaskStarted.Load(); n > 0 {
+				age := now.Unix() - n
+				if age > 0 { return age }
+			}
+			return 0
+		}(),
 		WallUpgradePending:    b.wallUpgradePending.Load(),
 		RuntimeState:          state.String(),
 		RuntimePhase:       phase.String(),
@@ -3538,6 +3548,8 @@ type BotStats struct {
 	AutomationTaskStarted   int64                     `json:"automation_task_started_unix"`
 	AutomationTasksStarted  int32                     `json:"automation_tasks_started"`
 	AutomationTasksCompleted int32                    `json:"automation_tasks_completed"`
+	AutomationTaskPanics      int32                    `json:"automation_task_panics"`
+	AutomationTaskAgeSec      int64                    `json:"automation_task_age_sec"`
 	WallUpgradePending      bool                      `json:"wall_upgrade_pending"`
 
 	RuntimeState    string        `json:"runtime_state"`
