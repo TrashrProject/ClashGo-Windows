@@ -2149,6 +2149,11 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		if !b.sleepResponsive(900 * time.Millisecond) { lootRec.Close(); return }
 	}
 
+	// The matchmaking OCR is no longer needed once a base was accepted.
+	// Release its native digit Mats before the long battle/result pipeline so
+	// one completed attack does not accumulate OpenCV allocations.
+	lootRec.Close()
+
 	if deployErr != nil || remainingUndeployed > 0 {
 		b.logger.Warn().
 			Int("remaining", remainingUndeployed).
