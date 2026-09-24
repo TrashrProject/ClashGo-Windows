@@ -3,6 +3,8 @@ package attack
 import (
 	"image"
 	"testing"
+
+	"github.com/Ducky705/ClashGO/internal/config"
 )
 
 // TestHasPinnedForTarget_RealPin verifies a non-zero edge counts as pinned.
@@ -242,6 +244,44 @@ func TestApplyCornerOverride_PinnedViaSides(t *testing.T) {
 	for _, s := range []string{"top", "right", "left"} {
 		if got, want := pCfg.Sides[s], pinned; got != want {
 			t.Errorf("Sides[%q] should mirror pin: got %+v, want %+v", s, got, want)
+		}
+	}
+}
+
+
+func TestShouldDeployLiveCategoryHonorsPlayerPreferences(t *testing.T) {
+	e := &Executor{cfg: &config.AttackConfig{
+		UseHeroes:     false,
+		UseClanCastle: false,
+	}}
+	if e.shouldDeployLiveCategory("Hero") {
+		t.Fatal("heroes must stay untouched when UseHeroes=false")
+	}
+	if e.shouldDeployLiveCategory("CC") {
+		t.Fatal("Clan Castle card must stay untouched when UseClanCastle=false")
+	}
+	if !e.shouldDeployLiveCategory("Troop") {
+		t.Fatal("normal troops must remain deployable")
+	}
+	if !e.shouldDeployLiveCategory("Spell") {
+		t.Fatal("spells must remain deployable")
+	}
+	if !e.shouldDeployLiveCategory("Siege") {
+		t.Fatal("siege card is independent from the Clan Castle reinforcement toggle")
+	}
+
+	e.cfg.UseHeroes = true
+	e.cfg.UseClanCastle = true
+	if !e.shouldDeployLiveCategory("Hero") || !e.shouldDeployLiveCategory("CC") {
+		t.Fatal("enabled hero and Clan Castle cards must be deployable")
+	}
+}
+
+func TestShouldDeployLiveCategoryFailsOpenWithoutConfig(t *testing.T) {
+	e := &Executor{}
+	for _, category := range []string{"Troop", "Hero", "CC", "Siege", "Spell"} {
+		if !e.shouldDeployLiveCategory(category) {
+			t.Fatalf("category %q should remain deployable without config", category)
 		}
 	}
 }
