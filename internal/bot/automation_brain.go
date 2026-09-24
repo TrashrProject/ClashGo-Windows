@@ -40,6 +40,7 @@ type VillageDecisionInput struct {
 	DonationInFlight    bool
 	DonationEnabled     bool
 	LastDonationScan    time.Time
+	DonationNextCheck   time.Time
 	DonationInterval    time.Duration
 	ResourceEnabled     bool
 	LastResourceScan    time.Time
@@ -79,7 +80,11 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 	if donationInterval <= 0 {
 		donationInterval = 90 * time.Second
 	}
-	if in.DonationEnabled && (in.LastDonationScan.IsZero() || in.Now.Sub(in.LastDonationScan) >= donationInterval) {
+	donationDue := in.LastDonationScan.IsZero() || in.Now.Sub(in.LastDonationScan) >= donationInterval
+	if !in.DonationNextCheck.IsZero() && in.Now.Before(in.DonationNextCheck) {
+		donationDue = false
+	}
+	if in.DonationEnabled && donationDue {
 		return VillageDecision{Action: VillageActionDonate, Reason: "clan donation check is due"}
 	}
 
