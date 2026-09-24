@@ -40,7 +40,7 @@ func deploymentRedRatio(screen gocv.Mat, pt image.Point, radius int) float64 {
 
 			// The no-deploy overlay is translucent, so absolute RGB varies with
 			// terrain. Red dominance is much more stable than one exact color.
-			if r >= 105 && r-g >= 24 && r-b >= 18 && r*100 >= g*125 {
+			if isDeploymentRedRGB(r, g, b) {
 				red++
 			}
 		}
@@ -129,6 +129,10 @@ func (e *Executor) resolveSafeDeployPoints(screen gocv.Mat, planned []image.Poin
 		}
 	}
 	return out
+}
+
+func isDeploymentRedRGB(r, g, b int) bool {
+	return r >= 105 && r-g >= 24 && r-b >= 18 && r*100 >= g*125
 }
 
 func minInt(a, b int) int {
