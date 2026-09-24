@@ -3410,13 +3410,45 @@ func (b *Bot) Health() game.SystemHealth {
 }
 
 func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
+	if cfg == nil {
+		b.logger.Warn().Msg("ignored nil runtime configuration update")
+		return
+	}
+
+	oldArmySlot := b.armySlot
 	b.cfg = cfg
-	if cfg != nil && cfg.Automation.AutoArmyGuard && cfg.Training.Enabled && cfg.Training.FullArmyBeforeAttack {
+
+	// Strategy changes can select a different saved-army recipe. Keeping the
+	// slot resolved only at boot made a live strategy change deploy the new
+	// strategy with the OLD recipe until ClashGO restarted.
+	if strat, err := strategy.ParseYAML(cfg.Attack.StrategyFile); err == nil {
+		b.armySlot = strat.SelectedArmySlot()
+		if b.armySlot != oldArmySlot {
+			b.logger.Info().
+				Int("old_army_slot", oldArmySlot).
+				Int("army_slot", b.armySlot).
+				Str("strategy", strat.Name).
+				Msg("runtime strategy changed saved-army recipe")
+		}
+	} else {
+		b.logger.Warn().Err(err).Str("path", cfg.Attack.StrategyFile).
+			Msg("runtime config strategy could not be parsed; keeping previous army slot")
+	}
+
+	if cfg.Automation.AutoArmyGuard && cfg.Training.Enabled && cfg.Training.FullArmyBeforeAttack {
 		if _, ok := cfg.Attack.Farm.ActiveProfile(); ok {
+			// Any live config update may alter the desired composition or
+			// strategy. Expire previous proof and require a fresh exclusive
+			// preflight before matchmaking.
 			b.armyCheckPending.Store(true)
 			b.armyVerifiedUntil.Store(0)
 		}
+	} else {
+		b.armyCheckPending.Store(false)
+		b.armyWaitUntil.Store(0)
+		b.armyVerifiedUntil.Store(0)
 	}
+
 	if b.attackExec != nil {
 		b.attackExec.UpdateConfig(&cfg.Attack)
 	}
