@@ -211,12 +211,12 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               <div>
                 <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Army status</div>
                 <div className="text-base font-black text-zinc-950 dark:text-white mt-0.5">
-                  Waiting for {(stats.training_items_pending ?? 0)} army item{stats.training_items_pending === 1 ? '' : 's'}
+                  Army recipe needs {(stats.training_items_pending ?? 0)} correction{stats.training_items_pending === 1 ? '' : 's'}
                 </div>
                 <div className="text-xs text-zinc-500 mt-1">
                   {(stats.training_housing_pending ?? 0) > 0
-                    ? `${stats.training_housing_pending} housing space still missing from the configured farm army.`
-                    : 'ClashGO is waiting for the configured farm army to be complete.'}
+                    ? `${stats.training_housing_pending} housing space differs from the selected farm recipe.`
+                    : 'ClashGO is checking the selected army recipe before attacking.'}
                 </div>
                 {(stats.training_pending ?? []).length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
