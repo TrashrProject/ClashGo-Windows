@@ -6,7 +6,7 @@ import (
 
 const (
 	runtimeSupervisorTick         = 10 * time.Second
-	runtimeCaptureStaleThreshold  = 25 * time.Second
+	runtimeCaptureStaleThreshold  = 45 * time.Second
 )
 
 // runtimeSupervisorLoop is deliberately independent from captureLoop.
