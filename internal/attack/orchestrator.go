@@ -15,6 +15,24 @@ import (
 	"gocv.io/x/gocv"
 )
 
+// shouldDeployLiveCategory applies player-facing battle preferences to the
+// Windows live-bar path. The live bar is authoritative for what exists, but
+// "available" is not the same as "authorized": disabled heroes/CC must remain
+// untouched instead of being deployed merely because vision found a card.
+func (e *Executor) shouldDeployLiveCategory(category string) bool {
+	if e == nil || e.cfg == nil {
+		return true
+	}
+	switch category {
+	case "Hero":
+		return e.cfg.UseHeroes
+	case "CC":
+		return e.cfg.UseClanCastle
+	default:
+		return true
+	}
+}
+
 // DeployDynamicV2 deploys troops using dynamic red line detection.
 // No hardcoded precision_config.json needed - detects deployment boundary live.
 //
@@ -710,6 +728,14 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			anonymousHeroIndex := 0
 			for _, slot := range liveSlots {
 				key := oneShotKey(slot)
+				// Player preferences are hard policy, not hints. Keep disabled
+				// hero/Clan Castle cards untouched and continue evaluating the
+				// remaining live bar. This is especially important in Easy Mode,
+				// where a single "Use heroes" switch must cover every hero rather
+				// than only legacy Queen/Warden code paths.
+				if !e.shouldDeployLiveCategory(slot.Category) {
+					continue
+				}
 				// Skip every identity explicitly blacklisted for this battle.
 				if oneShotDone[key] {
 					continue
@@ -878,6 +904,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			finalCounts := troopCounter.DetectCounts(finalFrame, finalMgr.GetAllSlots(), finalMgr.GetBarY())
 			liveRemaining = 0
 			for _, slot := range finalMgr.GetAllSlots() {
+				if !e.shouldDeployLiveCategory(slot.Category) {
+					continue
+				}
 				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
 					continue
 				}
