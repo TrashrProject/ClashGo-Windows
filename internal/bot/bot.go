@@ -3367,29 +3367,42 @@ func (b *Bot) dismissInterruptions() {
 		}
 	case game.StateGemDialog, game.StateShieldInfo:
 		x, y := b.cal.ScaleRef(175, 30)
-		b.client.TapRandomized(x, y)
+		if err := b.client.TapRandomized(x, y); err != nil {
+			b.logger.Debug().Err(err).Str("state", state.String()).Msg("interruption dismiss tap failed")
+		}
 	case game.StateWelcomeBack:
-
 		ox, oy := b.cal.ScaleRef(430, 520)
-		b.client.TapRandomized(ox, oy)
+		if err := b.client.TapRandomized(ox, oy); err != nil {
+			b.logger.Debug().Err(err).Msg("welcome-back dismiss tap failed")
+		}
 	case game.StateChatOpen:
-		b.client.Back()
+		if err := b.client.Back(); err != nil {
+			b.logger.Debug().Err(err).Msg("chat close Back failed")
+		}
 	case game.StateTapToContinue:
 		// Post-boot "ТАР!" collect splash — tap the prompt text.
 		px, py := b.cal.ScaleRef(450, 195)
-		b.client.TapRandomized(px, py)
+		if err := b.client.TapRandomized(px, py); err != nil {
+			b.logger.Debug().Err(err).Msg("tap-to-continue dismiss failed")
+		}
 	case game.StateNewsSplash:
 		// Post-boot news splash — tap the green Continue button.
 		px, py := b.cal.ScaleRef(403, 535)
-		b.client.TapRandomized(px, py)
+		if err := b.client.TapRandomized(px, py); err != nil {
+			b.logger.Debug().Err(err).Msg("news splash dismiss failed")
+		}
 	case game.StateConnectionLost:
 		// Connection-lost dialog — tap TRY AGAIN to reconnect in place.
 		px, py := b.cal.ScaleRef(300, 478)
-		b.client.TapRandomized(px, py)
+		if err := b.client.TapRandomized(px, py); err != nil {
+			b.logger.Warn().Err(err).Msg("connection-lost retry tap failed")
+		}
 	case game.StateConfirmExit:
 		// Quit-confirm dialog — tap Cancel to stay in the game.
 		px, py := b.cal.ScaleRef(279, 429)
-		b.client.TapRandomized(px, py)
+		if err := b.client.TapRandomized(px, py); err != nil {
+			b.logger.Warn().Err(err).Msg("quit-confirm cancel tap failed")
+		}
 	}
 }
 
