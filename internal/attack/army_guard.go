@@ -16,10 +16,21 @@ const (
 	ArmyGuardNotReady
 )
 
+type ArmyDeficit struct {
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Have     int    `json:"have"`
+	Need     int    `json:"need"`
+	Missing  int    `json:"missing"`
+	Housing  int    `json:"housing"`
+	Confident bool  `json:"confident"`
+}
+
 type ArmyGuardResult struct {
 	Decision ArmyGuardDecision
 	Warnings []string
 	Observed map[string]int
+	Deficits []ArmyDeficit
 }
 
 // InspectPreBattleArmy reads the live troop bar immediately before the final
@@ -91,7 +102,7 @@ func (e *Executor) InspectPreBattleArmy(screen gocv.Mat, profile config.FarmProf
 
 	hardMissing := 0
 	uncertain := 0
-	check := func(name string, expected int, category string) {
+	check := func(name string, expected, housing int, category string) {
 		if expected <= 0 || strings.TrimSpace(name) == "" {
 			return
 		}
@@ -101,22 +112,30 @@ func (e *Executor) InspectPreBattleArmy(screen gocv.Mat, profile config.FarmProf
 			// No confident positive count: could be OCR/template uncertainty.
 			// Do not block the attack solely on missing evidence.
 			uncertain++
+			res.Deficits = append(res.Deficits, ArmyDeficit{
+				Name: name, Category: category, Have: 0, Need: expected,
+				Missing: expected, Housing: housing, Confident: false,
+			})
 			res.Warnings = append(res.Warnings,
 				fmt.Sprintf("%s %s: target %d, count not confidently readable", category, name, expected))
 			return
 		}
 		if got < expected {
 			hardMissing++
+			res.Deficits = append(res.Deficits, ArmyDeficit{
+				Name: name, Category: category, Have: got, Need: expected,
+				Missing: expected-got, Housing: housing, Confident: true,
+			})
 			res.Warnings = append(res.Warnings,
 				fmt.Sprintf("%s %s: detected %d, target %d", category, name, got, expected))
 		}
 	}
 
 	for _, u := range profile.Troops {
-		check(u.Name, u.Count, "troop")
+		check(u.Name, u.Count, u.Housing, "troop")
 	}
 	for _, u := range profile.Spells {
-		check(u.Name, u.Count, "spell")
+		check(u.Name, u.Count, u.Housing, "spell")
 	}
 
 	if hardMissing > 0 {
