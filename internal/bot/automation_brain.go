@@ -13,6 +13,8 @@ const (
 	VillageActionDonate
 	VillageActionScanResources
 	VillageActionWaitArmy
+	VillageActionCooldown
+	VillageActionSessionComplete
 	VillageActionAttack
 )
 
@@ -26,6 +28,10 @@ func (a VillageAction) String() string {
 		return "reading resources"
 	case VillageActionWaitArmy:
 		return "waiting for army"
+	case VillageActionCooldown:
+		return "cooldown"
+	case VillageActionSessionComplete:
+		return "session complete"
 	case VillageActionAttack:
 		return "starting attack"
 	default:
@@ -46,6 +52,9 @@ type VillageDecisionInput struct {
 	LastResourceScan    time.Time
 	ResourceInterval    time.Duration
 	ArmyWaitUntil       time.Time
+	AttackEnabled       bool
+	AttackCapReached    bool
+	AttackNotBefore     time.Time
 	AttackButtonVisible bool
 }
 
@@ -98,6 +107,16 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 
 	if !in.ArmyWaitUntil.IsZero() && in.Now.Before(in.ArmyWaitUntil) {
 		return VillageDecision{Action: VillageActionWaitArmy, Reason: "army readiness gate is active"}
+	}
+
+	if !in.AttackEnabled {
+		return VillageDecision{Action: VillageActionIdle, Reason: "automatic attacks are disabled"}
+	}
+	if in.AttackCapReached {
+		return VillageDecision{Action: VillageActionSessionComplete, Reason: "session attack limit reached"}
+	}
+	if !in.AttackNotBefore.IsZero() && in.Now.Before(in.AttackNotBefore) {
+		return VillageDecision{Action: VillageActionCooldown, Reason: "waiting between attacks"}
 	}
 
 	if in.AttackButtonVisible {
