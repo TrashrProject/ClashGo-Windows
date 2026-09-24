@@ -196,3 +196,19 @@ func TestAutomationTaskLeaseRejectsWrongRelease(t *testing.T) {
 	}
 	b.endAutomationTask("wall upgrades")
 }
+
+
+func TestVillageBrainExplainsActiveExclusiveTask(t *testing.T) {
+	got := decideVillageAction(VillageDecisionInput{
+		Now: time.Unix(8000, 0),
+		VillageVerified: true,
+		SequenceRunning: true,
+		ActiveTaskName: "wall upgrades",
+	})
+	if got.Action != VillageActionHold {
+		t.Fatalf("action=%v want hold", got.Action)
+	}
+	if got.Reason != "exclusive task active: wall upgrades" {
+		t.Fatalf("reason=%q", got.Reason)
+	}
+}
