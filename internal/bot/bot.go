@@ -79,6 +79,9 @@ type Bot struct {
 	donationChecks          atomic.Int32
 	donationsSent           atomic.Int32
 	lastDonationUnix        atomic.Int64
+	trainingItemsPending    atomic.Int32
+	trainingHousingPending  atomic.Int32
+	trainingPlanUncertain   atomic.Bool
 	lastArmyCampGuardLog    time.Time
 	lastDonationScan        time.Time
 	startedAt             time.Time
@@ -2448,6 +2451,9 @@ func (b *Bot) clickSequence() bool {
 				switch guard.Decision {
 				case attack.ArmyGuardNotReady:
 					plan := attack.BuildTrainingPlan(profile, guard)
+					b.trainingItemsPending.Store(int32(len(plan.Items)))
+					b.trainingHousingPending.Store(int32(plan.TotalHousing))
+					b.trainingPlanUncertain.Store(plan.HasUncertain)
 					if err := attack.WriteTrainingPlan(plan); err != nil {
 						b.logger.Warn().Err(err).Msg("could not persist pending training plan")
 					} else {
@@ -2480,6 +2486,9 @@ func (b *Bot) clickSequence() bool {
 
 				case attack.ArmyGuardReady:
 					b.armyWaitUntil.Store(0)
+					b.trainingItemsPending.Store(0)
+					b.trainingHousingPending.Store(0)
+					b.trainingPlanUncertain.Store(false)
 					_ = attack.WriteTrainingPlan(attack.BuildTrainingPlan(profile, guard))
 					b.logger.Info().Msg("pre-battle army guard: configured troops/spells ready")
 
@@ -3078,9 +3087,12 @@ func (b *Bot) Stats() BotStats {
 		BlueStacksRestarts: b.blueStacksRestarts.Load(),
 		DonationChecks:     b.donationChecks.Load(),
 		DonationsSent:      b.donationsSent.Load(),
-		LastDonationUnix:   b.lastDonationUnix.Load(),
-		VillageAction:      VillageAction(b.villageAction.Load()).String(),
-		RuntimeState:       state.String(),
+		LastDonationUnix:      b.lastDonationUnix.Load(),
+		TrainingItemsPending:   b.trainingItemsPending.Load(),
+		TrainingHousingPending: b.trainingHousingPending.Load(),
+		TrainingPlanUncertain:  b.trainingPlanUncertain.Load(),
+		VillageAction:         VillageAction(b.villageAction.Load()).String(),
+		RuntimeState:          state.String(),
 		RuntimePhase:       phase.String(),
 		RuntimeStateAge:    stateAge,
 		RuntimePhaseAge:    b.runtimePhaseAge(now),
@@ -3110,8 +3122,11 @@ type BotStats struct {
 	BlueStacksRestarts int32 `json:"bluestacks_restarts"`
 	DonationChecks     int32 `json:"donation_checks"`
 	DonationsSent      int32 `json:"donations_sent"`
-	LastDonationUnix   int64  `json:"last_donation_unix"`
-	VillageAction      string `json:"village_action"`
+	LastDonationUnix      int64  `json:"last_donation_unix"`
+	TrainingItemsPending   int32  `json:"training_items_pending"`
+	TrainingHousingPending int32  `json:"training_housing_pending"`
+	TrainingPlanUncertain  bool   `json:"training_plan_uncertain"`
+	VillageAction          string `json:"village_action"`
 
 	RuntimeState    string        `json:"runtime_state"`
 	RuntimePhase    string        `json:"runtime_phase"`
