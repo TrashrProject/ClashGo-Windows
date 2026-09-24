@@ -1238,6 +1238,10 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 				b.logger.Warn().Msg("village navigation could not perform a valid transition")
 				return
 			}
+			if !b.returnToVillageVerified(2, "village navigation completion") {
+				b.logger.Warn().Msg("village navigation action completed but main village was not positively verified")
+				return
+			}
 			b.recordActivity()
 		})
 		return
