@@ -404,6 +404,36 @@ func Load(path string) (*BotConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+
+	// Backward-compatible migration for fields introduced by the Windows
+	// automation scheduler. We need presence information here, not just bool
+	// values: an omitted JSON bool and an explicitly-false bool both decode to
+	// false. Preserve old user intent when legacy fields are present while
+	// retaining new-install defaults when they are absent altogether.
+	var presence struct {
+		Attack map[string]json.RawMessage `json:"attack"`
+		Upgrade struct {
+			UpgradeWalls *bool `json:"upgrade_walls"`
+		} `json:"upgrade"`
+		Automation struct {
+			Preferences map[string]json.RawMessage `json:"preferences"`
+		} `json:"automation"`
+	}
+	if json.Unmarshal(data, &presence) == nil {
+		if _, hasGenericHeroes := presence.Attack["use_heroes"]; !hasGenericHeroes {
+			_, hadQueen := presence.Attack["use_queen"]
+			_, hadWarden := presence.Attack["use_warden"]
+			if hadQueen || hadWarden {
+				cfg.Attack.UseHeroes = cfg.Attack.UseQueen || cfg.Attack.UseWarden
+			}
+		}
+
+		if _, hasWallPreference := presence.Automation.Preferences["auto_upgrade_walls"]; !hasWallPreference &&
+			presence.Upgrade.UpgradeWalls != nil {
+			cfg.Automation.Preferences.AutoUpgradeWalls = *presence.Upgrade.UpgradeWalls
+		}
+	}
+
 	normalizeStrategyFile(&cfg)
 
 	return &cfg, nil
