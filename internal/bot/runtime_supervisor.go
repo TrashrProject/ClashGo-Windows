@@ -11,6 +11,29 @@ const (
 	runtimeCaptureStaleThreshold = 45 * time.Second
 )
 
+func automationTaskTimeout(name string) time.Duration {
+	switch name {
+	case "chest reward":
+		return 25 * time.Second
+	case "resource scan":
+		return 20 * time.Second
+	case "donation":
+		return 75 * time.Second
+	case "village navigation":
+		return 45 * time.Second
+	case "return home recovery":
+		return 75 * time.Second
+	case "army check":
+		return 90 * time.Second
+	case "wall upgrades":
+		return 2 * time.Minute
+	case "attack":
+		return 12 * time.Minute
+	default:
+		return 2 * time.Minute
+	}
+}
+
 // observeRuntimeState stores only CONFIRMED classifier states. Raw one-frame
 // guesses never reach this supervisor, which prevents recovery decisions from
 // being driven by transient misclassification.
@@ -116,12 +139,31 @@ func (b *Bot) runtimeSupervisorLoop() {
 				}
 			}
 
-			// Any lease-owning automation task is allowed to control its own
-			// bounded flow. Without this guard the generic state watchdog could
-			// restart Clash in the middle of a valid donation or wall sequence
-			// simply because ChatOpen / builder UI stayed stable for 20-30s.
-			if b.seqRunning.Load() || b.automationTaskInFlight.Load() ||
-				b.recoveryInFlight.Load() || b.restartInFlight.Load() {
+			// Lease-owning tasks have task-specific budgets. They are excluded
+			// from the generic state watchdog, but are not allowed to hold the
+			// UI forever. A timed-out task triggers one controlled game restart;
+			// the task keeps its lease until its own flow exits, so we never
+			// create overlapping clickers by force-releasing ownership.
+			if b.automationTaskInFlight.Load() {
+				task := b.currentAutomationTask()
+				if started := b.automationTaskStarted.Load(); started > 0 {
+					age := now.Sub(time.Unix(started, 0))
+					timeout := automationTaskTimeout(task)
+					if timeout > 0 && age >= timeout && !b.recoveryInFlight.Load() && !b.restartInFlight.Load() {
+						b.automationTaskTimeouts.Add(1)
+						b.logger.Error().
+							Str("task", task).
+							Dur("task_age", age).
+							Dur("timeout", timeout).
+							Msg("automation task exceeded bounded runtime; restarting game without releasing task lease")
+						b.automationTaskStarted.Store(now.Unix())
+						b.restartGame()
+					}
+				}
+				continue
+			}
+
+			if b.seqRunning.Load() || b.recoveryInFlight.Load() || b.restartInFlight.Load() {
 				continue
 			}
 
