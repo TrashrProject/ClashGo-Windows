@@ -26,6 +26,8 @@ export interface BotStats {
   training_items_pending: number;
   training_housing_pending: number;
   training_plan_uncertain: boolean;
+  army_repair_attempts: number;
+  army_repair_successes: number;
   training_pending: Array<{
     name: string;
     category: string;
