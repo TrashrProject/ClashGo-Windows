@@ -68,6 +68,7 @@ func (e *Executor) InspectPreBattleArmy(screen gocv.Mat, profile config.FarmProf
 	}
 
 	counter := NewTroopCounter(860, 732, e.logger)
+	defer counter.Close()
 	counts := counter.DetectCounts(screen, slots, sm.GetBarY())
 
 	identified := 0
@@ -82,14 +83,24 @@ func (e *Executor) InspectPreBattleArmy(screen gocv.Mat, profile config.FarmProf
 		}
 		identified++
 
-		count := GetCountForSlot(counts, slot.X)
+		countRead, hasRead := GetTroopCountForSlot(counts, slot.X)
+		count := 0
+		confident := hasRead && countRead.Count > 0 && countRead.Confidence >= 0.58
+		if confident {
+			count = countRead.Count
+		}
+
 		switch slot.Category {
 		case "Hero", "Siege", "CC":
+			// One-shot cards do not need quantity OCR. Their visible,
+			// non-empty card is stronger evidence than a missing digit.
 			if count <= 0 && !slot.IsEmpty {
 				count = 1
+				confident = true
 			}
 		}
-		if count > 0 {
+
+		if count > 0 && confident {
 			confidentCounts++
 			res.Observed[name] += count
 		}
