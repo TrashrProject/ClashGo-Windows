@@ -53,6 +53,7 @@ func (b *Bot) maybeStartDonationCycle(state gocv.Mat) bool {
 
 func (b *Bot) runDonationCycle() {
 	defer b.donationInFlight.Store(false)
+	b.donationChecks.Add(1)
 	report := donationRunReport{Timestamp: time.Now()}
 	defer func() {
 		if data, err := json.MarshalIndent(report, "", "  "); err == nil {
@@ -170,6 +171,8 @@ func (b *Bot) runDonationCycle() {
 			before.Close()
 			if changed {
 				report.Donated = append(report.Donated, name)
+				b.donationsSent.Add(1)
+				b.lastDonationUnix.Store(time.Now().Unix())
 				b.logger.Info().Str("troop", name).Msg("clan donation visually confirmed")
 				break
 			}
@@ -239,7 +242,7 @@ func (b *Bot) findDonationRequests(screen gocv.Mat) []donationRequest {
 }
 
 func (b *Bot) matchDonationTroops(screen gocv.Mat, roi image.Rectangle) []string {
-	names := []string{"electro_dragon", "balloon"}
+	names := b.supportedDonationTemplateNames()
 	var found []string
 	for _, name := range names {
 		tpl, ok := b.templates.Get("attack/" + name)
@@ -255,6 +258,43 @@ func (b *Bot) matchDonationTroops(screen gocv.Mat, roi image.Rectangle) []string
 		}
 	}
 	return found
+}
+
+
+func (b *Bot) supportedDonationTemplateNames() []string {
+	if b.templates == nil {
+		return nil
+	}
+
+	// Reuse every compatible unit template already shipped in the EXE. New
+	// troop templates automatically become donation-capable without another
+	// code change. Heroes/spells are excluded; siege machines are valid clan
+	// reinforcements and may be recognized when a template exists.
+	excluded := map[string]bool{
+		"archer_queen": true,
+		"barbarian_king": true,
+		"grand_warden": true,
+		"minion_prince": true,
+		"dragon_duke": true,
+		"ice_spell": true,
+		"rage_spell": true,
+	}
+
+	seen := map[string]bool{}
+	var out []string
+	for _, full := range b.templates.List(game.StateUnknown) {
+		if !strings.HasPrefix(full, "attack/") {
+			continue
+		}
+		name := strings.TrimPrefix(full, "attack/")
+		if name == "" || excluded[name] || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (b *Bot) findDonationTroopInPicker(screen gocv.Mat, name string) (image.Point, bool) {
