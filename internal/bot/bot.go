@@ -1293,6 +1293,7 @@ func (b *Bot) runAutomationTask(name string, work func()) bool {
 	}
 	defer func() {
 		if r := recover(); r != nil {
+			b.automationTaskPanics.Add(1)
 			b.logger.Error().Interface("panic", r).Str("task", name).
 				Msg("recovered panic in automation task")
 		}
