@@ -86,8 +86,22 @@ type VillageDecision struct {
 //   6. standalone army preflight;
 //   7. matchmaking.
 //
-// This means useful village housekeeping can happen while troops are training,
-// but nothing competes with an active donation or attack.
+// This means useful village housekeeping can happen while an army retry or
+// attack cooldown is active, but nothing competes with the one task that owns
+// the game controls.
+func earlierFuture(now time.Time, values ...time.Time) time.Time {
+	var best time.Time
+	for _, value := range values {
+		if value.IsZero() || !value.After(now) {
+			continue
+		}
+		if best.IsZero() || value.Before(best) {
+			best = value
+		}
+	}
+	return best
+}
+
 func decideVillageAction(in VillageDecisionInput) VillageDecision {
 	if !in.VillageVerified {
 		return VillageDecision{Action: VillageActionIdle, Reason: "village not positively verified"}
@@ -146,8 +160,25 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 		return VillageDecision{Action: VillageActionCheckArmy, Reason: "army preflight is due before the next attack"}
 	}
 
+	donationWake := time.Time{}
+	if in.DonationEnabled {
+		if !in.DonationNextCheck.IsZero() && in.DonationNextCheck.After(in.Now) {
+			donationWake = in.DonationNextCheck
+		} else if !in.LastDonationScan.IsZero() {
+			donationWake = in.LastDonationScan.Add(donationInterval)
+		}
+	}
+	resourceWake := time.Time{}
+	if in.ResourceEnabled && !in.LastResourceScan.IsZero() {
+		resourceWake = in.LastResourceScan.Add(resourceInterval)
+	}
+
 	if !in.AttackEnabled {
-		return VillageDecision{Action: VillageActionIdle, Reason: "automatic attacks are disabled"}
+		return VillageDecision{
+			Action: VillageActionIdle,
+			Reason: "automatic attacks are disabled",
+			NextAt: earlierFuture(in.Now, donationWake, resourceWake),
+		}
 	}
 	if !in.AttackNotBefore.IsZero() && in.Now.Before(in.AttackNotBefore) {
 		return VillageDecision{Action: VillageActionCooldown, Reason: "waiting between attacks", NextAt: in.AttackNotBefore}
@@ -157,5 +188,9 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 		return VillageDecision{Action: VillageActionAttack, Reason: "village ready and attack entry is available"}
 	}
 
-	return VillageDecision{Action: VillageActionIdle, Reason: "no action due"}
+	return VillageDecision{
+		Action: VillageActionIdle,
+		Reason: "waiting for a verified action opportunity",
+		NextAt: earlierFuture(in.Now, donationWake, resourceWake),
+	}
 }
