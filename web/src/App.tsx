@@ -33,6 +33,7 @@ import {
   GetPlayerProfile,
   GetVillageResourceHistory,
   SetSimpleMode,
+  SaveSimplePreferences,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
 import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot } from './types';
@@ -173,6 +174,13 @@ function App() {
   const [lootExitEnabled, setLootExitEnabled] = useState(false);
   const [lootExitPercent, setLootExitPercent] = useState(100);
   const [simpleMode, setSimpleMode] = useState(true);
+  const [autoDonate, setAutoDonate] = useState(false);
+  const [donateOnlyRequested, setDonateOnlyRequested] = useState(true);
+  const [useHeroesSimple, setUseHeroesSimple] = useState(true);
+  const [useClanCastleSimple, setUseClanCastleSimple] = useState(true);
+  const [waitForFullArmy, setWaitForFullArmy] = useState(true);
+  const [autoRetrain, setAutoRetrain] = useState(true);
+  const [lootPreset, setLootPreset] = useState<'relaxed' | 'balanced' | 'rich'>('balanced');
 
   useEffect(() => {
     const init = async () => {
@@ -194,6 +202,14 @@ function App() {
         setLootExitEnabled(conf.attack.loot_exit_enabled ?? false);
         setLootExitPercent(conf.attack.loot_exit_percent ?? 100);
         setSimpleMode(conf.automation?.simple_mode ?? true);
+        const prefs = conf.automation?.preferences;
+        setAutoDonate(prefs?.auto_donate ?? false);
+        setDonateOnlyRequested(prefs?.donate_only_requested ?? true);
+        setUseHeroesSimple(prefs?.use_heroes ?? true);
+        setUseClanCastleSimple(prefs?.use_clan_castle ?? true);
+        setWaitForFullArmy(prefs?.wait_for_full_army ?? true);
+        setAutoRetrain(prefs?.auto_retrain ?? true);
+        setLootPreset((prefs?.loot_preset === 'relaxed' || prefs?.loot_preset === 'rich') ? prefs.loot_preset : 'balanced');
         setIsRunning(running);
         setIsStarting(false);
         // Never let a null from the Go side reach the Config page — a
@@ -537,6 +553,45 @@ function App() {
       await SetSimpleMode(enabled);
       setSimpleMode(enabled);
     },
+    simplePreferences: {
+      autoDonate,
+      donateOnlyRequested,
+      useHeroes: useHeroesSimple,
+      useClanCastle: useClanCastleSimple,
+      waitForFullArmy,
+      autoRetrain,
+      lootPreset,
+    },
+    onSaveSimplePreferences: async (prefs: {
+      autoDonate: boolean;
+      donateOnlyRequested: boolean;
+      useHeroes: boolean;
+      useClanCastle: boolean;
+      waitForFullArmy: boolean;
+      autoRetrain: boolean;
+      lootPreset: 'relaxed' | 'balanced' | 'rich';
+    }) => {
+      await SaveSimplePreferences(
+        prefs.autoDonate,
+        prefs.donateOnlyRequested,
+        prefs.useHeroes,
+        prefs.useClanCastle,
+        prefs.waitForFullArmy,
+        prefs.autoRetrain,
+        prefs.lootPreset,
+      );
+      setAutoDonate(prefs.autoDonate);
+      setDonateOnlyRequested(prefs.donateOnlyRequested);
+      setUseHeroesSimple(prefs.useHeroes);
+      setUseClanCastleSimple(prefs.useClanCastle);
+      setWaitForFullArmy(prefs.waitForFullArmy);
+      setAutoRetrain(prefs.autoRetrain);
+      setLootPreset(prefs.lootPreset);
+      const refreshed = await GetConfig();
+      setGoldThreshold(refreshed.search.min_loot_gold);
+      setElixirThreshold(refreshed.search.min_loot_elixir);
+      setDeThreshold(refreshed.search.min_loot_de);
+    },
     onSave: async () => {
       // Errors intentionally bubble so ConfigView's save-status
       // indicator can show a red "Save failed" pill back to the user.
@@ -548,7 +603,9 @@ function App() {
   }), [
     goldThreshold, elixirThreshold, deThreshold,
     selectedStrategy, strategies, searchEnabled, upgradeWalls, stallTimer,
-    lootExitEnabled, lootExitPercent, simpleMode
+    lootExitEnabled, lootExitPercent, simpleMode,
+    autoDonate, donateOnlyRequested, useHeroesSimple, useClanCastleSimple,
+    waitForFullArmy, autoRetrain, lootPreset
   ]);
 
   return (
