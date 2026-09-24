@@ -22,6 +22,7 @@ export interface BotStats {
   donation_checks: number;
   donations_sent: number;
   last_donation_unix: number;
+  last_donation_result: string;
   training_items_pending: number;
   training_housing_pending: number;
   training_plan_uncertain: boolean;
