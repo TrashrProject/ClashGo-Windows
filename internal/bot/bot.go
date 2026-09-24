@@ -1518,6 +1518,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	searchStart := time.Now()
 	consecutiveNextFailures := 0
 	skipsSinceRest := 0
+	skipsThisSearch := 0
 	for {
 		// Stop check: a user Stop must abort the search loop even
 		// though CaptureToMat below would silently reconnect a closed
@@ -1576,6 +1577,18 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		meetsReq := !b.cfg.Search.Enabled || (loot.Gold >= b.cfg.Search.MinLootGold &&
 			loot.Elixir >= b.cfg.Search.MinLootElixir &&
 			loot.DarkElixir >= b.cfg.Search.MinLootDarkElixir)
+
+		forcedBySearchCap := shouldForceAttackAfterSkips(b.cfg.Search.MaxSkipsBeforeForceAttack, skipsThisSearch)
+		if forcedBySearchCap {
+			b.logger.Warn().
+				Int("skips", skipsThisSearch).
+				Int("limit", b.cfg.Search.MaxSkipsBeforeForceAttack).
+				Int("gold", loot.Gold).
+				Int("elixir", loot.Elixir).
+				Int("de", loot.DarkElixir).
+				Msg("search cap reached; accepting current base to prevent endless matchmaking")
+			meetsReq = true
+		}
 
 		if meetsReq {
 			b.logger.Info().Msg("loot requirements met, starting attack!")
@@ -1712,6 +1725,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		if transitioned {
 			consecutiveNextFailures = 0
 			skipsSinceRest++
+			skipsThisSearch++
 			b.skipsCount.Add(1)
 			if b.OnStatsUpdate != nil {
 				b.OnStatsUpdate()
@@ -2966,4 +2980,9 @@ func (a *adbLogAdapter) WithFields(fields map[string]any) adb.Logger {
 
 func init() {
 	runtime.GOMAXPROCS(0)
+}
+
+
+func shouldForceAttackAfterSkips(limit, skips int) bool {
+	return limit > 0 && skips >= limit
 }
