@@ -118,6 +118,11 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Windows Readiness</div>
               <div className="text-lg font-black mt-1">{overallReady ? 'Ready to launch' : 'Setup required'}</div>
+              <div className="text-[11px] text-zinc-400 mt-1">
+                {overallReady
+                  ? 'Everything needed to start the bot is detected.'
+                  : 'Fix the orange items below. Advanced details are optional.'}
+              </div>
             </div>
             <div className={`w-3 h-3 rounded-full ${overallReady ? 'bg-emerald-400 shadow-[0_0_14px_rgba(52,211,153,.7)]' : 'bg-amber-400 animate-pulse'}`}></div>
           </div>
@@ -162,7 +167,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             <div className="border-t border-zinc-800 p-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="text-[11px] text-zinc-400 max-w-[250px]">
-                  Leave this on Automatic unless ClashGO detected the wrong BlueStacks instance.
+                  Beginners should leave this on Automatic. Change it only if ClashGO clearly detected the wrong BlueStacks instance.
                 </div>
                 <select
                   value={systemDiagnostics?.configured_instance || ''}
