@@ -49,11 +49,18 @@ func (b *Bot) maybeStartDonationCycle(state gocv.Mat) bool {
 		return false
 	}
 
+	if !b.tryBeginAutomationTask("donation") {
+		return false
+	}
 	if !b.donationInFlight.CompareAndSwap(false, true) {
+		b.endAutomationTask("donation")
 		return true
 	}
 	b.lastDonationScan = time.Now()
-	go b.runDonationCycle()
+	go func() {
+		defer b.endAutomationTask("donation")
+		b.runDonationCycle()
+	}()
 	return true
 }
 
