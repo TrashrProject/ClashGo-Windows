@@ -1120,7 +1120,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 		if !hasDeploySafetyFrame {
 			return points
 		}
-		return e.resolveSafeDeployPoints(deploySafetyFrame, points)
+		return e.adaptDeployPointsToBoundary(deploySafetyFrame, points)
 	}
 
 	isDragonDuke := strings.Contains(unitName, "duke")
