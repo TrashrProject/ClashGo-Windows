@@ -435,3 +435,18 @@ func TestSchedulerInvariantRepairClearsStaleOwner(t *testing.T) {
 		t.Fatalf("stale owner=%q want empty", got)
 	}
 }
+
+
+func TestVillageBrainDoesNotPreflightArmyWhenAttacksDisabled(t *testing.T) {
+	got := decideVillageAction(VillageDecisionInput{
+		Now: time.Unix(11000, 0),
+		VillageVerified: true,
+		AttackEnabled: false,
+		ArmyCheckEnabled: true,
+		ArmyCheckDue: true,
+		AttackButtonVisible: true,
+	})
+	if got.Action != VillageActionIdle {
+		t.Fatalf("action=%v want idle when attacks are disabled", got.Action)
+	}
+}
