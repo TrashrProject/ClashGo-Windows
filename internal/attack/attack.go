@@ -884,17 +884,11 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 
 		for _, slot := range remainingActiveSlots {
 
-			alreadyDeployed := false
-			for ux := range globalUsedSlots {
-				if math.Abs(float64(slot.X-ux)) < float64(w)*0.04 {
-					alreadyDeployed = true
-					break
-				}
-			}
-			if alreadyDeployed {
-				e.logger.Debug().Int("x", slot.X).Msg("skipping main-phase-deployed slot in verify")
-				continue
-			}
+			// globalUsedSlots means "attempted during the main phase", not
+			// "confirmed empty". If the slot is still visibly active here,
+			// the deployment did not finish and it MUST enter the recovery
+			// pass. Previously these slots were skipped, which could leave
+			// troops undeployed after a rejected red-zone click.
 
 			isDeployedUnit := false
 			for _, hp := range deployedHeroSlots {
@@ -1506,24 +1500,31 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 				p1 = safe[0]
 				e.logger.Info().Str("unit", unit.Name).Int("count", maxTaps).Interface("safe_point", p1).Msg("deploying troop point batch")
 				for i := 0; i < maxTaps; {
-					rem := maxTaps - i
-					if rem >= 3 {
-						j1 := e.addJitter(p1, 8)
-						j2 := e.addJitter(p1, 8)
-						j3 := e.addJitter(p1, 8)
-						e.client.TapTriple(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0, j3.X, j3.Y, 12.0)
-						i += 3
-					} else if rem == 2 {
-						j1 := e.addJitter(p1, 8)
-						j2 := e.addJitter(p1, 8)
-						e.client.TapDual(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0)
-						i += 2
-					} else {
-						j1 := e.addJitter(p1, 8)
-						e.client.TapFast(j1.X, j1.Y, 12.0)
-						i += 1
+					batchSize := maxTaps - i
+					if batchSize > 3 {
+						batchSize = 3
 					}
-					e.client.HumanSleep(200, 40)
+					batch := make([]image.Point, 0, batchSize)
+					for j := 0; j < batchSize; j++ {
+						batch = append(batch, e.addJitter(p1, 8))
+					}
+					if !e.deployTroopBatchVerified(uPt, batch) {
+						e.logger.Warn().
+							Str("unit", unit.Name).
+							Int("deployed_before_failure", i).
+							Msg("troop point batch was rejected twice; stopping this unit for final recovery pass")
+						return false
+					}
+					i += batchSize
+					e.client.HumanSleep(110, 25)
+					if verify, err := e.client.CaptureToMat(); err == nil {
+						empty := e.isSlotEmpty(verify, uPt.X, slotY)
+						verify.Close()
+						if empty {
+							e.logger.Info().Str("unit", unit.Name).Msg("slot emptied during verified point deployment")
+							break
+						}
+					}
 				}
 			} else {
 				e.logger.Info().Str("unit", unit.Name).Int("count", maxTaps).Msg("deploying troop line precisely")
@@ -1554,19 +1555,21 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 				}
 
 				for i := 0; i < len(points); {
-					rem := len(points) - i
-					if rem >= 3 {
-						e.client.TapTriple(points[i].X, points[i].Y, 15.0, points[i+1].X, points[i+1].Y, 15.0, points[i+2].X, points[i+2].Y, 15.0)
-						i += 3
-					} else if rem == 2 {
-						e.client.TapDual(points[i].X, points[i].Y, 15.0, points[i+1].X, points[i+1].Y, 15.0)
-						i += 2
-					} else {
-						e.client.TapFast(points[i].X, points[i].Y, 15.0)
-						i += 1
+					batchSize := len(points) - i
+					if batchSize > 3 {
+						batchSize = 3
 					}
+					batch := append([]image.Point(nil), points[i:i+batchSize]...)
+					if !e.deployTroopBatchVerified(uPt, batch) {
+						e.logger.Warn().
+							Str("unit", unit.Name).
+							Int("deployed_before_failure", i).
+							Msg("troop line batch was rejected twice; stopping this unit for final recovery pass")
+						return false
+					}
+					i += batchSize
 
-					sleepBase := 200
+					sleepBase := 120
 					sleepDev := 40
 					if rand.Float64() < 0.10 {
 
