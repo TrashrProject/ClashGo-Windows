@@ -12,6 +12,7 @@ const (
 	VillageActionHold
 	VillageActionDonate
 	VillageActionScanResources
+	VillageActionUpgradeWalls
 	VillageActionWaitArmy
 	VillageActionCooldown
 	VillageActionSessionComplete
@@ -26,6 +27,8 @@ func (a VillageAction) String() string {
 		return "donating"
 	case VillageActionScanResources:
 		return "reading resources"
+	case VillageActionUpgradeWalls:
+		return "upgrading walls"
 	case VillageActionWaitArmy:
 		return "checking army"
 	case VillageActionCooldown:
@@ -51,6 +54,8 @@ type VillageDecisionInput struct {
 	ResourceEnabled     bool
 	LastResourceScan    time.Time
 	ResourceInterval    time.Duration
+	WallsEnabled        bool
+	WallsDue            bool
 	ArmyWaitUntil       time.Time
 	AttackEnabled       bool
 	AttackCapReached    bool
@@ -70,8 +75,9 @@ type VillageDecision struct {
 //   1. never overlap an existing sequence/action;
 //   2. donation opportunity (short and bounded);
 //   3. periodic resource read;
-//   4. explicit army-ready gate;
-//   5. matchmaking.
+//   4. queued wall maintenance;
+//   5. explicit army-ready gate;
+//   6. matchmaking.
 //
 // This means useful village housekeeping can happen while troops are training,
 // but nothing competes with an active donation or attack.
@@ -104,6 +110,10 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 	}
 	if in.ResourceEnabled && (in.LastResourceScan.IsZero() || in.Now.Sub(in.LastResourceScan) >= resourceInterval) {
 		return VillageDecision{Action: VillageActionScanResources, Reason: "resource snapshot is due"}
+	}
+
+	if in.WallsEnabled && in.WallsDue {
+		return VillageDecision{Action: VillageActionUpgradeWalls, Reason: "wall maintenance is queued after the previous attack"}
 	}
 
 	if !in.ArmyWaitUntil.IsZero() && in.Now.Before(in.ArmyWaitUntil) {
