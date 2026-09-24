@@ -1376,7 +1376,8 @@ func dismissInterruptionsFor(h *WallUpgradeHooks) {
 			_ = h.Client.Back()
 		}
 	case game.StateGemDialog, game.StateShieldInfo:
-		_ = h.Client.TapRandomized(175, 30)
+		x, y := h.Cal.ScaleRef(175, 30)
+		_ = h.Client.TapRandomized(x, y)
 	case game.StateWelcomeBack:
 		ox, oy := h.Cal.ScaleRef(430, 520)
 		_ = h.Client.Tap(ox, oy)
