@@ -31,6 +31,7 @@ type SimplePreferences struct {
 	UseClanCastle       bool   `json:"use_clan_castle"`
 	WaitForFullArmy     bool   `json:"wait_for_full_army"`
 	AutoRetrain         bool   `json:"auto_retrain"`
+	AutoUpgradeWalls    bool   `json:"auto_upgrade_walls"`
 	LootPreset          string `json:"loot_preset"` // relaxed | balanced | rich
 }
 
@@ -98,6 +99,7 @@ type AttackConfig struct {
 	DropDelay           Duration `json:"drop_delay"`
 	SpellDelay          Duration `json:"spell_delay"`
 	EndBattleDelay      Duration `json:"end_battle_delay"`
+	UseHeroes           bool     `json:"use_heroes"`
 	UseQueen            bool     `json:"use_queen"`
 	UseWarden           bool     `json:"use_warden"`
 	UseClanCastle       bool     `json:"use_clan_castle"`
@@ -293,6 +295,10 @@ func DefaultConfig() *BotConfig {
 			DropDelay:                Duration{500 * time.Millisecond},
 			SpellDelay:               Duration{2 * time.Second},
 			EndBattleDelay:           Duration{30 * time.Second},
+			UseHeroes:                true,
+			UseQueen:                 true,
+			UseWarden:                true,
+			UseClanCastle:            true,
 			QueenChargeAtPct:         50,
 			WardenUseAtPct:           30,
 			ReserveDEPercent:         200,
@@ -348,6 +354,7 @@ func DefaultConfig() *BotConfig {
 				UseClanCastle:       true,
 				WaitForFullArmy:     true,
 				AutoRetrain:         true,
+				AutoUpgradeWalls:    false,
 				LootPreset:          "balanced",
 			},
 		},
