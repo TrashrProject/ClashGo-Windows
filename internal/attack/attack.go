@@ -1408,13 +1408,14 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 					for j := range safe {
 						safe[j] = e.addJitter(safe[j], 8)
 					}
-					switch len(safe) {
-					case 3:
-						e.client.TapTriple(safe[0].X, safe[0].Y, 12.0, safe[1].X, safe[1].Y, 12.0, safe[2].X, safe[2].Y, 12.0)
-					case 2:
-						e.client.TapDual(safe[0].X, safe[0].Y, 12.0, safe[1].X, safe[1].Y, 12.0)
-					case 1:
-						e.client.TapFast(safe[0].X, safe[0].Y, 12.0)
+					if len(safe) > 0 {
+						if !e.deployTroopBatchVerified(uPt, safe) {
+							e.logger.Warn().
+								Str("unit", unit.Name).
+								Str("edge", edgeName).
+								Msg("FourSides batch rejected after relocation retry; leaving remainder for final recovery pass")
+							return false
+						}
 					}
 					time.Sleep(45 * time.Millisecond)
 				}
