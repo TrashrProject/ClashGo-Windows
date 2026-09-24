@@ -88,7 +88,7 @@ func (b *Bot) runDonationCycle() {
 	if st != game.StateChatOpen {
 		chat.Close()
 		report.SkippedReason = "chat state not confirmed"
-		_ = b.client.Back()
+		b.returnToVillageAfterDonation(3)
 		return
 	}
 	report.ChatOpened = true
@@ -98,7 +98,7 @@ func (b *Bot) runDonationCycle() {
 	report.RequestButtons = len(requests)
 	if len(requests) == 0 {
 		report.SkippedReason = "no donation request found"
-		_ = b.client.Back()
+		b.returnToVillageAfterDonation(3)
 		return
 	}
 
@@ -114,7 +114,7 @@ func (b *Bot) runDonationCycle() {
 	}
 	if req == nil {
 		report.SkippedReason = "request found but troop type was not recognized"
-		_ = b.client.Back()
+		b.returnToVillageAfterDonation(3)
 		return
 	}
 	report.Recognized = append(report.Recognized, req.Requested...)
@@ -123,13 +123,13 @@ func (b *Bot) runDonationCycle() {
 	// tightens policy, but both modes still require positive visual identity.
 	if b.cfg.Automation.Preferences.DonateOnlyRequested && len(req.Requested) == 0 {
 		report.SkippedReason = "strict requested-only mode"
-		_ = b.client.Back()
+		b.returnToVillageAfterDonation(3)
 		return
 	}
 
 	if err := b.client.TapFast(req.Button.X, req.Button.Y, 0.6); err != nil {
 		report.SkippedReason = "could not open donation picker"
-		_ = b.client.Back()
+		b.returnToVillageAfterDonation(3)
 		return
 	}
 	if !b.sleepResponsive(260 * time.Millisecond) {
@@ -142,7 +142,7 @@ func (b *Bot) runDonationCycle() {
 		if !picker.Empty() { picker.Close() }
 		report.SkippedReason = "donation picker capture failed"
 		_ = b.client.Back()
-		_ = b.client.Back()
+		b.returnToVillageAfterDonation(3)
 		return
 	}
 
@@ -188,12 +188,56 @@ func (b *Bot) runDonationCycle() {
 		report.SkippedReason = "no recognized requested troop was available to donate"
 	}
 
-	// Close picker (if still open) then chat. Back is bounded and the next
-	// capture loop frame will re-classify; no blind chain of additional taps.
-	_ = b.client.Back()
-	b.sleepResponsive(120 * time.Millisecond)
-	_ = b.client.Back()
+	// Return to the village with proof after every Back press. Never issue a
+	// fixed two-Back sequence: if the donation picker auto-closes after a
+	// successful donation, the second blind Back would hit the village and open
+	// Clash's quit-confirm dialog.
+	b.returnToVillageAfterDonation(3)
 	b.recordActivity()
+}
+
+func (b *Bot) returnToVillageAfterDonation(maxBacks int) bool {
+	if maxBacks < 1 {
+		maxBacks = 1
+	}
+	for attempt := 0; attempt <= maxBacks; attempt++ {
+		screen, err := b.client.CaptureToMat()
+		if err == nil && !screen.Empty() {
+			state, _ := b.classify(screen)
+			atVillage := state == game.StateMainVillage || b.findAttackButton(screen, 0.30)
+			if state == game.StateConfirmExit {
+				// We should never intentionally reach this state. If a previous
+				// UI transition raced us, cancel the quit instead of pressing
+				// Back again and risking an app exit.
+				screen.Close()
+				x, y := b.cal.ScaleRef(279, 429)
+				if tapErr := b.client.TapFast(x, y, 0.5); tapErr == nil {
+					b.logger.Warn().Msg("donation cleanup reached quit-confirm; cancelled safely")
+				}
+				return true
+			}
+			screen.Close()
+			if atVillage {
+				return true
+			}
+		} else if !screen.Empty() {
+			screen.Close()
+		}
+
+		if attempt == maxBacks {
+			break
+		}
+		if err := b.client.Back(); err != nil {
+			b.logger.Warn().Err(err).Msg("donation cleanup Back failed")
+			return false
+		}
+		if !b.sleepResponsive(160 * time.Millisecond) {
+			return false
+		}
+	}
+
+	b.logger.Warn().Msg("donation cleanup could not positively confirm return to village")
+	return false
 }
 
 func (b *Bot) findDonationRequests(screen gocv.Mat) []donationRequest {
