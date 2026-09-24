@@ -50,6 +50,7 @@ export interface BotStats {
   automation_tasks_started: number;
   automation_tasks_completed: number;
   automation_task_panics: number;
+  automation_task_timeouts: number;
   automation_task_age_sec: number;
   wall_upgrade_pending: boolean;
   adb_health: {
