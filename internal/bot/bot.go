@@ -1111,8 +1111,19 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			b.startAutomationTask("wall upgrades", func() {
 				b.logger.Info().Msg("automation brain: starting queued wall maintenance")
 				b.UpgradeWalls(gc)
+
+				// A wall flow is only considered complete once control is back on
+				// a positively verified village. This prevents a half-closed
+				// builder menu from becoming the starting point of the next task.
+				returned := b.returnToVillageVerified(4, "wall maintenance completion")
 				b.wallUpgradePending.Store(false)
-				b.recordActivity()
+				if !returned {
+					b.logger.Warn().Msg("wall maintenance ended outside a verified village; restarting Clash before releasing scheduler")
+					b.restartGame()
+				} else {
+					b.recordActivity()
+				}
+
 				if b.cfg.Attack.MaxAttackPerSession > 0 &&
 					int(b.attackCount.Load()) >= b.cfg.Attack.MaxAttackPerSession {
 					b.logger.Info().Msg("wall maintenance complete and session attack limit reached; stopping session")
