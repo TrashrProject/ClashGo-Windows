@@ -2237,7 +2237,7 @@ func (b *Bot) clickSequence() bool {
 				screen.Close()
 			}
 		}
-		b.client.JitteredSleep(650 * time.Millisecond)
+		if !b.sleepResponsive(220 * time.Millisecond) { return false }
 	}
 	if !attackClicked {
 		b.logger.Warn().Msg("could not find or click Attack button")
@@ -2289,7 +2289,7 @@ func (b *Bot) clickSequence() bool {
 			break
 		}
 
-		b.client.JitteredSleep(650 * time.Millisecond)
+		if !b.sleepResponsive(220 * time.Millisecond) { return false }
 	}
 	if !findMatchClicked {
 		b.logger.Warn().Msg("could not find or click Find Match button")
@@ -2325,7 +2325,7 @@ func (b *Bot) clickSequence() bool {
 			armyArrowClicked = true
 			break
 		}
-		b.client.JitteredSleep(650 * time.Millisecond)
+		if !b.sleepResponsive(220 * time.Millisecond) { return false }
 	}
 	if !armyArrowClicked {
 		b.logger.Warn().Msg("could not find or click Army Arrow button")
@@ -2335,7 +2335,7 @@ func (b *Bot) clickSequence() bool {
 		}
 		return false
 	}
-	b.client.JitteredSleep(650 * time.Millisecond)
+	if !b.sleepResponsive(220 * time.Millisecond) { return false }
 
 	armyClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
@@ -2343,7 +2343,7 @@ func (b *Bot) clickSequence() bool {
 			armyClicked = true
 			break
 		}
-		b.client.JitteredSleep(650 * time.Millisecond)
+		if !b.sleepResponsive(220 * time.Millisecond) { return false }
 	}
 	if !armyClicked {
 		b.logger.Warn().Int("army_slot", b.armySlot).Msg("army recipe card did not appear, continuing anyway")
@@ -2352,7 +2352,7 @@ func (b *Bot) clickSequence() bool {
 			screen.Close()
 		}
 	}
-	b.client.JitteredSleep(650 * time.Millisecond)
+	if !b.sleepResponsive(220 * time.Millisecond) { return false }
 
 	battleClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
@@ -2364,7 +2364,7 @@ func (b *Bot) clickSequence() bool {
 			battleClicked = true
 			break
 		}
-		b.client.JitteredSleep(650 * time.Millisecond)
+		if !b.sleepResponsive(220 * time.Millisecond) { return false }
 	}
 	if !battleClicked {
 		b.logger.Warn().Msg("could not find or click Battle button")
