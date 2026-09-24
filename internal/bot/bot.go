@@ -3448,6 +3448,8 @@ func (b *Bot) Stats() BotStats {
 		TrainingItemsPending:   b.trainingItemsPending.Load(),
 		TrainingHousingPending: b.trainingHousingPending.Load(),
 		TrainingPlanUncertain:  b.trainingPlanUncertain.Load(),
+		ArmyCheckPending:       b.armyCheckPending.Load(),
+		ArmyVerifiedUntil:      b.armyVerifiedUntil.Load(),
 		ArmyRepairAttempts:     b.armyRepairAttempts.Load(),
 		ArmyRepairSuccesses:    b.armyRepairSuccesses.Load(),
 		TrainingPending:        trainingPending,
@@ -3499,6 +3501,8 @@ type BotStats struct {
 	TrainingItemsPending   int32  `json:"training_items_pending"`
 	TrainingHousingPending int32  `json:"training_housing_pending"`
 	TrainingPlanUncertain  bool                      `json:"training_plan_uncertain"`
+	ArmyCheckPending       bool                      `json:"army_check_pending"`
+	ArmyVerifiedUntil      int64                     `json:"army_verified_until_nano"`
 	ArmyRepairAttempts     int32                     `json:"army_repair_attempts"`
 	ArmyRepairSuccesses    int32                     `json:"army_repair_successes"`
 	TrainingPending        []attack.TrainingPlanItem `json:"training_pending"`
