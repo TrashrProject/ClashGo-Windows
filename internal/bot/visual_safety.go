@@ -50,10 +50,16 @@ func localVisualDelta(before, after gocv.Mat, pt image.Point, radiusX, radiusY i
 // screen after every transition. If Clash's quit confirmation ever appears,
 // cancel it immediately rather than risking an application exit.
 func (b *Bot) returnToVillageVerified(maxBacks int, source string) bool {
+	if b == nil || (b.ctx != nil && b.ctx.Err() != nil) {
+		return false
+	}
 	if maxBacks < 1 {
 		maxBacks = 1
 	}
 	for attempt := 0; attempt <= maxBacks; attempt++ {
+		if b.ctx != nil && b.ctx.Err() != nil {
+			return false
+		}
 		screen, err := b.client.CaptureToMat()
 		if err == nil && !screen.Empty() {
 			state, _ := b.classify(screen)
