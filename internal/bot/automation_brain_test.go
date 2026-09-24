@@ -128,3 +128,34 @@ func TestVillageBrainOwnsInterAttackCooldown(t *testing.T) {
 		t.Fatalf("action=%v want cooldown", got.Action)
 	}
 }
+
+
+func TestVillageBrainSchedulesQueuedWallsBeforeAttack(t *testing.T) {
+	now := time.Unix(7000, 0)
+	got := decideVillageAction(VillageDecisionInput{
+		Now:                 now,
+		VillageVerified:     true,
+		WallsEnabled:        true,
+		WallsDue:            true,
+		AttackEnabled:       true,
+		AttackButtonVisible: true,
+	})
+	if got.Action != VillageActionUpgradeWalls {
+		t.Fatalf("action=%v want wall upgrade", got.Action)
+	}
+}
+
+func TestVillageBrainDoesNotRunWallsUnlessQueued(t *testing.T) {
+	now := time.Unix(7100, 0)
+	got := decideVillageAction(VillageDecisionInput{
+		Now:                 now,
+		VillageVerified:     true,
+		WallsEnabled:        true,
+		WallsDue:            false,
+		AttackEnabled:       true,
+		AttackButtonVisible: true,
+	})
+	if got.Action != VillageActionAttack {
+		t.Fatalf("action=%v want attack when walls are enabled but not queued", got.Action)
+	}
+}
