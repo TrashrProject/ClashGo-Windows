@@ -68,8 +68,11 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 	if !in.VillageVerified {
 		return VillageDecision{Action: VillageActionIdle, Reason: "village not positively verified"}
 	}
-	if in.SequenceRunning || in.DonationInFlight {
-		return VillageDecision{Action: VillageActionHold, Reason: "another automation action is already running"}
+	if in.SequenceRunning {
+		return VillageDecision{Action: VillageActionHold, Reason: "attack or long-running sequence is active"}
+	}
+	if in.DonationInFlight {
+		return VillageDecision{Action: VillageActionDonate, Reason: "donation cycle is already running"}
 	}
 
 	donationInterval := in.DonationInterval
