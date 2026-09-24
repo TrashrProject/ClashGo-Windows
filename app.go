@@ -405,6 +405,10 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 	cfg.Search.MinLootElixir = elixir
 	cfg.Search.MinLootDarkElixir = dark
 	cfg.Upgrade.UpgradeWalls = upgradeWalls
+	// Keep the beginner preference and the underlying runtime flag in sync.
+	// Otherwise changing Walls in Advanced mode could be silently undone the
+	// next time Easy Mode reapplies its preferences.
+	cfg.Automation.Preferences.AutoUpgradeWalls = upgradeWalls
 	cfg.Search.Enabled = searchEnabled
 
 	// Create a placeholder to indicate the bot is starting. The
