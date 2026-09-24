@@ -1099,7 +1099,8 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		}
 
 		_, hasArmyProfile := b.cfg.Attack.Farm.ActiveProfile()
-		armyCheckEnabled := b.cfg.Automation.AutoArmyGuard &&
+		armyCheckEnabled := b.cfg.Attack.Enabled &&
+			b.cfg.Automation.AutoArmyGuard &&
 			b.cfg.Training.Enabled &&
 			b.cfg.Training.FullArmyBeforeAttack &&
 			hasArmyProfile
