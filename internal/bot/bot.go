@@ -801,6 +801,16 @@ func (b *Bot) locateRewardPopup(screen gocv.Mat) (int, int, bool) {
 	return x, y, true
 }
 
+func armyPreflightDue(enabled, pending bool, verifiedUntilNano int64, now time.Time) bool {
+	if !enabled {
+		return false
+	}
+	if pending {
+		return true
+	}
+	return verifiedUntilNano <= 0 || verifiedUntilNano <= now.UnixNano()
+}
+
 func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, captureMs time.Duration) {
 	if err != nil {
 		gc.RecordCaptureError()
@@ -1113,12 +1123,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			WallsEnabled:        b.cfg.Upgrade.UpgradeWalls,
 			WallsDue:            b.wallUpgradePending.Load(),
 			ArmyCheckEnabled:    armyCheckEnabled,
-			ArmyCheckDue: func() bool {
-				if !armyCheckEnabled { return false }
-				if b.armyCheckPending.Load() { return true }
-				verifiedUntil := b.armyVerifiedUntil.Load()
-				return verifiedUntil <= 0 || verifiedUntil <= now.UnixNano()
-			}(),
+			ArmyCheckDue:        armyPreflightDue(armyCheckEnabled, b.armyCheckPending.Load(), b.armyVerifiedUntil.Load(), now),
 			ArmyWaitUntil:       armyUntil,
 			AttackEnabled:       b.cfg.Attack.Enabled,
 			AttackCapReached:    b.cfg.Attack.MaxAttackPerSession > 0 && int(b.attackCount.Load()) >= b.cfg.Attack.MaxAttackPerSession,
