@@ -46,6 +46,7 @@ type VillageDecisionInput struct {
 	Now                 time.Time
 	VillageVerified     bool
 	SequenceRunning     bool
+	ActiveTaskName      string
 	DonationInFlight    bool
 	DonationEnabled     bool
 	LastDonationScan    time.Time
@@ -86,7 +87,11 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 		return VillageDecision{Action: VillageActionIdle, Reason: "village not positively verified"}
 	}
 	if in.SequenceRunning {
-		return VillageDecision{Action: VillageActionHold, Reason: "attack or long-running sequence is active"}
+		reason := "exclusive automation task is active"
+		if in.ActiveTaskName != "" {
+			reason = "exclusive task active: " + in.ActiveTaskName
+		}
+		return VillageDecision{Action: VillageActionHold, Reason: reason}
 	}
 	if in.DonationInFlight {
 		return VillageDecision{Action: VillageActionDonate, Reason: "donation cycle is already running"}
