@@ -3343,9 +3343,27 @@ func (b *Bot) dismissInterruptions() {
 	switch state {
 	case game.StateObstacleDialog:
 		x, y := b.cal.ScaleRef(400, 300)
-		b.client.TapRandomized(x, y)
-		time.Sleep(400 * time.Millisecond)
-		b.client.Back()
+		if err := b.client.TapRandomized(x, y); err != nil {
+			b.logger.Warn().Err(err).Msg("obstacle dialog dismiss tap failed")
+			return
+		}
+		if !b.sleepResponsive(320 * time.Millisecond) {
+			return
+		}
+		// Never chain a blind Back after the first tap. Re-prove that the
+		// obstacle dialog is still present; only then is Back a safe fallback.
+		verify, capErr := b.client.CaptureToMat()
+		if capErr != nil || verify.Empty() {
+			if !verify.Empty() { verify.Close() }
+			return
+		}
+		stillOpen, _ := b.classify(verify)
+		verify.Close()
+		if stillOpen == game.StateObstacleDialog {
+			if err := b.client.Back(); err != nil {
+				b.logger.Warn().Err(err).Msg("obstacle dialog Back fallback failed")
+			}
+		}
 	case game.StateGemDialog, game.StateShieldInfo:
 		x, y := b.cal.ScaleRef(175, 30)
 		b.client.TapRandomized(x, y)
