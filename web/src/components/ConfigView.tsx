@@ -23,6 +23,24 @@ interface ConfigViewProps {
   setLootExitPercent: (v: number) => void;
   simpleMode: boolean;
   onSetSimpleMode: (enabled: boolean) => Promise<void>;
+  simplePreferences: {
+    autoDonate: boolean;
+    donateOnlyRequested: boolean;
+    useHeroes: boolean;
+    useClanCastle: boolean;
+    waitForFullArmy: boolean;
+    autoRetrain: boolean;
+    lootPreset: 'relaxed' | 'balanced' | 'rich';
+  };
+  onSaveSimplePreferences: (prefs: {
+    autoDonate: boolean;
+    donateOnlyRequested: boolean;
+    useHeroes: boolean;
+    useClanCastle: boolean;
+    waitForFullArmy: boolean;
+    autoRetrain: boolean;
+    lootPreset: 'relaxed' | 'balanced' | 'rich';
+  }) => Promise<void>;
   // Returns the underlying SaveConfig promise so ConfigView can own
   // the save-status indicator (green flash / red flash + inline
   // "Saved!" / "Save failed" pill) and surface success or failure to
@@ -52,12 +70,16 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   lootExitPercent, setLootExitPercent,
   simpleMode,
   onSetSimpleMode,
+  simplePreferences,
+  onSaveSimplePreferences,
   onSave
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
   const [saveStatus, setSaveStatus] = React.useState<SaveStatus>('idle');
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const [simpleModeBusy, setSimpleModeBusy] = React.useState(false);
+  const [simplePrefsBusy, setSimplePrefsBusy] = React.useState(false);
+  const [simplePrefsStatus, setSimplePrefsStatus] = React.useState<'idle' | 'saved' | 'error'>('idle');
   const [lastSaveError, setLastSaveError] = React.useState<string | null>(null);
   const dropdownRef = React.useRef<HTMLDivElement>(null);
   const savedTimerRef = React.useRef<number | null>(null);
@@ -223,6 +245,106 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                       You do not need to understand ADB, OCR, templates, coordinates or training timers. Those stay automatic unless you deliberately open Advanced controls.
                     </span>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {simpleMode && (
+            <div className="mt-6 rounded-2xl border border-zinc-200/70 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/30 p-5">
+              <div className="flex items-start justify-between gap-4 mb-5">
+                <div>
+                  <div className="text-base font-black text-zinc-950 dark:text-white">My preferences</div>
+                  <div className="text-xs text-zinc-500 mt-1">Simple choices only. ClashGO handles the technical details.</div>
+                </div>
+                <div className={simplePrefsStatus === 'saved' ? "text-[10px] font-black uppercase tracking-widest text-emerald-500" : simplePrefsStatus === 'error' ? "text-[10px] font-black uppercase tracking-widest text-rose-500" : "text-[10px] font-black uppercase tracking-widest text-zinc-400"}>
+                  {simplePrefsBusy ? 'Saving…' : simplePrefsStatus === 'saved' ? 'Saved ✓' : simplePrefsStatus === 'error' ? 'Save failed' : 'Auto-saved'}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {[
+                  { key: 'autoRetrain', icon: 'autorenew', title: 'Retrain after battles', text: 'Rebuild the farming army automatically after each attack.', value: simplePreferences.autoRetrain },
+                  { key: 'waitForFullArmy', icon: 'verified', title: 'Wait for a full army', text: 'Do not attack until the configured army is ready.', value: simplePreferences.waitForFullArmy },
+                  { key: 'useHeroes', icon: 'shield_person', title: 'Use heroes', text: 'Use available heroes during farming attacks.', value: simplePreferences.useHeroes },
+                  { key: 'useClanCastle', icon: 'fort', title: 'Use Clan Castle', text: 'Use available Clan Castle reinforcements in attacks.', value: simplePreferences.useClanCastle },
+                  { key: 'autoDonate', icon: 'volunteer_activism', title: 'Automatic clan donations', text: 'Allow ClashGO to donate troops when a matching request is available.', value: simplePreferences.autoDonate },
+                  { key: 'donateOnlyRequested', icon: 'fact_check', title: 'Only donate requested troops', text: 'Safer default: never send a different troop just because it is available.', value: simplePreferences.donateOnlyRequested, disabled: !simplePreferences.autoDonate },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    role="switch"
+                    aria-checked={item.value}
+                    disabled={simplePrefsBusy || item.disabled}
+                    onClick={async () => {
+                      if (simplePrefsBusy || item.disabled) return;
+                      const next = { ...simplePreferences, [item.key]: !item.value };
+                      setSimplePrefsBusy(true);
+                      setSimplePrefsStatus('idle');
+                      try {
+                        await onSaveSimplePreferences(next);
+                        setSimplePrefsStatus('saved');
+                        window.setTimeout(() => setSimplePrefsStatus('idle'), 1600);
+                      } catch {
+                        setSimplePrefsStatus('error');
+                      } finally {
+                        setSimplePrefsBusy(false);
+                      }
+                    }}
+                    className={item.value ? "rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.06] p-4 text-left transition-all disabled:opacity-40" : "rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4 text-left transition-all disabled:opacity-40"}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={item.value ? "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-emerald-500 text-white" : "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-zinc-100 dark:bg-zinc-800 text-zinc-500"}>
+                        <span className="material-symbols-outlined text-lg">{item.icon}</span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-sm font-black text-zinc-900 dark:text-white">{item.title}</span>
+                          <span className={item.value ? "text-[10px] font-black uppercase tracking-wider text-emerald-500" : "text-[10px] font-black uppercase tracking-wider text-zinc-400"}>{item.value ? 'On' : 'Off'}</span>
+                        </div>
+                        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{item.text}</p>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-5">
+                <div className="text-xs font-black text-zinc-900 dark:text-white mb-2">Base search</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { key: 'relaxed' as const, label: 'Fast', text: 'More bases' },
+                    { key: 'balanced' as const, label: 'Balanced', text: 'Recommended' },
+                    { key: 'rich' as const, label: 'Rich only', text: 'More loot' },
+                  ].map((preset) => {
+                    const active = simplePreferences.lootPreset === preset.key;
+                    return (
+                      <button
+                        key={preset.key}
+                        type="button"
+                        disabled={simplePrefsBusy}
+                        onClick={async () => {
+                          if (simplePrefsBusy || active) return;
+                          setSimplePrefsBusy(true);
+                          setSimplePrefsStatus('idle');
+                          try {
+                            await onSaveSimplePreferences({ ...simplePreferences, lootPreset: preset.key });
+                            setSimplePrefsStatus('saved');
+                            window.setTimeout(() => setSimplePrefsStatus('idle'), 1600);
+                          } catch {
+                            setSimplePrefsStatus('error');
+                          } finally {
+                            setSimplePrefsBusy(false);
+                          }
+                        }}
+                        className={active ? "rounded-xl border border-emerald-500 bg-emerald-500 px-3 py-3 text-center text-white transition-all" : "rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-3 text-center text-zinc-600 dark:text-zinc-300 transition-all"}
+                      >
+                        <div className="text-xs font-black">{preset.label}</div>
+                        <div className={active ? "text-[9px] mt-1 text-white/80" : "text-[9px] mt-1 text-zinc-400"}>{preset.text}</div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
