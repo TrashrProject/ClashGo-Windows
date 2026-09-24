@@ -2,6 +2,7 @@ package attack
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Ducky705/ClashGO/internal/config"
 )
@@ -54,5 +55,20 @@ func TestActionableTrainingItemsSkipsUncertainRows(t *testing.T) {
 	items := ActionableTrainingItems(plan)
 	if len(items) != 1 || items[0].Name != "Balloon" {
 		t.Fatalf("actionable items=%v want only Balloon", items)
+	}
+}
+
+func TestTrainingPlanStale(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	fresh := TrainingPlan{CreatedAt: now.Add(-5 * time.Minute)}
+	if fresh.Stale(now, 15*time.Minute) {
+		t.Fatal("fresh plan reported stale")
+	}
+	old := TrainingPlan{CreatedAt: now.Add(-20 * time.Minute)}
+	if !old.Stale(now, 15*time.Minute) {
+		t.Fatal("old plan should be stale")
+	}
+	if !(TrainingPlan{}).Stale(now, 15*time.Minute) {
+		t.Fatal("zero timestamp plan should be stale")
 	}
 }
