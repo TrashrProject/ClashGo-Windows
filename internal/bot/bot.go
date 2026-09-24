@@ -1611,7 +1611,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		// every few successful skips instead of hammering Next/capture forever.
 		if skipsSinceRest >= 8 {
 			b.logger.Info().Msg("matchmaking stability pause after 8 skips")
-			time.Sleep(1500 * time.Millisecond)
+			if !b.sleepResponsive(1500 * time.Millisecond) { lootRec.Close(); return }
 			skipsSinceRest = 0
 		}
 
@@ -1658,7 +1658,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			// asking for another screenshot. The old 220ms polling burst could
 			// issue 8-12 PNG screencaps immediately after every Next tap and
 			// was correlated with HD-Player.exe access-violation crashes.
-			time.Sleep(650 * time.Millisecond)
+			if !b.sleepResponsive(650 * time.Millisecond) { lootRec.Close(); return }
 			for verify := 0; verify < 3 && !transitioned; verify++ {
 				probe, capErr := b.client.CaptureToMat()
 				if capErr == nil && !probe.Empty() {
@@ -1672,7 +1672,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 					probe.Close()
 				}
 				if verify < 2 {
-					time.Sleep(550 * time.Millisecond)
+					if !b.sleepResponsive(550 * time.Millisecond) { lootRec.Close(); return }
 				}
 			}
 		}
@@ -1682,9 +1682,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		// user manually clicked Next, while also preventing rapid tap spam.
 		if !transitioned {
 			b.logger.Warn().Msg("Next tap did not start matchmaking; reacquiring button for one controlled retry")
-			time.Sleep(450 * time.Millisecond)
+			if !b.sleepResponsive(450 * time.Millisecond) { lootRec.Close(); return }
 			if clickNextFresh() {
-				time.Sleep(700 * time.Millisecond)
+				if !b.sleepResponsive(700 * time.Millisecond) { lootRec.Close(); return }
 				for verify := 0; verify < 3 && !transitioned; verify++ {
 					probe, capErr := b.client.CaptureToMat()
 					if capErr == nil && !probe.Empty() {
@@ -1698,7 +1698,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 						probe.Close()
 					}
 					if verify < 2 {
-						time.Sleep(600 * time.Millisecond)
+						if !b.sleepResponsive(600 * time.Millisecond) { lootRec.Close(); return }
 					}
 				}
 			}
@@ -1712,7 +1712,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				b.OnStatsUpdate()
 			}
 			b.logger.Info().Msg("matchmaking transition confirmed after Next")
-			time.Sleep(1100 * time.Millisecond)
+			if !b.sleepResponsive(700 * time.Millisecond) { lootRec.Close(); return }
 			continue
 		}
 
@@ -1731,7 +1731,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			return
 		}
 
-		time.Sleep(1200 * time.Millisecond)
+		if !b.sleepResponsive(900 * time.Millisecond) { lootRec.Close(); return }
 	}
 
 	if deployErr != nil || remainingUndeployed > 0 {
