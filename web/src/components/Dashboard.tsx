@@ -176,6 +176,23 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
     <div className="space-y-6">
       <AutomationOverview />
 
+      <section className="bg-white dark:bg-zinc-900 rounded-[2rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none px-5 py-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+              <span className="material-symbols-outlined">psychology</span>
+            </div>
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Automation brain</div>
+              <div className="text-base font-black text-zinc-950 dark:text-white capitalize">{stats.village_action || 'idle'}</div>
+            </div>
+          </div>
+          <div className="text-xs text-zinc-500">
+            ClashGO picks the next safe village task automatically.
+          </div>
+        </div>
+      </section>
+
       {/* Metrics Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         {[
