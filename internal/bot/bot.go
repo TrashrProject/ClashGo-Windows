@@ -1387,10 +1387,11 @@ func automationPhaseForTask(name string) RuntimePhase {
 
 // runAutomationTask executes a short task inline under the global UI lease.
 // The defer guarantees that even a panic cannot leave the scheduler locked.
-func (b *Bot) runAutomationTask(name string, work func()) bool {
+func (b *Bot) runAutomationTask(name string, work func()) (started bool) {
 	if !b.tryBeginAutomationTask(name) {
 		return false
 	}
+	started = true
 	defer b.endAutomationTask(name)
 	phase := automationPhaseForTask(name)
 	if phase != PhaseIdle {
@@ -1405,7 +1406,7 @@ func (b *Bot) runAutomationTask(name string, work func()) bool {
 		}
 	}()
 	work()
-	return true
+	return started
 }
 
 // startAutomationTask is the long-running counterpart. It acquires the lease
