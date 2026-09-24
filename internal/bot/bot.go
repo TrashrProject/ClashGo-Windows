@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -82,6 +83,9 @@ type Bot struct {
 	trainingItemsPending    atomic.Int32
 	trainingHousingPending  atomic.Int32
 	trainingPlanUncertain   atomic.Bool
+	statusMu                sync.RWMutex
+	trainingPending         []attack.TrainingPlanItem
+	villageReason           string
 	lastArmyCampGuardLog    time.Time
 	lastDonationScan        time.Time
 	startedAt             time.Time
@@ -1020,6 +1024,9 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			AttackButtonVisible: attackVisible,
 		})
 		b.villageAction.Store(int32(decision.Action))
+		b.statusMu.Lock()
+		b.villageReason = decision.Reason
+		b.statusMu.Unlock()
 
 		switch decision.Action {
 		case VillageActionDonate:
@@ -2454,6 +2461,9 @@ func (b *Bot) clickSequence() bool {
 					b.trainingItemsPending.Store(int32(len(plan.Items)))
 					b.trainingHousingPending.Store(int32(plan.TotalHousing))
 					b.trainingPlanUncertain.Store(plan.HasUncertain)
+					b.statusMu.Lock()
+					b.trainingPending = append([]attack.TrainingPlanItem(nil), plan.Items...)
+					b.statusMu.Unlock()
 					if err := attack.WriteTrainingPlan(plan); err != nil {
 						b.logger.Warn().Err(err).Msg("could not persist pending training plan")
 					} else {
@@ -2489,6 +2499,9 @@ func (b *Bot) clickSequence() bool {
 					b.trainingItemsPending.Store(0)
 					b.trainingHousingPending.Store(0)
 					b.trainingPlanUncertain.Store(false)
+					b.statusMu.Lock()
+					b.trainingPending = nil
+					b.statusMu.Unlock()
 					_ = attack.WriteTrainingPlan(attack.BuildTrainingPlan(profile, guard))
 					b.logger.Info().Msg("pre-battle army guard: configured troops/spells ready")
 
@@ -3057,6 +3070,10 @@ func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 
 func (b *Bot) Stats() BotStats {
 	now := time.Now()
+	b.statusMu.RLock()
+	trainingPending := append([]attack.TrainingPlanItem(nil), b.trainingPending...)
+	villageReason := b.villageReason
+	b.statusMu.RUnlock()
 	state := game.GameState(b.runtimeState.Load())
 	phase := RuntimePhase(b.runtimePhase.Load())
 	stateAge := time.Duration(0)
@@ -3091,7 +3108,9 @@ func (b *Bot) Stats() BotStats {
 		TrainingItemsPending:   b.trainingItemsPending.Load(),
 		TrainingHousingPending: b.trainingHousingPending.Load(),
 		TrainingPlanUncertain:  b.trainingPlanUncertain.Load(),
+		TrainingPending:        trainingPending,
 		VillageAction:         VillageAction(b.villageAction.Load()).String(),
+		VillageReason:         villageReason,
 		RuntimeState:          state.String(),
 		RuntimePhase:       phase.String(),
 		RuntimeStateAge:    stateAge,
@@ -3125,8 +3144,10 @@ type BotStats struct {
 	LastDonationUnix      int64  `json:"last_donation_unix"`
 	TrainingItemsPending   int32  `json:"training_items_pending"`
 	TrainingHousingPending int32  `json:"training_housing_pending"`
-	TrainingPlanUncertain  bool   `json:"training_plan_uncertain"`
-	VillageAction          string `json:"village_action"`
+	TrainingPlanUncertain  bool                      `json:"training_plan_uncertain"`
+	TrainingPending        []attack.TrainingPlanItem `json:"training_pending,omitempty"`
+	VillageAction          string                    `json:"village_action"`
+	VillageReason          string                    `json:"village_reason"`
 
 	RuntimeState    string        `json:"runtime_state"`
 	RuntimePhase    string        `json:"runtime_phase"`
