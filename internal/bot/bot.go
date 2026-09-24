@@ -984,6 +984,14 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		return
 	}
 
+	// A leased village task owns normal UI navigation until it finishes.
+	// Critical overlays above (reward/chest/boot splash) may still interrupt,
+	// but generic state handlers below must never issue a competing Back/pan/
+	// navigation while donation, wall maintenance or army preflight is active.
+	if b.automationTaskInFlight.Load() {
+		return
+	}
+
 	// Connection-lost dialog. CoC shows this whenever the game's own
 	// server link drops (emulator network blip, server restart); the
 	// classifier used to misread it as StateBattleEnd — the dialog's
