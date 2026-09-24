@@ -262,9 +262,14 @@ func mergeStats(acc, current bot.BotStats) bot.BotStats {
 		AdbHealth:        current.AdbHealth,
 		CPUTimeSec:       current.CPUTimeSec,
 		CPUCores:          current.CPUCores,
-		RecoveryAttempts:  acc.RecoveryAttempts + current.RecoveryAttempts,
-		RecoverySuccesses: acc.RecoverySuccesses + current.RecoverySuccesses,
+		RecoveryAttempts:   acc.RecoveryAttempts + current.RecoveryAttempts,
+		RecoverySuccesses:  acc.RecoverySuccesses + current.RecoverySuccesses,
 		BlueStacksRestarts: acc.BlueStacksRestarts + current.BlueStacksRestarts,
+		RuntimeState:       current.RuntimeState,
+		RuntimePhase:       current.RuntimePhase,
+		RuntimeStateAge:    current.RuntimeStateAge,
+		RuntimePhaseAge:    current.RuntimePhaseAge,
+		LastProgressAgo:    current.LastProgressAgo,
 	}
 }
 
