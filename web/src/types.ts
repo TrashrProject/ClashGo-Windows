@@ -38,6 +38,7 @@ export interface BotStats {
   }>;
   village_action: string;
   village_reason: string;
+  village_next_unix: number;
   adb_health: {
     avg_capture_ms: number;
     consecutive_fails: number;
