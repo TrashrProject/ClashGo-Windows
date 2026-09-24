@@ -116,6 +116,15 @@ func (b *Bot) runtimeSupervisorLoop() {
 			}
 
 			state := game.GameState(b.runtimeState.Load())
+
+			// Windows/BlueStacks may classify the first visually usable frames
+			// as Unknown while localized HUD assets and template caches settle.
+			// Preserve the proven startup grace from the Windows branch, but do
+			// not give Unknown the same generosity later in the session.
+			if state == game.StateUnknown && time.Since(b.startedAt) < 2*time.Minute {
+				continue
+			}
+
 			timeout := runtimeStateTimeout(state)
 			if timeout <= 0 {
 				continue
