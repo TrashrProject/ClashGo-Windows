@@ -14,6 +14,7 @@ func TestVillageBrainPriorities(t *testing.T) {
 		LastDonationScan: now.Add(-2*time.Minute),
 		ResourceEnabled: true,
 		LastResourceScan: now.Add(-time.Minute),
+		AttackEnabled:       true,
 		AttackButtonVisible: true,
 	}
 
@@ -43,6 +44,7 @@ func TestVillageBrainNeverActsWithoutVerifiedVillage(t *testing.T) {
 		Now: time.Now(),
 		DonationEnabled: true,
 		ResourceEnabled: true,
+		AttackEnabled:       true,
 		AttackButtonVisible: true,
 	})
 	if got.Action != VillageActionIdle {
@@ -78,6 +80,7 @@ func TestVillageBrainUsesHousekeepingWhileArmyWaits(t *testing.T) {
 		ResourceEnabled:     true,
 		LastResourceScan:    now.Add(-time.Minute),
 		ArmyWaitUntil:       now.Add(5 * time.Minute),
+		AttackEnabled:       true,
 		AttackButtonVisible: true,
 	})
 	if got.Action != VillageActionScanResources {
@@ -94,9 +97,34 @@ func TestVillageBrainHonorsDonationBackoff(t *testing.T) {
 		LastDonationScan:    now.Add(-10 * time.Minute),
 		DonationNextCheck:   now.Add(2 * time.Minute),
 		ResourceEnabled:     false,
+		AttackEnabled:       true,
 		AttackButtonVisible: true,
 	})
 	if got.Action != VillageActionAttack {
 		t.Fatalf("action=%v want attack while donation backoff is active", got.Action)
+	}
+}
+
+func TestVillageBrainStopsAtSessionCap(t *testing.T) {
+	now := time.Unix(5000, 0)
+	got := decideVillageAction(VillageDecisionInput{
+		Now: now, VillageVerified: true,
+		AttackEnabled: true, AttackCapReached: true, AttackButtonVisible: true,
+	})
+	if got.Action != VillageActionSessionComplete {
+		t.Fatalf("action=%v want session complete", got.Action)
+	}
+}
+
+func TestVillageBrainOwnsInterAttackCooldown(t *testing.T) {
+	now := time.Unix(6000, 0)
+	got := decideVillageAction(VillageDecisionInput{
+		Now: now, VillageVerified: true,
+		AttackEnabled: true,
+		AttackNotBefore: now.Add(20 * time.Second),
+		AttackButtonVisible: true,
+	})
+	if got.Action != VillageActionCooldown {
+		t.Fatalf("action=%v want cooldown", got.Action)
 	}
 }
