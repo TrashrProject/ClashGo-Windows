@@ -2316,7 +2316,7 @@ func (b *Bot) clickSequence() bool {
 				break
 			}
 		}
-		time.Sleep(120 * time.Millisecond)
+		if !b.sleepResponsive(120 * time.Millisecond) { return false }
 	}
 
 	armyArrowClicked := false
@@ -2455,7 +2455,7 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 		screen, err := b.client.CaptureToMat()
 		if err != nil {
 			b.logger.Warn().Err(err).Str("step", stepName).Msg("capture failed")
-			time.Sleep(500 * time.Millisecond)
+			if !b.sleepResponsive(250 * time.Millisecond) { return false }
 			continue
 		}
 
@@ -2503,7 +2503,7 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 				b.logger.Debug().Str("step", stepName).Msg("not found, retrying...")
 			}
 			b.dismissInterruptions()
-			time.Sleep(800 * time.Millisecond)
+			if !b.sleepResponsive(350 * time.Millisecond) { return false }
 			continue
 		}
 
