@@ -2,6 +2,8 @@ package attack
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"os"
 	"time"
 
@@ -60,6 +62,73 @@ func BuildTrainingPlan(profile config.FarmProfile, guard ArmyGuardResult) Traini
 		}
 	}
 	return p
+}
+
+// ValidateTrainingPlan rejects impossible or internally inconsistent plans
+// before a future training executor is allowed to act on them.
+func ValidateTrainingPlan(plan TrainingPlan, profile config.FarmProfile) error {
+	if plan.TownHall != 0 && profile.TownHall != 0 && plan.TownHall != profile.TownHall {
+		return fmt.Errorf("training plan TH%d does not match active TH%d profile", plan.TownHall, profile.TownHall)
+	}
+
+	seen := make(map[string]bool)
+	troopSpace := 0
+	spellSpace := 0
+	for _, item := range plan.Items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			return fmt.Errorf("training plan contains unnamed item")
+		}
+		key := strings.ToLower(strings.TrimSpace(item.Category)) + ":" + strings.ToLower(name)
+		if seen[key] {
+			return fmt.Errorf("training plan contains duplicate item %s", name)
+		}
+		seen[key] = true
+
+		if item.Current < 0 || item.Target < 0 || item.ToTrain < 0 || item.Housing < 0 || item.SpaceNeed < 0 {
+			return fmt.Errorf("training plan contains negative values for %s", name)
+		}
+		if item.Current > item.Target {
+			return fmt.Errorf("training plan current count exceeds target for %s", name)
+		}
+		if item.ToTrain != item.Target-item.Current {
+			return fmt.Errorf("training plan deficit mismatch for %s", name)
+		}
+		if item.Housing > 0 && item.SpaceNeed != item.Housing*item.ToTrain {
+			return fmt.Errorf("training plan housing mismatch for %s", name)
+		}
+
+		// Only confident rows are actionable and therefore count toward
+		// capacity validation. Uncertain rows are diagnostic-only.
+		if item.Confident {
+			switch strings.ToLower(strings.TrimSpace(item.Category)) {
+			case "troop":
+				troopSpace += item.SpaceNeed
+			case "spell":
+				spellSpace += item.SpaceNeed
+			}
+		}
+	}
+
+	if profile.TroopCapacity > 0 && troopSpace > profile.TroopCapacity {
+		return fmt.Errorf("training plan troop deficit %d exceeds troop capacity %d", troopSpace, profile.TroopCapacity)
+	}
+	if profile.SpellCapacity > 0 && spellSpace > profile.SpellCapacity {
+		return fmt.Errorf("training plan spell deficit %d exceeds spell capacity %d", spellSpace, profile.SpellCapacity)
+	}
+	return nil
+}
+
+// ActionableTrainingItems returns only deficits backed by confident visual/OCR
+// evidence. A UI executor must never act on uncertain diagnostic rows.
+func ActionableTrainingItems(plan TrainingPlan) []TrainingPlanItem {
+	out := make([]TrainingPlanItem, 0, len(plan.Items))
+	for _, item := range plan.Items {
+		if item.Confident && item.ToTrain > 0 {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func WriteTrainingPlan(plan TrainingPlan) error {
