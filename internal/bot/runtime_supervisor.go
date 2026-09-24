@@ -79,8 +79,9 @@ func runtimeStateTimeout(state game.GameState) time.Duration {
 //   2. captures continue, but the confirmed game state stops progressing ->
 //      bounded game restart.
 //
-// Attack sequences are excluded from state-stall recovery because search,
-// deployment, and battle already have their own domain-specific timers.
+// Lease-owning automation tasks are excluded from generic state-stall
+// recovery because each flow owns its own bounded checks. Capture-heartbeat
+// recovery still runs above this gate, so a dead emulator can always recover.
 func (b *Bot) runtimeSupervisorLoop() {
 	ticker := time.NewTicker(runtimeSupervisorTick)
 	defer ticker.Stop()
@@ -111,7 +112,12 @@ func (b *Bot) runtimeSupervisorLoop() {
 				}
 			}
 
-			if b.seqRunning.Load() || b.recoveryInFlight.Load() || b.restartInFlight.Load() {
+			// Any lease-owning automation task is allowed to control its own
+			// bounded flow. Without this guard the generic state watchdog could
+			// restart Clash in the middle of a valid donation or wall sequence
+			// simply because ChatOpen / builder UI stayed stable for 20-30s.
+			if b.seqRunning.Load() || b.automationTaskInFlight.Load() ||
+				b.recoveryInFlight.Load() || b.restartInFlight.Load() {
 				continue
 			}
 
