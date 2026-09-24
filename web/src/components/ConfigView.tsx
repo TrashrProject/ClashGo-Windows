@@ -268,8 +268,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                   { key: 'waitForFullArmy', icon: 'verified', title: 'Wait for a full army', text: 'Do not attack until the configured army is ready.', value: simplePreferences.waitForFullArmy },
                   { key: 'useHeroes', icon: 'shield_person', title: 'Use heroes', text: 'Use available heroes during farming attacks.', value: simplePreferences.useHeroes },
                   { key: 'useClanCastle', icon: 'fort', title: 'Use Clan Castle', text: 'Use available Clan Castle reinforcements in attacks.', value: simplePreferences.useClanCastle },
-                  { key: 'autoDonate', icon: 'volunteer_activism', title: 'Automatic clan donations', text: 'Allow ClashGO to donate troops when a matching request is available.', value: simplePreferences.autoDonate },
-                  { key: 'donateOnlyRequested', icon: 'fact_check', title: 'Only donate requested troops', text: 'Safer default: never send a different troop just because it is available.', value: simplePreferences.donateOnlyRequested, disabled: !simplePreferences.autoDonate },
+                  { key: 'autoDonate', icon: 'volunteer_activism', title: 'Automatic clan donations', text: 'Donate only when ClashGO can positively match a requested troop. Unknown requests are skipped.', value: simplePreferences.autoDonate },
                 ].map((item) => (
                   <button
                     key={item.key}
