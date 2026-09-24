@@ -483,10 +483,11 @@ func (b *Bot) captureLoop() {
 		// On the user's Pie64 instance this can terminate/restart the emulator
 		// with no Go error at all. Keep one low-rate observer alive for popup /
 		// health handling, but remove the duplicate high-frequency pressure.
-		if b.seqRunning.Load() {
-			// The active attack/search goroutine owns screencaps while a
-			// sequence is running. Keep only a very low-rate observer so
-			// BlueStacks is never hit by two concurrent screencap streams.
+		if b.seqRunning.Load() || b.automationTaskInFlight.Load() {
+			// The lease-owning task performs its own fresh captures. Keep the
+			// background observer deliberately slow so donation, army preflight
+			// and wall flows get the same single-capture-stream protection as
+			// attacks instead of hammering BlueStacks from two goroutines.
 			return 2500 * time.Millisecond
 		}
 
