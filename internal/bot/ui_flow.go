@@ -51,10 +51,9 @@ func (b *Bot) captureFailureDiagnostic(name string, extra map[string]interface{}
 //
 // Safety path:
 //   - transient dialogs are dismissed while waiting;
-//   - if the template asset is unavailable, use the known pinpoint
-//     immediately (there is no visual matcher to wait for);
-//   - if visual evidence never appears before timeout, one final pinpoint
-//     fallback is allowed so minor UI/template drift does not deadlock.
+//   - missing template assets fail closed instead of clicking blindly;
+//   - if visual evidence never appears before timeout, the caller recovers
+//     from the failed step rather than firing a stale coordinate.
 func (b *Bot) waitAndClickButton(templateName, stepName string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 
@@ -67,20 +66,14 @@ func (b *Bot) waitAndClickButton(templateName, stepName string, timeout time.Dur
 		}
 	}
 
-	// If there is no template for this build, waiting cannot increase our
-	// certainty. Use the calibrated reference point immediately.
+	// If there is no template, do not blindly tap an assumed coordinate.
+	// A missing asset is a configuration/runtime-integrity problem; failing
+	// closed is safer than turning a fast path into a random UI action.
 	if !hasTemplate {
-		if pp, ok := villagePinpoints[templateName]; ok {
-			px, py := b.cal.ScaleRef(pp.X, pp.Y)
-			b.logger.Warn().
-				Str("step", stepName).
-				Str("template", templateName).
-				Msg("template unavailable; using calibrated pinpoint fallback")
-			if err := b.client.TapRandomized(px, py); err == nil {
-				b.recordActivity()
-				return true
-			}
-		}
+		b.logger.Error().
+			Str("step", stepName).
+			Str("template", templateName).
+			Msg("required UI template unavailable; refusing blind action")
 		return false
 	}
 
@@ -183,21 +176,10 @@ func (b *Bot) waitAndClickButton(templateName, stepName string, timeout time.Dur
 		}
 	}
 
-	// Last-resort compatibility fallback. It is deliberately done only
-	// after a bounded visual wait, unlike the old path which blindly tapped
-	// pinpoints before looking at the screen.
-	if pp, ok := villagePinpoints[templateName]; ok {
-		px, py := b.cal.ScaleRef(pp.X, pp.Y)
-		b.logger.Warn().
-			Str("step", stepName).
-			Dur("visual_timeout", timeout).
-			Msg("visual target not confirmed; one calibrated fallback tap")
-		if err := b.client.TapRandomized(px, py); err == nil {
-			b.recordActivity()
-			return true
-		}
-	}
-
+	b.logger.Warn().
+		Str("step", stepName).
+		Dur("visual_timeout", timeout).
+		Msg("visual target not confirmed; refusing blind fallback tap")
 	return false
 }
 
