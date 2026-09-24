@@ -2,6 +2,7 @@ package bot
 
 import (
 	"image"
+	"time"
 
 	"github.com/Ducky705/ClashGO/internal/game"
 	"gocv.io/x/gocv"
