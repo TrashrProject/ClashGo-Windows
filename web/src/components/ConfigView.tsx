@@ -275,9 +275,9 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                     type="button"
                     role="switch"
                     aria-checked={item.value}
-                    disabled={simplePrefsBusy || item.disabled}
+                    disabled={simplePrefsBusy}
                     onClick={async () => {
-                      if (simplePrefsBusy || item.disabled) return;
+                      if (simplePrefsBusy) return;
                       const next = { ...simplePreferences, [item.key]: !item.value };
                       setSimplePrefsBusy(true);
                       setSimplePrefsStatus('idle');
