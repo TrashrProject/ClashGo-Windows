@@ -1290,12 +1290,36 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 // 30s-window logic. When Classify is nil (manual mode), returns true
 // after the first successful capture — the user is expected to have
 // navigated to MainVillage themselves.
+func wallSleep(h *WallUpgradeHooks, d time.Duration) bool {
+	if d <= 0 {
+		return h == nil || h.StopCheck == nil || !h.StopCheck()
+	}
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if h != nil && h.StopCheck != nil && h.StopCheck() {
+			return false
+		}
+		remaining := time.Until(deadline)
+		step := 100 * time.Millisecond
+		if remaining < step {
+			step = remaining
+		}
+		if step > 0 {
+			time.Sleep(step)
+		}
+	}
+	return h == nil || h.StopCheck == nil || !h.StopCheck()
+}
+
 func waitForMainVillage(h *WallUpgradeHooks, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
+		if h.StopCheck != nil && h.StopCheck() {
+			return false
+		}
 		screen, err := h.Client.CaptureToMat()
 		if err != nil {
-			time.Sleep(500 * time.Millisecond)
+			if !wallSleep(h, 500*time.Millisecond) { return false }
 			continue
 		}
 		if h.Classify == nil {
@@ -1308,7 +1332,7 @@ func waitForMainVillage(h *WallUpgradeHooks, timeout time.Duration) bool {
 			return true
 		}
 		dismissInterruptionsFor(h)
-		time.Sleep(500 * time.Millisecond)
+		if !wallSleep(h, 500*time.Millisecond) { return false }
 	}
 	return false
 }
@@ -1334,9 +1358,23 @@ func dismissInterruptionsFor(h *WallUpgradeHooks) {
 	screen.Close()
 	switch state {
 	case game.StateObstacleDialog:
-		_ = h.Client.TapRandomized(400, 300)
-		time.Sleep(400 * time.Millisecond)
-		_ = h.Client.Back()
+		x, y := h.Cal.ScaleRef(400, 300)
+		if err := h.Client.TapRandomized(x, y); err != nil {
+			return
+		}
+		if !wallSleep(h, 320*time.Millisecond) {
+			return
+		}
+		verify, capErr := h.Client.CaptureToMat()
+		if capErr != nil || verify.Empty() {
+			if !verify.Empty() { verify.Close() }
+			return
+		}
+		stillOpen, _ := h.Classify(verify)
+		verify.Close()
+		if stillOpen == game.StateObstacleDialog {
+			_ = h.Client.Back()
+		}
 	case game.StateGemDialog, game.StateShieldInfo:
 		_ = h.Client.TapRandomized(175, 30)
 	case game.StateWelcomeBack:
@@ -1386,7 +1424,7 @@ func defensiveDualTapAndLogClose(h *WallUpgradeHooks, xcx, xcy int, xPopupAlt *R
 		acx, acy := xPopupAlt.Center()
 		_ = h.Client.Tap(acx, acy)
 	}
-	time.Sleep(1000 * time.Millisecond)
+	_ = wallSleep(h, 1000*time.Millisecond)
 	h.step("asset_driven_modal_close_failed", map[string]any{
 		"name":             btnName,
 		"reason":           reason,
