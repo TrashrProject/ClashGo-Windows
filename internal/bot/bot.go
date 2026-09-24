@@ -3399,8 +3399,11 @@ func (b *Bot) dismissInterruptions() {
 // fade-out and confuse the next template match.
 func (b *Bot) dismissSelection() {
 	tx, ty := b.cal.ScaleRef(50, 450)
-	_ = b.client.Tap(tx, ty)
-	time.Sleep(500 * time.Millisecond)
+	if err := b.client.Tap(tx, ty); err != nil {
+		b.logger.Debug().Err(err).Msg("selection dismiss tap failed")
+		return
+	}
+	_ = b.sleepResponsive(500 * time.Millisecond)
 }
 
 func (b *Bot) waitForBattleState(timeout time.Duration) bool {
@@ -3408,7 +3411,7 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 	for time.Now().Before(deadline) {
 		screen, err := b.client.CaptureToMat()
 		if err != nil {
-			time.Sleep(500 * time.Millisecond)
+			if !b.sleepResponsive(500 * time.Millisecond) { return false }
 			continue
 		}
 
