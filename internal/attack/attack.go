@@ -1128,8 +1128,30 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 	if isHero {
 		e.client.HumanSleep(250, 50)
 	} else {
-
 		e.client.HumanSleep(35, 10)
+	}
+
+	// Selecting a troop/hero makes Clash render the red no-deploy overlay.
+	// Capture that exact frame once and reuse it for every planned tap for
+	// this unit. Spells ignore troop deployment restrictions and abilities do
+	// not place a unit, so neither needs this extra capture.
+	deploySafetyFrame := gocv.NewMat()
+	hasDeploySafetyFrame := false
+	if !isSpell && !isAbility {
+		e.client.HumanSleep(45, 10)
+		if frame, capErr := e.client.CaptureToMat(); capErr == nil && !frame.Empty() {
+			deploySafetyFrame = frame
+			hasDeploySafetyFrame = true
+			defer deploySafetyFrame.Close()
+		} else if !frame.Empty() {
+			frame.Close()
+		}
+	}
+	resolveDeploy := func(points []image.Point) []image.Point {
+		if !hasDeploySafetyFrame {
+			return points
+		}
+		return e.resolveSafeDeployPoints(deploySafetyFrame, points)
 	}
 
 	isDragonDuke := strings.Contains(unitName, "duke")
