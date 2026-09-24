@@ -3452,7 +3452,8 @@ func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 	b.applyConfigNow(cfg)
 }
 
-func (b *Bot) applyConfigNow(cfg *config.BotConfig) {	oldArmySlot := b.armySlot
+func (b *Bot) applyConfigNow(cfg *config.BotConfig) {
+	oldArmySlot := b.armySlot
 	b.cfg = cfg
 
 	// Strategy changes can select a different saved-army recipe. Keeping the
