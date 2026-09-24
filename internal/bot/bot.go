@@ -1493,14 +1493,17 @@ func (b *Bot) clickSequence() bool {
 	if b.armySlot <= 1 {
 		armyClicked = b.waitAndClickButton("btn_army_1", "Army 1", 3000*time.Millisecond)
 	} else {
-		// The selected slot uses measured row geometry, but we still wait
-		// for proof that the army-selection UI is actually open first.
-		_ = b.waitForUIEvidence("btn_army_1", game.StateArmySelection, 3000*time.Millisecond)
-		armyClicked = b.selectArmySlot()
+		// The selected slot uses measured row geometry, so require proof that
+		// the army-selection UI is actually open before firing coordinates.
+		if b.waitForUIEvidence("btn_army_1", game.StateArmySelection, 3000*time.Millisecond) {
+			armyClicked = b.selectArmySlot()
+		} else {
+			b.logger.Warn().Int("army_slot", b.armySlot).Msg("army-selection UI was not confirmed; refusing geometry-only slot tap")
+		}
 	}
 	if !armyClicked {
-		b.logger.Warn().Int("army_slot", b.armySlot).Msg("army recipe card did not confirm; continuing to battle button fallback")
 		b.captureFailureDiagnostic("click_army_slot_not_found", map[string]interface{}{"army_slot": b.armySlot})
+		return false
 	}
 
 	if !b.waitAndClickButton("btn_battle", "Battle", 4000*time.Millisecond) {
