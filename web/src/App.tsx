@@ -741,7 +741,7 @@ function App() {
               }}
             />
           )}
-          {tab === 'analytics' && <Analytics stats={stats} resourceHistory={resourceHistory} history={history as any} />}
+          {tab === 'analytics' && <Analytics stats={stats} resourceHistory={resourceHistory} history={history as any} logs={logs} />}
           {tab === 'config' && <ConfigView {...configProps} />}
           {tab === 'settings' && (
             <SettingsView
