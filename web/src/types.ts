@@ -22,6 +22,7 @@ export interface BotStats {
   donation_checks: number;
   donations_sent: number;
   last_donation_unix: number;
+  village_action: string;
   adb_health: {
     avg_capture_ms: number;
     consecutive_fails: number;
