@@ -312,6 +312,12 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		cpuSampler:        newCPUSampler(),
 		dukePicksFile:     dukePicksFile,
 	}
+	if cfg.Upgrade.UpgradeWalls {
+		// Treat enabled wall automation as a real scheduler capability from
+		// startup, not merely an after-attack hook. It gets one bounded pass,
+		// then is re-queued after future attacks.
+		b.wallUpgradePending.Store(true)
+	}
 	if cfg.Automation.AutoArmyGuard && cfg.Training.Enabled && cfg.Training.FullArmyBeforeAttack {
 		if _, ok := cfg.Attack.Farm.ActiveProfile(); ok {
 			b.armyCheckPending.Store(true)
@@ -3465,7 +3471,17 @@ func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 
 func (b *Bot) applyConfigNow(cfg *config.BotConfig) {
 	oldArmySlot := b.armySlot
+	oldWallsEnabled := b.cfg != nil && b.cfg.Upgrade.UpgradeWalls
 	b.cfg = cfg
+
+	if cfg.Upgrade.UpgradeWalls {
+		if !oldWallsEnabled {
+			b.wallUpgradePending.Store(true)
+			b.logger.Info().Msg("wall automation enabled; queued initial scheduler pass")
+		}
+	} else {
+		b.wallUpgradePending.Store(false)
+	}
 
 	// Strategy changes can select a different saved-army recipe. Keeping the
 	// slot resolved only at boot made a live strategy change deploy the new
