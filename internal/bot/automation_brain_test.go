@@ -34,8 +34,15 @@ func TestVillageBrainPriorities(t *testing.T) {
 	}
 
 	base.ArmyWaitUntil = time.Time{}
+	base.ArmyCheckEnabled = true
+	base.ArmyCheckDue = true
+	if got := decideVillageAction(base).Action; got != VillageActionCheckArmy {
+		t.Fatalf("fourth action=%v want army preflight", got)
+	}
+
+	base.ArmyCheckDue = false
 	if got := decideVillageAction(base).Action; got != VillageActionAttack {
-		t.Fatalf("fourth action=%v want attack", got)
+		t.Fatalf("fifth action=%v want attack", got)
 	}
 }
 
@@ -210,5 +217,37 @@ func TestVillageBrainExplainsActiveExclusiveTask(t *testing.T) {
 	}
 	if got.Reason != "exclusive task active: wall upgrades" {
 		t.Fatalf("reason=%q", got.Reason)
+	}
+}
+
+
+func TestVillageBrainArmyPreflightWaitsForBackoff(t *testing.T) {
+	now := time.Unix(9000, 0)
+	got := decideVillageAction(VillageDecisionInput{
+		Now: now,
+		VillageVerified: true,
+		ArmyCheckEnabled: true,
+		ArmyCheckDue: true,
+		ArmyWaitUntil: now.Add(25 * time.Second),
+		AttackEnabled: true,
+		AttackButtonVisible: true,
+	})
+	if got.Action != VillageActionWaitArmy {
+		t.Fatalf("action=%v want wait army before retrying preflight", got.Action)
+	}
+}
+
+func TestVillageBrainArmyPreflightRunsBeforeAttack(t *testing.T) {
+	now := time.Unix(9100, 0)
+	got := decideVillageAction(VillageDecisionInput{
+		Now: now,
+		VillageVerified: true,
+		ArmyCheckEnabled: true,
+		ArmyCheckDue: true,
+		AttackEnabled: true,
+		AttackButtonVisible: true,
+	})
+	if got.Action != VillageActionCheckArmy {
+		t.Fatalf("action=%v want army preflight", got.Action)
 	}
 }
