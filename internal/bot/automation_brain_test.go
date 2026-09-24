@@ -311,3 +311,43 @@ func TestApplyConfigQueuesAndCancelsWallMaintenance(t *testing.T) {
 		t.Fatal("disabling wall automation should cancel queued wall maintenance")
 	}
 }
+
+
+func TestVillageBrainCapSkipsNonessentialHousekeeping(t *testing.T) {
+	now := time.Unix(9200, 0)
+	got := decideVillageAction(VillageDecisionInput{
+		Now: now,
+		VillageVerified: true,
+		AttackCapReached: true,
+		DonationEnabled: true,
+		LastDonationScan: time.Time{},
+		ResourceEnabled: true,
+		LastResourceScan: time.Time{},
+		ArmyCheckEnabled: true,
+		ArmyCheckDue: true,
+		AttackEnabled: true,
+		AttackButtonVisible: true,
+	})
+	if got.Action != VillageActionSessionComplete {
+		t.Fatalf("action=%v want session complete", got.Action)
+	}
+}
+
+func TestVillageBrainCapAllowsOnlyQueuedFinalWalls(t *testing.T) {
+	now := time.Unix(9300, 0)
+	got := decideVillageAction(VillageDecisionInput{
+		Now: now,
+		VillageVerified: true,
+		AttackCapReached: true,
+		WallsEnabled: true,
+		WallsDue: true,
+		DonationEnabled: true,
+		ResourceEnabled: true,
+		ArmyCheckEnabled: true,
+		ArmyCheckDue: true,
+		AttackEnabled: true,
+	})
+	if got.Action != VillageActionUpgradeWalls {
+		t.Fatalf("action=%v want final wall maintenance", got.Action)
+	}
+}
