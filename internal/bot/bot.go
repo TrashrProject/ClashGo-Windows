@@ -65,6 +65,7 @@ type Bot struct {
 	runtimeProgress   atomic.Int64
 	runtimePhase      atomic.Int32
 	runtimePhaseSince atomic.Int64
+	armyWaitUntil     atomic.Int64
 	recoveryAttempts  atomic.Int32
 	recoverySuccesses atomic.Int32
 	blueStacksRestarts atomic.Int32
@@ -988,6 +989,15 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 	}
 
 	if b.zoomedOut.Load() && (gc.State == game.StateMainVillage || gc.State == game.StateUnknown) && b.findAttackButton(screen, 0.30) {
+		if until := b.armyWaitUntil.Load(); until > time.Now().UnixNano() {
+			if time.Since(b.lastArmyCampGuardLog) > 10*time.Second {
+				b.lastArmyCampGuardLog = time.Now()
+				b.logger.Info().
+					Time("retry_after", time.Unix(0, until)).
+					Msg("army readiness gate active; staying in village until next check")
+			}
+			return
+		}
 		b.logger.Info().Msg("attack button detected, starting sequence")
 		b.lastSequenceStart = time.Now()
 		go b.executeAttackSequence(gc)
@@ -1500,6 +1510,12 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 
 	if !b.clickSequence() {
+		if until := b.armyWaitUntil.Load(); until > time.Now().UnixNano() {
+			b.logger.Info().
+				Time("retry_after", time.Unix(0, until)).
+				Msg("attack sequence paused because army is not ready yet")
+			return
+		}
 		b.logger.Warn().Msg("attack click sequence failed, restarting game to recover...")
 		b.restartGame()
 		return
@@ -2372,6 +2388,66 @@ func (b *Bot) clickSequence() bool {
 		}
 	}
 	if !b.sleepResponsive(220 * time.Millisecond) { return false }
+
+	// Pre-battle army gate. Only a confident, positive shortage blocks the
+	// attack; uncertain OCR/template reads are logged but never strand the bot.
+	if b.cfg.Training.Enabled &&
+		b.cfg.Training.FullArmyBeforeAttack &&
+		b.cfg.Automation.AutoArmyGuard {
+		if profile, ok := b.cfg.Attack.Farm.ActiveProfile(); ok {
+			if armyScreen, err := b.client.CaptureToMat(); err == nil && !armyScreen.Empty() {
+				guard := b.attackExec.InspectPreBattleArmy(armyScreen, profile)
+				armyScreen.Close()
+
+				for _, warning := range guard.Warnings {
+					b.logger.Debug().Str("detail", warning).Msg("pre-battle army inspection")
+				}
+
+				switch guard.Decision {
+				case attack.ArmyGuardNotReady:
+					wait := b.cfg.Training.SleepAfterTrain.Duration
+					if wait < 15*time.Second {
+						wait = 15 * time.Second
+					}
+					until := time.Now().Add(wait)
+					b.armyWaitUntil.Store(until.UnixNano())
+					b.logger.Warn().
+						Time("retry_after", until).
+						Int("warnings", len(guard.Warnings)).
+						Msg("army confidently below configured farm profile; aborting matchmaking before Battle")
+
+					// Walk back toward the village with bounded, state-aware
+					// Back presses instead of restarting Clash.
+					for i := 0; i < 3; i++ {
+						_ = b.client.Back()
+						if !b.sleepResponsive(300 * time.Millisecond) { return false }
+						probe, capErr := b.client.CaptureToMat()
+						if capErr == nil && !probe.Empty() {
+							st, _ := b.classify(probe)
+							atVillage := st == game.StateMainVillage || b.findAttackButton(probe, 0.30)
+							probe.Close()
+							if atVillage {
+								b.logger.Info().Msg("returned to village after army readiness block")
+								break
+							}
+						} else if !probe.Empty() {
+							probe.Close()
+						}
+					}
+					return false
+
+				case attack.ArmyGuardReady:
+					b.armyWaitUntil.Store(0)
+					b.logger.Info().Msg("pre-battle army guard: configured troops/spells ready")
+
+				case attack.ArmyGuardUncertain:
+					b.logger.Warn().
+						Int("warnings", len(guard.Warnings)).
+						Msg("pre-battle army guard uncertain; allowing attack rather than false-blocking")
+				}
+			}
+		}
+	}
 
 	battleClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
