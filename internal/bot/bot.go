@@ -1316,6 +1316,41 @@ func (b *Bot) endAutomationTask(name string) {
 	b.logger.Debug().Str("task", name).Msg("automation task lease released")
 }
 
+// repairAutomationLeaseInvariant self-heals bookkeeping corruption at a
+// scheduler boundary. The gate excludes real acquire/release operations, so
+// these repairs cannot steal a lease from a task that is legitimately starting
+// or finishing.
+func (b *Bot) repairAutomationLeaseInvariant() bool {
+	b.automationGateMu.Lock()
+	defer b.automationGateMu.Unlock()
+
+	b.automationTaskMu.Lock()
+	defer b.automationTaskMu.Unlock()
+
+	busy := b.automationTaskInFlight.Load()
+	name := b.automationTaskName
+
+	switch {
+	case busy && name == "":
+		b.automationTaskInFlight.Store(false)
+		b.automationTaskStarted.Store(0)
+		b.logger.Error().Msg("scheduler invariant repaired: busy lease had no owner")
+		return true
+	case !busy && name != "":
+		b.automationLastTask = name
+		b.automationTaskName = ""
+		b.automationTaskStarted.Store(0)
+		b.logger.Error().Str("stale_task", name).Msg("scheduler invariant repaired: stale owner without lease")
+		return true
+	case busy && b.automationTaskStarted.Load() == 0:
+		b.automationTaskStarted.Store(time.Now().Unix())
+		b.logger.Warn().Str("task", name).Msg("scheduler invariant repaired: missing task start timestamp")
+		return true
+	default:
+		return false
+	}
+}
+
 func (b *Bot) currentAutomationTask() string {
 	b.automationTaskMu.RLock()
 	defer b.automationTaskMu.RUnlock()
