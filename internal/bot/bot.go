@@ -1564,123 +1564,21 @@ var villagePinpoints = map[string]Pinpoint{
 }
 
 func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
-
-	if pp, ok := villagePinpoints[templateName]; ok {
-		px, py := b.cal.ScaleRef(pp.X, pp.Y)
-		b.logger.Info().Str("step", stepName).Msg("pinpoint match, clicking...")
-		// TapRandomized = Gaussian jitter + the 180-450ms human reaction
-		// delay, so the bot visibly hesitates before committing to each
-		// decision tap the way a player would.
-		if err := b.client.TapRandomized(px, py); err == nil {
-			_ = b.sleepResponsive(120 * time.Millisecond)
-			b.recordActivity()
-			return true
-		}
+	// Compatibility wrapper for older callers. The old implementation fired
+	// the calibrated pinpoint BEFORE looking at the screen, which was fast but
+	// could click a stale UI. Reuse the visual gate so every normal action is
+	// evidence-first. maxRetries only scales the bounded wait.
+	if maxRetries < 1 {
+		maxRetries = 1
 	}
-
-	tpl, ok := b.templates.Get(templateName)
-	if !ok {
-		b.logger.Error().Str("template", templateName).Msg("template not loaded")
-		return false
+	timeout := time.Duration(maxRetries) * 900 * time.Millisecond
+	if timeout < 900*time.Millisecond {
+		timeout = 900 * time.Millisecond
 	}
-
-	roi := b.buttonROI(templateName)
-
-	physROI := image.Rect(
-		int(float64(roi.Min.X)*b.cal.ScaleX),
-		int(float64(roi.Min.Y)*b.cal.ScaleY),
-		int(float64(roi.Max.X)*b.cal.ScaleX),
-		int(float64(roi.Max.Y)*b.cal.ScaleY),
-	)
-
-	for retry := 0; retry < maxRetries; retry++ {
-		screen, err := b.client.CaptureToMat()
-		if err != nil {
-			b.logger.Warn().Err(err).Str("step", stepName).Msg("capture failed")
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-
-		if screen.Empty() {
-			screen.Close()
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-
-		if templateName == "btn_battle" && retry == 0 {
-			altX, altY := b.cal.ScaleRef(525, 247)
-			if b.isGreen(screen, altX, altY) {
-				screen.Close()
-				b.logger.Info().Str("step", stepName).Msg("secondary pinpoint match (upper battle), clicking...")
-				if err := b.client.TapRandomized(altX, altY); err == nil {
-					b.recordActivity()
-					return true
-				}
-				var recaptureErr error
-				screen, recaptureErr = b.client.CaptureToMat()
-				if recaptureErr != nil || screen.Empty() {
-					if !screen.Empty() {
-						screen.Close()
-					}
-					b.logger.Warn().Err(recaptureErr).Str("step", stepName).Msg("battle fallback recapture failed")
-					continue
-				}
-			}
-		}
-
-		matches, err := vision.MatchMultiScaleROICached(screen, tpl, templateName, 0.2, 2.0, 5, 0.45, physROI)
-
-		if err != nil {
-			screen.Close()
-			b.logger.Warn().Err(err).Str("step", stepName).Msg("match error")
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-
-		if len(matches) == 0 {
-			screen.Close()
-			if retry == 0 {
-				b.logger.Debug().Str("step", stepName).Msg("not found, retrying...")
-			}
-			b.dismissInterruptions()
-			time.Sleep(800 * time.Millisecond)
-			continue
-		}
-
-		best := matches[0]
-		px, py := best.Point.X, best.Point.Y
-
-		b.logger.Info().
-			Str("step", stepName).
-			Float64("conf", best.Confidence).
-			Int("x", px).Int("y", py).
-			Msg("clicking (fallback match)")
-
-		if b.cfg.Debug.SaveScreenshots {
-			gocv.IMWrite(paths.ResolveConfig(fmt.Sprintf("diag_fallback_%s.png", templateName)), screen)
-		}
-		screen.Close()
-
-		if err := b.client.TapRandomized(px, py); err != nil {
-			b.logger.Error().Err(err).Msg("tap failed")
-			return false
-		}
-		b.recordActivity()
-
-		return true
+	if timeout > 4*time.Second {
+		timeout = 4 * time.Second
 	}
-
-	if pp, ok := villagePinpoints[templateName]; ok {
-		px, py := b.cal.ScaleRef(pp.X, pp.Y)
-		b.logger.Warn().Str("step", pp.Name).Msg("pinpoint color check and template match failed; executing blind tap fallback")
-		if err := b.client.TapRandomized(px, py); err == nil {
-			b.recordActivity()
-			return true
-		}
-	}
-
-	b.logger.Error().Str("step", stepName).Int("retries", maxRetries).Msg("failed after retries")
-	return false
+	return b.waitAndClickButton(templateName, stepName, timeout)
 }
 
 // resultPanelHash returns a cheap content hash of the end-of-battle
