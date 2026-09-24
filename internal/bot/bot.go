@@ -74,7 +74,9 @@ type Bot struct {
 	rewardDismissInFlight atomic.Bool
 	splashDismissInFlight atomic.Bool
 	connLostDismissInFlight atomic.Bool
+	donationInFlight        atomic.Bool
 	lastArmyCampGuardLog    time.Time
+	lastDonationScan        time.Time
 	startedAt             time.Time
 	lastAction            time.Time
 	lastSequenceStart     time.Time
@@ -989,6 +991,13 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 	}
 
 	if b.zoomedOut.Load() && (gc.State == game.StateMainVillage || gc.State == game.StateUnknown) && b.findAttackButton(screen, 0.30) {
+		// Donations get a short, bounded opportunity before matchmaking. The
+		// donation manager verifies chat/request/troop visuals and then releases
+		// this gate; it never runs concurrently with an attack sequence.
+		if b.maybeStartDonationCycle(screen) {
+			return
+		}
+
 		if until := b.armyWaitUntil.Load(); until > time.Now().UnixNano() {
 			if time.Since(b.lastArmyCampGuardLog) > 10*time.Second {
 				b.lastArmyCampGuardLog = time.Now()
