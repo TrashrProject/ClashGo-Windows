@@ -532,6 +532,9 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                 </div>
                 <div className="text-xs text-zinc-500 mt-1">
                   ClashGO only counts a donation after the game screen visibly changes.
+                  {stats.last_donation_result && (
+                    <span className="block mt-1 text-zinc-400">Last check: {stats.last_donation_result}</span>
+                  )}
                 </div>
               </div>
             </div>
