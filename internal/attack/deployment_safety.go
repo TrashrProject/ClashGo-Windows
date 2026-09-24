@@ -132,7 +132,15 @@ func (e *Executor) resolveSafeDeployPoints(screen gocv.Mat, planned []image.Poin
 }
 
 func isDeploymentRedRGB(r, g, b int) bool {
-	return r >= 105 && r-g >= 24 && r-b >= 18 && r*100 >= g*125
+	// The no-deploy tint is a translucent red wash: red dominates, while
+	// green and blue remain relatively close because the underlying terrain
+	// still shows through. Orange/yellow UI controls also have strong red,
+	// but their blue channel collapses far below green; reject those here.
+	return r >= 105 &&
+		r-g >= 24 &&
+		r-b >= 18 &&
+		r*100 >= g*125 &&
+		b >= g-45
 }
 
 func minInt(a, b int) int {
