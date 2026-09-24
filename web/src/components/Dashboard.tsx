@@ -185,6 +185,9 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Automation brain</div>
               <div className="text-base font-black text-zinc-950 dark:text-white capitalize">{stats.village_action || 'idle'}</div>
+              {stats.village_reason && (
+                <div className="text-[11px] text-zinc-500 mt-0.5">{stats.village_reason}</div>
+              )}
             </div>
           </div>
           <div className="text-xs text-zinc-500">
@@ -210,6 +213,23 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                     ? `${stats.training_housing_pending} housing space still missing from the configured farm army.`
                     : 'ClashGO is waiting for the configured farm army to be complete.'}
                 </div>
+                {(stats.training_pending ?? []).length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {(stats.training_pending ?? []).slice(0, 6).map((item) => (
+                      <div
+                        key={`${item.category}-${item.name}`}
+                        className="px-3 py-2 rounded-xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-100 dark:border-zinc-700"
+                      >
+                        <div className="text-[10px] font-black text-zinc-900 dark:text-white">{item.name}</div>
+                        <div className="text-[9px] text-zinc-500 mt-0.5">
+                          {item.confident
+                            ? `${item.to_train} missing · ${item.current}/${item.target}`
+                            : `Needs verification · target ${item.target}`}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <div className={stats.training_plan_uncertain
