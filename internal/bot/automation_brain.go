@@ -27,7 +27,7 @@ func (a VillageAction) String() string {
 	case VillageActionScanResources:
 		return "reading resources"
 	case VillageActionWaitArmy:
-		return "waiting for army"
+		return "checking army"
 	case VillageActionCooldown:
 		return "cooldown"
 	case VillageActionSessionComplete:
