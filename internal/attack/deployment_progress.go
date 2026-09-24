@@ -303,7 +303,7 @@ func (e *Executor) recoverRemainingSlot(slot TroopSlot, pCfg PrecisionConfig, ta
 	if slot.Category != "Spell" {
 		overlay, err := e.client.CaptureToMat()
 		if err == nil && !overlay.Empty() {
-			planned = e.resolveSafeDeployPoints(overlay, planned)
+			planned = e.adaptDeployPointsToBoundary(overlay, planned)
 			overlay.Close()
 		} else if !overlay.Empty() {
 			overlay.Close()
