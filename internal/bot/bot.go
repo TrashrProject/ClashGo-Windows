@@ -80,12 +80,14 @@ type Bot struct {
 	donationChecks          atomic.Int32
 	donationsSent           atomic.Int32
 	lastDonationUnix        atomic.Int64
+	donationNextCheck       atomic.Int64
 	trainingItemsPending    atomic.Int32
 	trainingHousingPending  atomic.Int32
 	trainingPlanUncertain   atomic.Bool
 	statusMu                sync.RWMutex
 	trainingPending         []attack.TrainingPlanItem
 	villageReason           string
+	lastDonationResult      string
 	lastArmyCampGuardLog    time.Time
 	lastDonationScan        time.Time
 	startedAt             time.Time
@@ -1037,6 +1039,10 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			DonationInFlight:    b.donationInFlight.Load(),
 			DonationEnabled:     b.cfg.Automation.Preferences.AutoDonate,
 			LastDonationScan:    b.lastDonationScan,
+			DonationNextCheck: func() time.Time {
+				if n := b.donationNextCheck.Load(); n > 0 { return time.Unix(0, n) }
+				return time.Time{}
+			}(),
 			DonationInterval:    90 * time.Second,
 			ResourceEnabled:     b.cfg.Automation.AutoResourceTracking,
 			LastResourceScan:    b.lastResourceScan,
@@ -3112,6 +3118,7 @@ func (b *Bot) Stats() BotStats {
 	b.statusMu.RLock()
 	trainingPending := append([]attack.TrainingPlanItem(nil), b.trainingPending...)
 	villageReason := b.villageReason
+	lastDonationResult := b.lastDonationResult
 	b.statusMu.RUnlock()
 	state := game.GameState(b.runtimeState.Load())
 	phase := RuntimePhase(b.runtimePhase.Load())
@@ -3144,6 +3151,7 @@ func (b *Bot) Stats() BotStats {
 		DonationChecks:     b.donationChecks.Load(),
 		DonationsSent:      b.donationsSent.Load(),
 		LastDonationUnix:      b.lastDonationUnix.Load(),
+		LastDonationResult:    lastDonationResult,
 		TrainingItemsPending:   b.trainingItemsPending.Load(),
 		TrainingHousingPending: b.trainingHousingPending.Load(),
 		TrainingPlanUncertain:  b.trainingPlanUncertain.Load(),
@@ -3181,6 +3189,7 @@ type BotStats struct {
 	DonationChecks     int32 `json:"donation_checks"`
 	DonationsSent      int32 `json:"donations_sent"`
 	LastDonationUnix      int64  `json:"last_donation_unix"`
+	LastDonationResult    string `json:"last_donation_result"`
 	TrainingItemsPending   int32  `json:"training_items_pending"`
 	TrainingHousingPending int32  `json:"training_housing_pending"`
 	TrainingPlanUncertain  bool                      `json:"training_plan_uncertain"`
