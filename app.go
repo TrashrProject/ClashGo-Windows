@@ -808,9 +808,11 @@ func applySimpleAutomationDefaults(cfg *config.BotConfig) {
 		cfg.Automation.Preferences.AutoRetrain = true
 	}
 
+	cfg.Attack.UseHeroes = cfg.Automation.Preferences.UseHeroes
 	cfg.Attack.UseQueen = cfg.Automation.Preferences.UseHeroes
 	cfg.Attack.UseWarden = cfg.Automation.Preferences.UseHeroes
 	cfg.Attack.UseClanCastle = cfg.Automation.Preferences.UseClanCastle
+	cfg.Upgrade.UpgradeWalls = cfg.Automation.Preferences.AutoUpgradeWalls
 	cfg.Training.Enabled = cfg.Automation.Preferences.AutoRetrain || cfg.Automation.Preferences.WaitForFullArmy
 	cfg.Training.TrainDeadTroops = cfg.Automation.Preferences.AutoRetrain
 	cfg.Training.FullArmyBeforeAttack = cfg.Automation.Preferences.WaitForFullArmy
@@ -891,7 +893,7 @@ func (a *App) SetSimpleMode(enabled bool) error {
 // SaveSimplePreferences persists only the small, player-facing choices exposed
 // in Easy Mode. It deliberately translates them into the underlying technical
 // config so beginners never need to understand those lower-level settings.
-func (a *App) SaveSimplePreferences(autoDonate, donateOnlyRequested, useHeroes, useClanCastle, waitForFullArmy, autoRetrain bool, lootPreset string) error {
+func (a *App) SaveSimplePreferences(autoDonate, donateOnlyRequested, useHeroes, useClanCastle, waitForFullArmy, autoRetrain, autoUpgradeWalls bool, lootPreset string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -909,13 +911,16 @@ func (a *App) SaveSimplePreferences(autoDonate, donateOnlyRequested, useHeroes, 
 		UseClanCastle:       useClanCastle,
 		WaitForFullArmy:     waitForFullArmy,
 		AutoRetrain:         autoRetrain,
+		AutoUpgradeWalls:    autoUpgradeWalls,
 		LootPreset:          lootPreset,
 	}
 
 	// Translate the simple choices into the real runtime config.
+	cfg.Attack.UseHeroes = useHeroes
 	cfg.Attack.UseQueen = useHeroes
 	cfg.Attack.UseWarden = useHeroes
 	cfg.Attack.UseClanCastle = useClanCastle
+	cfg.Upgrade.UpgradeWalls = autoUpgradeWalls
 
 	cfg.Training.Enabled = autoRetrain || waitForFullArmy
 	cfg.Training.TrainDeadTroops = autoRetrain
