@@ -66,6 +66,7 @@ type Bot struct {
 	runtimePhase      atomic.Int32
 	runtimePhaseSince atomic.Int64
 	armyWaitUntil     atomic.Int64
+	villageAction     atomic.Int32
 	recoveryAttempts  atomic.Int32
 	recoverySuccesses atomic.Int32
 	blueStacksRestarts atomic.Int32
@@ -860,10 +861,6 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			Msg("state detected")
 	}
 
-	if !b.seqRunning.Load() && (state == game.StateMainVillage || gc.State == game.StateMainVillage) {
-		b.maybeScanVillageResources(screen)
-	}
-
 	if state == game.StateChestReward {
 		if b.cfg.Device.DisableChestDismissal {
 
@@ -993,27 +990,60 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		return
 	}
 
-	if b.zoomedOut.Load() && (gc.State == game.StateMainVillage || gc.State == game.StateUnknown) && b.findAttackButton(screen, 0.30) {
-		// Donations get a short, bounded opportunity before matchmaking. The
-		// donation manager verifies chat/request/troop visuals and then releases
-		// this gate; it never runs concurrently with an attack sequence.
-		if b.maybeStartDonationCycle(screen) {
-			return
+	// Central village automation coordinator. One decision per frame means
+	// donation, resource tracking, army waiting and matchmaking can no longer
+	// race each other through separate ad-hoc branches.
+	if b.zoomedOut.Load() && (state == game.StateMainVillage || state == game.StateUnknown || gc.State == game.StateMainVillage || gc.State == game.StateUnknown) {
+		attackVisible := b.findAttackButton(screen, 0.30)
+		villageVerified := state == game.StateMainVillage || gc.State == game.StateMainVillage || attackVisible
+		now := time.Now()
+		armyUntil := time.Time{}
+		if n := b.armyWaitUntil.Load(); n > 0 {
+			armyUntil = time.Unix(0, n)
 		}
 
-		if until := b.armyWaitUntil.Load(); until > time.Now().UnixNano() {
+		decision := decideVillageAction(VillageDecisionInput{
+			Now:                 now,
+			VillageVerified:     villageVerified,
+			SequenceRunning:     b.seqRunning.Load(),
+			DonationInFlight:    b.donationInFlight.Load(),
+			DonationEnabled:     b.cfg.Automation.Preferences.AutoDonate,
+			LastDonationScan:    b.lastDonationScan,
+			DonationInterval:    90 * time.Second,
+			ResourceEnabled:     b.cfg.Automation.AutoResourceTracking,
+			LastResourceScan:    b.lastResourceScan,
+			ResourceInterval:    15 * time.Second,
+			ArmyWaitUntil:       armyUntil,
+			AttackButtonVisible: attackVisible,
+		})
+		b.villageAction.Store(int32(decision.Action))
+
+		switch decision.Action {
+		case VillageActionDonate:
+			if b.maybeStartDonationCycle(screen) {
+				return
+			}
+		case VillageActionScanResources:
+			b.maybeScanVillageResources(screen)
+			return
+		case VillageActionWaitArmy:
 			if time.Since(b.lastArmyCampGuardLog) > 10*time.Second {
 				b.lastArmyCampGuardLog = time.Now()
 				b.logger.Info().
-					Time("retry_after", time.Unix(0, until)).
-					Msg("army readiness gate active; staying in village until next check")
+					Time("retry_after", armyUntil).
+					Msg("automation brain: army not ready yet; using village time for safe housekeeping")
 			}
 			return
+		case VillageActionAttack:
+			b.logger.Info().
+				Str("reason", decision.Reason).
+				Msg("automation brain: starting matchmaking")
+			b.lastSequenceStart = time.Now()
+			go b.executeAttackSequence(gc)
+			return
+		case VillageActionHold:
+			return
 		}
-		b.logger.Info().Msg("attack button detected, starting sequence")
-		b.lastSequenceStart = time.Now()
-		go b.executeAttackSequence(gc)
-		return
 	}
 
 	// Idle humanization: while confirmed on the main village with no
@@ -3013,6 +3043,7 @@ func (b *Bot) Stats() BotStats {
 		DonationChecks:     b.donationChecks.Load(),
 		DonationsSent:      b.donationsSent.Load(),
 		LastDonationUnix:   b.lastDonationUnix.Load(),
+		VillageAction:      VillageAction(b.villageAction.Load()).String(),
 		RuntimeState:       state.String(),
 		RuntimePhase:       phase.String(),
 		RuntimeStateAge:    stateAge,
@@ -3043,7 +3074,8 @@ type BotStats struct {
 	BlueStacksRestarts int32 `json:"bluestacks_restarts"`
 	DonationChecks     int32 `json:"donation_checks"`
 	DonationsSent      int32 `json:"donations_sent"`
-	LastDonationUnix   int64 `json:"last_donation_unix"`
+	LastDonationUnix   int64  `json:"last_donation_unix"`
+	VillageAction      string `json:"village_action"`
 
 	RuntimeState    string        `json:"runtime_state"`
 	RuntimePhase    string        `json:"runtime_phase"`
