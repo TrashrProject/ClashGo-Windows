@@ -426,10 +426,11 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       </section>
 
       {/* Summary Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-8">
         {[
           { label: 'Bases Searched', value: stats.search_skips + stats.attacks_completed, icon: 'search', detail: `${stats.search_skips} skips` },
           { label: 'Attacks', value: stats.attacks_completed, icon: 'bolt' },
+          { label: 'Donations', value: stats.donations_sent ?? 0, icon: 'volunteer_activism', detail: `${stats.donation_checks ?? 0} checks` },
           { label: 'Total Revenue', value: `${((stats.total_gold + stats.total_elixir) / 1e6).toFixed(1)}M`, icon: 'trending_up' },
           { label: 'System Uptime', value: formatUptime(stats.uptime), icon: 'timer' }
         ].map((item, idx) => (
@@ -449,6 +450,43 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
           </div>
         ))}
       </div>
+
+      {(stats.donation_checks ?? 0) > 0 && (
+        <section className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none p-6">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined">volunteer_activism</span>
+              </div>
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Clan donations</div>
+                <div className="text-xl font-black text-zinc-950 dark:text-white mt-1">
+                  {(stats.donations_sent ?? 0) > 0
+                    ? `${stats.donations_sent} verified donation${stats.donations_sent === 1 ? '' : 's'} this session`
+                    : 'Donation checks are active'}
+                </div>
+                <div className="text-xs text-zinc-500 mt-1">
+                  ClashGO only counts a donation after the game screen visibly changes.
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 min-w-[260px]">
+              <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 p-4">
+                <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Checks</div>
+                <div className="text-2xl font-black text-zinc-950 dark:text-white mt-1">{stats.donation_checks ?? 0}</div>
+              </div>
+              <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 p-4">
+                <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Last donation</div>
+                <div className="text-sm font-black text-zinc-950 dark:text-white mt-2">
+                  {(stats.last_donation_unix ?? 0) > 0
+                    ? new Date(stats.last_donation_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : 'None yet'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Logs Terminal */}
       <section className="bg-white dark:bg-black rounded-[3rem] p-3 shadow-premium-lg border border-zinc-200/60 dark:border-zinc-900/80 transition-all duration-500">
