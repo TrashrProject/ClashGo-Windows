@@ -1166,6 +1166,11 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		case VillageActionCooldown:
 			return
 		case VillageActionSessionComplete:
+			b.logger.Info().
+				Int32("attacks", b.attackCount.Load()).
+				Int("cap", b.cfg.Attack.MaxAttackPerSession).
+				Msg("automation brain: session complete; stopping bot cleanly")
+			b.cancel()
 			return
 		case VillageActionAttack:
 			b.startAutomationTask("attack", func() {
