@@ -13,6 +13,7 @@ const (
 	VillageActionDonate
 	VillageActionScanResources
 	VillageActionUpgradeWalls
+	VillageActionCheckArmy
 	VillageActionWaitArmy
 	VillageActionCooldown
 	VillageActionSessionComplete
@@ -29,6 +30,8 @@ func (a VillageAction) String() string {
 		return "reading resources"
 	case VillageActionUpgradeWalls:
 		return "upgrading walls"
+	case VillageActionCheckArmy:
+		return "checking army"
 	case VillageActionWaitArmy:
 		return "checking army"
 	case VillageActionCooldown:
@@ -57,6 +60,8 @@ type VillageDecisionInput struct {
 	ResourceInterval    time.Duration
 	WallsEnabled        bool
 	WallsDue            bool
+	ArmyCheckEnabled    bool
+	ArmyCheckDue        bool
 	ArmyWaitUntil       time.Time
 	AttackEnabled       bool
 	AttackCapReached    bool
@@ -77,8 +82,9 @@ type VillageDecision struct {
 //   2. donation opportunity (short and bounded);
 //   3. periodic resource read;
 //   4. queued wall maintenance;
-//   5. explicit army-ready gate;
-//   6. matchmaking.
+//   5. explicit retry backoff after an uncertain/failed army check;
+//   6. standalone army preflight;
+//   7. matchmaking.
 //
 // This means useful village housekeeping can happen while troops are training,
 // but nothing competes with an active donation or attack.
@@ -122,7 +128,11 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 	}
 
 	if !in.ArmyWaitUntil.IsZero() && in.Now.Before(in.ArmyWaitUntil) {
-		return VillageDecision{Action: VillageActionWaitArmy, Reason: "army readiness gate is active", NextAt: in.ArmyWaitUntil}
+		return VillageDecision{Action: VillageActionWaitArmy, Reason: "army readiness retry backoff is active", NextAt: in.ArmyWaitUntil}
+	}
+
+	if in.ArmyCheckEnabled && in.ArmyCheckDue {
+		return VillageDecision{Action: VillageActionCheckArmy, Reason: "army preflight is due before the next attack"}
 	}
 
 	if !in.AttackEnabled {
