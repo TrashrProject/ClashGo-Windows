@@ -188,6 +188,11 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {stats.village_reason && (
                 <div className="text-[11px] text-zinc-500 mt-0.5">{stats.village_reason}</div>
               )}
+              {(stats.village_next_unix ?? 0) > Math.floor(Date.now() / 1000) && (
+                <div className="text-[10px] font-black uppercase tracking-widest text-emerald-500 mt-1">
+                  Next check in {Math.max(1, Math.ceil(stats.village_next_unix - Date.now() / 1000))}s
+                </div>
+              )}
             </div>
           </div>
           <div className="text-xs text-zinc-500">
