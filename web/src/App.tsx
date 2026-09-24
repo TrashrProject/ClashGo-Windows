@@ -193,6 +193,7 @@ function App() {
   const [useClanCastleSimple, setUseClanCastleSimple] = useState(true);
   const [waitForFullArmy, setWaitForFullArmy] = useState(true);
   const [autoRetrain, setAutoRetrain] = useState(true);
+  const [autoUpgradeWalls, setAutoUpgradeWalls] = useState(false);
   const [lootPreset, setLootPreset] = useState<'relaxed' | 'balanced' | 'rich'>('balanced');
 
   useEffect(() => {
@@ -222,6 +223,7 @@ function App() {
         setUseClanCastleSimple(prefs?.use_clan_castle ?? true);
         setWaitForFullArmy(prefs?.wait_for_full_army ?? true);
         setAutoRetrain(prefs?.auto_retrain ?? true);
+        setAutoUpgradeWalls(prefs?.auto_upgrade_walls ?? false);
         setLootPreset((prefs?.loot_preset === 'relaxed' || prefs?.loot_preset === 'rich') ? prefs.loot_preset : 'balanced');
         setIsRunning(running);
         setIsStarting(false);
@@ -573,6 +575,7 @@ function App() {
       useClanCastle: useClanCastleSimple,
       waitForFullArmy,
       autoRetrain,
+      autoUpgradeWalls,
       lootPreset,
     },
     onSaveSimplePreferences: async (prefs: {
@@ -582,6 +585,7 @@ function App() {
       useClanCastle: boolean;
       waitForFullArmy: boolean;
       autoRetrain: boolean;
+      autoUpgradeWalls: boolean;
       lootPreset: 'relaxed' | 'balanced' | 'rich';
     }) => {
       await SaveSimplePreferences(
@@ -591,6 +595,7 @@ function App() {
         prefs.useClanCastle,
         prefs.waitForFullArmy,
         prefs.autoRetrain,
+        prefs.autoUpgradeWalls,
         prefs.lootPreset,
       );
       setAutoDonate(prefs.autoDonate);
@@ -599,6 +604,8 @@ function App() {
       setUseClanCastleSimple(prefs.useClanCastle);
       setWaitForFullArmy(prefs.waitForFullArmy);
       setAutoRetrain(prefs.autoRetrain);
+      setAutoUpgradeWalls(prefs.autoUpgradeWalls);
+      setUpgradeWalls(prefs.autoUpgradeWalls);
       setLootPreset(prefs.lootPreset);
       const refreshed = await GetConfig();
       setGoldThreshold(refreshed.search.min_loot_gold);
@@ -618,7 +625,7 @@ function App() {
     selectedStrategy, strategies, searchEnabled, upgradeWalls, stallTimer,
     lootExitEnabled, lootExitPercent, simpleMode,
     autoDonate, donateOnlyRequested, useHeroesSimple, useClanCastleSimple,
-    waitForFullArmy, autoRetrain, lootPreset
+    waitForFullArmy, autoRetrain, autoUpgradeWalls, lootPreset
   ]);
 
   return (
