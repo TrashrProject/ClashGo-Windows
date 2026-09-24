@@ -10,6 +10,7 @@ type RuntimePhase int32
 
 const (
 	PhaseIdle RuntimePhase = iota
+	PhaseChestReward
 	PhaseDonation
 	PhaseResourceScan
 	PhaseWallUpgrade
@@ -26,6 +27,8 @@ func (p RuntimePhase) String() string {
 	switch p {
 	case PhaseIdle:
 		return "Idle"
+	case PhaseChestReward:
+		return "ChestReward"
 	case PhaseDonation:
 		return "Donation"
 	case PhaseResourceScan:
