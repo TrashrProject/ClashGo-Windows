@@ -505,82 +505,23 @@ func (b *Bot) recordActivity() {
 // one place doing nothing for too long, we cycle the game to recover from
 // hangs / dialogs / out-of-game screens without requiring user intervention.
 func (b *Bot) checkStuck(gc *game.GameContext) {
-
 	if gc.ReadHealth().ConsecutiveFails >= 10 {
 		b.logger.Error().
 			Int("consecutive_fails", gc.ReadHealth().ConsecutiveFails).
 			Str("state", gc.State.String()).
-			Msg("capture pipeline appears dead, beginning device recovery ladder...")
+			Msg("capture pipeline appears unhealthy, beginning device recovery ladder...")
 		b.recoverEmulator()
 		b.lastSequenceStart = time.Now()
 		return
 	}
 
-	if b.seqRunning.Load() {
-		if time.Since(b.lastSequenceStart) > 15*time.Minute {
-			b.logger.Warn().
-				Dur("seq_time", time.Since(b.lastSequenceStart)).
-				Msg("attack sequence exceeded maximum duration, triggering emergency restart...")
-			b.restartGame()
-			b.lastSequenceStart = time.Now()
-		}
-		return
-	}
-
-	state, _, _ := gc.ReadState()
-
-	// Post-boot splash states (ТАР! collect splash, castle logo, news)
-	// legitimately sit static for 1-3 minutes while the game connects — the
-	// castle logo has no progress indicator at all. The generic stuck timeout
-	// below (35s) would force-restart mid-boot, which previously caused an
-	// endless force-stop/relaunch loop on the collect splash. Give the whole
-	// boot-splash chain a generous window; the dismiss taps in processFrame
-	// advance through it.
-	if state == game.StateLogo || state == game.StateTapToContinue || state == game.StateNewsSplash {
-		bootStuck := time.Since(b.lastAction)
-		const bootSplashTimeout = 5 * time.Minute
-		if bootStuck > bootSplashTimeout {
-			b.logger.Warn().
-				Str("state", state.String()).
-				Time("last_action", b.lastAction).
-				Dur("stuck_time", bootStuck).
-				Dur("timeout", bootSplashTimeout).
-				Msg("boot splash stuck too long, triggering emergency restart...")
-			b.restartGame()
-			b.lastSequenceStart = time.Now()
-		}
-		return
-	}
-
-	if state == game.StateBattle ||
-		state == game.StateSearchMap ||
-		state == game.StateLoading {
-		attackPhaseStuck := time.Since(b.lastAction)
-		const attackPhaseTimeout = 30 * time.Second
-		if attackPhaseStuck > attackPhaseTimeout {
-			b.logger.Warn().
-				Str("state", state.String()).
-				Time("last_action", b.lastAction).
-				Dur("stuck_time", attackPhaseStuck).
-				Dur("timeout", attackPhaseTimeout).
-				Msg("attack-phase state without active sequence, triggering emergency restart...")
-			b.restartGame()
-			b.lastSequenceStart = time.Now()
-		}
-		return
-	}
-
-	timeout := b.stuckTimeout
-
-	stuckTime := time.Since(b.lastAction)
-	if stuckTime > timeout {
+	// While an attack sequence owns the UI, its search/battle loops use
+	// domain-specific timeouts. This outer ceiling is only a final safety
+	// net for a goroutine that somehow never returns.
+	if b.seqRunning.Load() && time.Since(b.lastSequenceStart) > 15*time.Minute {
 		b.logger.Warn().
-			Str("state", state.String()).
-			Time("last_action", b.lastAction).
-			Dur("stuck_time", stuckTime).
-			Dur("timeout", timeout).
-			Msg("bot appears stuck without meaningful action, triggering emergency restart...")
-
+			Dur("seq_time", time.Since(b.lastSequenceStart)).
+			Msg("attack sequence exceeded hard safety ceiling, triggering restart")
 		b.restartGame()
 		b.lastSequenceStart = time.Now()
 	}
@@ -731,7 +672,9 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 				b.navigator.ZoomOut()
 				b.recordActivity()
 
-				time.Sleep(1800 * time.Millisecond)
+				if !b.sleepResponsive(450 * time.Millisecond) {
+					return
+				}
 
 				return
 			}
@@ -795,7 +738,9 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			b.logger.Info().Str("state", state.String()).Msg("boot splash detected; dispatching dismiss tap")
 			go func(st game.GameState) {
 				defer b.splashDismissInFlight.Store(false)
-				time.Sleep(1200 * time.Millisecond)
+				if !b.sleepResponsive(250 * time.Millisecond) {
+					return
+				}
 
 				var x, y int
 				switch st {
@@ -845,7 +790,9 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			b.logger.Warn().Msg("connection lost dialog detected; tapping TRY AGAIN...")
 			go func() {
 				defer b.connLostDismissInFlight.Store(false)
-				time.Sleep(800 * time.Millisecond)
+				if !b.sleepResponsive(250 * time.Millisecond) {
+					return
+				}
 				x, y := b.cal.ScaleRef(300, 478)
 				if err := b.client.TapRandomized(x, y); err != nil {
 					b.logger.Warn().Err(err).Msg("connection-lost dismiss tap failed; will retry on next detection")
@@ -868,7 +815,9 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			b.logger.Warn().Msg("quit-confirm dialog detected; tapping Cancel...")
 			go func() {
 				defer b.connLostDismissInFlight.Store(false)
-				time.Sleep(800 * time.Millisecond)
+				if !b.sleepResponsive(200 * time.Millisecond) {
+					return
+				}
 				x, y := b.cal.ScaleRef(279, 429)
 				if err := b.client.TapRandomized(x, y); err != nil {
 					b.logger.Warn().Err(err).Msg("quit-confirm cancel tap failed; will retry on next detection")
@@ -1615,7 +1564,7 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 		// delay, so the bot visibly hesitates before committing to each
 		// decision tap the way a player would.
 		if err := b.client.TapRandomized(px, py); err == nil {
-			time.Sleep(1000 * time.Millisecond)
+			_ = b.sleepResponsive(120 * time.Millisecond)
 			b.recordActivity()
 			return true
 		}
@@ -1872,17 +1821,23 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 			b.logger.Info().Msg("battle state detected, entering search loop")
 			return true
 		case state == game.StateSearchMap || state == game.StateLoading:
-			b.logger.Info().Msg("in clouds/loading...")
-			time.Sleep(1 * time.Second)
+			b.logger.Debug().Msg("in clouds/loading...")
+			if !b.sleepResponsive(350 * time.Millisecond) {
+				return false
+			}
 			continue
 		case state == game.StateArmySelection || state == game.StateArmyCamp:
 			b.logger.Info().Msg("in army menu, retrying battle click...")
 			b.findAndClick("btn_battle", "Battle Retry", 1)
-			time.Sleep(1 * time.Second)
+			if !b.sleepResponsive(250 * time.Millisecond) {
+				return false
+			}
 		default:
-			b.logger.Info().Str("state", state.String()).Msg("waiting for battle state (searching)...")
+			b.logger.Debug().Str("state", state.String()).Msg("waiting for battle/search state...")
 			b.dismissInterruptions()
-			time.Sleep(500 * time.Millisecond)
+			if !b.sleepResponsive(200 * time.Millisecond) {
+				return false
+			}
 		}
 	}
 
@@ -1902,7 +1857,9 @@ func (b *Bot) deployTroops(screen gocv.Mat) (int, error) {
 		Int("phases", len(strat.Phases)).
 		Msg("executing dynamic attack plan")
 
-	time.Sleep(600 * time.Millisecond)
+	if !b.sleepResponsive(300 * time.Millisecond) {
+		return 0, b.ctx.Err()
+	}
 
 	remaining, err := b.attackExec.DeployDynamicV2(strat, screen, b.cfg.Attack.StrategyFile)
 	if err != nil {
