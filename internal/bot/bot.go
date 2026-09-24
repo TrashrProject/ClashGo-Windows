@@ -1050,6 +1050,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			Now:                 now,
 			VillageVerified:     villageVerified,
 			SequenceRunning:     b.seqRunning.Load() || b.automationTaskInFlight.Load(),
+			ActiveTaskName:      b.currentAutomationTask(),
 			DonationInFlight:    b.donationInFlight.Load(),
 			DonationEnabled:     b.cfg.Automation.Preferences.AutoDonate,
 			LastDonationScan:    b.lastDonationScan,
