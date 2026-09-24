@@ -30,6 +30,7 @@ interface ConfigViewProps {
     useClanCastle: boolean;
     waitForFullArmy: boolean;
     autoRetrain: boolean;
+    autoUpgradeWalls: boolean;
     lootPreset: 'relaxed' | 'balanced' | 'rich';
   };
   onSaveSimplePreferences: (prefs: {
@@ -39,6 +40,7 @@ interface ConfigViewProps {
     useClanCastle: boolean;
     waitForFullArmy: boolean;
     autoRetrain: boolean;
+    autoUpgradeWalls: boolean;
     lootPreset: 'relaxed' | 'balanced' | 'rich';
   }) => Promise<void>;
   // Returns the underlying SaveConfig promise so ConfigView can own
@@ -265,6 +267,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {[
                   { key: 'autoRetrain', icon: 'autorenew', title: 'Keep my army recipe ready', text: 'Reapply the selected army recipe automatically when ClashGO detects a mismatch.', value: simplePreferences.autoRetrain },
+                  { key: 'autoUpgradeWalls', icon: 'construction', title: 'Spend on walls automatically', text: 'After an attack, queue wall maintenance as its own safe automation task when enabled.', value: simplePreferences.autoUpgradeWalls },
                   { key: 'waitForFullArmy', icon: 'verified', title: 'Verify army before attacking', text: 'Only start matchmaking after the selected army recipe is visually confirmed.', value: simplePreferences.waitForFullArmy },
                   { key: 'useHeroes', icon: 'shield_person', title: 'Use heroes', text: 'Use available heroes during farming attacks.', value: simplePreferences.useHeroes },
                   { key: 'useClanCastle', icon: 'fort', title: 'Use Clan Castle', text: 'Use available Clan Castle reinforcements in attacks.', value: simplePreferences.useClanCastle },
