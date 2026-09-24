@@ -292,6 +292,27 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		dukePicksFile:     dukePicksFile,
 	}
 
+	// Restore only a recent, profile-matching plan. This keeps the beginner UI
+	// coherent after an EXE restart without ever acting on stale army data.
+	if profile, ok := cfg.Attack.Farm.ActiveProfile(); ok {
+		if plan, err := attack.ReadTrainingPlan(); err == nil &&
+			!plan.Ready &&
+			!plan.Stale(time.Now(), 15*time.Minute) &&
+			attack.ValidateTrainingPlan(plan, profile) == nil {
+			actionable := attack.ActionableTrainingItems(plan)
+			b.trainingItemsPending.Store(int32(len(actionable)))
+			b.trainingHousingPending.Store(int32(plan.TotalHousing))
+			b.trainingPlanUncertain.Store(plan.HasUncertain)
+			b.statusMu.Lock()
+			b.trainingPending = append([]attack.TrainingPlanItem(nil), plan.Items...)
+			b.statusMu.Unlock()
+			log.Info().
+				Int("items", len(plan.Items)).
+				Int("actionable_items", len(actionable)).
+				Msg("restored recent validated training plan")
+		}
+	}
+
 	// Resolve the strategy's declared army slot once at boot so the
 	// pre-battle click sequence can arm the right saved recipe. The
 	// strategy is parsed again later for the deploy phases; this early
