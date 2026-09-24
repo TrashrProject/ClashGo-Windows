@@ -496,11 +496,12 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       </section>
 
       {/* Summary Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-8">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-8">
         {[
           { label: 'Bases Searched', value: stats.search_skips + stats.attacks_completed, icon: 'search', detail: `${stats.search_skips} skips` },
           { label: 'Attacks', value: stats.attacks_completed, icon: 'bolt' },
           { label: 'Donations', value: stats.donations_sent ?? 0, icon: 'volunteer_activism', detail: `${stats.donation_checks ?? 0} checks` },
+          { label: 'Army Repairs', value: stats.army_repair_successes ?? 0, icon: 'autorenew', detail: `${stats.army_repair_attempts ?? 0} attempts` },
           { label: 'Total Revenue', value: `${((stats.total_gold + stats.total_elixir) / 1e6).toFixed(1)}M`, icon: 'trending_up' },
           { label: 'System Uptime', value: formatUptime(stats.uptime), icon: 'timer' }
         ].map((item, idx) => (
