@@ -154,7 +154,7 @@ func (b *Bot) waitAndClickButton(templateName, stepName string, timeout time.Dur
 				Int("x", clickX).
 				Int("y", clickY).
 				Msg("visual target ready; clicking immediately")
-			if err := b.client.TapRandomized(clickX, clickY); err != nil {
+			if err := b.client.TapFast(clickX, clickY, 0.45); err != nil {
 				b.logger.Warn().Err(err).Str("step", stepName).Msg("visual target tap failed")
 				return false
 			}
