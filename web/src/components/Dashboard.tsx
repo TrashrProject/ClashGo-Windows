@@ -50,6 +50,21 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({ stats }) => {
         </div>
       </section>
 
+      {stats.army_check_pending && (stats.training_items_pending ?? 0) === 0 && (
+        <section className="rounded-[2rem] border border-sky-500/20 bg-sky-500/[0.05] dark:bg-sky-500/[0.04] p-5">
+          <div className="flex items-center gap-4">
+            <div className="w-11 h-11 rounded-2xl bg-sky-500/10 text-sky-500 flex items-center justify-center">
+              <span className="material-symbols-outlined">fact_check</span>
+            </div>
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-widest text-sky-600 dark:text-sky-400">Army preflight queued</div>
+              <div className="text-sm font-black text-zinc-950 dark:text-white mt-1">ClashGO will verify the selected recipe before matchmaking.</div>
+              <div className="text-xs text-zinc-500 mt-1">This runs as its own exclusive task, never at the same time as donations, walls or an attack.</div>
+            </div>
+          </div>
+        </section>
+      )}
+
       {(stats.training_items_pending ?? 0) > 0 && (
         <section className="rounded-[2rem] border border-amber-500/20 bg-amber-500/[0.05] dark:bg-amber-500/[0.04] p-5">
           <div className="flex items-center gap-4">
