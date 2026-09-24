@@ -731,11 +731,15 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				if slot.Category != "Troop" {
 					continue
 				}
-				count := GetCountForSlot(liveCounts, slot.X)
-				if count == 0 && looksLikeHeroCardStatic(fresh, slot.X, liveMgr.GetBarY(), w, h) {
+				// Hero cards show their LEVEL (e.g. 91/95/69) in the same lower
+				// area where troop OCR looks for quantity. Treating that number
+				// as a troop count prevented real King/Queen/Prince/Warden cards
+				// from entering the hero path. A verified green hero-health strip
+				// wins over numeric OCR.
+				if looksLikeHeroCardStatic(fresh, slot.X, liveMgr.GetBarY(), w, h) {
 					slot.Category = "Hero"
 					e.logger.Info().Int("x", slot.X).Str("unit", slot.UnitName).
-						Msg("Windows live deployment: promoted zero-count structural card to hero")
+						Msg("Windows live deployment: structural hero card overrides count OCR")
 				}
 			}
 			sort.SliceStable(liveSlots, func(i, j int) bool {
@@ -933,7 +937,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 					continue
 				}
 				count := GetCountForSlot(finalCounts, slot.X)
-				if slot.Category == "Troop" && count == 0 &&
+				if slot.Category == "Troop" &&
 					looksLikeHeroCardStatic(finalFrame, slot.X, finalMgr.GetBarY(), w, h) {
 					slot.Category = "Hero"
 				}
