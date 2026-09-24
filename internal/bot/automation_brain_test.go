@@ -290,3 +290,24 @@ func TestRuntimeConfigIsDeferredUntilTaskBoundary(t *testing.T) {
 		t.Fatal("task lease should be released after config boundary apply")
 	}
 }
+
+
+func TestApplyConfigQueuesAndCancelsWallMaintenance(t *testing.T) {
+	base := config.DefaultConfig()
+	base.Upgrade.UpgradeWalls = false
+	b := &Bot{cfg: base, logger: zerolog.Nop(), armySlot: 1}
+
+	enabled := config.DefaultConfig()
+	enabled.Upgrade.UpgradeWalls = true
+	b.applyConfigNow(enabled)
+	if !b.wallUpgradePending.Load() {
+		t.Fatal("enabling wall automation should queue one scheduler pass")
+	}
+
+	disabled := config.DefaultConfig()
+	disabled.Upgrade.UpgradeWalls = false
+	b.applyConfigNow(disabled)
+	if b.wallUpgradePending.Load() {
+		t.Fatal("disabling wall automation should cancel queued wall maintenance")
+	}
+}
