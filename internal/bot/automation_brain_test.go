@@ -84,3 +84,19 @@ func TestVillageBrainUsesHousekeepingWhileArmyWaits(t *testing.T) {
 		t.Fatalf("action=%v want resource scan before army wait", got.Action)
 	}
 }
+
+func TestVillageBrainHonorsDonationBackoff(t *testing.T) {
+	now := time.Unix(4000, 0)
+	got := decideVillageAction(VillageDecisionInput{
+		Now:                 now,
+		VillageVerified:     true,
+		DonationEnabled:     true,
+		LastDonationScan:    now.Add(-10 * time.Minute),
+		DonationNextCheck:   now.Add(2 * time.Minute),
+		ResourceEnabled:     false,
+		AttackButtonVisible: true,
+	})
+	if got.Action != VillageActionAttack {
+		t.Fatalf("action=%v want attack while donation backoff is active", got.Action)
+	}
+}
