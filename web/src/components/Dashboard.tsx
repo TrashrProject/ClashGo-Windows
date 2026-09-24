@@ -193,6 +193,34 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         </div>
       </section>
 
+      {(stats.training_items_pending ?? 0) > 0 && (
+        <section className="bg-white dark:bg-zinc-900 rounded-[2rem] border border-amber-500/20 shadow-premium dark:shadow-none px-5 py-4">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined">military_tech</span>
+              </div>
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Army status</div>
+                <div className="text-base font-black text-zinc-950 dark:text-white mt-0.5">
+                  Waiting for {(stats.training_items_pending ?? 0)} army item{stats.training_items_pending === 1 ? '' : 's'}
+                </div>
+                <div className="text-xs text-zinc-500 mt-1">
+                  {(stats.training_housing_pending ?? 0) > 0
+                    ? `${stats.training_housing_pending} housing space still missing from the configured farm army.`
+                    : 'ClashGO is waiting for the configured farm army to be complete.'}
+                </div>
+              </div>
+            </div>
+            <div className={stats.training_plan_uncertain
+              ? "px-3 py-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px] font-black uppercase tracking-widest"
+              : "px-3 py-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-black uppercase tracking-widest"}>
+              {stats.training_plan_uncertain ? 'Some counts need re-checking' : 'Deficit verified'}
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Metrics Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         {[
