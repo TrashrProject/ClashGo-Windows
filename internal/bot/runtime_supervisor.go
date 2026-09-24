@@ -28,7 +28,9 @@ func automationTaskTimeout(name string) time.Duration {
 	case "wall upgrades":
 		return 2 * time.Minute
 	case "attack":
-		return 12 * time.Minute
+		// Matchmaking may legitimately scan many villages; attack internals
+		// already own tighter phase-level guards. This is only a final deadlock fuse.
+		return 30 * time.Minute
 	default:
 		return 2 * time.Minute
 	}
