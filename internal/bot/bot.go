@@ -54,8 +54,10 @@ type Bot struct {
 	stars1      atomic.Int32
 	stars2      atomic.Int32
 	stars3      atomic.Int32
-	seqRunning  atomic.Bool
-	zoomedOut   atomic.Bool
+	seqRunning       atomic.Bool
+	zoomedOut        atomic.Bool
+	recoveryInFlight atomic.Bool
+	captureHeartbeat atomic.Int64
 
 	chestDismissInFlight  atomic.Bool
 	splashDismissInFlight atomic.Bool
@@ -343,7 +345,9 @@ func (b *Bot) Start() error {
 	b.client.Tap(focusX, focusY)
 	b.client.JitteredSleep(1 * time.Second)
 
+	b.captureHeartbeat.Store(time.Now().UnixNano())
 	go b.captureLoop()
+	go b.runtimeSupervisorLoop()
 	return nil
 }
 
@@ -429,6 +433,7 @@ func (b *Bot) captureLoop() {
 			dur := time.Since(start)
 			lastCapture = time.Now()
 			b.lastCapture = lastCapture
+			b.captureHeartbeat.Store(lastCapture.UnixNano())
 
 			if err != nil || screen.Empty() || screen.Cols() < 2 || screen.Rows() < 2 {
 				screen.Close()
@@ -612,6 +617,12 @@ func (b *Bot) restartGame() {
 //  4. EnsureBlueStacksMac   — emulator really gone; relaunch at the
 //     configured resolution, then poll up to 2 min for adb
 func (b *Bot) recoverEmulator() {
+	if !b.recoveryInFlight.CompareAndSwap(false, true) {
+		b.logger.Debug().Msg("device recovery already in progress; suppressing duplicate recovery")
+		return
+	}
+	defer b.recoveryInFlight.Store(false)
+
 	b.logger.Warn().Msg("capture pipeline dead; beginning device recovery ladder")
 
 	deviceOK := func() bool {
