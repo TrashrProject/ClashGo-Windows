@@ -1451,7 +1451,11 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	if !b.seqRunning.CompareAndSwap(false, true) {
 		return
 	}
-	defer b.seqRunning.Store(false)
+	b.setRuntimePhase(PhaseAttackNavigation)
+	defer func() {
+		b.setRuntimePhase(PhaseIdle)
+		b.seqRunning.Store(false)
+	}()
 
 	if b.cfg.Debug.UseShellPipe && runtime.GOOS != "windows" {
 		b.client.EnablePersistentShell(b.cfg.Debug.ShellPipeSyncFlush)
@@ -1496,6 +1500,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		return
 	}
 
+	b.setRuntimePhase(PhaseSearching)
 	b.logger.Info().Msg("waiting for base to be found...")
 
 	lootRec := game.NewLootRecognizer(b.cal, b.templates, b.logger)
@@ -1569,6 +1574,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 		if meetsReq {
 			b.logger.Info().Msg("loot requirements met, starting attack!")
+			b.setRuntimePhase(PhaseDeploying)
 			b.attackExec.SetInitialLoot(loot.Gold, loot.Elixir, loot.DarkElixir)
 			if strat, err := strategy.ParseYAML(b.cfg.Attack.StrategyFile); err == nil {
 				stratName = strat.Name
@@ -1736,6 +1742,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		b.logger.Info().Msg("battle deployment complete: all live deployable units verified, waiting for battle to end naturally...")
 	}
 
+	b.setRuntimePhase(PhaseBattle)
 	var battleStars int = 0
 	var battleGold int = 0
 	var battleElixir int = 0
@@ -1744,6 +1751,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	var parsedResults bool = false
 
 	if b.attackExec.WaitForBattleEndCtx(b.ctx, 4*time.Minute) {
+		b.setRuntimePhase(PhaseParsingResult)
 
 		// WaitForBattleEnd returns the moment the result overlay's Return
 		// Home button is detected, but the overlay is still animating in:
@@ -1995,6 +2003,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		b.OnStatsUpdate()
 	}
 
+	b.setRuntimePhase(PhaseReturningHome)
 	returnedHome := false
 	if err := b.attackExec.ReturnHome(); err == nil {
 		returnedHome = true
@@ -2852,6 +2861,18 @@ func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 }
 
 func (b *Bot) Stats() BotStats {
+	now := time.Now()
+	state := game.GameState(b.runtimeState.Load())
+	phase := RuntimePhase(b.runtimePhase.Load())
+	stateAge := time.Duration(0)
+	if n := b.runtimeStateSince.Load(); n > 0 {
+		stateAge = now.Sub(time.Unix(0, n))
+	}
+	progressAge := time.Duration(0)
+	if n := b.runtimeProgress.Load(); n > 0 {
+		progressAge = now.Sub(time.Unix(0, n))
+	}
+
 	return BotStats{
 		AttacksCompleted: b.attackCount.Load(),
 		SearchSkips:      b.skipsCount.Load(),
@@ -2869,6 +2890,11 @@ func (b *Bot) Stats() BotStats {
 		RecoveryAttempts:   b.recoveryAttempts.Load(),
 		RecoverySuccesses:  b.recoverySuccesses.Load(),
 		BlueStacksRestarts: b.blueStacksRestarts.Load(),
+		RuntimeState:       state.String(),
+		RuntimePhase:       phase.String(),
+		RuntimeStateAge:    stateAge,
+		RuntimePhaseAge:    b.runtimePhaseAge(now),
+		LastProgressAgo:    progressAge,
 	}
 }
 
@@ -2892,6 +2918,12 @@ type BotStats struct {
 	RecoveryAttempts   int32 `json:"recovery_attempts"`
 	RecoverySuccesses  int32 `json:"recovery_successes"`
 	BlueStacksRestarts int32 `json:"bluestacks_restarts"`
+
+	RuntimeState    string        `json:"runtime_state"`
+	RuntimePhase    string        `json:"runtime_phase"`
+	RuntimeStateAge time.Duration `json:"runtime_state_age"`
+	RuntimePhaseAge time.Duration `json:"runtime_phase_age"`
+	LastProgressAgo time.Duration `json:"last_progress_ago"`
 }
 
 type AttackReport struct {
