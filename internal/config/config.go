@@ -22,6 +22,18 @@ type BotConfig struct {
 	Automation AutomationConfig `json:"automation"`
 }
 
+type SimplePreferences struct {
+	// Keep the beginner surface intentionally small. These are player-facing
+	// choices; technical CV/ADB thresholds stay internal.
+	AutoDonate          bool   `json:"auto_donate"`
+	DonateOnlyRequested bool   `json:"donate_only_requested"`
+	UseHeroes           bool   `json:"use_heroes"`
+	UseClanCastle       bool   `json:"use_clan_castle"`
+	WaitForFullArmy     bool   `json:"wait_for_full_army"`
+	AutoRetrain         bool   `json:"auto_retrain"`
+	LootPreset          string `json:"loot_preset"` // relaxed | balanced | rich
+}
+
 type AutomationConfig struct {
 	// SimpleMode is the default user experience: ClashGO derives sane values
 	// from the linked account and only exposes a few meaningful controls.
@@ -40,6 +52,9 @@ type AutomationConfig struct {
 
 	// AutoProfileSync keeps account data fresh without manual Sync clicks.
 	AutoProfileSync bool `json:"auto_profile_sync"`
+
+	// Preferences contains the tiny set of choices exposed in Easy Mode.
+	Preferences SimplePreferences `json:"preferences"`
 }
 
 type AccountConfig struct {
@@ -329,6 +344,15 @@ func DefaultConfig() *BotConfig {
 			AutoArmyGuard:         true,
 			AutoResourceTracking:  true,
 			AutoProfileSync:       true,
+			Preferences: SimplePreferences{
+				AutoDonate:          false,
+				DonateOnlyRequested: true,
+				UseHeroes:           true,
+				UseClanCastle:       true,
+				WaitForFullArmy:     true,
+				AutoRetrain:         true,
+				LootPreset:          "balanced",
+			},
 		},
 	}
 }
