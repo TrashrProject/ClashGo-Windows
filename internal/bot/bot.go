@@ -2494,6 +2494,28 @@ func (b *Bot) clickSequence() bool {
 
 			switch guard.Decision {
 				case attack.ArmyGuardNotReady:
+					if b.cfg.Automation.Preferences.AutoRetrain {
+						b.logger.Info().
+							Int("warnings", len(guard.Warnings)).
+							Msg("army recipe incomplete; attempting one verified instant recipe repair")
+						if repairedGuard, repaired := b.reapplyActiveArmyRecipe(profile); repaired {
+							guard = repairedGuard
+							b.armyWaitUntil.Store(0)
+							b.trainingItemsPending.Store(0)
+							b.trainingHousingPending.Store(0)
+							b.trainingPlanUncertain.Store(false)
+							b.statusMu.Lock()
+							b.trainingPending = nil
+							b.statusMu.Unlock()
+							_ = attack.WriteTrainingPlan(attack.BuildTrainingPlan(profile, guard))
+							b.logger.Info().Msg("army recipe repair verified; continuing to Battle")
+							break
+						} else {
+							guard = repairedGuard
+							b.logger.Warn().Msg("army recipe repair did not reach a verified ready state")
+						}
+					}
+
 					plan := attack.BuildTrainingPlan(profile, guard)
 					if err := attack.ValidateTrainingPlan(plan, profile); err != nil {
 						plan.HasUncertain = true
@@ -2517,17 +2539,15 @@ func (b *Bot) clickSequence() bool {
 							Msg("training plan generated and safety-validated from live army deficits")
 					}
 
-					wait := b.cfg.Training.SleepAfterTrain.Duration
-					if wait < 15*time.Second {
-						wait = 15 * time.Second
-					}
-					until := time.Now().Add(wait)
+					// Army recipes apply instantly in the modern game. This
+					// delay is only a retry backoff after a failed repair.
+					until := time.Now().Add(30 * time.Second)
 					b.armyWaitUntil.Store(until.UnixNano())
 					b.logger.Warn().
 						Time("retry_after", until).
 						Int("warnings", len(guard.Warnings)).
 						Int("training_items", len(plan.Items)).
-						Msg("army confidently below configured farm profile; aborting matchmaking before Battle")
+						Msg("army recipe still does not match configured farm profile; aborting matchmaking before Battle")
 
 					// Return with proof after every Back press. This shares the
 					// same bounded safety rule as donation cleanup and never
@@ -2550,11 +2570,7 @@ func (b *Bot) clickSequence() bool {
 
 			case attack.ArmyGuardUncertain:
 				if b.cfg.Automation.Preferences.WaitForFullArmy {
-					wait := b.cfg.Training.SleepAfterTrain.Duration
-					if wait < 15*time.Second {
-						wait = 15 * time.Second
-					}
-					until := time.Now().Add(wait)
+					until := time.Now().Add(20 * time.Second)
 					b.armyWaitUntil.Store(until.UnixNano())
 					b.trainingPlanUncertain.Store(true)
 					b.logger.Warn().
