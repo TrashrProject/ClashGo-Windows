@@ -31,3 +31,28 @@ func TestBuildTrainingPlanUsesOnlyMeasuredDeficitsForHousing(t *testing.T) {
 		t.Fatalf("items=%d want 2", len(p.Items))
 	}
 }
+
+func TestValidateTrainingPlanRejectsInconsistentDeficit(t *testing.T) {
+	profile := config.FarmProfile{TownHall: 16, TroopCapacity: 320}
+	plan := TrainingPlan{
+		TownHall: 16,
+		Items: []TrainingPlanItem{{
+			Name: "Balloon", Category: "troop", Current: 5, Target: 10,
+			ToTrain: 4, Housing: 5, SpaceNeed: 20, Confident: true,
+		}},
+	}
+	if err := ValidateTrainingPlan(plan, profile); err == nil {
+		t.Fatal("expected inconsistent deficit to be rejected")
+	}
+}
+
+func TestActionableTrainingItemsSkipsUncertainRows(t *testing.T) {
+	plan := TrainingPlan{Items: []TrainingPlanItem{
+		{Name: "Balloon", Category: "troop", ToTrain: 3, Confident: true},
+		{Name: "Rage Spell", Category: "spell", ToTrain: 2, Confident: false},
+	}}
+	items := ActionableTrainingItems(plan)
+	if len(items) != 1 || items[0].Name != "Balloon" {
+		t.Fatalf("actionable items=%v want only Balloon", items)
+	}
+}
