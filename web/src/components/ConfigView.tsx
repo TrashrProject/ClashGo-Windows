@@ -264,8 +264,8 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {[
-                  { key: 'autoRetrain', icon: 'autorenew', title: 'Retrain after battles', text: 'Rebuild the farming army automatically after each attack.', value: simplePreferences.autoRetrain },
-                  { key: 'waitForFullArmy', icon: 'verified', title: 'Wait for a full army', text: 'Do not attack until the configured army is ready.', value: simplePreferences.waitForFullArmy },
+                  { key: 'autoRetrain', icon: 'autorenew', title: 'Keep my army recipe ready', text: 'Reapply the selected army recipe automatically when ClashGO detects a mismatch.', value: simplePreferences.autoRetrain },
+                  { key: 'waitForFullArmy', icon: 'verified', title: 'Verify army before attacking', text: 'Only start matchmaking after the selected army recipe is visually confirmed.', value: simplePreferences.waitForFullArmy },
                   { key: 'useHeroes', icon: 'shield_person', title: 'Use heroes', text: 'Use available heroes during farming attacks.', value: simplePreferences.useHeroes },
                   { key: 'useClanCastle', icon: 'fort', title: 'Use Clan Castle', text: 'Use available Clan Castle reinforcements in attacks.', value: simplePreferences.useClanCastle },
                   { key: 'autoDonate', icon: 'volunteer_activism', title: 'Automatic clan donations', text: 'Donate only when ClashGO can positively match a requested troop. Unknown requests are skipped.', value: simplePreferences.autoDonate },
