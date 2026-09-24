@@ -1816,9 +1816,28 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			}
 			state, _ := e.classify(screen)
 
-			if state == game.StateBattleEnd || state == game.StateReturnHome {
+			switch state {
+			case game.StateBattleEnd, game.StateReturnHome:
 				screen.Close()
 				return true
+			case game.StateConnectionLost:
+				// The outer capture loop yields while the attack sequence owns
+				// the UI, so reconnect here instead of waiting for the full
+				// battle timeout.
+				screen.Close()
+				x, y := e.cal.ScaleRef(300, 478)
+				e.logger.Warn().Msg("connection lost during battle; tapping TRY AGAIN")
+				if tapErr := e.client.TapRandomized(x, y); tapErr != nil {
+					e.logger.Warn().Err(tapErr).Msg("battle reconnect tap failed")
+				}
+				continue
+			case game.StateMainVillage, game.StateArmyCamp, game.StateArmySelection:
+				// Definitive evidence that the battle flow already ended or
+				// reloaded somewhere unexpected. Fail fast so the orchestrator
+				// can recover rather than burning the remaining deadline.
+				screen.Close()
+				e.logger.Warn().Str("state", state.String()).Msg("battle flow exited unexpectedly; aborting battle-end wait")
+				return false
 			}
 
 			// Continuously sample the live Available Loot counters. Accept only
