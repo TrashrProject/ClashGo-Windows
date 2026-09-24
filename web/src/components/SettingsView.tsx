@@ -244,6 +244,16 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           </div>
         </button>
 
+        <details className="rounded-2xl border border-zinc-100/60 dark:border-zinc-800/60 bg-zinc-50/40 dark:bg-zinc-950/20 overflow-hidden">
+          <summary className="cursor-pointer list-none p-5 flex items-center justify-between gap-4">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Technical performance</div>
+              <div className="text-sm font-bold text-zinc-950 dark:text-white mt-1">Connection, capture and recovery details</div>
+              <div className="text-[10px] text-zinc-400 mt-0.5">Normal users can leave this closed.</div>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">monitoring</span>
+          </summary>
+          <div className="border-t border-zinc-100 dark:border-zinc-800 p-4 space-y-4">
           {[
             { label: 'Connection Status', value: stats.adb_health.consecutive_fails === 0 ? 'Optimal' : 'Interrupted', status: stats.adb_health.consecutive_fails === 0 ? 'success' : 'error', icon: 'hub', detail: stats.adb_health.last_error },
             { label: 'ADB Port', value: adbPort.toString(), status: 'info', icon: 'router' },
@@ -280,6 +290,8 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             </div>
           </div>
         ))}
+          </div>
+        </details>
 
         {/* Update row — surfaces current version + a manual check
             button so users can force a refresh without waiting for the
