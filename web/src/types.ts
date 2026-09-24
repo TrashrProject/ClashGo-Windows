@@ -41,6 +41,13 @@ export interface BotStats {
   village_action: string;
   village_reason: string;
   village_next_unix: number;
+  automation_busy: boolean;
+  automation_task: string;
+  automation_last_task: string;
+  automation_task_started_unix: number;
+  automation_tasks_started: number;
+  automation_tasks_completed: number;
+  wall_upgrade_pending: boolean;
   adb_health: {
     avg_capture_ms: number;
     consecutive_fails: number;
