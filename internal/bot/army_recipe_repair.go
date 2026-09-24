@@ -16,6 +16,7 @@ import (
 // necessary, selects the configured recipe with visual verification, then
 // requires a fresh multi-frame army consensus.
 func (b *Bot) reapplyActiveArmyRecipe(profile config.FarmProfile) (attack.ArmyGuardResult, bool) {
+	b.armyRepairAttempts.Add(1)
 	screen, err := b.client.CaptureToMat()
 	if err != nil || screen.Empty() {
 		if !screen.Empty() { screen.Close() }
@@ -45,5 +46,9 @@ func (b *Bot) reapplyActiveArmyRecipe(profile config.FarmProfile) (attack.ArmyGu
 		return attack.ArmyGuardResult{Decision: attack.ArmyGuardUncertain}, false
 	}
 	guard := b.inspectArmyConsensus(profile, 3)
-	return guard, guard.Decision == attack.ArmyGuardReady
+	ready := guard.Decision == attack.ArmyGuardReady
+	if ready {
+		b.armyRepairSuccesses.Add(1)
+	}
+	return guard, ready
 }
