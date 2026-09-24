@@ -905,67 +905,42 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 				continue
 			}
 
-			e.logger.Info().Int("x", slot.X).Str("category", slot.Category).Msg("re-deploying remaining slot")
+			e.logger.Info().
+				Int("x", slot.X).
+				Str("category", slot.Category).
+				Msg("re-deploying remaining slot through verified recovery")
 
-			e.client.TapFast(slot.X, slot.Y, 2.0)
-			e.client.HumanSleep(35, 10)
-
-			var p1, p2 image.Point
-			if slot.Category == "Spell" {
-				if edge, ok := pCfg.SpellEdgesB[targetEdge]; ok {
-					p1, p2 = edge.P1, edge.P2
-
-					centerX, centerY := w/2, h/2
-					pct := 0.20
-					p1 = image.Pt(int(float64(p1.X)+float64(centerX-p1.X)*pct), int(float64(p1.Y)+float64(centerY-p1.Y)*pct))
-					p2 = image.Pt(int(float64(p2.X)+float64(centerX-p2.X)*pct), int(float64(p2.Y)+float64(centerY-p2.Y)*pct))
-				}
-			}
-			if p1.X == 0 && p1.Y == 0 {
-				if edge, ok := pCfg.Edges[targetEdge]; ok {
-					p1, p2 = edge.P1, edge.P2
-				} else {
-					p1 = image.Pt(w/2, h/2)
-					p2 = p1
-				}
-			}
-
-			maxRetryAttempts := 2
-			for batch := 0; batch < maxRetryAttempts; batch++ {
-				if p1 == p2 {
-
-					e.client.TapTriple(p1.X, p1.Y, 12.0, p1.X, p1.Y, 12.0, p1.X, p1.Y, 12.0)
-				} else {
-
-					steps := 9
-					for i := 0; i < steps; i += 3 {
-						pct1 := float64(i) / float64(steps-1)
-						pct2 := float64(i+1) / float64(steps-1)
-						pct3 := float64(i+2) / float64(steps-1)
-						tx1, ty1 := int(float64(p1.X)+float64(p2.X-p1.X)*pct1), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct1)
-						tx2, ty2 := int(float64(p1.X)+float64(p2.X-p1.X)*pct2), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct2)
-						tx3, ty3 := int(float64(p1.X)+float64(p2.X-p1.X)*pct3), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct3)
-						e.client.TapTriple(tx1, ty1, 15.0, tx2, ty2, 15.0, tx3, ty3, 15.0)
-					}
-				}
-
-				time.Sleep(80 * time.Millisecond)
-				checkMat, err := e.client.CaptureToMat()
-				if err != nil {
-					break
-				}
-				isEmpty := e.isSlotEmpty(checkMat, slot.X, slot.Y)
-				checkMat.Close()
-
-				if isEmpty {
-					break
-				}
-
-				e.client.TapFast(slot.X, slot.Y, 2.0)
-				time.Sleep(50 * time.Millisecond)
+			if !e.recoverRemainingSlot(slot, pCfg, targetEdge, w, h) {
+				e.logger.Warn().
+					Int("x", slot.X).
+					Str("category", slot.Category).
+					Msg("final recovery could not confirm this slot")
 			}
 			e.client.HumanSleep(35, 10)
 		}
+	}
+
+	// Recount after the recovery attempts. The previous value was measured
+	// before re-deployment and could incorrectly report failure even when the
+	// retry emptied every remaining troop/spell/CC card.
+	if finalScreen, err := e.client.CaptureToMat(); err == nil && !finalScreen.Empty() {
+		finalSlots := e.ParseLayout(finalScreen, pCfg, w, h, mBarY)
+		remainingCount = 0
+		for _, slot := range finalSlots {
+			if slot.Category == "Siege" || e.isSiegeTapped(slot.X, w) {
+				continue
+			}
+			ratio := e.getSlotActivityRatio(finalScreen, slot.X, slot.Y)
+			if ratio >= 0.4 && (slot.Category == "Troop" || slot.Category == "Spell" || slot.Category == "CC") {
+				remainingCount++
+			}
+		}
+		finalScreen.Close()
+	}
+	if remainingCount == 0 {
+		e.logger.Info().Msg("final verified deployment check passed: no active troop/spell/CC slots remain")
+	} else {
+		e.logger.Warn().Int("remaining_slots", remainingCount).Msg("final verified deployment check still has active slots")
 	}
 
 	return remainingCount, nil
@@ -2118,10 +2093,11 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 }
 
 func (e *Executor) SweepRemainingSlots(screen gocv.Mat, pCfg PrecisionConfig, targetEdge string, w, h int, mBarY int, usedSlots map[int]bool, siegeXs []int, allSlots []TroopSlot, slotY int) {
-	e.logger.Info().Msg("starting sweep of remaining/event slots...")
+	e.logger.Info().Msg("starting verified sweep of remaining/event slots...")
 
 	for _, slot := range allSlots {
 		x := slot.X
+		slot.Y = slotY
 
 		if slot.Category == "Siege" || e.isSiegeTapped(x, w) {
 			continue
@@ -2134,67 +2110,24 @@ func (e *Executor) SweepRemainingSlots(screen gocv.Mat, pCfg PrecisionConfig, ta
 				break
 			}
 		}
-		if alreadyUsed {
+		if alreadyUsed || e.isSlotEmpty(screen, x, slotY) {
 			continue
 		}
 
-		if !e.isSlotEmpty(screen, x, slotY) {
-			e.logger.Info().Int("x", x).Str("category", slot.Category).Msg("found undeployed troop slot during sweep, deploying...")
+		e.logger.Info().
+			Int("x", x).
+			Str("category", slot.Category).
+			Msg("found undeployed slot during sweep; using verified recovery path")
 
-			e.client.TapFast(x, slotY, 2.0)
-			e.client.HumanSleep(35, 10)
-
-			var p1, p2 image.Point
-			if slot.Category == "Spell" {
-				if edge, ok := pCfg.SpellEdgesB[targetEdge]; ok {
-					p1, p2 = edge.P1, edge.P2
-				}
-			}
-			if p1.X == 0 && p1.Y == 0 {
-				if edge, ok := pCfg.Edges[targetEdge]; ok {
-					p1, p2 = edge.P1, edge.P2
-				} else {
-					p1 = image.Pt(w/2, h/2)
-					p2 = p1
-				}
-			}
-
-			maxSweepAttempts := 2
-			for batch := 0; batch < maxSweepAttempts; batch++ {
-				if p1 == p2 {
-					e.client.TapTriple(p1.X, p1.Y, 12.0, p1.X, p1.Y, 12.0, p1.X, p1.Y, 12.0)
-				} else {
-					steps := 9
-					for i := 0; i < steps; i += 3 {
-						pct1 := float64(i) / float64(steps-1)
-						pct2 := float64(i+1) / float64(steps-1)
-						pct3 := float64(i+2) / float64(steps-1)
-						tx1, ty1 := int(float64(p1.X)+float64(p2.X-p1.X)*pct1), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct1)
-						tx2, ty2 := int(float64(p1.X)+float64(p2.X-p1.X)*pct2), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct2)
-						tx3, ty3 := int(float64(p1.X)+float64(p2.X-p1.X)*pct3), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct3)
-						e.client.TapTriple(tx1, ty1, 15.0, tx2, ty2, 15.0, tx3, ty3, 15.0)
-					}
-				}
-
-				time.Sleep(200 * time.Millisecond)
-				checkMat, err := e.client.CaptureToMat()
-				if err != nil {
-					break
-				}
-				isEmpty := e.isSlotEmpty(checkMat, x, slotY)
-				checkMat.Close()
-
-				if isEmpty {
-					e.logger.Info().Int("x", x).Msg("swept slot empty, finished deploying")
-					break
-				}
-				e.client.TapFast(x, slotY, 2.0)
-				time.Sleep(50 * time.Millisecond)
-			}
-
+		if e.recoverRemainingSlot(slot, pCfg, targetEdge, w, h) {
 			usedSlots[x] = true
-			e.client.HumanSleep(35, 10)
+		} else {
+			e.logger.Warn().
+				Int("x", x).
+				Str("category", slot.Category).
+				Msg("sweep could not confirm deployment; leaving slot for final verification")
 		}
+		e.client.HumanSleep(35, 10)
 	}
 }
 
