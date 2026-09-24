@@ -75,6 +75,9 @@ type Bot struct {
 	splashDismissInFlight atomic.Bool
 	connLostDismissInFlight atomic.Bool
 	donationInFlight        atomic.Bool
+	donationChecks          atomic.Int32
+	donationsSent           atomic.Int32
+	lastDonationUnix        atomic.Int64
 	lastArmyCampGuardLog    time.Time
 	lastDonationScan        time.Time
 	startedAt             time.Time
@@ -3007,6 +3010,9 @@ func (b *Bot) Stats() BotStats {
 		RecoveryAttempts:   b.recoveryAttempts.Load(),
 		RecoverySuccesses:  b.recoverySuccesses.Load(),
 		BlueStacksRestarts: b.blueStacksRestarts.Load(),
+		DonationChecks:     b.donationChecks.Load(),
+		DonationsSent:      b.donationsSent.Load(),
+		LastDonationUnix:   b.lastDonationUnix.Load(),
 		RuntimeState:       state.String(),
 		RuntimePhase:       phase.String(),
 		RuntimeStateAge:    stateAge,
@@ -3035,6 +3041,9 @@ type BotStats struct {
 	RecoveryAttempts   int32 `json:"recovery_attempts"`
 	RecoverySuccesses  int32 `json:"recovery_successes"`
 	BlueStacksRestarts int32 `json:"bluestacks_restarts"`
+	DonationChecks     int32 `json:"donation_checks"`
+	DonationsSent      int32 `json:"donations_sent"`
+	LastDonationUnix   int64 `json:"last_donation_unix"`
 
 	RuntimeState    string        `json:"runtime_state"`
 	RuntimePhase    string        `json:"runtime_phase"`
