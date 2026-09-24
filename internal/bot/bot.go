@@ -107,6 +107,7 @@ type Bot struct {
 	lastIdlePan           time.Time
 	lastVisionLog         time.Time
 	lastResourceScan      time.Time
+	wallUpgradePending   atomic.Bool
 	// lastAttackEnd is stamped when a battle fully returns home; the
 	// inter-attack cooldown (cfg.Attack.MinSecondsBetweenAttacks) is
 	// measured from it. Written by the attack goroutine only.
@@ -1056,9 +1057,11 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			ResourceEnabled:     b.cfg.Automation.AutoResourceTracking,
 			LastResourceScan:    b.lastResourceScan,
 			ResourceInterval:    15 * time.Second,
+			WallsEnabled:        b.cfg.Upgrade.UpgradeWalls,
+			WallsDue:            b.wallUpgradePending.Load(),
 			ArmyWaitUntil:       armyUntil,
 			AttackEnabled:       b.cfg.Attack.Enabled,
-			AttackCapReached:    int(b.attackCount.Load()) >= b.cfg.Attack.MaxAttackPerSession,
+			AttackCapReached:    b.cfg.Attack.MaxAttackPerSession > 0 && int(b.attackCount.Load()) >= b.cfg.Attack.MaxAttackPerSession,
 			AttackNotBefore: func() time.Time {
 				if b.cfg.Attack.MinSecondsBetweenAttacks <= 0 || b.lastAttackEnd.IsZero() { return time.Time{} }
 				return b.lastAttackEnd.Add(time.Duration(b.cfg.Attack.MinSecondsBetweenAttacks) * time.Second)
@@ -1081,6 +1084,23 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 				b.maybeScanVillageResources(screen)
 				b.endAutomationTask("resource scan")
 			}
+			return
+		case VillageActionUpgradeWalls:
+			if !b.tryBeginAutomationTask("wall upgrades") {
+				return
+			}
+			go func() {
+				defer b.endAutomationTask("wall upgrades")
+				b.logger.Info().Msg("automation brain: starting queued wall maintenance")
+				b.UpgradeWalls(gc)
+				b.wallUpgradePending.Store(false)
+				b.recordActivity()
+				if b.cfg.Attack.MaxAttackPerSession > 0 &&
+					int(b.attackCount.Load()) >= b.cfg.Attack.MaxAttackPerSession {
+					b.logger.Info().Msg("wall maintenance complete and session attack limit reached; stopping session")
+					b.cancel()
+				}
+			}()
 			return
 		case VillageActionWaitArmy:
 			if time.Since(b.lastArmyCampGuardLog) > 10*time.Second {
@@ -1620,7 +1640,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		b.logger.Info().Msg("persistent adb shell pipe disabled on Windows-safe path")
 	}
 
-	if b.attackCount.Load() >= int32(b.cfg.Attack.MaxAttackPerSession) {
+	if b.cfg.Attack.MaxAttackPerSession > 0 && b.attackCount.Load() >= int32(b.cfg.Attack.MaxAttackPerSession) {
 		return
 	}
 
@@ -2205,23 +2225,25 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	_ = b.client.Tap(sideX, sideY)
 	time.Sleep(1000 * time.Millisecond)
 
+	// Wall work is no longer executed inside the attack sequence. Queue it
+	// for the village scheduler so the attack lease is released first and the
+	// next UI flow gets its own exclusive task slot.
 	if b.cfg.Upgrade.UpgradeWalls {
-		b.UpgradeWalls(gc)
+		b.wallUpgradePending.Store(true)
+		b.logger.Info().Msg("queued wall maintenance for automation brain")
 	}
 
-	// Cap check stays after wall upgrades so the graceful shutdown (2s
-	// grace then cancel) never interrupts an in-progress wall loop; the
-	// count itself was already incremented when the report was recorded.
-	if int(b.attackCount.Load()) >= b.cfg.Attack.MaxAttackPerSession {
+	// If there is no queued post-attack maintenance, a reached session cap may
+	// stop immediately. Otherwise the scheduler is allowed to finish that one
+	// queued task first and stops the session from the wall-task completion.
+	if b.cfg.Attack.MaxAttackPerSession > 0 &&
+		int(b.attackCount.Load()) >= b.cfg.Attack.MaxAttackPerSession &&
+		!b.wallUpgradePending.Load() {
 		b.logger.Info().
 			Int32("attacks", b.attackCount.Load()).
 			Int("cap", b.cfg.Attack.MaxAttackPerSession).
-			Msg("attack cap reached, scheduling graceful shutdown...")
-		go func() {
-
-			time.Sleep(2 * time.Second)
-			b.cancel()
-		}()
+			Msg("attack cap reached with no queued village maintenance; stopping session")
+		b.cancel()
 	}
 
 	deployStatus := "SUCCESS (100% Deployed)"
@@ -3276,7 +3298,10 @@ func (b *Bot) Stats() BotStats {
 		TrainingPending:        trainingPending,
 		VillageAction:         VillageAction(b.villageAction.Load()).String(),
 		VillageReason:         villageReason,
-		VillageNextUnix:       villageNextAt.Unix(),
+		VillageNextUnix: func() int64 {
+			if villageNextAt.IsZero() { return 0 }
+			return villageNextAt.Unix()
+		}(),
 		RuntimeState:          state.String(),
 		RuntimePhase:       phase.String(),
 		RuntimeStateAge:    stateAge,
