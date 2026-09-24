@@ -159,3 +159,40 @@ func TestVillageBrainDoesNotRunWallsUnlessQueued(t *testing.T) {
 		t.Fatalf("action=%v want attack when walls are enabled but not queued", got.Action)
 	}
 }
+
+
+func TestAutomationTaskLeaseAllowsOnlyOneOwner(t *testing.T) {
+	b := &Bot{}
+	if !b.tryBeginAutomationTask("attack") {
+		t.Fatal("first task should acquire lease")
+	}
+	if b.tryBeginAutomationTask("donation") {
+		t.Fatal("second task must not acquire lease while attack owns it")
+	}
+	if got := b.currentAutomationTask(); got != "attack" {
+		t.Fatalf("current task=%q want attack", got)
+	}
+	b.endAutomationTask("attack")
+	if b.automationTaskInFlight.Load() {
+		t.Fatal("lease should be released")
+	}
+	if !b.tryBeginAutomationTask("donation") {
+		t.Fatal("next task should acquire released lease")
+	}
+	b.endAutomationTask("donation")
+}
+
+func TestAutomationTaskLeaseRejectsWrongRelease(t *testing.T) {
+	b := &Bot{}
+	if !b.tryBeginAutomationTask("wall upgrades") {
+		t.Fatal("wall task should acquire lease")
+	}
+	b.endAutomationTask("attack")
+	if !b.automationTaskInFlight.Load() {
+		t.Fatal("wrong owner must not release active lease")
+	}
+	if got := b.currentAutomationTask(); got != "wall upgrades" {
+		t.Fatalf("current task=%q want wall upgrades", got)
+	}
+	b.endAutomationTask("wall upgrades")
+}
