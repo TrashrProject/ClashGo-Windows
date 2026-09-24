@@ -103,6 +103,17 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 		return VillageDecision{Action: VillageActionDonate, Reason: "donation cycle is already running"}
 	}
 
+	// A completed attack session should wind down immediately. The only
+	// intentional post-cap task is wall maintenance queued by the final
+	// battle; donations/resource reads/army preflight must not keep a capped
+	// session alive.
+	if in.AttackCapReached {
+		if in.WallsEnabled && in.WallsDue {
+			return VillageDecision{Action: VillageActionUpgradeWalls, Reason: "finishing queued wall maintenance before session stop"}
+		}
+		return VillageDecision{Action: VillageActionSessionComplete, Reason: "session attack limit reached"}
+	}
+
 	donationInterval := in.DonationInterval
 	if donationInterval <= 0 {
 		donationInterval = 90 * time.Second
@@ -137,9 +148,6 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 
 	if !in.AttackEnabled {
 		return VillageDecision{Action: VillageActionIdle, Reason: "automatic attacks are disabled"}
-	}
-	if in.AttackCapReached {
-		return VillageDecision{Action: VillageActionSessionComplete, Reason: "session attack limit reached"}
 	}
 	if !in.AttackNotBefore.IsZero() && in.Now.Before(in.AttackNotBefore) {
 		return VillageDecision{Action: VillageActionCooldown, Reason: "waiting between attacks", NextAt: in.AttackNotBefore}
