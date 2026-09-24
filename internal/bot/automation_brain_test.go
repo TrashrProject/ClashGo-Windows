@@ -351,3 +351,44 @@ func TestVillageBrainCapAllowsOnlyQueuedFinalWalls(t *testing.T) {
 		t.Fatalf("action=%v want final wall maintenance", got.Action)
 	}
 }
+
+
+func TestAutomationTaskPanicStillReleasesLease(t *testing.T) {
+	b := &Bot{logger: zerolog.Nop()}
+
+	if !b.runAutomationTask("resource scan", func() {
+		panic("boom")
+	}) {
+		t.Fatal("task should acquire lease")
+	}
+	if b.automationTaskInFlight.Load() {
+		t.Fatal("panic must not leave automation lease locked")
+	}
+	if got := b.automationTaskPanics.Load(); got != 1 {
+		t.Fatalf("recovered panic count=%d want 1", got)
+	}
+	if got := b.automationTasksCompleted.Load(); got != 1 {
+		t.Fatalf("completed tasks=%d want 1 after recovered panic", got)
+	}
+	if current := b.currentAutomationTask(); current != "" {
+		t.Fatalf("current task=%q want empty after recovered panic", current)
+	}
+}
+
+func TestAutomationTaskWrongReleasePreservesOwnerAndCounters(t *testing.T) {
+	b := &Bot{logger: zerolog.Nop()}
+	if !b.tryBeginAutomationTask("army check") {
+		t.Fatal("army check should acquire lease")
+	}
+	b.endAutomationTask("donation")
+	if got := b.automationTasksCompleted.Load(); got != 0 {
+		t.Fatalf("wrong release incremented completion counter: %d", got)
+	}
+	if !b.automationTaskInFlight.Load() || b.currentAutomationTask() != "army check" {
+		t.Fatal("wrong release changed lease ownership")
+	}
+	b.endAutomationTask("army check")
+	if got := b.automationTasksCompleted.Load(); got != 1 {
+		t.Fatalf("correct release completion count=%d want 1", got)
+	}
+}
