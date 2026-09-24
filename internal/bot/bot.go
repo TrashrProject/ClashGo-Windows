@@ -1084,17 +1084,12 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 				return
 			}
 		case VillageActionScanResources:
-			if b.tryBeginAutomationTask("resource scan") {
+			b.runAutomationTask("resource scan", func() {
 				b.maybeScanVillageResources(screen)
-				b.endAutomationTask("resource scan")
-			}
+			})
 			return
 		case VillageActionUpgradeWalls:
-			if !b.tryBeginAutomationTask("wall upgrades") {
-				return
-			}
-			go func() {
-				defer b.endAutomationTask("wall upgrades")
+			b.startAutomationTask("wall upgrades", func() {
 				b.logger.Info().Msg("automation brain: starting queued wall maintenance")
 				b.UpgradeWalls(gc)
 				b.wallUpgradePending.Store(false)
@@ -1104,7 +1099,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 					b.logger.Info().Msg("wall maintenance complete and session attack limit reached; stopping session")
 					b.cancel()
 				}
-			}()
+			})
 			return
 		case VillageActionWaitArmy:
 			if time.Since(b.lastArmyCampGuardLog) > 10*time.Second {
@@ -1119,17 +1114,13 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		case VillageActionSessionComplete:
 			return
 		case VillageActionAttack:
-			if !b.tryBeginAutomationTask("attack") {
-				return
-			}
-			b.logger.Info().
-				Str("reason", decision.Reason).
-				Msg("automation brain: starting matchmaking")
-			b.lastSequenceStart = time.Now()
-			go func() {
-				defer b.endAutomationTask("attack")
+			b.startAutomationTask("attack", func() {
+				b.logger.Info().
+					Str("reason", decision.Reason).
+					Msg("automation brain: starting matchmaking")
+				b.lastSequenceStart = time.Now()
 				b.executeAttackSequence(gc)
-			}()
+			})
 			return
 		case VillageActionHold:
 			return
@@ -1235,6 +1226,44 @@ func (b *Bot) automationTaskSnapshot() (current, last string) {
 	b.automationTaskMu.RLock()
 	defer b.automationTaskMu.RUnlock()
 	return b.automationTaskName, b.automationLastTask
+}
+
+// runAutomationTask executes a short task inline under the global UI lease.
+// The defer guarantees that even a panic cannot leave the scheduler locked.
+func (b *Bot) runAutomationTask(name string, work func()) bool {
+	if !b.tryBeginAutomationTask(name) {
+		return false
+	}
+	defer b.endAutomationTask(name)
+	defer func() {
+		if r := recover(); r != nil {
+			b.logger.Error().Interface("panic", r).Str("task", name).
+				Msg("recovered panic in automation task")
+		}
+	}()
+	work()
+	return true
+}
+
+// startAutomationTask is the long-running counterpart. It acquires the lease
+// synchronously before returning so the very next capture cannot start a
+// competing task while the goroutine is being scheduled.
+func (b *Bot) startAutomationTask(name string, work func()) bool {
+	if !b.tryBeginAutomationTask(name) {
+		return false
+	}
+	go func() {
+		defer b.endAutomationTask(name)
+		defer func() {
+			if r := recover(); r != nil {
+				b.logger.Error().Interface("panic", r).Str("task", name).
+					Msg("recovered panic in asynchronous automation task")
+				b.recordActivity()
+			}
+		}()
+		work()
+	}()
+	return true
 }
 
 func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
