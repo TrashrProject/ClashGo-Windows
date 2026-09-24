@@ -2622,7 +2622,49 @@ func (b *Bot) selectArmySlot() bool {
 	}
 
 	if slot == 1 {
-		return b.findAndClick("btn_army_1", "Army 1", 1)
+		before, err := b.client.CaptureToMat()
+		if err != nil || before.Empty() {
+			if !before.Empty() { before.Close() }
+			return false
+		}
+		stateBefore, _ := b.classify(before)
+		if stateBefore != game.StateArmySelection && stateBefore != game.StateArmyCamp {
+			before.Close()
+			b.logger.Warn().Str("state", stateBefore.String()).Msg("refusing Army 1 selection outside verified army menu")
+			return false
+		}
+
+		if !b.findAndClick("btn_army_1", "Army 1", 1) {
+			before.Close()
+			return false
+		}
+		if !b.sleepResponsive(180 * time.Millisecond) {
+			before.Close()
+			return false
+		}
+
+		after, capErr := b.client.CaptureToMat()
+		if capErr != nil || after.Empty() {
+			before.Close()
+			if !after.Empty() { after.Close() }
+			return false
+		}
+		refX, refY := b.cal.ScaleRef(513, 230)
+		delta := localVisualDelta(before, after, image.Pt(refX, refY), int(95*b.cal.ScaleX), int(42*b.cal.ScaleY))
+		stateAfter, _ := b.classify(after)
+		before.Close()
+		after.Close()
+
+		if delta < 0.012 && stateAfter == stateBefore {
+			b.logger.Warn().
+				Float64("visual_delta", delta).
+				Str("state", stateAfter.String()).
+				Msg("Army 1 tap produced no verified UI progress")
+			return false
+		}
+		b.recordActivity()
+		b.logger.Info().Float64("visual_delta", delta).Msg("Army 1 recipe selection verified")
+		return true
 	}
 
 	// Slots 2+ do not have dedicated templates yet. Never treat a coordinate
