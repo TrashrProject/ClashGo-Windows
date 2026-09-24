@@ -67,10 +67,17 @@ func (b *Bot) returnToVillageVerified(maxBacks int, source string) bool {
 			if state == game.StateConfirmExit {
 				screen.Close()
 				x, y := b.cal.ScaleRef(279, 429)
-				if tapErr := b.client.TapFast(x, y, 0.5); tapErr == nil {
-					b.logger.Warn().Str("source", source).Msg("verified-return reached quit-confirm; cancelled safely")
+				if tapErr := b.client.TapFast(x, y, 0.5); tapErr != nil {
+					b.logger.Warn().Err(tapErr).Str("source", source).Msg("verified-return could not cancel quit-confirm")
+					return false
 				}
-				return true
+				b.logger.Warn().Str("source", source).Msg("verified-return reached quit-confirm; cancelled safely and will re-verify village")
+				if !b.sleepResponsive(180 * time.Millisecond) {
+					return false
+				}
+				// Cancel is an action, not proof. Re-capture on the next loop
+				// iteration and only return success after village evidence.
+				continue
 			}
 			screen.Close()
 			if atVillage {
