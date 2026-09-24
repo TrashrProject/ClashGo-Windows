@@ -77,6 +77,12 @@ type Bot struct {
 	splashDismissInFlight atomic.Bool
 	connLostDismissInFlight atomic.Bool
 	donationInFlight        atomic.Bool
+	// automationTaskInFlight is the single global village-task lease. Features
+	// may all be enabled, but only one automation task can own the UI at once.
+	// Safety/recovery handlers remain outside this lease so they can interrupt.
+	automationTaskInFlight   atomic.Bool
+	automationTaskMu         sync.RWMutex
+	automationTaskName       string
 	donationChecks          atomic.Int32
 	donationsSent           atomic.Int32
 	lastDonationUnix        atomic.Int64
@@ -1038,7 +1044,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		decision := decideVillageAction(VillageDecisionInput{
 			Now:                 now,
 			VillageVerified:     villageVerified,
-			SequenceRunning:     b.seqRunning.Load(),
+			SequenceRunning:     b.seqRunning.Load() || b.automationTaskInFlight.Load(),
 			DonationInFlight:    b.donationInFlight.Load(),
 			DonationEnabled:     b.cfg.Automation.Preferences.AutoDonate,
 			LastDonationScan:    b.lastDonationScan,
@@ -1071,7 +1077,10 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 				return
 			}
 		case VillageActionScanResources:
-			b.maybeScanVillageResources(screen)
+			if b.tryBeginAutomationTask("resource scan") {
+				b.maybeScanVillageResources(screen)
+				b.endAutomationTask("resource scan")
+			}
 			return
 		case VillageActionWaitArmy:
 			if time.Since(b.lastArmyCampGuardLog) > 10*time.Second {
@@ -1086,11 +1095,17 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		case VillageActionSessionComplete:
 			return
 		case VillageActionAttack:
+			if !b.tryBeginAutomationTask("attack") {
+				return
+			}
 			b.logger.Info().
 				Str("reason", decision.Reason).
 				Msg("automation brain: starting matchmaking")
 			b.lastSequenceStart = time.Now()
-			go b.executeAttackSequence(gc)
+			go func() {
+				defer b.endAutomationTask("attack")
+				b.executeAttackSequence(gc)
+			}()
 			return
 		case VillageActionHold:
 			return
@@ -1145,6 +1160,34 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		go b.navigator.NavigateToMainVillage(gc)
 		return
 	}
+}
+
+// tryBeginAutomationTask acquires the one-at-a-time automation lease.
+// Enabling several capabilities means they are eligible for scheduling; it
+// never means ClashGO may click through several flows simultaneously.
+func (b *Bot) tryBeginAutomationTask(name string) bool {
+	if !b.automationTaskInFlight.CompareAndSwap(false, true) {
+		return false
+	}
+	b.automationTaskMu.Lock()
+	b.automationTaskName = name
+	b.automationTaskMu.Unlock()
+	return true
+}
+
+func (b *Bot) endAutomationTask(name string) {
+	b.automationTaskMu.Lock()
+	if b.automationTaskName == name {
+		b.automationTaskName = ""
+	}
+	b.automationTaskMu.Unlock()
+	b.automationTaskInFlight.Store(false)
+}
+
+func (b *Bot) currentAutomationTask() string {
+	b.automationTaskMu.RLock()
+	defer b.automationTaskMu.RUnlock()
+	return b.automationTaskName
 }
 
 func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
