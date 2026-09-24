@@ -3,6 +3,9 @@ package bot
 import (
 	"testing"
 	"time"
+
+	"github.com/Ducky705/ClashGO/internal/config"
+	"github.com/rs/zerolog"
 )
 
 func TestVillageBrainPriorities(t *testing.T) {
@@ -249,5 +252,41 @@ func TestVillageBrainArmyPreflightRunsBeforeAttack(t *testing.T) {
 	})
 	if got.Action != VillageActionCheckArmy {
 		t.Fatalf("action=%v want army preflight", got.Action)
+	}
+}
+
+
+func TestRuntimeConfigIsDeferredUntilTaskBoundary(t *testing.T) {
+	oldCfg := config.DefaultConfig()
+	newCfg := config.DefaultConfig()
+	newCfg.Attack.Enabled = false
+	newCfg.Automation.AutoArmyGuard = false
+
+	b := &Bot{
+		cfg: oldCfg,
+		logger: zerolog.Nop(),
+		armySlot: 1,
+	}
+	if !b.tryBeginAutomationTask("attack") {
+		t.Fatal("attack should acquire task lease")
+	}
+
+	b.UpdateConfig(newCfg)
+	if b.cfg != oldCfg {
+		t.Fatal("active task must keep original config until it finishes")
+	}
+	if b.pendingConfig != newCfg {
+		t.Fatal("newest config should be staged while a task owns the UI")
+	}
+
+	b.endAutomationTask("attack")
+	if b.cfg != newCfg {
+		t.Fatal("staged config was not applied at task boundary")
+	}
+	if b.pendingConfig != nil {
+		t.Fatal("pending config should be cleared after boundary apply")
+	}
+	if b.automationTaskInFlight.Load() {
+		t.Fatal("task lease should be released after config boundary apply")
 	}
 }
