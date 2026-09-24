@@ -1130,6 +1130,11 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			b.startAutomationTask("wall upgrades", func() {
 				b.logger.Info().Msg("automation brain: starting queued wall maintenance")
 				b.UpgradeWalls(gc)
+				if b.ctx.Err() != nil {
+					b.wallUpgradePending.Store(false)
+					b.logger.Info().Msg("wall maintenance interrupted by bot stop; skipping further UI recovery")
+					return
+				}
 
 				// A wall flow is only considered complete once control is back on
 				// a positively verified village. This prevents a half-closed
@@ -1287,8 +1292,12 @@ func (b *Bot) endAutomationTask(name string) {
 	// policy, pending config is committed, task N+1 starts with the new policy.
 	if pending := b.pendingConfig; pending != nil {
 		b.pendingConfig = nil
-		b.applyConfigNow(pending)
-		b.logger.Info().Str("after_task", name).Msg("applied deferred runtime configuration at safe task boundary")
+		if b.ctx == nil || b.ctx.Err() == nil {
+			b.applyConfigNow(pending)
+			b.logger.Info().Str("after_task", name).Msg("applied deferred runtime configuration at safe task boundary")
+		} else {
+			b.logger.Debug().Str("after_task", name).Msg("discarded deferred runtime config during shutdown; persisted config will load next start")
+		}
 	}
 
 	b.automationTaskInFlight.Store(false)
@@ -2875,6 +2884,10 @@ func (b *Bot) runArmyPreflight() {
 	if ok {
 		b.armyCheckPending.Store(false)
 		b.recordActivity()
+		return
+	}
+	if b.ctx.Err() != nil {
+		b.logger.Info().Msg("standalone army preflight interrupted by bot stop")
 		return
 	}
 
