@@ -182,3 +182,179 @@ func (e *Executor) deployTroopBatchVerified(slot image.Point, pts []image.Point)
 		Msg("deployment relocation retry result")
 	return ok
 }
+
+
+// deploySpellBatchVerified verifies that a spell card changes after taps. Spells
+// are intentionally NOT passed through the troop red-zone resolver because
+// Clash allows spells to be placed inside the village.
+func (e *Executor) deploySpellBatchVerified(slot image.Point, pts []image.Point) bool {
+	if len(pts) == 0 {
+		return false
+	}
+	if len(pts) > 3 {
+		pts = pts[:3]
+	}
+
+	before, err := e.client.CaptureToMat()
+	if err != nil || before.Empty() {
+		if !before.Empty() {
+			before.Close()
+		}
+		tapDeployPoints(e, pts)
+		return true
+	}
+	defer before.Close()
+
+	tapDeployPoints(e, pts)
+	e.client.HumanSleep(150, 25)
+
+	after, err := e.client.CaptureToMat()
+	if err != nil || after.Empty() {
+		if !after.Empty() {
+			after.Close()
+		}
+		return true
+	}
+	empty := e.isSlotEmpty(after, slot.X, slot.Y)
+	delta := e.slotVisualDelta(before, after, slot)
+	after.Close()
+	if empty || delta >= 0.018 {
+		return true
+	}
+
+	// One controlled retry after reselecting the same card. A spell rejected
+	// for transient input/focus reasons should not make us spam indefinitely.
+	e.logger.Warn().
+		Float64("slot_delta", delta).
+		Msg("spell batch produced no card progress; reselecting and retrying once")
+	e.client.TapFast(slot.X, slot.Y, 2.0)
+	e.client.HumanSleep(55, 10)
+	tapDeployPoints(e, pts)
+	e.client.HumanSleep(150, 25)
+
+	final, err := e.client.CaptureToMat()
+	if err != nil || final.Empty() {
+		if !final.Empty() {
+			final.Close()
+		}
+		return true
+	}
+	defer final.Close()
+	return e.isSlotEmpty(final, slot.X, slot.Y) || e.slotVisualDelta(before, final, slot) >= 0.018
+}
+
+func lineDeployPoints(p1, p2 image.Point, count int) []image.Point {
+	if count <= 0 {
+		return nil
+	}
+	if count == 1 || p1 == p2 {
+		return []image.Point{p1}
+	}
+	out := make([]image.Point, 0, count)
+	for i := 0; i < count; i++ {
+		pct := float64(i) / float64(count-1)
+		out = append(out, image.Pt(
+			int(float64(p1.X)+float64(p2.X-p1.X)*pct),
+			int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct),
+		))
+	}
+	return out
+}
+
+// recoverRemainingSlot is the common recovery path used both by the early sweep
+// and the final deployment verification pass. Troops/CC use a fresh selected-
+// unit red overlay and safe-point resolution; spells use their normal in-base
+// line. Every batch is followed by proof that the card changed.
+func (e *Executor) recoverRemainingSlot(slot TroopSlot, pCfg PrecisionConfig, targetEdge string, w, h int) bool {
+	if slot.Category == "Siege" || e.isSiegeTapped(slot.X, w) {
+		return true
+	}
+
+	slotPt := image.Pt(slot.X, slot.Y)
+	e.client.TapFast(slot.X, slot.Y, 2.0)
+	e.client.HumanSleep(55, 10)
+
+	var p1, p2 image.Point
+	if slot.Category == "Spell" {
+		if edge, ok := pCfg.SpellEdgesB[targetEdge]; ok {
+			p1, p2 = edge.P1, edge.P2
+			centerX, centerY := w/2, h/2
+			pct := 0.20
+			p1 = image.Pt(
+				int(float64(p1.X)+float64(centerX-p1.X)*pct),
+				int(float64(p1.Y)+float64(centerY-p1.Y)*pct),
+			)
+			p2 = image.Pt(
+				int(float64(p2.X)+float64(centerX-p2.X)*pct),
+				int(float64(p2.Y)+float64(centerY-p2.Y)*pct),
+			)
+		}
+	}
+	if p1 == (image.Point{}) && p2 == (image.Point{}) {
+		if edge, ok := pCfg.Edges[targetEdge]; ok {
+			p1, p2 = edge.P1, edge.P2
+		} else {
+			p1 = image.Pt(w/2, int(float64(h)*0.65))
+			p2 = p1
+		}
+	}
+
+	planned := lineDeployPoints(p1, p2, 9)
+	if slot.Category != "Spell" {
+		overlay, err := e.client.CaptureToMat()
+		if err == nil && !overlay.Empty() {
+			planned = e.resolveSafeDeployPoints(overlay, planned)
+			overlay.Close()
+		} else if !overlay.Empty() {
+			overlay.Close()
+		}
+		if len(planned) == 0 {
+			e.logger.Warn().Int("x", slot.X).Msg("recovery pass found no safe troop deployment points")
+			return false
+		}
+	}
+
+	for i := 0; i < len(planned); i += 3 {
+		end := i + 3
+		if end > len(planned) {
+			end = len(planned)
+		}
+		batch := append([]image.Point(nil), planned[i:end]...)
+		ok := false
+		if slot.Category == "Spell" {
+			ok = e.deploySpellBatchVerified(slotPt, batch)
+		} else {
+			ok = e.deployTroopBatchVerified(slotPt, batch)
+		}
+		if !ok {
+			e.logger.Warn().
+				Int("x", slot.X).
+				Str("category", slot.Category).
+				Msg("recovery deployment batch not confirmed")
+			return false
+		}
+
+		check, err := e.client.CaptureToMat()
+		if err == nil && !check.Empty() {
+			empty := e.isSlotEmpty(check, slot.X, slot.Y)
+			check.Close()
+			if empty {
+				e.logger.Info().Int("x", slot.X).Str("category", slot.Category).Msg("recovery slot emptied successfully")
+				return true
+			}
+		} else if !check.Empty() {
+			check.Close()
+		}
+		e.client.HumanSleep(80, 15)
+	}
+
+	final, err := e.client.CaptureToMat()
+	if err != nil || final.Empty() {
+		if !final.Empty() {
+			final.Close()
+		}
+		return false
+	}
+	defer final.Close()
+	return e.isSlotEmpty(final, slot.X, slot.Y)
+}
