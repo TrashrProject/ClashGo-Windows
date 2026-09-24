@@ -613,7 +613,7 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 	// Domain-specific search/deploy/battle loops own their normal timeouts.
 	// This is only a final safety ceiling for a sequence goroutine that never
 	// returns at all.
-	if b.seqRunning.Load() && time.Since(b.lastSequenceStart) > 15*time.Minute {
+	if b.seqRunning.Load() && time.Since(b.lastSequenceStart) > 30*time.Minute {
 		b.logger.Warn().
 			Dur("seq_time", time.Since(b.lastSequenceStart)).
 			Msg("attack sequence exceeded hard safety ceiling; restarting Clash")
