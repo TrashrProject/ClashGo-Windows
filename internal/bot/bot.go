@@ -2458,7 +2458,12 @@ func (b *Bot) clickSequence() bool {
 				switch guard.Decision {
 				case attack.ArmyGuardNotReady:
 					plan := attack.BuildTrainingPlan(profile, guard)
-					b.trainingItemsPending.Store(int32(len(plan.Items)))
+					if err := attack.ValidateTrainingPlan(plan, profile); err != nil {
+						plan.HasUncertain = true
+						b.logger.Error().Err(err).Msg("generated training plan failed safety validation; executor must not act on it")
+					}
+					actionable := attack.ActionableTrainingItems(plan)
+					b.trainingItemsPending.Store(int32(len(actionable)))
 					b.trainingHousingPending.Store(int32(plan.TotalHousing))
 					b.trainingPlanUncertain.Store(plan.HasUncertain)
 					b.statusMu.Lock()
@@ -2469,9 +2474,10 @@ func (b *Bot) clickSequence() bool {
 					} else {
 						b.logger.Info().
 							Int("items", len(plan.Items)).
+							Int("actionable_items", len(actionable)).
 							Int("housing_to_train", plan.TotalHousing).
 							Bool("has_uncertain", plan.HasUncertain).
-							Msg("training plan generated from live army deficits")
+							Msg("training plan generated and safety-validated from live army deficits")
 					}
 
 					wait := b.cfg.Training.SleepAfterTrain.Duration
