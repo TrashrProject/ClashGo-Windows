@@ -1678,7 +1678,9 @@ func (b *Bot) dismissInterruptions() {
 	switch state {
 	case game.StateObstacleDialog:
 		b.client.TapRandomized(400, 300)
-		time.Sleep(400 * time.Millisecond)
+		if !b.sleepResponsive(180 * time.Millisecond) {
+			return
+		}
 		b.client.Back()
 	case game.StateGemDialog, game.StateShieldInfo:
 		b.client.TapRandomized(175, 30)
