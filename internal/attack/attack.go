@@ -1728,9 +1728,30 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			}
 			state, _ := e.classify(screen)
 
-			if state == game.StateBattleEnd || state == game.StateReturnHome {
+			switch state {
+			case game.StateBattleEnd, game.StateReturnHome:
 				screen.Close()
 				return true
+			case game.StateConnectionLost:
+				// The main capture loop deliberately yields while an attack
+				// sequence owns the UI, so battle-end waiting must recover this
+				// dialog itself instead of sitting on it until the 4-minute
+				// deadline. Tap TRY AGAIN using reference-screen calibration.
+				screen.Close()
+				x, y := e.cal.ScaleRef(300, 478)
+				e.logger.Warn().Msg("connection lost during battle; tapping TRY AGAIN")
+				if tapErr := e.client.TapRandomized(x, y); tapErr != nil {
+					e.logger.Warn().Err(tapErr).Msg("battle reconnect tap failed")
+				}
+				continue
+			case game.StateMainVillage, game.StateArmyCamp, game.StateArmySelection:
+				// We are definitively no longer in the battle flow (for example
+				// the game reloaded or returned home unexpectedly). Fail fast so
+				// the orchestrator can recover immediately instead of waiting for
+				// the full battle deadline.
+				screen.Close()
+				e.logger.Warn().Str("state", state.String()).Msg("battle flow exited unexpectedly; aborting battle-end wait")
+				return false
 			}
 
 			// Per-strategy auto-end threshold from end_at_percent (0 = off).
