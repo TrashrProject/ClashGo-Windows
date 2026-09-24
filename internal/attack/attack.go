@@ -1659,6 +1659,52 @@ func (e *Executor) endButtonVisible(screen gocv.Mat, sCfg StallConfig) bool {
 	return r > 130 && g < 110 && b < 110
 }
 
+func (e *Executor) retryBattleConnection(ctx context.Context, deadline time.Time) bool {
+	const maxAttempts = 3
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+
+		x, y := e.cal.ScaleRef(300, 478)
+		e.logger.Warn().Int("attempt", attempt).Int("max_attempts", maxAttempts).Msg("connection lost during battle; trying to reconnect")
+		if err := e.client.TapRandomized(x, y); err != nil {
+			e.logger.Warn().Err(err).Msg("TRY AGAIN tap failed")
+		}
+
+		attemptDeadline := time.Now().Add(6 * time.Second)
+		for time.Now().Before(attemptDeadline) && time.Now().Before(deadline) {
+			select {
+			case <-ctx.Done():
+				return false
+			case <-time.After(300 * time.Millisecond):
+			}
+
+			screen, err := e.client.CaptureToMat()
+			if err != nil || screen.Empty() {
+				if !screen.Empty() {
+					screen.Close()
+				}
+				continue
+			}
+			state, _ := e.classify(screen)
+			screen.Close()
+			if state != game.StateConnectionLost {
+				e.logger.Info().Str("state", state.String()).Msg("battle connection recovered")
+				return true
+			}
+		}
+	}
+
+	e.logger.Error().Msg("battle connection did not recover after bounded retries")
+	return false
+}
+
 func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(1000 * time.Millisecond)
@@ -1735,13 +1781,11 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			case game.StateConnectionLost:
 				// The main capture loop deliberately yields while an attack
 				// sequence owns the UI, so battle-end waiting must recover this
-				// dialog itself instead of sitting on it until the 4-minute
-				// deadline. Tap TRY AGAIN using reference-screen calibration.
+				// dialog itself. Use a bounded reconnect loop: recover immediately
+				// when the visual state clears, but fail fast after repeated loss.
 				screen.Close()
-				x, y := e.cal.ScaleRef(300, 478)
-				e.logger.Warn().Msg("connection lost during battle; tapping TRY AGAIN")
-				if tapErr := e.client.TapRandomized(x, y); tapErr != nil {
-					e.logger.Warn().Err(tapErr).Msg("battle reconnect tap failed")
+				if !e.retryBattleConnection(ctx, deadline) {
+					return false
 				}
 				continue
 			case game.StateMainVillage, game.StateArmyCamp, game.StateArmySelection:
