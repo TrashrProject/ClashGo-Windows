@@ -89,6 +89,7 @@ type Bot struct {
 	automationTasksStarted   atomic.Int32
 	automationTasksCompleted atomic.Int32
 	automationTaskPanics     atomic.Int32
+	automationTaskTimeouts   atomic.Int32
 	pendingConfig            *config.BotConfig
 	donationChecks          atomic.Int32
 	donationsSent           atomic.Int32
@@ -3697,6 +3698,7 @@ func (b *Bot) Stats() BotStats {
 		AutomationTasksStarted: b.automationTasksStarted.Load(),
 		AutomationTasksCompleted: b.automationTasksCompleted.Load(),
 		AutomationTaskPanics:     b.automationTaskPanics.Load(),
+		AutomationTaskTimeouts:   b.automationTaskTimeouts.Load(),
 		AutomationTaskAgeSec: func() int64 {
 			if n := b.automationTaskStarted.Load(); n > 0 {
 				age := now.Unix() - n
@@ -3755,6 +3757,7 @@ type BotStats struct {
 	AutomationTasksStarted  int32                     `json:"automation_tasks_started"`
 	AutomationTasksCompleted int32                    `json:"automation_tasks_completed"`
 	AutomationTaskPanics      int32                    `json:"automation_task_panics"`
+	AutomationTaskTimeouts    int32                    `json:"automation_task_timeouts"`
 	AutomationTaskAgeSec      int64                    `json:"automation_task_age_sec"`
 	WallUpgradePending      bool                      `json:"wall_upgrade_pending"`
 
