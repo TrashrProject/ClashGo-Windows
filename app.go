@@ -815,6 +815,11 @@ func applySimpleAutomationDefaults(cfg *config.BotConfig) {
 	cfg.Training.TrainDeadTroops = cfg.Automation.Preferences.AutoRetrain
 	cfg.Training.FullArmyBeforeAttack = cfg.Automation.Preferences.WaitForFullArmy
 
+	// Clash Anytime removed army training waits. Easy Mode keeps only a tiny
+	// post-battle settle so the village UI can finish returning before the next
+	// verified action begins.
+	cfg.Attack.MinSecondsBetweenAttacks = 3
+
 	// Keep automatic mode quiet and stable. Explicit failure diagnostics still
 	// write their targeted captures when something goes wrong.
 	cfg.Debug.SaveScreenshots = false
