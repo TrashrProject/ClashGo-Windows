@@ -2462,21 +2462,19 @@ func (b *Bot) clickSequence() bool {
 	}
 	if !b.sleepResponsive(220 * time.Millisecond) { return false }
 
-	// Pre-battle army gate. Only a confident, positive shortage blocks the
-	// attack; uncertain OCR/template reads are logged but never strand the bot.
+	// Pre-battle army gate. Require multi-frame consensus so one noisy OCR
+	// read cannot launch a bad attack or create a bogus training deficit.
 	if b.cfg.Training.Enabled &&
 		b.cfg.Training.FullArmyBeforeAttack &&
 		b.cfg.Automation.AutoArmyGuard {
 		if profile, ok := b.cfg.Attack.Farm.ActiveProfile(); ok {
-			if armyScreen, err := b.client.CaptureToMat(); err == nil && !armyScreen.Empty() {
-				guard := b.attackExec.InspectPreBattleArmy(armyScreen, profile)
-				armyScreen.Close()
+			guard := b.inspectArmyConsensus(profile, 3)
 
-				for _, warning := range guard.Warnings {
-					b.logger.Debug().Str("detail", warning).Msg("pre-battle army inspection")
-				}
+			for _, warning := range guard.Warnings {
+				b.logger.Debug().Str("detail", warning).Msg("pre-battle army inspection")
+			}
 
-				switch guard.Decision {
+			switch guard.Decision {
 				case attack.ArmyGuardNotReady:
 					plan := attack.BuildTrainingPlan(profile, guard)
 					if err := attack.ValidateTrainingPlan(plan, profile); err != nil {
@@ -2532,11 +2530,25 @@ func (b *Bot) clickSequence() bool {
 					_ = attack.WriteTrainingPlan(attack.BuildTrainingPlan(profile, guard))
 					b.logger.Info().Msg("pre-battle army guard: configured troops/spells ready")
 
-				case attack.ArmyGuardUncertain:
+			case attack.ArmyGuardUncertain:
+				if b.cfg.Automation.Preferences.WaitForFullArmy {
+					wait := b.cfg.Training.SleepAfterTrain.Duration
+					if wait < 15*time.Second {
+						wait = 15 * time.Second
+					}
+					until := time.Now().Add(wait)
+					b.armyWaitUntil.Store(until.UnixNano())
+					b.trainingPlanUncertain.Store(true)
 					b.logger.Warn().
 						Int("warnings", len(guard.Warnings)).
-						Msg("pre-battle army guard uncertain; allowing attack rather than false-blocking")
+						Time("retry_after", until).
+						Msg("army readiness stayed uncertain; Easy Mode refuses to launch an unverified attack")
+					_ = b.returnToVillageVerified(3, "uncertain army readiness")
+					return false
 				}
+				b.logger.Warn().
+					Int("warnings", len(guard.Warnings)).
+					Msg("army readiness uncertain; advanced mode permits attack")
 			}
 		}
 	}
