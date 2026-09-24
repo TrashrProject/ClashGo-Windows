@@ -1088,6 +1088,12 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			armyUntil = time.Unix(0, n)
 		}
 
+		_, hasArmyProfile := b.cfg.Attack.Farm.ActiveProfile()
+		armyCheckEnabled := b.cfg.Automation.AutoArmyGuard &&
+			b.cfg.Training.Enabled &&
+			b.cfg.Training.FullArmyBeforeAttack &&
+			hasArmyProfile
+
 		decision := decideVillageAction(VillageDecisionInput{
 			Now:                 now,
 			VillageVerified:     villageVerified,
@@ -1106,8 +1112,9 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			ResourceInterval:    15 * time.Second,
 			WallsEnabled:        b.cfg.Upgrade.UpgradeWalls,
 			WallsDue:            b.wallUpgradePending.Load(),
-			ArmyCheckEnabled:    b.cfg.Automation.AutoArmyGuard && b.cfg.Training.Enabled && b.cfg.Training.FullArmyBeforeAttack,
+			ArmyCheckEnabled:    armyCheckEnabled,
 			ArmyCheckDue: func() bool {
+				if !armyCheckEnabled { return false }
 				if b.armyCheckPending.Load() { return true }
 				verifiedUntil := b.armyVerifiedUntil.Load()
 				return verifiedUntil <= 0 || verifiedUntil <= now.UnixNano()
