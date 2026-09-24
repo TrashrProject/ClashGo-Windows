@@ -1107,7 +1107,11 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			WallsEnabled:        b.cfg.Upgrade.UpgradeWalls,
 			WallsDue:            b.wallUpgradePending.Load(),
 			ArmyCheckEnabled:    b.cfg.Automation.AutoArmyGuard && b.cfg.Training.Enabled && b.cfg.Training.FullArmyBeforeAttack,
-			ArmyCheckDue:        b.armyCheckPending.Load(),
+			ArmyCheckDue: func() bool {
+				if b.armyCheckPending.Load() { return true }
+				verifiedUntil := b.armyVerifiedUntil.Load()
+				return verifiedUntil <= 0 || verifiedUntil <= now.UnixNano()
+			}(),
 			ArmyWaitUntil:       armyUntil,
 			AttackEnabled:       b.cfg.Attack.Enabled,
 			AttackCapReached:    b.cfg.Attack.MaxAttackPerSession > 0 && int(b.attackCount.Load()) >= b.cfg.Attack.MaxAttackPerSession,
