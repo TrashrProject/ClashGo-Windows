@@ -1608,7 +1608,15 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 					b.recordActivity()
 					return true
 				}
-				screen, _ = b.client.CaptureToMat()
+				var recaptureErr error
+				screen, recaptureErr = b.client.CaptureToMat()
+				if recaptureErr != nil || screen.Empty() {
+					if !screen.Empty() {
+						screen.Close()
+					}
+					b.logger.Warn().Err(recaptureErr).Str("step", stepName).Msg("battle fallback recapture failed")
+					continue
+				}
 			}
 		}
 
