@@ -25,10 +25,12 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({ stats }) => {
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Automation brain</div>
               <div className="text-2xl font-black text-zinc-950 dark:text-white capitalize mt-1">
-                {stats.village_action || 'idle'}
+                {stats.automation_busy ? (stats.automation_task || 'working') : (stats.village_action || 'idle')}
               </div>
               <div className="text-sm text-zinc-500 mt-1 max-w-2xl">
-                {stats.village_reason || 'ClashGO is waiting for the next safe action.'}
+                {stats.automation_busy
+                  ? `One task owns the game controls right now: ${stats.automation_task || 'automation'}.`
+                  : (stats.village_reason || 'ClashGO is waiting for the next safe action.')}
               </div>
             </div>
           </div>
@@ -72,7 +74,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({ stats }) => {
           { label: 'Attacks', value: stats.attacks_completed.toLocaleString(), icon: 'swords' },
           { label: 'Donations', value: (stats.donations_sent ?? 0).toLocaleString(), icon: 'volunteer_activism' },
           { label: 'Army repairs', value: (stats.army_repair_successes ?? 0).toLocaleString(), icon: 'autorenew' },
-          { label: 'Connection', value: stats.adb_health.consecutive_fails === 0 ? 'Ready' : 'Check', icon: 'hub' },
+          { label: 'Scheduler', value: stats.automation_busy ? 'Busy' : 'Ready', icon: 'account_tree' },
         ].map((item) => (
           <div key={item.label} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-5 py-4 shadow-sm">
             <div className="flex items-center justify-between gap-3">
