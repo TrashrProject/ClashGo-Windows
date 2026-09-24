@@ -412,3 +412,26 @@ func TestArmyPreflightDueFreshness(t *testing.T) {
 		t.Fatal("fresh proof must suppress duplicate preflight")
 	}
 }
+
+
+func TestSchedulerInvariantRepairClearsOwnerlessBusyLease(t *testing.T) {
+	b := &Bot{logger: zerolog.Nop()}
+	b.automationTaskInFlight.Store(true)
+	if !b.repairAutomationLeaseInvariant() {
+		t.Fatal("expected invariant repair")
+	}
+	if b.automationTaskInFlight.Load() {
+		t.Fatal("ownerless busy lease should be released")
+	}
+}
+
+func TestSchedulerInvariantRepairClearsStaleOwner(t *testing.T) {
+	b := &Bot{logger: zerolog.Nop()}
+	b.automationTaskName = "stale task"
+	if !b.repairAutomationLeaseInvariant() {
+		t.Fatal("expected invariant repair")
+	}
+	if got := b.currentAutomationTask(); got != "" {
+		t.Fatalf("stale owner=%q want empty", got)
+	}
+}
