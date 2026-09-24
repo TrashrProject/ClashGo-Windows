@@ -313,17 +313,15 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		cpuSampler:        newCPUSampler(),
 		dukePicksFile:     dukePicksFile,
 	}
-	if cfg.Upgrade.UpgradeWalls {
-		// Treat enabled wall automation as a real scheduler capability from
-		// startup, not merely an after-attack hook. It gets one bounded pass,
-		// then is re-queued after future attacks.
-		b.wallUpgradePending.Store(true)
-	}
-	if cfg.Automation.AutoArmyGuard && cfg.Training.Enabled && cfg.Training.FullArmyBeforeAttack {
-		if _, ok := cfg.Attack.Farm.ActiveProfile(); ok {
-			b.armyCheckPending.Store(true)
-		}
-	}
+	// Fast first farm: enabled housekeeping is permission, not startup work.
+	// Do not make a new session spend time on walls, donation polling, resource
+	// scans or a separate army-preflight trip before its first attack. The
+	// attack flow already verifies the army inline; maintenance is queued after
+	// the battle or only when a real mismatch is discovered.
+	b.wallUpgradePending.Store(false)
+	b.armyCheckPending.Store(false)
+	b.lastDonationScan = startedWall
+	b.lastResourceScan = startedWall
 
 	// Restore only a recent, profile-matching plan. This keeps the beginner UI
 	// coherent after an EXE restart without ever acting on stale army data.
@@ -2436,18 +2434,34 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 
 	if !returnedHome {
-		b.logger.Error().Msg("failed to return home after battle, restarting game...")
-		b.restartGame()
+		// Live Windows traces show an ADB transport drop can happen exactly on
+		// BattleEnd. Reconnect first and retry the real Return Home action before
+		// escalating; blindly force-stopping through the same dead transport just
+		// produces a second failure and leaves the session stuck.
+		b.logger.Warn().Msg("return home failed after battle; reconnecting device transport before recovery")
+		if err := b.client.Reconnect(); err == nil {
+			if b.sleepResponsive(250 * time.Millisecond) {
+				if err := b.attackExec.ReturnHome(); err == nil {
+					returnedHome = true
+					b.logger.Info().Msg("return home recovered after ADB reconnect")
+				}
+			}
+		}
+	}
+	if !returnedHome {
+		b.logger.Error().Msg("failed to return home after reconnect; escalating through device recovery ladder")
+		b.recoverEmulator()
 		return
 	}
 
 	// Stamp the attack boundary so the inter-attack cooldown has a clean
 	// reference point (set only on a real return home, not on a restart).
 	b.lastAttackEnd = time.Now()
-	if b.cfg.Automation.AutoArmyGuard && b.cfg.Training.Enabled && b.cfg.Training.FullArmyBeforeAttack {
-		b.armyCheckPending.Store(true)
-		b.armyVerifiedUntil.Store(0)
-	}
+	// The next attack performs its army guard inline. A standalone preflight is
+	// only queued by an actual mismatch/failure, avoiding a duplicate trip
+	// through Attack -> Army on every successful farming cycle.
+	b.armyCheckPending.Store(false)
+	b.armyVerifiedUntil.Store(0)
 
 	sideX := int(537 * b.cal.ScaleX)
 	sideY := int(693 * b.cal.ScaleY)
