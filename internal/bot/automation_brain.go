@@ -142,7 +142,7 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 		return VillageDecision{Action: VillageActionWaitArmy, Reason: "army readiness retry backoff is active", NextAt: in.ArmyWaitUntil}
 	}
 
-	if in.ArmyCheckEnabled && in.ArmyCheckDue {
+	if in.AttackEnabled && in.ArmyCheckEnabled && in.ArmyCheckDue {
 		return VillageDecision{Action: VillageActionCheckArmy, Reason: "army preflight is due before the next attack"}
 	}
 
