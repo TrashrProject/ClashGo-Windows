@@ -176,40 +176,61 @@ func (b *Bot) runDonationCycle() {
 		return
 	}
 
-	// Donate one verified unit per cycle. This makes the first live runs easy
-	// to audit and prevents an imperfect template from emptying the user's army.
+	// Donate multiple units when the same verified request still accepts them,
+	// but keep a strict bounded ceiling. Every individual tap must produce a
+	// local visual change before it is counted; a rejected/full request stops
+	// immediately rather than hammering the button.
+	const maxVerifiedDonationsPerCycle = 6
+	verifiedThisCycle := 0
 	for _, name := range req.Requested {
-		pt, ok := b.findDonationTroopInPicker(picker, name)
-		if !ok {
-			continue
-		}
-		before := picker.Clone()
-		if err := b.client.TapFast(pt.X, pt.Y, 0.7); err != nil {
-			before.Close()
-			continue
-		}
-		if !b.sleepResponsive(180 * time.Millisecond) {
-			before.Close()
-			picker.Close()
-			return
-		}
-
-		after, capErr := b.client.CaptureToMat()
-		if capErr == nil && !after.Empty() {
-			changed := donationVisualDelta(before, after, pt, int(34*b.cal.ScaleX)) >= 0.015
-			after.Close()
-			before.Close()
-			if changed {
-				report.Donated = append(report.Donated, name)
-				b.donationsSent.Add(1)
-				b.lastDonationUnix.Store(time.Now().Unix())
-				b.logger.Info().Str("troop", name).Msg("clan donation visually confirmed")
+		for verifiedThisCycle < maxVerifiedDonationsPerCycle {
+			pt, ok := b.findDonationTroopInPicker(picker, name)
+			if !ok {
 				break
 			}
-			b.logger.Debug().Str("troop", name).Msg("donation tap produced no visible change; not counting it")
-		} else {
+
+			before := picker.Clone()
+			if err := b.client.TapFast(pt.X, pt.Y, 0.7); err != nil {
+				before.Close()
+				break
+			}
+			if !b.sleepResponsive(180 * time.Millisecond) {
+				before.Close()
+				picker.Close()
+				return
+			}
+
+			after, capErr := b.client.CaptureToMat()
+			if capErr != nil || after.Empty() {
+				before.Close()
+				if !after.Empty() { after.Close() }
+				break
+			}
+
+			changed := donationVisualDelta(before, after, pt, int(34*b.cal.ScaleX)) >= 0.015
 			before.Close()
-			if !after.Empty() { after.Close() }
+			if !changed {
+				after.Close()
+				b.logger.Debug().Str("troop", name).Msg("donation tap produced no visible change; request may be full or troop unavailable")
+				break
+			}
+
+			report.Donated = append(report.Donated, name)
+			b.donationsSent.Add(1)
+			b.lastDonationUnix.Store(time.Now().Unix())
+			verifiedThisCycle++
+			b.logger.Info().
+				Str("troop", name).
+				Int("verified_cycle", verifiedThisCycle).
+				Msg("clan donation visually confirmed")
+
+			// Continue from the fresh verified frame. If the picker auto-closed
+			// after filling the request, the next template lookup simply fails.
+			picker.Close()
+			picker = after
+		}
+		if verifiedThisCycle >= maxVerifiedDonationsPerCycle {
+			break
 		}
 	}
 	picker.Close()
