@@ -137,6 +137,7 @@ function App() {
     donation_checks: 0,
     donations_sent: 0,
     last_donation_unix: 0,
+    village_action: 'idle',
     adb_health: {
       last_capture: null,
       avg_capture_ms: 0,
