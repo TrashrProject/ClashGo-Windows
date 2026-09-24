@@ -255,7 +255,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
               <div className="flex items-start justify-between gap-4 mb-5">
                 <div>
                   <div className="text-base font-black text-zinc-950 dark:text-white">My preferences</div>
-                  <div className="text-xs text-zinc-500 mt-1">Simple choices only. ClashGO handles the technical details.</div>
+                  <div className="text-xs text-zinc-500 mt-1">Choose what ClashGO is allowed to do. Several options can be enabled, but the automation brain executes only one task at a time.</div>
                 </div>
                 <div className={simplePrefsStatus === 'saved' ? "text-[10px] font-black uppercase tracking-widest text-emerald-500" : simplePrefsStatus === 'error' ? "text-[10px] font-black uppercase tracking-widest text-rose-500" : "text-[10px] font-black uppercase tracking-widest text-zinc-400"}>
                   {simplePrefsBusy ? 'Saving…' : simplePrefsStatus === 'saved' ? 'Saved ✓' : simplePrefsStatus === 'error' ? 'Save failed' : 'Auto-saved'}
