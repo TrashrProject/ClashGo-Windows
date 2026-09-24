@@ -141,6 +141,8 @@ function App() {
     training_items_pending: 0,
     training_housing_pending: 0,
     training_plan_uncertain: false,
+    army_repair_attempts: 0,
+    army_repair_successes: 0,
     training_pending: [],
     village_action: 'idle',
     village_reason: '',
