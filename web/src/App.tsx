@@ -134,6 +134,9 @@ function App() {
     recovery_attempts: 0,
     recovery_successes: 0,
     bluestacks_restarts: 0,
+    donation_checks: 0,
+    donations_sent: 0,
+    last_donation_unix: 0,
     adb_health: {
       last_capture: null,
       avg_capture_ms: 0,
