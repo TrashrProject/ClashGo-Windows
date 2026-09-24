@@ -136,18 +136,16 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 	if !in.DonationNextCheck.IsZero() && in.Now.Before(in.DonationNextCheck) {
 		donationDue = false
 	}
-	if in.DonationEnabled && donationDue {
-		return VillageDecision{Action: VillageActionDonate, Reason: "clan donation check is due"}
-	}
 
 	resourceInterval := in.ResourceInterval
 	if resourceInterval <= 0 {
 		resourceInterval = 15 * time.Second
 	}
-	if in.ResourceEnabled && (in.LastResourceScan.IsZero() || in.Now.Sub(in.LastResourceScan) >= resourceInterval) {
-		return VillageDecision{Action: VillageActionScanResources, Reason: "resource snapshot is due"}
-	}
+	resourceDue := in.ResourceEnabled && (in.LastResourceScan.IsZero() || in.Now.Sub(in.LastResourceScan) >= resourceInterval)
 
+	// Post-attack maintenance keeps priority because it was explicitly queued
+	// by the previous battle. Everything else is housekeeping and must not make
+	// a player wait after pressing Start when the village can already attack.
 	if in.WallsEnabled && in.WallsDue {
 		return VillageDecision{Action: VillageActionUpgradeWalls, Reason: "wall maintenance is queued after the previous attack"}
 	}
@@ -156,8 +154,24 @@ func decideVillageAction(in VillageDecisionInput) VillageDecision {
 		return VillageDecision{Action: VillageActionWaitArmy, Reason: "army readiness retry backoff is active", NextAt: in.ArmyWaitUntil}
 	}
 
+	// Fast farm path: when Attack is available, enter the single attack task
+	// immediately. clickSequence performs the army guard/repair inline under
+	// that same exclusive lease, avoiding a duplicate Attack -> Army -> Home ->
+	// Attack round-trip before every battle.
+	if in.AttackEnabled && in.AttackButtonVisible {
+		return VillageDecision{Action: VillageActionAttack, Reason: "attack ready; army verification will run inline"}
+	}
+
+	// Housekeeping fills idle/cooldown time instead of delaying matchmaking.
+	if in.DonationEnabled && donationDue {
+		return VillageDecision{Action: VillageActionDonate, Reason: "clan donation check is due"}
+	}
+	if resourceDue {
+		return VillageDecision{Action: VillageActionScanResources, Reason: "resource snapshot is due"}
+	}
+
 	if in.AttackEnabled && in.ArmyCheckEnabled && in.ArmyCheckDue {
-		return VillageDecision{Action: VillageActionCheckArmy, Reason: "army preflight is due before the next attack"}
+		return VillageDecision{Action: VillageActionCheckArmy, Reason: "army preflight is due while attack entry is unavailable"}
 	}
 
 	donationWake := time.Time{}
