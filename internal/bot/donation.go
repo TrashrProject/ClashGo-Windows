@@ -197,47 +197,7 @@ func (b *Bot) runDonationCycle() {
 }
 
 func (b *Bot) returnToVillageAfterDonation(maxBacks int) bool {
-	if maxBacks < 1 {
-		maxBacks = 1
-	}
-	for attempt := 0; attempt <= maxBacks; attempt++ {
-		screen, err := b.client.CaptureToMat()
-		if err == nil && !screen.Empty() {
-			state, _ := b.classify(screen)
-			atVillage := state == game.StateMainVillage || b.findAttackButton(screen, 0.30)
-			if state == game.StateConfirmExit {
-				// We should never intentionally reach this state. If a previous
-				// UI transition raced us, cancel the quit instead of pressing
-				// Back again and risking an app exit.
-				screen.Close()
-				x, y := b.cal.ScaleRef(279, 429)
-				if tapErr := b.client.TapFast(x, y, 0.5); tapErr == nil {
-					b.logger.Warn().Msg("donation cleanup reached quit-confirm; cancelled safely")
-				}
-				return true
-			}
-			screen.Close()
-			if atVillage {
-				return true
-			}
-		} else if !screen.Empty() {
-			screen.Close()
-		}
-
-		if attempt == maxBacks {
-			break
-		}
-		if err := b.client.Back(); err != nil {
-			b.logger.Warn().Err(err).Msg("donation cleanup Back failed")
-			return false
-		}
-		if !b.sleepResponsive(160 * time.Millisecond) {
-			return false
-		}
-	}
-
-	b.logger.Warn().Msg("donation cleanup could not positively confirm return to village")
-	return false
+	return b.returnToVillageVerified(maxBacks, "donation cleanup")
 }
 
 func (b *Bot) findDonationRequests(screen gocv.Mat) []donationRequest {
@@ -365,31 +325,5 @@ func (b *Bot) findDonationTroopInPicker(screen gocv.Mat, name string) (image.Poi
 }
 
 func donationVisualDelta(before, after gocv.Mat, pt image.Point, radius int) float64 {
-	if before.Empty() || after.Empty() {
-		return 0
-	}
-	if radius < 8 { radius = 8 }
-	x0 := maxBotInt(0, pt.X-radius)
-	y0 := maxBotInt(0, pt.Y-radius)
-	x1 := minBotInt(minBotInt(before.Cols(), after.Cols())-1, pt.X+radius)
-	y1 := minBotInt(minBotInt(before.Rows(), after.Rows())-1, pt.Y+radius)
-	if x1 <= x0 || y1 <= y0 { return 0 }
-
-	var sum float64
-	var n int
-	for y := y0; y <= y1; y += 2 {
-		for x := x0; x <= x1; x += 2 {
-			for c := 0; c < 3; c++ {
-				d := int(before.GetUCharAt(y, x*3+c)) - int(after.GetUCharAt(y, x*3+c))
-				if d < 0 { d = -d }
-				sum += float64(d)
-				n++
-			}
-		}
-	}
-	if n == 0 { return 0 }
-	return sum / (255 * float64(n))
+	return localVisualDelta(before, after, pt, radius, radius)
 }
-
-func minBotInt(a,b int) int { if a < b { return a }; return b }
-func maxBotInt(a,b int) int { if a > b { return a }; return b }
