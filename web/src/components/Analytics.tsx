@@ -181,11 +181,31 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             <h3 className="text-xl font-black text-zinc-950 dark:text-white">Automation operations</h3>
             <p className="text-xs text-zinc-500 mt-1">Donations, army corrections and recovery activity.</p>
           </div>
+          <div className="mb-4 rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/30 p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Exclusive scheduler</div>
+                <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white capitalize">
+                  {stats.automation_busy ? (stats.automation_task || 'working') : 'Ready for next task'}
+                </div>
+                <div className="mt-1 text-[10px] text-zinc-500">
+                  {stats.wall_upgrade_pending ? 'Wall maintenance is queued. ' : ''}
+                  {stats.automation_last_task ? `Last completed: ${stats.automation_last_task}.` : 'No completed task yet.'}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-black text-zinc-950 dark:text-white">{stats.automation_tasks_completed ?? 0}</div>
+                <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">tasks completed</div>
+              </div>
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             {[
+              { label: 'Scheduler starts', value: stats.automation_tasks_started ?? 0, detail: stats.automation_busy ? `Running ${stats.automation_task || 'task'}` : 'No overlapping UI tasks' },
               { label: 'Donation checks', value: stats.donation_checks ?? 0, detail: stats.last_donation_result || 'No check yet' },
               { label: 'Verified donations', value: stats.donations_sent ?? 0, detail: stats.last_donation_unix ? new Date(stats.last_donation_unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'None yet' },
               { label: 'Army repairs', value: stats.army_repair_successes ?? 0, detail: `${stats.army_repair_attempts ?? 0} attempts` },
+              { label: 'Recoveries', value: stats.recovery_successes ?? 0, detail: `${stats.recovery_attempts ?? 0} attempts` },
               { label: 'BlueStacks restarts', value: stats.bluestacks_restarts ?? 0, detail: `${stats.adb_health.errors_total ?? 0} connection errors` },
             ].map((item) => (
               <div key={item.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-100 dark:border-zinc-800 p-4">
