@@ -2405,6 +2405,17 @@ func (b *Bot) clickSequence() bool {
 
 				switch guard.Decision {
 				case attack.ArmyGuardNotReady:
+					plan := attack.BuildTrainingPlan(profile, guard)
+					if err := attack.WriteTrainingPlan(plan); err != nil {
+						b.logger.Warn().Err(err).Msg("could not persist pending training plan")
+					} else {
+						b.logger.Info().
+							Int("items", len(plan.Items)).
+							Int("housing_to_train", plan.TotalHousing).
+							Bool("has_uncertain", plan.HasUncertain).
+							Msg("training plan generated from live army deficits")
+					}
+
 					wait := b.cfg.Training.SleepAfterTrain.Duration
 					if wait < 15*time.Second {
 						wait = 15 * time.Second
@@ -2414,6 +2425,7 @@ func (b *Bot) clickSequence() bool {
 					b.logger.Warn().
 						Time("retry_after", until).
 						Int("warnings", len(guard.Warnings)).
+						Int("training_items", len(plan.Items)).
 						Msg("army confidently below configured farm profile; aborting matchmaking before Battle")
 
 					// Walk back toward the village with bounded, state-aware
@@ -2438,6 +2450,7 @@ func (b *Bot) clickSequence() bool {
 
 				case attack.ArmyGuardReady:
 					b.armyWaitUntil.Store(0)
+					_ = attack.WriteTrainingPlan(attack.BuildTrainingPlan(profile, guard))
 					b.logger.Info().Msg("pre-battle army guard: configured troops/spells ready")
 
 				case attack.ArmyGuardUncertain:
