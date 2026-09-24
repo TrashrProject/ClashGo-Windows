@@ -3271,7 +3271,7 @@ type BotStats struct {
 	TrainingPlanUncertain  bool                      `json:"training_plan_uncertain"`
 	ArmyRepairAttempts     int32                     `json:"army_repair_attempts"`
 	ArmyRepairSuccesses    int32                     `json:"army_repair_successes"`
-	TrainingPending        []attack.TrainingPlanItem `json:"training_pending,omitempty"`
+	TrainingPending        []attack.TrainingPlanItem `json:"training_pending"`
 	VillageAction          string                    `json:"village_action"`
 	VillageReason          string                    `json:"village_reason"`
 	VillageNextUnix        int64                     `json:"village_next_unix"`
