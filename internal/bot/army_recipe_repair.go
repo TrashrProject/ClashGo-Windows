@@ -38,8 +38,19 @@ func (b *Bot) reapplyActiveArmyRecipe(profile config.FarmProfile) (attack.ArmyGu
 	}
 
 	if !b.selectArmySlot() {
-		b.logger.Warn().Int("army_slot", b.armySlot).Msg("army recipe repair could not verify recipe selection")
-		return attack.ArmyGuardResult{Decision: attack.ArmyGuardUncertain}, false
+		// Selecting an already-active recipe may legitimately leave the card and
+		// classifier state unchanged. Do not turn that visual no-op into a false
+		// repair failure: prove the resulting army directly before giving up.
+		b.logger.Info().Int("army_slot", b.armySlot).
+			Msg("recipe selection produced no visible transition; verifying live army before treating repair as failed")
+		guard := b.inspectArmyConsensus(profile, 3)
+		if guard.Decision == attack.ArmyGuardReady {
+			b.armyRepairSuccesses.Add(1)
+			return guard, true
+		}
+		b.logger.Warn().Int("army_slot", b.armySlot).
+			Msg("army recipe repair could not verify selection or a ready army")
+		return guard, false
 	}
 
 	if !b.sleepResponsive(240 * time.Millisecond) {
