@@ -54,10 +54,14 @@ type Bot struct {
 	stars1      atomic.Int32
 	stars2      atomic.Int32
 	stars3      atomic.Int32
-	seqRunning       atomic.Bool
-	zoomedOut        atomic.Bool
-	recoveryInFlight atomic.Bool
-	captureHeartbeat atomic.Int64
+	seqRunning        atomic.Bool
+	zoomedOut         atomic.Bool
+	recoveryInFlight  atomic.Bool
+	restartInFlight   atomic.Bool
+	captureHeartbeat  atomic.Int64
+	runtimeState      atomic.Int32
+	runtimeStateSince atomic.Int64
+	runtimeProgress   atomic.Int64
 
 	chestDismissInFlight  atomic.Bool
 	splashDismissInFlight atomic.Bool
@@ -345,7 +349,11 @@ func (b *Bot) Start() error {
 	b.client.Tap(focusX, focusY)
 	b.client.JitteredSleep(1 * time.Second)
 
-	b.captureHeartbeat.Store(time.Now().UnixNano())
+	now := time.Now().UnixNano()
+	b.captureHeartbeat.Store(now)
+	b.runtimeState.Store(int32(game.StateUnknown))
+	b.runtimeStateSince.Store(now)
+	b.runtimeProgress.Store(now)
 	go b.captureLoop()
 	go b.runtimeSupervisorLoop()
 	return nil
@@ -487,7 +495,9 @@ func (b *Bot) captureLoop() {
 // Called after real forward progress (successful clicks/state transitions)
 // so the stuck-check distinguishes "spinning" from "working".
 func (b *Bot) recordActivity() {
-	b.lastAction = time.Now()
+	now := time.Now()
+	b.lastAction = now
+	b.runtimeProgress.Store(now.UnixNano())
 }
 
 // checkStuck enforces a global watchdog: if the capture pipeline is dead,
@@ -577,6 +587,12 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 }
 
 func (b *Bot) restartGame() {
+	if !b.restartInFlight.CompareAndSwap(false, true) {
+		b.logger.Debug().Msg("game restart already in progress; suppressing duplicate restart")
+		return
+	}
+	defer b.restartInFlight.Store(false)
+
 	pkg := b.cfg.Device.PackageName
 	if pkg == "" {
 		pkg = "com.supercell.clashofclans"
@@ -588,18 +604,31 @@ func (b *Bot) restartGame() {
 		b.logger.Error().Err(err).Msg("failed to force stop game")
 	}
 
-	b.client.JitteredSleep(2 * time.Second)
+	if !b.sleepResponsive(750 * time.Millisecond) {
+		return
+	}
 
 	if err := b.client.StartApp(pkg); err != nil {
 		b.logger.Error().Err(err).Msg("failed to start app")
+		return
 	}
 
-	b.client.JitteredSleep(15 * time.Second)
+	// Do not freeze the capture/state engine for a blind 15 seconds.
+	// A short launch grace is enough for Android to create the activity;
+	// from there the normal classifier handles Logo/TapToContinue/News
+	// immediately and advances as soon as visual evidence appears.
+	if !b.sleepResponsive(1200 * time.Millisecond) {
+		return
+	}
 	b.zoomedOut.Store(false)
 
-	b.lastAction = time.Now()
-	b.lastNav = time.Now()
-	b.lastSequenceStart = time.Now()
+	now := time.Now()
+	b.lastAction = now
+	b.lastNav = now
+	b.lastSequenceStart = now
+	b.runtimeProgress.Store(now.UnixNano())
+	b.runtimeState.Store(int32(game.StateUnknown))
+	b.runtimeStateSince.Store(now.UnixNano())
 }
 
 // recoverEmulator is the mid-run escalation for a dead capture
@@ -715,6 +744,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 
 	if gc.ConfirmState(state) {
 		now := time.Now()
+		b.observeRuntimeState(state, now)
 		gc.UpdateState(state, now)
 
 		select {
@@ -1080,10 +1110,14 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			return
 		}
 
-		time.Sleep(500 * time.Millisecond)
+		if !b.sleepResponsive(250 * time.Millisecond) {
+			lootRec.Close()
+			return
+		}
 
 		screen, err := b.client.CaptureToMat()
 		if err != nil {
+			lootRec.Close()
 			return
 		}
 
@@ -1150,8 +1184,6 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			b.OnStatsUpdate()
 		}
 
-		screen.Close()
-
 		if !b.findAndClick("btn_next", "Next Match", 2) {
 			b.logger.Warn().Msg("template match failed, forcing skip via color/pinpoint")
 
@@ -1162,7 +1194,6 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				b.client.TapRandomized(orangePt.X, orangePt.Y)
 				b.recordActivity()
 			} else {
-
 				b.DumpDiagnostics("next_button_not_found", screen, map[string]interface{}{
 					"message": "forcing skip via hardcoded coordinates",
 				})
@@ -1171,8 +1202,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				b.recordActivity()
 			}
 		}
-
-		time.Sleep(600 * time.Millisecond)
+		screen.Close()
 	}
 
 	b.logger.Info().Msg("battle deployment complete, waiting for battle to end naturally...")
@@ -1483,92 +1513,45 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 }
 
 func (b *Bot) clickSequence() bool {
-
-	attackClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
-		if b.findAndClick("btn_attack", "Attack", 1) {
-			attackClicked = true
-			break
-		}
-		b.client.JitteredSleep(500 * time.Millisecond)
-	}
-	if !attackClicked {
-		b.logger.Warn().Msg("could not find or click Attack button")
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			b.DumpDiagnostics("click_attack_failed", screen, nil)
-			screen.Close()
-		}
+	// Each step waits for visual evidence instead of sleeping a fixed
+	// 1-1.5s after every tap. On a fast emulator this advances in a few
+	// hundred milliseconds; on a slow transition it waits only as long
+	// as needed, up to the bounded timeout.
+	if !b.waitAndClickButton("btn_attack", "Attack", 1500*time.Millisecond) {
+		b.captureFailureDiagnostic("click_attack_failed", nil)
 		return false
 	}
-	b.client.JitteredSleep(500 * time.Millisecond)
 
-	findMatchClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
-		if b.findAndClick("btn_find_match", "Find Match", 1) {
-			findMatchClicked = true
-			break
-		}
-		b.client.JitteredSleep(500 * time.Millisecond)
-	}
-	if !findMatchClicked {
-		b.logger.Warn().Msg("could not find or click Find Match button")
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			b.DumpDiagnostics("click_find_match_failed", screen, nil)
-			screen.Close()
-		}
+	if !b.waitAndClickButton("btn_find_match", "Find Match", 3500*time.Millisecond) {
+		b.captureFailureDiagnostic("click_find_match_failed", nil)
 		return false
 	}
-	b.client.JitteredSleep(500 * time.Millisecond)
 
-	armyArrowClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
-		if b.findAndClick("btn_army_arrow", "Army Arrow", 1) {
-			armyArrowClicked = true
-			break
-		}
-		b.client.JitteredSleep(500 * time.Millisecond)
-	}
-	if !armyArrowClicked {
-		b.logger.Warn().Msg("could not find or click Army Arrow button")
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			b.DumpDiagnostics("click_army_arrow_failed", screen, nil)
-			screen.Close()
-		}
+	if !b.waitAndClickButton("btn_army_arrow", "Army Arrow", 3500*time.Millisecond) {
+		b.captureFailureDiagnostic("click_army_arrow_failed", nil)
 		return false
 	}
-	b.client.JitteredSleep(500 * time.Millisecond)
 
 	armyClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
-		if b.selectArmySlot() {
-			armyClicked = true
-			break
-		}
-		b.client.JitteredSleep(500 * time.Millisecond)
+	if b.armySlot <= 1 {
+		armyClicked = b.waitAndClickButton("btn_army_1", "Army 1", 3000*time.Millisecond)
+	} else {
+		// The selected slot uses measured row geometry, but we still wait
+		// for proof that the army-selection UI is actually open first.
+		_ = b.waitForUIEvidence("btn_army_1", game.StateArmySelection, 3000*time.Millisecond)
+		armyClicked = b.selectArmySlot()
 	}
 	if !armyClicked {
-		b.logger.Warn().Int("army_slot", b.armySlot).Msg("army recipe card did not appear, continuing anyway")
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			b.DumpDiagnostics("click_army_slot_not_found", screen, map[string]interface{}{"army_slot": b.armySlot})
-			screen.Close()
-		}
+		b.logger.Warn().Int("army_slot", b.armySlot).Msg("army recipe card did not confirm; continuing to battle button fallback")
+		b.captureFailureDiagnostic("click_army_slot_not_found", map[string]interface{}{"army_slot": b.armySlot})
 	}
-	b.client.JitteredSleep(500 * time.Millisecond)
 
-	battleClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
-		if b.findAndClick("btn_battle", "Battle", 1) {
-			battleClicked = true
-			break
-		}
-		b.client.JitteredSleep(500 * time.Millisecond)
-	}
-	if !battleClicked {
-		b.logger.Warn().Msg("could not find or click Battle button")
+	if !b.waitAndClickButton("btn_battle", "Battle", 4000*time.Millisecond) {
+		b.logger.Warn().Msg("could not visually confirm or click Battle button")
 		return false
 	}
 
-	b.logger.Info().Msg("waiting for battle state (searching)...")
+	b.logger.Info().Msg("battle requested; waiting for search/base state...")
 	return b.waitForBattleState(60 * time.Second)
 }
 
@@ -1601,7 +1584,6 @@ func (b *Bot) selectArmySlot() bool {
 		b.logger.Warn().Err(err).Msg("army recipe card tap failed")
 		return false
 	}
-	time.Sleep(1000 * time.Millisecond)
 	b.recordActivity()
 	return true
 }
@@ -1682,15 +1664,16 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 		}
 
 		matches, err := vision.MatchMultiScaleROICached(screen, tpl, templateName, 0.2, 2.0, 5, 0.45, physROI)
-		screen.Close()
 
 		if err != nil {
+			screen.Close()
 			b.logger.Warn().Err(err).Str("step", stepName).Msg("match error")
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
 
 		if len(matches) == 0 {
+			screen.Close()
 			if retry == 0 {
 				b.logger.Debug().Str("step", stepName).Msg("not found, retrying...")
 			}
@@ -1711,6 +1694,7 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 		if b.cfg.Debug.SaveScreenshots {
 			gocv.IMWrite(paths.ResolveConfig(fmt.Sprintf("diag_fallback_%s.png", templateName)), screen)
 		}
+		screen.Close()
 
 		if err := b.client.TapRandomized(px, py); err != nil {
 			b.logger.Error().Err(err).Msg("tap failed")
