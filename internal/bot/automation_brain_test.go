@@ -450,3 +450,26 @@ func TestVillageBrainDoesNotPreflightArmyWhenAttacksDisabled(t *testing.T) {
 		t.Fatalf("action=%v want idle when attacks are disabled", got.Action)
 	}
 }
+
+
+func TestVillageBrainPublishesNextHousekeepingWakeWhileIdle(t *testing.T) {
+	now := time.Unix(12000, 0)
+	got := decideVillageAction(VillageDecisionInput{
+		Now: now,
+		VillageVerified: true,
+		DonationEnabled: true,
+		LastDonationScan: now,
+		DonationInterval: 90 * time.Second,
+		ResourceEnabled: true,
+		LastResourceScan: now,
+		ResourceInterval: 15 * time.Second,
+		AttackEnabled: false,
+	})
+	if got.Action != VillageActionIdle {
+		t.Fatalf("action=%v want idle", got.Action)
+	}
+	want := now.Add(15 * time.Second)
+	if !got.NextAt.Equal(want) {
+		t.Fatalf("next=%v want %v", got.NextAt, want)
+	}
+}
