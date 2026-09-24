@@ -25,7 +25,18 @@ export interface BotStats {
   training_items_pending: number;
   training_housing_pending: number;
   training_plan_uncertain: boolean;
+  training_pending: Array<{
+    name: string;
+    category: string;
+    current: number;
+    target: number;
+    to_train: number;
+    housing: number;
+    space_need: number;
+    confident: boolean;
+  }>;
   village_action: string;
+  village_reason: string;
   adb_health: {
     avg_capture_ms: number;
     consecutive_fails: number;
