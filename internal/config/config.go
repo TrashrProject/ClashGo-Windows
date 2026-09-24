@@ -187,6 +187,11 @@ func defaultFarmProfiles() map[string]FarmProfile {
 
 type SearchConfig struct {
 	Enabled              bool `json:"enabled"`
+	// MaxSkipsBeforeForceAttack mirrors the proven "force attack after N
+	// searches" escape hatch used by mature CoC automation. 0 disables it.
+	// A high default keeps normal loot filtering intact while guaranteeing
+	// the bot cannot spend an entire unattended session cycling bases forever.
+	MaxSkipsBeforeForceAttack int `json:"max_skips_before_force_attack"`
 	MinTrophies          int  `json:"min_trophies"`
 	MaxTrophies          int  `json:"max_trophies"`
 	MinTownHall          int  `json:"min_town_hall"`
@@ -290,7 +295,8 @@ func DefaultConfig() *BotConfig {
 			},
 		},
 		Search: SearchConfig{
-			Enabled:              true,
+			Enabled:                   true,
+			MaxSkipsBeforeForceAttack: 999,
 			MinTrophies:          0,
 			MaxTrophies:          3000,
 			MinTownHall:          7,
