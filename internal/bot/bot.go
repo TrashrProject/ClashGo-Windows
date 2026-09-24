@@ -1825,7 +1825,9 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 	for time.Now().Before(deadline) {
 		screen, err := b.client.CaptureToMat()
 		if err != nil {
-			time.Sleep(500 * time.Millisecond)
+			if !b.sleepResponsive(250 * time.Millisecond) {
+				return false
+			}
 			continue
 		}
 
@@ -1836,6 +1838,20 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 		case state == game.StateBattle:
 			b.logger.Info().Msg("battle state detected, entering search loop")
 			return true
+		case state == game.StateMainVillage:
+			// A failed navigation sometimes lands back home (network bounce,
+			// accidental close, stale fallback coordinate). This is a terminal
+			// failure for THIS sequence; fail now so the caller can recover,
+			// rather than waiting the full minute while already at home.
+			b.logger.Warn().Msg("returned to village while waiting for battle; aborting current attack navigation")
+			return false
+		case state == game.StateConnectionLost:
+			b.logger.Warn().Msg("connection lost while entering battle; retrying immediately")
+			b.dismissInterruptions()
+			if !b.sleepResponsive(300 * time.Millisecond) {
+				return false
+			}
+			continue
 		case state == game.StateSearchMap || state == game.StateLoading:
 			b.logger.Debug().Msg("in clouds/loading...")
 			if !b.sleepResponsive(350 * time.Millisecond) {
