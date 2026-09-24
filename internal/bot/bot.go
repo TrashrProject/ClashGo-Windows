@@ -1223,8 +1223,8 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		b.lastNav = time.Now()
 		b.startAutomationTask("village navigation", func() {
 			b.logger.Info().Msg("in ArmyCamp, returning to main village...")
-			if err := b.navigator.NavigateToMainVillage(gc); err != nil {
-				b.logger.Warn().Err(err).Msg("village navigation failed")
+			if !b.navigator.NavigateToMainVillage(gc) {
+				b.logger.Warn().Msg("village navigation could not perform a valid transition")
 				return
 			}
 			b.recordActivity()
