@@ -94,6 +94,8 @@ type Bot struct {
 	trainingItemsPending    atomic.Int32
 	trainingHousingPending  atomic.Int32
 	trainingPlanUncertain   atomic.Bool
+	armyCheckPending        atomic.Bool
+	armyVerifiedUntil       atomic.Int64
 	armyRepairAttempts      atomic.Int32
 	armyRepairSuccesses     atomic.Int32
 	statusMu                sync.RWMutex
@@ -306,6 +308,11 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		stuckTimeout:      35 * time.Second,
 		cpuSampler:        newCPUSampler(),
 		dukePicksFile:     dukePicksFile,
+	}
+	if cfg.Automation.AutoArmyGuard && cfg.Training.Enabled && cfg.Training.FullArmyBeforeAttack {
+		if _, ok := cfg.Attack.Farm.ActiveProfile(); ok {
+			b.armyCheckPending.Store(true)
+		}
 	}
 
 	// Restore only a recent, profile-matching plan. This keeps the beginner UI
@@ -1064,6 +1071,8 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 			ResourceInterval:    15 * time.Second,
 			WallsEnabled:        b.cfg.Upgrade.UpgradeWalls,
 			WallsDue:            b.wallUpgradePending.Load(),
+			ArmyCheckEnabled:    b.cfg.Automation.AutoArmyGuard && b.cfg.Training.Enabled && b.cfg.Training.FullArmyBeforeAttack,
+			ArmyCheckDue:        b.armyCheckPending.Load(),
 			ArmyWaitUntil:       armyUntil,
 			AttackEnabled:       b.cfg.Attack.Enabled,
 			AttackCapReached:    b.cfg.Attack.MaxAttackPerSession > 0 && int(b.attackCount.Load()) >= b.cfg.Attack.MaxAttackPerSession,
@@ -1100,6 +1109,11 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 					b.logger.Info().Msg("wall maintenance complete and session attack limit reached; stopping session")
 					b.cancel()
 				}
+			})
+			return
+		case VillageActionCheckArmy:
+			b.startAutomationTask("army check", func() {
+				b.runArmyPreflight()
 			})
 			return
 		case VillageActionWaitArmy:
@@ -1237,6 +1251,8 @@ func automationPhaseForTask(name string) RuntimePhase {
 		return PhaseResourceScan
 	case "wall upgrades":
 		return PhaseWallUpgrade
+	case "army check":
+		return PhaseArmyCheck
 	default:
 		return PhaseIdle
 	}
@@ -2298,6 +2314,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	// Stamp the attack boundary so the inter-attack cooldown has a clean
 	// reference point (set only on a real return home, not on a restart).
 	b.lastAttackEnd = time.Now()
+	if b.cfg.Automation.AutoArmyGuard && b.cfg.Training.Enabled && b.cfg.Training.FullArmyBeforeAttack {
+		b.armyCheckPending.Store(true)
+		b.armyVerifiedUntil.Store(0)
+	}
 
 	sideX := int(537 * b.cal.ScaleX)
 	sideY := int(693 * b.cal.ScaleY)
@@ -2485,6 +2505,13 @@ func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int
 }
 
 func (b *Bot) clickSequence() bool {
+	return b.clickSequenceMode(true)
+}
+
+// clickSequenceMode navigates through Attack -> Find Match -> army recipe.
+// launchBattle=false is the scheduler's standalone army preflight: it proves
+// or repairs the army, then returns to the village without entering matchmaking.
+func (b *Bot) clickSequenceMode(launchBattle bool) bool {
 
 	attackClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
@@ -2627,12 +2654,16 @@ func (b *Bot) clickSequence() bool {
 	}
 	if !b.sleepResponsive(220 * time.Millisecond) { return false }
 
-	// Pre-battle army gate. Require multi-frame consensus so one noisy OCR
-	// read cannot launch a bad attack or create a bogus training deficit.
+	// Army gate. A standalone scheduler preflight can verify the exact recipe
+	// shortly before this attack. Reuse that proof for a small window; if it is
+	// stale or absent, perform the normal multi-frame inspection here.
 	if b.cfg.Training.Enabled &&
 		b.cfg.Training.FullArmyBeforeAttack &&
 		b.cfg.Automation.AutoArmyGuard {
 		if profile, ok := b.cfg.Attack.Farm.ActiveProfile(); ok {
+			if launchBattle && b.armyVerifiedUntil.Load() > time.Now().UnixNano() {
+				b.logger.Info().Msg("recent standalone army preflight still valid; reusing verified readiness")
+			} else {
 			guard := b.inspectArmyConsensus(profile, 3)
 
 			for _, warning := range guard.Warnings {
@@ -2648,6 +2679,8 @@ func (b *Bot) clickSequence() bool {
 						if repairedGuard, repaired := b.reapplyActiveArmyRecipe(profile); repaired {
 							guard = repairedGuard
 							b.armyWaitUntil.Store(0)
+							b.armyCheckPending.Store(false)
+							b.armyVerifiedUntil.Store(time.Now().Add(45 * time.Second).UnixNano())
 							b.trainingItemsPending.Store(0)
 							b.trainingHousingPending.Store(0)
 							b.trainingPlanUncertain.Store(false)
@@ -2690,6 +2723,8 @@ func (b *Bot) clickSequence() bool {
 					// delay is only a retry backoff after a failed repair.
 					until := time.Now().Add(30 * time.Second)
 					b.armyWaitUntil.Store(until.UnixNano())
+					b.armyCheckPending.Store(true)
+					b.armyVerifiedUntil.Store(0)
 					b.logger.Warn().
 						Time("retry_after", until).
 						Int("warnings", len(guard.Warnings)).
@@ -2706,6 +2741,8 @@ func (b *Bot) clickSequence() bool {
 
 				case attack.ArmyGuardReady:
 					b.armyWaitUntil.Store(0)
+					b.armyCheckPending.Store(false)
+					b.armyVerifiedUntil.Store(time.Now().Add(45 * time.Second).UnixNano())
 					b.trainingItemsPending.Store(0)
 					b.trainingHousingPending.Store(0)
 					b.trainingPlanUncertain.Store(false)
@@ -2719,6 +2756,8 @@ func (b *Bot) clickSequence() bool {
 				if b.cfg.Automation.Preferences.WaitForFullArmy {
 					until := time.Now().Add(20 * time.Second)
 					b.armyWaitUntil.Store(until.UnixNano())
+					b.armyCheckPending.Store(true)
+					b.armyVerifiedUntil.Store(0)
 					b.trainingPlanUncertain.Store(true)
 					b.logger.Warn().
 						Int("warnings", len(guard.Warnings)).
@@ -2731,7 +2770,17 @@ func (b *Bot) clickSequence() bool {
 					Int("warnings", len(guard.Warnings)).
 					Msg("army readiness uncertain; advanced mode permits attack")
 			}
+			}
 		}
+	}
+
+	if !launchBattle {
+		if b.returnToVillageVerified(4, "standalone army preflight") {
+			b.logger.Info().Msg("standalone army preflight complete; returned to village")
+			return true
+		}
+		b.logger.Warn().Msg("army preflight finished but village return could not be verified")
+		return false
 	}
 
 	battleClicked := false
@@ -2753,6 +2802,25 @@ func (b *Bot) clickSequence() bool {
 
 	b.logger.Info().Msg("waiting for battle state (searching)...")
 	return b.waitForBattleState(60 * time.Second)
+}
+
+func (b *Bot) runArmyPreflight() {
+	b.logger.Info().Msg("automation brain: running standalone army preflight")
+	ok := b.clickSequenceMode(false)
+	if ok {
+		b.armyCheckPending.Store(false)
+		b.recordActivity()
+		return
+	}
+
+	b.armyCheckPending.Store(true)
+	b.armyVerifiedUntil.Store(0)
+	if until := b.armyWaitUntil.Load(); until <= time.Now().UnixNano() {
+		retry := time.Now().Add(15 * time.Second)
+		b.armyWaitUntil.Store(retry.UnixNano())
+		b.logger.Warn().Time("retry_after", retry).Msg("standalone army preflight failed; scheduling bounded retry")
+	}
+	_ = b.returnToVillageVerified(4, "army preflight recovery")
 }
 
 // selectArmySlot clicks the saved-recipe card for b.armySlot in the
@@ -3320,6 +3388,12 @@ func (b *Bot) Health() game.SystemHealth {
 
 func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 	b.cfg = cfg
+	if cfg != nil && cfg.Automation.AutoArmyGuard && cfg.Training.Enabled && cfg.Training.FullArmyBeforeAttack {
+		if _, ok := cfg.Attack.Farm.ActiveProfile(); ok {
+			b.armyCheckPending.Store(true)
+			b.armyVerifiedUntil.Store(0)
+		}
+	}
 	if b.attackExec != nil {
 		b.attackExec.UpdateConfig(&cfg.Attack)
 	}
