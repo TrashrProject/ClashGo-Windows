@@ -12,7 +12,7 @@ func TestRuntimeSupervisorThresholdsAreSane(t *testing.T) {
 	if runtimeCaptureStaleThreshold <= runtimeSupervisorTick {
 		t.Fatalf("stale threshold (%s) must exceed tick (%s)", runtimeCaptureStaleThreshold, runtimeSupervisorTick)
 	}
-	if runtimeCaptureStaleThreshold < 20*time.Second {
+	if runtimeCaptureStaleThreshold < 40*time.Second {
 		t.Fatalf("stale threshold too aggressive: %s", runtimeCaptureStaleThreshold)
 	}
 }
