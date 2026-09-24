@@ -11,6 +11,7 @@ on:
     branches:
       - main
       - windows/core-port
+      - windows/core-port
     types: [opened, synchronize, reopened]
 
 permissions:
