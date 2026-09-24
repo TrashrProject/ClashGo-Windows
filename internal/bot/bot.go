@@ -81,6 +81,7 @@ type Bot struct {
 	// may all be enabled, but only one automation task can own the UI at once.
 	// Safety/recovery handlers remain outside this lease so they can interrupt.
 	automationTaskInFlight   atomic.Bool
+	automationGateMu         sync.Mutex
 	automationTaskMu         sync.RWMutex
 	automationTaskName       string
 	automationLastTask       string
@@ -88,6 +89,7 @@ type Bot struct {
 	automationTasksStarted   atomic.Int32
 	automationTasksCompleted atomic.Int32
 	automationTaskPanics     atomic.Int32
+	pendingConfig            *config.BotConfig
 	donationChecks          atomic.Int32
 	donationsSent           atomic.Int32
 	lastDonationUnix        atomic.Int64
@@ -1220,6 +1222,13 @@ func (b *Bot) tryBeginAutomationTask(name string) bool {
 	if name == "" {
 		return false
 	}
+
+	// The gate serializes task acquisition with runtime-config application.
+	// A task therefore starts with one coherent config snapshot and settings
+	// changed from the UI cannot mutate deployment policy halfway through it.
+	b.automationGateMu.Lock()
+	defer b.automationGateMu.Unlock()
+
 	if !b.automationTaskInFlight.CompareAndSwap(false, true) {
 		return false
 	}
@@ -1233,6 +1242,9 @@ func (b *Bot) tryBeginAutomationTask(name string) bool {
 }
 
 func (b *Bot) endAutomationTask(name string) {
+	b.automationGateMu.Lock()
+	defer b.automationGateMu.Unlock()
+
 	b.automationTaskMu.Lock()
 	if b.automationTaskName != name {
 		current := b.automationTaskName
@@ -1248,6 +1260,16 @@ func (b *Bot) endAutomationTask(name string) {
 	b.automationTaskMu.Unlock()
 	b.automationTaskStarted.Store(0)
 	b.automationTasksCompleted.Add(1)
+
+	// Apply the newest UI settings BEFORE making the lease available again.
+	// This creates a clean task boundary: task N finishes with its original
+	// policy, pending config is committed, task N+1 starts with the new policy.
+	if pending := b.pendingConfig; pending != nil {
+		b.pendingConfig = nil
+		b.applyConfigNow(pending)
+		b.logger.Info().Str("after_task", name).Msg("applied deferred runtime configuration at safe task boundary")
+	}
+
 	b.automationTaskInFlight.Store(false)
 	b.logger.Debug().Str("task", name).Msg("automation task lease released")
 }
@@ -3415,7 +3437,22 @@ func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 		return
 	}
 
-	oldArmySlot := b.armySlot
+	b.automationGateMu.Lock()
+	defer b.automationGateMu.Unlock()
+
+	if b.automationTaskInFlight.Load() {
+		// Keep only the newest pending snapshot; repeated UI toggles while an
+		// attack is running collapse into one atomic boundary update.
+		b.pendingConfig = cfg
+		b.logger.Info().
+			Str("active_task", b.currentAutomationTask()).
+			Msg("runtime configuration deferred until active automation task completes")
+		return
+	}
+	b.applyConfigNow(cfg)
+}
+
+func (b *Bot) applyConfigNow(cfg *config.BotConfig) {	oldArmySlot := b.armySlot
 	b.cfg = cfg
 
 	// Strategy changes can select a different saved-army recipe. Keeping the
@@ -3458,6 +3495,7 @@ func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 	}
 	b.logger.Info().Msg("bot configuration updated in real-time")
 }
+
 
 func (b *Bot) Stats() BotStats {
 	now := time.Now()
