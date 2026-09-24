@@ -646,7 +646,9 @@ func (b *Bot) recoverEmulator() {
 	if err := b.client.ResetAdbServer(); err != nil {
 		b.logger.Warn().Err(err).Msg("adb server reset failed")
 	}
-	time.Sleep(2 * time.Second)
+	if !b.sleepResponsive(2 * time.Second) {
+		return
+	}
 	_ = b.client.Reconnect()
 	if deviceOK() {
 		b.restartGame()
@@ -667,7 +669,10 @@ func (b *Bot) recoverEmulator() {
 			recovered = true
 			break
 		}
-		time.Sleep(2 * time.Second)
+		if !b.sleepResponsive(2 * time.Second) {
+			b.logger.Info().Msg("BlueStacks recovery wait cancelled")
+			return
+		}
 	}
 	if !recovered {
 		b.logger.Error().Msg("device remained unreachable after BlueStacks recovery window; deferring until next watchdog cycle")
