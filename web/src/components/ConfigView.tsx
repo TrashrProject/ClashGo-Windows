@@ -188,7 +188,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                 </div>
               </div>
               <div className="mt-5 flex flex-wrap gap-2">
-                {['Town Hall detected', 'Army chosen automatically', 'Waits for a ready army', 'Loot tracked automatically', 'Account kept in sync'].map((label) => (
+                {['Town Hall detected', 'Army chosen automatically', 'Verifies the selected army', 'Loot tracked automatically', 'Account kept in sync'].map((label) => (
                   <span key={label} className="px-3 py-2 rounded-xl bg-zinc-50 dark:bg-zinc-800 text-[10px] font-black uppercase tracking-wider text-zinc-500">
                     {label}
                   </span>
@@ -230,7 +230,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                     {[
                       { n: '1', title: 'Open BlueStacks', text: 'Launch Clash of Clans normally. ClashGO connects to it for you.' },
                       { n: '2', title: 'Link your account', text: 'Your Town Hall and recommended farm army are selected automatically.' },
-                      { n: '3', title: 'Press Start', text: 'ClashGO waits for the army, finds a base, attacks and recovers by itself.' },
+                      { n: '3', title: 'Press Start', text: 'ClashGO verifies the army recipe, handles village tasks one at a time, finds a base, attacks and recovers by itself.' },
                     ].map((step) => (
                       <div key={step.n} className="rounded-xl border border-emerald-500/15 bg-white/80 dark:bg-zinc-950/40 p-4">
                         <div className="flex items-center gap-2">
@@ -244,7 +244,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                   <div className="mt-4 flex items-start gap-2 rounded-xl bg-white/70 dark:bg-zinc-900/60 px-4 py-3 text-[11px] text-zinc-500">
                     <span className="material-symbols-outlined text-base text-emerald-500">info</span>
                     <span>
-                      You do not need to understand ADB, OCR, templates, coordinates or training timers. Those stay automatic unless you deliberately open Advanced controls.
+                      You do not need to understand ADB, OCR, templates, coordinates or internal retry timers. ClashGO keeps those technical details automatic unless you deliberately open Advanced controls.
                     </span>
                   </div>
                 </div>
