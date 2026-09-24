@@ -187,6 +187,7 @@ function App() {
   const [lootExitEnabled, setLootExitEnabled] = useState(false);
   const [lootExitPercent, setLootExitPercent] = useState(100);
   const [simpleMode, setSimpleMode] = useState(true);
+  const [autoProfileSync, setAutoProfileSync] = useState(true);
   const [autoDonate, setAutoDonate] = useState(false);
   const [donateOnlyRequested, setDonateOnlyRequested] = useState(true);
   const [useHeroesSimple, setUseHeroesSimple] = useState(true);
@@ -216,6 +217,7 @@ function App() {
         setLootExitEnabled(conf.attack.loot_exit_enabled ?? false);
         setLootExitPercent(conf.attack.loot_exit_percent ?? 100);
         setSimpleMode(conf.automation?.simple_mode ?? true);
+        setAutoProfileSync(conf.automation?.auto_profile_sync ?? true);
         const prefs = conf.automation?.preferences;
         setAutoDonate(prefs?.auto_donate ?? false);
         setDonateOnlyRequested(prefs?.donate_only_requested ?? true);
@@ -376,6 +378,22 @@ function App() {
       unsubStatsUpdated();
     };
   }, []);
+
+  useEffect(() => {
+    if (!autoProfileSync || !playerTag) return;
+
+    // Account metadata does not own the game UI, so it can refresh quietly
+    // alongside the one-task game scheduler. Keep the cadence deliberately
+    // low: the Town Hall/profile rarely changes and the service should never
+    // be polled like live telemetry.
+    const sync = () => {
+      void GetPlayerProfile().catch((err) => {
+        console.warn('Automatic account profile sync failed:', err);
+      });
+    };
+    const id = window.setInterval(sync, 30 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [autoProfileSync, playerTag]);
 
   useEffect(() => {
     if (darkMode) {
