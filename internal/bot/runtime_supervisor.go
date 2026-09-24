@@ -93,6 +93,10 @@ func (b *Bot) runtimeSupervisorLoop() {
 		case <-ticker.C:
 			now := time.Now()
 
+			if b.repairAutomationLeaseInvariant() {
+				b.recordActivity()
+			}
+
 			lastCaptureNano := b.captureHeartbeat.Load()
 			if lastCaptureNano > 0 {
 				staleFor := now.Sub(time.Unix(0, lastCaptureNano))
