@@ -140,7 +140,9 @@ function App() {
     training_items_pending: 0,
     training_housing_pending: 0,
     training_plan_uncertain: false,
+    training_pending: [],
     village_action: 'idle',
+    village_reason: '',
     adb_health: {
       last_capture: null,
       avg_capture_ms: 0,
