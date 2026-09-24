@@ -61,30 +61,36 @@ func (b *Bot) returnToVillageVerified(maxBacks int, source string) bool {
 			return false
 		}
 		screen, err := b.client.CaptureToMat()
-		if err == nil && !screen.Empty() {
-			state, _ := b.classify(screen)
-			atVillage := state == game.StateMainVillage || b.findAttackButton(screen, 0.30)
-			if state == game.StateConfirmExit {
-				screen.Close()
-				x, y := b.cal.ScaleRef(279, 429)
-				if tapErr := b.client.TapFast(x, y, 0.5); tapErr != nil {
-					b.logger.Warn().Err(tapErr).Str("source", source).Msg("verified-return could not cancel quit-confirm")
-					return false
-				}
-				b.logger.Warn().Str("source", source).Msg("verified-return reached quit-confirm; cancelled safely and will re-verify village")
-				if !b.sleepResponsive(180 * time.Millisecond) {
-					return false
-				}
-				// Cancel is an action, not proof. Re-capture on the next loop
-				// iteration and only return success after village evidence.
-				continue
+		if err != nil || screen.Empty() {
+			if !screen.Empty() { screen.Close() }
+			b.logger.Debug().Err(err).Str("source", source).
+				Msg("verified-return capture unavailable; refusing blind Back")
+			if !b.sleepResponsive(180 * time.Millisecond) {
+				return false
 			}
+			continue
+		}
+
+		state, _ := b.classify(screen)
+		atVillage := state == game.StateMainVillage || b.findAttackButton(screen, 0.30)
+		if state == game.StateConfirmExit {
 			screen.Close()
-			if atVillage {
-				return true
+			x, y := b.cal.ScaleRef(279, 429)
+			if tapErr := b.client.TapFast(x, y, 0.5); tapErr != nil {
+				b.logger.Warn().Err(tapErr).Str("source", source).Msg("verified-return could not cancel quit-confirm")
+				return false
 			}
-		} else if !screen.Empty() {
-			screen.Close()
+			b.logger.Warn().Str("source", source).Msg("verified-return reached quit-confirm; cancelled safely and will re-verify village")
+			if !b.sleepResponsive(180 * time.Millisecond) {
+				return false
+			}
+			// Cancel is an action, not proof. Re-capture on the next loop
+			// iteration and only return success after village evidence.
+			continue
+		}
+		screen.Close()
+		if atVillage {
+			return true
 		}
 
 		if attempt == maxBacks {
