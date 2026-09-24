@@ -21,7 +21,6 @@ concurrency:
 
 jobs:
   build:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'windows/core-port'
     runs-on: windows-latest
     env:
       BUILD_VERSION: ${{ github.event.inputs.version || '0.6.0-windows-beta' }}
@@ -31,10 +30,9 @@ jobs:
       GOFLAGS: -tags=customenv,gocv_specific_modules
     timeout-minutes: 120
     steps:
-      - name: Checkout Windows branch
+      - name: Checkout tested revision
         uses: actions/checkout@v4
         with:
-          ref: windows/core-port
           fetch-depth: 0
 
       - name: Setup Go
