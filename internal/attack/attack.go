@@ -1406,10 +1406,22 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 					tx1, ty1 := int(float64(p1.X)+float64(p2.X-p1.X)*pct1), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct1)
 					tx2, ty2 := int(float64(p1.X)+float64(p2.X-p1.X)*pct2), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct2)
 					tx3, ty3 := int(float64(p1.X)+float64(p2.X-p1.X)*pct3), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct3)
-					j1 := e.addJitter(image.Pt(tx1, ty1), 8)
-					j2 := e.addJitter(image.Pt(tx2, ty2), 8)
-					j3 := e.addJitter(image.Pt(tx3, ty3), 8)
-					e.client.TapTriple(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0, j3.X, j3.Y, 12.0)
+					safe := resolveDeploy([]image.Point{
+						image.Pt(tx1, ty1),
+						image.Pt(tx2, ty2),
+						image.Pt(tx3, ty3),
+					})
+					for j := range safe {
+						safe[j] = e.addJitter(safe[j], 8)
+					}
+					switch len(safe) {
+					case 3:
+						e.client.TapTriple(safe[0].X, safe[0].Y, 12.0, safe[1].X, safe[1].Y, 12.0, safe[2].X, safe[2].Y, 12.0)
+					case 2:
+						e.client.TapDual(safe[0].X, safe[0].Y, 12.0, safe[1].X, safe[1].Y, 12.0)
+					case 1:
+						e.client.TapFast(safe[0].X, safe[0].Y, 12.0)
+					}
 					time.Sleep(45 * time.Millisecond)
 				}
 			}
