@@ -107,12 +107,9 @@ type AttackConfig struct {
 	StallTimerSeconds   int      `json:"stall_timer_seconds"`
 	LootExitEnabled     bool     `json:"loot_exit_enabled"`
 	LootExitPercent     int      `json:"loot_exit_percent"`
-	// MinSecondsBetweenAttacks is the minimum pause between the end of one
-	// battle (Return Home) and the start of the next attack sequence.
-	// Armies take real time to retrain; without this gate the bot attacked
-	// back-to-back ~8s apart with whatever the camps held (observed live:
-	// three near-identical defeats in under four minutes). 0 disables the
-	// pause.
+	// MinSecondsBetweenAttacks is a short UI/recovery cooldown after Return
+	// Home. Modern Clash applies army recipes instantly, so this is no longer
+	// a troop-training timer. 0 disables the pause.
 	MinSecondsBetweenAttacks int `json:"min_seconds_between_attacks"`
 
 	// FarmComposition gives the Windows live deployer a deterministic army
@@ -302,7 +299,7 @@ func DefaultConfig() *BotConfig {
 			StallTimerSeconds:        10,
 			LootExitEnabled:          false,
 			LootExitPercent:          100,
-			MinSecondsBetweenAttacks: 30,
+			MinSecondsBetweenAttacks: 3,
 			Farm: FarmConfig{
 				Enabled:  false,
 				TownHall: 18,
