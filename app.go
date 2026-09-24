@@ -796,6 +796,25 @@ func applySimpleAutomationDefaults(cfg *config.BotConfig) {
 	cfg.Automation.AutoResourceTracking = true
 	cfg.Automation.AutoProfileSync = true
 
+	// New installs get safe, understandable Easy Mode defaults. Existing
+	// configs that predate Preferences may deserialize zero-values, so fill
+	// the preset and the non-controversial automation defaults here.
+	if cfg.Automation.Preferences.LootPreset == "" {
+		cfg.Automation.Preferences.LootPreset = "balanced"
+		cfg.Automation.Preferences.DonateOnlyRequested = true
+		cfg.Automation.Preferences.UseHeroes = true
+		cfg.Automation.Preferences.UseClanCastle = true
+		cfg.Automation.Preferences.WaitForFullArmy = true
+		cfg.Automation.Preferences.AutoRetrain = true
+	}
+
+	cfg.Attack.UseQueen = cfg.Automation.Preferences.UseHeroes
+	cfg.Attack.UseWarden = cfg.Automation.Preferences.UseHeroes
+	cfg.Attack.UseClanCastle = cfg.Automation.Preferences.UseClanCastle
+	cfg.Training.Enabled = cfg.Automation.Preferences.AutoRetrain || cfg.Automation.Preferences.WaitForFullArmy
+	cfg.Training.TrainDeadTroops = cfg.Automation.Preferences.AutoRetrain
+	cfg.Training.FullArmyBeforeAttack = cfg.Automation.Preferences.WaitForFullArmy
+
 	// Keep automatic mode quiet and stable. Explicit failure diagnostics still
 	// write their targeted captures when something goes wrong.
 	cfg.Debug.SaveScreenshots = false
@@ -856,6 +875,67 @@ func (a *App) SetSimpleMode(enabled bool) error {
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
 	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(paths.ResolveConfig("config.json"), data, 0600)
+}
+
+
+// SaveSimplePreferences persists only the small, player-facing choices exposed
+// in Easy Mode. It deliberately translates them into the underlying technical
+// config so beginners never need to understand those lower-level settings.
+func (a *App) SaveSimplePreferences(autoDonate, donateOnlyRequested, useHeroes, useClanCastle, waitForFullArmy, autoRetrain bool, lootPreset string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	switch lootPreset {
+	case "relaxed", "balanced", "rich":
+	default:
+		return fmt.Errorf("invalid loot preset %q", lootPreset)
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Automation.Preferences = config.SimplePreferences{
+		AutoDonate:          autoDonate,
+		DonateOnlyRequested: donateOnlyRequested,
+		UseHeroes:           useHeroes,
+		UseClanCastle:       useClanCastle,
+		WaitForFullArmy:     waitForFullArmy,
+		AutoRetrain:         autoRetrain,
+		LootPreset:          lootPreset,
+	}
+
+	// Translate the simple choices into the real runtime config.
+	cfg.Attack.UseQueen = useHeroes
+	cfg.Attack.UseWarden = useHeroes
+	cfg.Attack.UseClanCastle = useClanCastle
+
+	cfg.Training.Enabled = autoRetrain || waitForFullArmy
+	cfg.Training.TrainDeadTroops = autoRetrain
+	cfg.Training.FullArmyBeforeAttack = waitForFullArmy
+
+	// Three understandable loot levels instead of exposing three raw numbers.
+	switch lootPreset {
+	case "relaxed":
+		cfg.Search.MinLootGold = 250000
+		cfg.Search.MinLootElixir = 250000
+		cfg.Search.MinLootDarkElixir = 1000
+	case "balanced":
+		cfg.Search.MinLootGold = 400000
+		cfg.Search.MinLootElixir = 400000
+		cfg.Search.MinLootDarkElixir = 2000
+	case "rich":
+		cfg.Search.MinLootGold = 700000
+		cfg.Search.MinLootElixir = 700000
+		cfg.Search.MinLootDarkElixir = 3500
+	}
+
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
