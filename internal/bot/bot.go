@@ -84,6 +84,8 @@ type Bot struct {
 	trainingItemsPending    atomic.Int32
 	trainingHousingPending  atomic.Int32
 	trainingPlanUncertain   atomic.Bool
+	armyRepairAttempts      atomic.Int32
+	armyRepairSuccesses     atomic.Int32
 	statusMu                sync.RWMutex
 	trainingPending         []attack.TrainingPlanItem
 	villageReason           string
@@ -3226,6 +3228,8 @@ func (b *Bot) Stats() BotStats {
 		TrainingItemsPending:   b.trainingItemsPending.Load(),
 		TrainingHousingPending: b.trainingHousingPending.Load(),
 		TrainingPlanUncertain:  b.trainingPlanUncertain.Load(),
+		ArmyRepairAttempts:     b.armyRepairAttempts.Load(),
+		ArmyRepairSuccesses:    b.armyRepairSuccesses.Load(),
 		TrainingPending:        trainingPending,
 		VillageAction:         VillageAction(b.villageAction.Load()).String(),
 		VillageReason:         villageReason,
@@ -3265,6 +3269,8 @@ type BotStats struct {
 	TrainingItemsPending   int32  `json:"training_items_pending"`
 	TrainingHousingPending int32  `json:"training_housing_pending"`
 	TrainingPlanUncertain  bool                      `json:"training_plan_uncertain"`
+	ArmyRepairAttempts     int32                     `json:"army_repair_attempts"`
+	ArmyRepairSuccesses    int32                     `json:"army_repair_successes"`
 	TrainingPending        []attack.TrainingPlanItem `json:"training_pending,omitempty"`
 	VillageAction          string                    `json:"village_action"`
 	VillageReason          string                    `json:"village_reason"`
