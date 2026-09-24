@@ -654,16 +654,16 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// the observed "select ED -> jump to siege -> hammer last hero" failure.
 		categoryPriority := func(cat string) int {
 			switch cat {
-			case "Troop":
-				return 0
 			case "Hero":
-				return 1
+				return 0
 			case "Siege", "CC":
+				return 1
+			case "Troop":
 				return 2
 			case "Spell":
 				return 3
 			default:
-				return 0
+				return 2
 			}
 		}
 		var armyState *ArmyStateManager
@@ -721,6 +721,30 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			})
 
 			liveCounts := troopCounter.DetectCounts(fresh, liveSlots, liveMgr.GetBarY())
+
+			// Hero portraits vary heavily with skins/levels. If template identity
+			// missed one but the card has no troop-count overlay and carries the
+			// structural hero health strip, promote it before choosing a card.
+			// This is what prevents King/Queen/Prince/Warden cards from being left
+			// behind as generic zero-count troops.
+			for _, slot := range liveSlots {
+				if slot.Category != "Troop" {
+					continue
+				}
+				count := GetCountForSlot(liveCounts, slot.X)
+				if count == 0 && looksLikeHeroCardStatic(fresh, slot.X, liveMgr.GetBarY(), w, h) {
+					slot.Category = "Hero"
+					e.logger.Info().Int("x", slot.X).Str("unit", slot.UnitName).
+						Msg("Windows live deployment: promoted zero-count structural card to hero")
+				}
+			}
+			sort.SliceStable(liveSlots, func(i, j int) bool {
+				pi := categoryPriority(liveSlots[i].Category)
+				pj := categoryPriority(liveSlots[j].Category)
+				if pi != pj { return pi < pj }
+				return liveSlots[i].X < liveSlots[j].X
+			})
+
 			var chosen *TrackedSlot
 			chosenCount := 0
 			chosenActivity := 0.0
@@ -903,18 +927,46 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			finalMgr := NewSlotManager(finalFrame, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
 			finalCounts := troopCounter.DetectCounts(finalFrame, finalMgr.GetAllSlots(), finalMgr.GetBarY())
 			liveRemaining = 0
+			anonymousHeroesVisible := 0
 			for _, slot := range finalMgr.GetAllSlots() {
 				if !e.shouldDeployLiveCategory(slot.Category) {
 					continue
 				}
-				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
+				count := GetCountForSlot(finalCounts, slot.X)
+				if slot.Category == "Troop" && count == 0 &&
+					looksLikeHeroCardStatic(finalFrame, slot.X, finalMgr.GetBarY(), w, h) {
+					slot.Category = "Hero"
+				}
+				if slot.Category == "Hero" {
+					name := strings.ToLower(strings.TrimSpace(slot.UnitName))
+					if name == "" {
+						anonymousHeroesVisible++
+					} else if !oneShotDone["Hero:"+name] {
+						liveRemaining++
+						e.logger.Warn().Str("hero", name).Msg("final deployment verification found hero never deployed")
+					}
 					continue
 				}
-				count := GetCountForSlot(finalCounts, slot.X)
+				if slot.Category == "Siege" || slot.Category == "CC" {
+					name := strings.ToLower(strings.TrimSpace(slot.UnitName))
+					if name != "" && !oneShotDone[slot.Category+":"+name] {
+						liveRemaining++
+					}
+					continue
+				}
 				activity := GetSlotActivityRatioStatic(finalFrame, slot.X, slot.Y, w)
 				if count > 0 || activity >= 0.12 {
 					liveRemaining++
 				}
+			}
+			if anonymousHeroesVisible > unknownHeroesDeployed {
+				missing := anonymousHeroesVisible - unknownHeroesDeployed
+				liveRemaining += missing
+				e.logger.Warn().
+					Int("visible_anonymous_heroes", anonymousHeroesVisible).
+					Int("deployed_anonymous_heroes", unknownHeroesDeployed).
+					Int("missing", missing).
+					Msg("final deployment verification found undeployed anonymous hero cards")
 			}
 			finalFrame.Close()
 		}
