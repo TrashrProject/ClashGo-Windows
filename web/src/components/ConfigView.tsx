@@ -157,14 +157,14 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                   <span className="material-symbols-outlined">auto_awesome</span>
                 </div>
                 <div>
-                  <h3 className="text-2xl font-black text-zinc-950 dark:text-white tracking-tight">Automatic Setup</h3>
+                  <h3 className="text-2xl font-black text-zinc-950 dark:text-white tracking-tight">Easy Mode</h3>
                   <p className="text-sm text-zinc-500 font-medium mt-1">
-                    Recommended. ClashGO uses your linked account, HDV and live game state to choose the farm profile and keep resource tracking active automatically.
+                    Recommended for beginners. Link your Clash account once, start the bot, and ClashGO handles the technical choices automatically.
                   </p>
                 </div>
               </div>
               <div className="mt-5 flex flex-wrap gap-2">
-                {['Account → HDV', 'Auto farm profile', 'Army guard', 'Resource tracking', 'Auto profile sync'].map((label) => (
+                {['Town Hall detected', 'Army chosen automatically', 'Waits for a ready army', 'Loot tracked automatically', 'Account kept in sync'].map((label) => (
                   <span key={label} className="px-3 py-2 rounded-xl bg-zinc-50 dark:bg-zinc-800 text-[10px] font-black uppercase tracking-wider text-zinc-500">
                     {label}
                   </span>
@@ -194,17 +194,51 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
             </button>
           </div>
 
+          {simpleMode && (
+            <div className="mt-6 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] p-5">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 shrink-0 rounded-xl bg-emerald-500 text-white flex items-center justify-center shadow-sm">
+                  <span className="material-symbols-outlined text-xl">school</span>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-black text-zinc-950 dark:text-white">New to ClashGO? You only need 3 steps.</div>
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {[
+                      { n: '1', title: 'Open BlueStacks', text: 'Launch Clash of Clans normally. ClashGO connects to it for you.' },
+                      { n: '2', title: 'Link your account', text: 'Your Town Hall and recommended farm army are selected automatically.' },
+                      { n: '3', title: 'Press Start', text: 'ClashGO waits for the army, finds a base, attacks and recovers by itself.' },
+                    ].map((step) => (
+                      <div key={step.n} className="rounded-xl border border-emerald-500/15 bg-white/80 dark:bg-zinc-950/40 p-4">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-full bg-emerald-500 text-white text-[10px] font-black flex items-center justify-center">{step.n}</span>
+                          <span className="text-xs font-black text-zinc-900 dark:text-white">{step.title}</span>
+                        </div>
+                        <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">{step.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 flex items-start gap-2 rounded-xl bg-white/70 dark:bg-zinc-900/60 px-4 py-3 text-[11px] text-zinc-500">
+                    <span className="material-symbols-outlined text-base text-emerald-500">info</span>
+                    <span>
+                      You do not need to understand ADB, OCR, templates, coordinates or training timers. Those stay automatic unless you deliberately open Advanced controls.
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="mt-6 pt-5 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-4">
             <div>
               <div className="text-sm font-black text-zinc-900 dark:text-white">Advanced controls</div>
-              <div className="text-xs text-zinc-500 mt-1">Only open these if you want to override the automatic behavior.</div>
+              <div className="text-xs text-zinc-500 mt-1">Optional. Beginners can leave this closed — the defaults are designed to work without manual tuning.</div>
             </div>
             <button
               type="button"
               onClick={() => setAdvancedOpen(v => !v)}
               className="px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-black text-zinc-600 dark:text-zinc-300"
             >
-              {advancedOpen ? 'Hide advanced' : 'Show advanced'}
+              {advancedOpen ? 'Hide advanced' : 'I know what I’m doing'}
             </button>
           </div>
         </section>
