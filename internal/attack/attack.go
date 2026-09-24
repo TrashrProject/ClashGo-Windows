@@ -1805,7 +1805,16 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 		e.logger.Error().Err(err).Msg("failed to create template store for stall detection")
 		return false
 	}
-	tStore.LoadTemplates()
+	if err := tStore.LoadTemplates(); err != nil {
+		tStore.Close()
+		e.logger.Error().Err(err).Msg("failed to load templates for battle-end detection")
+		return false
+	}
+	// Battle-end created a fresh native OpenCV template store every attack but
+	// never released it. On Windows that leaks cv::Mat allocations until the
+	// first/next result transition can terminate the process inside native code.
+	// Close recognizer-owned clones first, then the store itself.
+	defer tStore.Close()
 	lootRec := game.NewLootRecognizer(e.cal, tStore, e.logger)
 	defer lootRec.Close()
 
