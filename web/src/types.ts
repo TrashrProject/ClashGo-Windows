@@ -19,6 +19,9 @@ export interface BotStats {
   recovery_attempts: number;
   recovery_successes: number;
   bluestacks_restarts: number;
+  donation_checks: number;
+  donations_sent: number;
+  last_donation_unix: number;
   adb_health: {
     avg_capture_ms: number;
     consecutive_fails: number;
