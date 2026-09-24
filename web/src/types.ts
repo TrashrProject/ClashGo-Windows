@@ -49,6 +49,8 @@ export interface BotStats {
   automation_task_started_unix: number;
   automation_tasks_started: number;
   automation_tasks_completed: number;
+  automation_task_panics: number;
+  automation_task_age_sec: number;
   wall_upgrade_pending: boolean;
   adb_health: {
     avg_capture_ms: number;
