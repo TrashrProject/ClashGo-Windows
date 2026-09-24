@@ -68,7 +68,7 @@ func TestAutomationTaskTimeoutBudgets(t *testing.T) {
 		{"donation", 45 * time.Second, 90 * time.Second},
 		{"army check", 60 * time.Second, 2 * time.Minute},
 		{"wall upgrades", 90 * time.Second, 3 * time.Minute},
-		{"attack", 8 * time.Minute, 15 * time.Minute},
+		{"attack", 20 * time.Minute, 40 * time.Minute},
 	}
 	for _, tc := range tests {
 		got := automationTaskTimeout(tc.name)
