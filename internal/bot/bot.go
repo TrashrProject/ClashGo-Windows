@@ -1229,6 +1229,19 @@ func (b *Bot) automationTaskSnapshot() (current, last string) {
 	return b.automationTaskName, b.automationLastTask
 }
 
+func automationPhaseForTask(name string) RuntimePhase {
+	switch name {
+	case "donation":
+		return PhaseDonation
+	case "resource scan":
+		return PhaseResourceScan
+	case "wall upgrades":
+		return PhaseWallUpgrade
+	default:
+		return PhaseIdle
+	}
+}
+
 // runAutomationTask executes a short task inline under the global UI lease.
 // The defer guarantees that even a panic cannot leave the scheduler locked.
 func (b *Bot) runAutomationTask(name string, work func()) bool {
@@ -1236,6 +1249,11 @@ func (b *Bot) runAutomationTask(name string, work func()) bool {
 		return false
 	}
 	defer b.endAutomationTask(name)
+	phase := automationPhaseForTask(name)
+	if phase != PhaseIdle {
+		b.setRuntimePhase(phase)
+		defer b.setRuntimePhase(PhaseIdle)
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			b.logger.Error().Interface("panic", r).Str("task", name).
@@ -1255,6 +1273,11 @@ func (b *Bot) startAutomationTask(name string, work func()) bool {
 	}
 	go func() {
 		defer b.endAutomationTask(name)
+		phase := automationPhaseForTask(name)
+		if phase != PhaseIdle {
+			b.setRuntimePhase(phase)
+			defer b.setRuntimePhase(PhaseIdle)
+		}
 		defer func() {
 			if r := recover(); r != nil {
 				b.logger.Error().Interface("panic", r).Str("task", name).
