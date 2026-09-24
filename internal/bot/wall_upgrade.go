@@ -1391,6 +1391,15 @@ func dismissInterruptionsFor(h *WallUpgradeHooks) {
 		// Post-boot news splash — tap the green Continue button.
 		px, py := h.Cal.ScaleRef(403, 535)
 		_ = h.Client.Tap(px, py)
+	case game.StateConnectionLost:
+		// Safety interruption: retry the connection without abandoning the
+		// leased wall task. The next village verification decides progress.
+		px, py := h.Cal.ScaleRef(300, 478)
+		_ = h.Client.Tap(px, py)
+	case game.StateConfirmExit:
+		// A defensive Back must never be allowed to close Clash.
+		px, py := h.Cal.ScaleRef(279, 429)
+		_ = h.Client.Tap(px, py)
 	}
 }
 
