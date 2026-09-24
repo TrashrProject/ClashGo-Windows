@@ -87,6 +87,7 @@ type Bot struct {
 	statusMu                sync.RWMutex
 	trainingPending         []attack.TrainingPlanItem
 	villageReason           string
+	villageNextAt           time.Time
 	lastDonationResult      string
 	lastArmyCampGuardLog    time.Time
 	lastDonationScan        time.Time
@@ -1059,6 +1060,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		b.villageAction.Store(int32(decision.Action))
 		b.statusMu.Lock()
 		b.villageReason = decision.Reason
+		b.villageNextAt = decision.NextAt
 		b.statusMu.Unlock()
 
 		switch decision.Action {
@@ -3128,6 +3130,7 @@ func (b *Bot) Stats() BotStats {
 	b.statusMu.RLock()
 	trainingPending := append([]attack.TrainingPlanItem(nil), b.trainingPending...)
 	villageReason := b.villageReason
+	villageNextAt := b.villageNextAt
 	lastDonationResult := b.lastDonationResult
 	b.statusMu.RUnlock()
 	state := game.GameState(b.runtimeState.Load())
@@ -3168,6 +3171,7 @@ func (b *Bot) Stats() BotStats {
 		TrainingPending:        trainingPending,
 		VillageAction:         VillageAction(b.villageAction.Load()).String(),
 		VillageReason:         villageReason,
+		VillageNextUnix:       villageNextAt.Unix(),
 		RuntimeState:          state.String(),
 		RuntimePhase:       phase.String(),
 		RuntimeStateAge:    stateAge,
@@ -3206,6 +3210,7 @@ type BotStats struct {
 	TrainingPending        []attack.TrainingPlanItem `json:"training_pending,omitempty"`
 	VillageAction          string                    `json:"village_action"`
 	VillageReason          string                    `json:"village_reason"`
+	VillageNextUnix        int64                     `json:"village_next_unix"`
 
 	RuntimeState    string        `json:"runtime_state"`
 	RuntimePhase    string        `json:"runtime_phase"`
