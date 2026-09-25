@@ -1850,6 +1850,13 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	b.setRuntimePhase(PhaseAttackNavigation)
 	defer func() {
 		b.setRuntimePhase(PhaseIdle)
+		// The classifier may still hold the last Battle state for a few frames
+		// after Return Home. Reset the watchdog age when the attack lease is
+		// released so the runtime supervisor cannot immediately restart Clash
+		// using a stale in-battle timestamp.
+		now := time.Now()
+		b.runtimeStateSince.Store(now.UnixNano())
+		b.runtimeProgress.Store(now.UnixNano())
 		b.seqRunning.Store(false)
 	}()
 
