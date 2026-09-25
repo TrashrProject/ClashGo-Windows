@@ -29,14 +29,47 @@ finally {
 
 $makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue
 if (-not $makensis) {
-    $choco = Get-Command choco.exe -ErrorAction SilentlyContinue
-    if ($choco) {
-        Write-Host "NSIS absent - installation automatique via Chocolatey..."
-        & $choco.Source install nsis -y --no-progress
-        if ($LASTEXITCODE -ne 0) { throw "NSIS installation failed." }
-        $env:Path += ";$env:ProgramFiles\NSIS;$env:ProgramFiles(x86)\NSIS"
-    } else {
-        throw "NSIS est requis pour produire Setup.exe. Installe NSIS puis relance ce script."
+    $installed = $false
+
+    # Prefer winget because it is available on normal Windows 10/11 installs
+    # and avoids requiring Chocolatey just to build the installer.
+    $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+    if ($winget) {
+        Write-Host "NSIS absent - installation automatique via winget..."
+        & $winget.Source install --id NSIS.NSIS -e --silent --accept-package-agreements --accept-source-agreements
+        if ($LASTEXITCODE -eq 0) {
+            $installed = $true
+        } else {
+            Write-Host "winget n'a pas pu installer NSIS; tentative via Chocolatey..."
+        }
+    }
+
+    if (-not $installed) {
+        $choco = Get-Command choco.exe -ErrorAction SilentlyContinue
+        if ($choco) {
+            Write-Host "Installation automatique de NSIS via Chocolatey..."
+            & $choco.Source install nsis -y --no-progress
+            if ($LASTEXITCODE -eq 0) {
+                $installed = $true
+            }
+        }
+    }
+
+    # Refresh the common NSIS install locations in the current PowerShell.
+    $nsisCandidates = @()
+    if ($env:ProgramFiles) { $nsisCandidates += (Join-Path $env:ProgramFiles "NSIS") }
+    $pf86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+    if ($pf86) { $nsisCandidates += (Join-Path $pf86 "NSIS") }
+    foreach ($candidate in $nsisCandidates) {
+        if (Test-Path (Join-Path $candidate "makensis.exe")) {
+            $env:Path = "$candidate;$env:Path"
+            break
+        }
+    }
+
+    $makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue
+    if (-not $makensis) {
+        throw "Installation automatique de NSIS impossible. Installe NSIS puis relance ce script."
     }
 }
 
