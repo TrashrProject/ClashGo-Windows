@@ -2752,16 +2752,24 @@ func (b *Bot) clickSequenceMode(launchBattle bool) bool {
 		}
 		return false
 	}
-	// Find Match opens a transition/menu. Give it a real state transition
-	// window instead of firing Army Arrow at a stale frame.
+	// Find Match opens a transition/menu. On the current localized Windows UI,
+	// the classifier can keep reporting MainVillage even though the army panel
+	// is already open. Accept either the semantic state OR positive visual
+	// evidence of the large green Battle button before deciding what to do next.
 	armyReadyDeadline := time.Now().Add(4 * time.Second)
+	armyMenuVisuallyReady := false
 	for time.Now().Before(armyReadyDeadline) {
 		s, err := b.client.CaptureToMat()
 		if err == nil && !s.Empty() {
 			st, _ := b.classify(s)
+			_, _, battleVisible := b.locateBattleButtonColor(s)
 			s.Close()
-			if st == game.StateArmySelection || st == game.StateArmyCamp {
-				b.logger.Info().Str("state", st.String()).Msg("army menu state confirmed before next click")
+			if st == game.StateArmySelection || st == game.StateArmyCamp || battleVisible {
+				armyMenuVisuallyReady = true
+				b.logger.Info().
+					Str("state", st.String()).
+					Bool("battle_visible", battleVisible).
+					Msg("army screen visually confirmed before recipe handling")
 				break
 			}
 		}
@@ -2777,31 +2785,44 @@ func (b *Bot) clickSequenceMode(launchBattle bool) bool {
 		if !b.sleepResponsive(220 * time.Millisecond) { return false }
 	}
 	if !armyArrowClicked {
-		b.logger.Warn().Msg("could not find or click Army Arrow button")
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			b.DumpDiagnostics("click_army_arrow_failed", screen, nil)
-			screen.Close()
+		if armyMenuVisuallyReady {
+			// Some current CoC layouts already expose the active army and Battle
+			// control without the legacy recipe-arrow affordance. Do not restart
+			// the whole game merely because that obsolete arrow is absent; the
+			// pre-battle army guard below still verifies the live composition.
+			b.logger.Warn().Msg("Army Arrow not visible, but army screen is visually confirmed; continuing with current active army")
+		} else {
+			b.logger.Warn().Msg("could not find or click Army Arrow button")
+			if screen, err := b.client.CaptureToMat(); err == nil {
+				b.DumpDiagnostics("click_army_arrow_failed", screen, nil)
+				screen.Close()
+			}
+			return false
 		}
-		return false
 	}
 	if !b.sleepResponsive(220 * time.Millisecond) { return false }
 
-	armyClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
-		if b.selectArmySlot() {
-			armyClicked = true
-			break
+	// Only select a saved recipe after we actually opened the recipe drawer.
+	// If the modern UI has no Army Arrow, keep the already-active army and let
+	// the live army guard decide whether it is safe to launch.
+	if armyArrowClicked {
+		armyClicked := false
+		for attempt := 0; attempt < 3; attempt++ {
+			if b.selectArmySlot() {
+				armyClicked = true
+				break
+			}
+			if !b.sleepResponsive(220 * time.Millisecond) { return false }
+		}
+		if !armyClicked {
+			b.logger.Warn().Int("army_slot", b.armySlot).Msg("army recipe card did not appear, continuing anyway")
+			if screen, err := b.client.CaptureToMat(); err == nil {
+				b.DumpDiagnostics("click_army_slot_not_found", screen, map[string]interface{}{"army_slot": b.armySlot})
+				screen.Close()
+			}
 		}
 		if !b.sleepResponsive(220 * time.Millisecond) { return false }
 	}
-	if !armyClicked {
-		b.logger.Warn().Int("army_slot", b.armySlot).Msg("army recipe card did not appear, continuing anyway")
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			b.DumpDiagnostics("click_army_slot_not_found", screen, map[string]interface{}{"army_slot": b.armySlot})
-			screen.Close()
-		}
-	}
-	if !b.sleepResponsive(220 * time.Millisecond) { return false }
 
 	// Army gate. A standalone scheduler preflight can verify the exact recipe
 	// shortly before this attack. Reuse that proof for a small window; if it is
