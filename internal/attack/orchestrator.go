@@ -6,6 +6,7 @@ import (
 	"image"
 	"math/rand"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +14,24 @@ import (
 	"github.com/Ducky705/ClashGO/pkg/strategy"
 	"gocv.io/x/gocv"
 )
+
+// shouldDeployLiveCategory applies player-facing battle preferences to the
+// Windows live-bar path. The live bar is authoritative for what exists, but
+// "available" is not the same as "authorized": disabled heroes/CC must remain
+// untouched instead of being deployed merely because vision found a card.
+func (e *Executor) shouldDeployLiveCategory(category string) bool {
+	if e == nil || e.cfg == nil {
+		return true
+	}
+	switch category {
+	case "Hero":
+		return e.cfg.UseHeroes
+	case "CC":
+		return e.cfg.UseClanCastle
+	default:
+		return true
+	}
+}
 
 // DeployDynamicV2 deploys troops using dynamic red line detection.
 // No hardcoded precision_config.json needed - detects deployment boundary live.
@@ -63,10 +82,15 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	uiCutoff := int(float64(h) * 0.85) // above troop bar
 	redZone := redDetector.Detect(screen, uiCutoff)
 
-	// Keep the Xingchen strategy planner, but restore the Windows-safe red-zone
-	// camera preparation that was proven on the live BlueStacks build. This
-	// moves the map only with single-pointer swipes, reacquires the red boundary
-	// after every movement, and hands the fresh frame to the Xingchen deployer.
+	// Windows adaptive camera search.
+	//
+	// A static screenshot is not enough when the village is zoomed-in or
+	// shifted against an edge: there may literally be no safe strip behind
+	// the red deployment boundary. Before choosing any troop-drop line, let
+	// the bot manipulate the map like a player would: zoom OUT, re-detect,
+	// then pan the map to expose more legal terrain. Every gesture is followed
+	// by a fresh capture + fresh red-line detection. We never deploy from stale
+	// pre-gesture coordinates.
 	deployScreen := screen
 	var cameraFrame gocv.Mat
 	cameraFrameOwned := false
@@ -89,8 +113,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			}
 			side := "left"
 			best := free[side]
-			// Avoid the lower HUD as a preferred troop-drop side.
-			for _, s := range []string{"right", "top"} {
+			for _, s := range []string{"right", "top", "bottom"} {
 				if free[s] > best {
 					side, best = s, free[s]
 				}
@@ -101,8 +124,10 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		refreshCamera := func(reason string) bool {
 			fresh, err := e.client.CaptureToMat()
 			if err != nil || fresh.Empty() {
-				if !fresh.Empty() { fresh.Close() }
-				e.logger.Warn().Err(err).Str("reason", reason).Msg("adaptive red-zone capture failed")
+				if !fresh.Empty() {
+					fresh.Close()
+				}
+				e.logger.Warn().Err(err).Str("reason", reason).Msg("adaptive camera capture failed")
 				return false
 			}
 			if cameraFrameOwned && !cameraFrame.Empty() {
@@ -118,10 +143,13 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				Bool("red_zone_valid", redZone.Valid).
 				Str("best_side", side).
 				Int("free_space", free).
-				Msg("adaptive camera re-evaluated red deployment zone")
+				Msg("adaptive camera re-evaluated deployment space")
 			return true
 		}
 
+		// Aim for a meaningful strip outside the red line, not merely a few
+		// pixels. ~90px on the 860-wide reference frame leaves enough room for
+		// the line itself, contour error and multiple troop taps.
 		minSafeFree := int(90.0 * float64(w) / 860.0)
 		if minSafeFree < 64 {
 			minSafeFree = 64
@@ -133,31 +161,56 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			Str("best_side", side).
 			Int("free_space", free).
 			Int("required_free_space", minSafeFree).
-			Msg("adaptive camera evaluating live red deployment zone")
+			Msg("adaptive camera evaluating battlefield")
 
-		// Never use native pinch zoom on this BlueStacks/Windows path. The
-		// earlier live tests showed multi-touch injection can destabilize
-		// HD-Player. Single-pointer pan is enough to expose a legal strip.
+		// IMPORTANT (Windows / BlueStacks):
+		// Do NOT use Client.ZoomOut()/ZoomIn() here. Those methods inject
+		// low-level multi-touch sendevent batches. BlueStacks 5 on the user's
+		// Pie64 instance can terminate the emulator process under repeated
+		// synthetic multi-touch. Startup already had a Windows-safe path that
+		// deliberately skipped native zoom for this reason.
+		//
+		// Keep adaptive camera movement to single-pointer map pans only. They
+		// are handled by Android's normal input swipe path and are much more
+		// stable on BlueStacks.
+		if !redZone.Valid || free < minSafeFree {
+			e.logger.Info().
+				Int("free_space", free).
+				Int("required_free_space", minSafeFree).
+				Msg("adaptive camera: native pinch zoom disabled on Windows-safe path; using map pan only")
+		}
+
+		// Drag the MAP toward the opposite
+		// direction so the already-best legal side gains even more empty land.
+		// Gestures stay in the playfield, well above the troop bar.
 		for panTry := 1; panTry <= 2 && redZone.Valid && free < minSafeFree; panTry++ {
 			cx := w / 2
 			cy := int(float64(uiCutoff) * 0.52)
 			dx := int(float64(w) * 0.20)
 			dy := int(float64(uiCutoff) * 0.18)
 			x2, y2 := cx, cy
+
 			switch side {
 			case "left":
+				// Move village right -> expose more legal space on left.
 				x2 = cx + dx
 			case "right":
 				x2 = cx - dx
 			case "top":
 				y2 = cy + dy
+			case "bottom":
+				y2 = cy - dy
 			}
+
 			e.logger.Info().
 				Int("attempt", panTry).
 				Str("target_safe_side", side).
-				Msg("adaptive camera: panning map to expose legal red-zone corridor")
+				Int("from_x", cx).Int("from_y", cy).
+				Int("to_x", x2).Int("to_y", y2).
+				Msg("adaptive camera: panning map to expose legal deployment area")
+
 			if err := e.client.Swipe(cx, cy, x2, y2, 260); err != nil {
-				e.logger.Warn().Err(err).Msg("adaptive red-zone map pan failed")
+				e.logger.Warn().Err(err).Msg("adaptive camera map pan failed")
 				break
 			}
 			time.Sleep(360 * time.Millisecond)
@@ -167,15 +220,19 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			side, free = freeSpace(redZone)
 		}
 
-		if redZone.Valid {
-			e.logger.Info().
-				Str("selected_side", side).
-				Int("free_space", free).
-				Interface("red_bbox", redZone.BBox).
-				Msg("live red-zone corridor restored for Xingchen deployment")
-		} else {
-			e.logger.Warn().Msg("live red deployment zone unavailable after camera preparation")
+		// No native pinch-zoom recovery on Windows. If panning lost the red
+		// boundary, keep the failure visible to the caller rather than sending
+		// an unsafe multi-touch gesture that can crash BlueStacks.
+		if !redZone.Valid && cameraFrameOwned {
+			e.logger.Warn().Msg("adaptive camera lost red boundary after pan; refusing unsafe Windows pinch-zoom recovery")
 		}
+
+		side, free = freeSpace(redZone)
+		e.logger.Info().
+			Bool("red_zone_valid", redZone.Valid).
+			Str("selected_side", side).
+			Int("free_space", free).
+			Msg("adaptive camera search complete")
 	}
 
 	// 2. Load precision config FIRST so we can detect user-pinned coords
@@ -364,7 +421,678 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	troopCounter := NewTroopCounter(pCfg.Width, pCfg.Height, e.logger)
 	troopCounts := troopCounter.DetectCounts(deployScreen, slotMgr.GetAllSlots(), mBarY)
 	countMap := GetAllCounts(troopCounts)
+	farmProfile, farmControlled := e.cfg.Farm.ActiveProfile()
+	if farmControlled {
+		writeArmyInspection(slotMgr.GetAllSlots(), troopCounts, &farmProfile)
+	} else {
+		writeArmyInspection(slotMgr.GetAllSlots(), troopCounts, nil)
+	}
 	e.logger.Info().Interface("counts", countMap).Msg("detected troop counts")
+
+	// Windows-safe deployment path.
+	//
+	// The legacy dynamic planner depends on historical manual_slots /
+	// manual_labels / formula mappings that were calibrated on another
+	// layout. On BlueStacks Windows the bot can reach Battle correctly but
+	// then repeatedly select/reconcile the wrong cards, which is exactly what
+	// the live logs show ("unit not found in bar", repeated top-up taps, heroes
+	// never transitioning). For Windows, prefer the slots we just detected on
+	// THIS live 860x732 battle frame and deploy them directly along a safe edge.
+	if runtime.GOOS == "windows" {
+		e.logger.Info().Int("slots", len(slotMgr.GetAllSlots())).Msg("using Windows live-slot deployment path")
+
+		// Build the Windows deployment line from the LIVE red deployment
+		// boundary, not from fixed percentages. Clash of Clans only accepts
+		// troop drops OUTSIDE the red no-deploy polygon; the previous fixed
+		// 28%-72% / 64%-height line frequently landed inside the village and
+		// produced "You cannot deploy troops on the red area!".
+		//
+		// RedZone is represented as a bounding box, so choose a side that has
+		// actual free screen space and place the line just OUTSIDE that box.
+		// If the strategy's preferred side has no room, use the side with the
+		// most room instead of falling back toward the middle of the base.
+		var p1, p2 image.Point
+		const edgeMargin = 24
+		deploySide := strings.ToLower(targetEdge)
+		if strings.Contains(deploySide, "top") {
+			deploySide = "top"
+		} else if strings.Contains(deploySide, "bottom") {
+			deploySide = "bottom"
+		} else if strings.Contains(deploySide, "left") {
+			deploySide = "left"
+		} else if strings.Contains(deploySide, "right") {
+			deploySide = "right"
+		}
+
+		if redZone.Valid {
+			const outsidePad = 34
+			free := map[string]int{
+				"left":   redZone.BBox.Min.X,
+				"right":  w - redZone.BBox.Max.X,
+				"top":    redZone.BBox.Min.Y,
+				"bottom": uiCutoff - redZone.BBox.Max.Y,
+			}
+
+			// Reliability first on Windows: use the side with the most real
+			// free space outside the detected red box, regardless of the
+			// strategy's preferred corner. The old preference could pick a
+			// very narrow strip and force taps back toward the village.
+			// Never choose the bottom side on Windows. The lower battle HUD
+			// contains Surrender/End Battle, Overall Damage and the troop bar.
+			// A geometrically "free" strip there is not a safe tap region.
+			deploySide = "left"
+			best := free["left"]
+			for _, side := range []string{"right", "top"} {
+				if free[side] > best {
+					deploySide = side
+					best = free[side]
+				}
+			}
+
+			switch deploySide {
+			case "right":
+				x := redZone.BBox.Max.X + outsidePad
+				if x > w-edgeMargin { x = w-edgeMargin }
+				fieldTop := int(float64(h) * 0.22)
+				fieldBottom := int(float64(h) * 0.58)
+				y1 := clamp(redZone.BBox.Min.Y+45, fieldTop, fieldBottom)
+				y2 := clamp(redZone.BBox.Max.Y-45, fieldTop, fieldBottom)
+				if y2-y1 < int(float64(h)*0.12) {
+					mid := (fieldTop + fieldBottom) / 2
+					half := int(float64(h) * 0.10)
+					y1, y2 = mid-half, mid+half
+				}
+				p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
+			case "top":
+				y := redZone.BBox.Min.Y - outsidePad
+				if y < edgeMargin { y = edgeMargin }
+				x1 := clamp(redZone.BBox.Min.X+35, edgeMargin, w-edgeMargin)
+				x2 := clamp(redZone.BBox.Max.X-35, edgeMargin, w-edgeMargin)
+				p1, p2 = image.Pt(x1, y), image.Pt(x2, y)
+			case "bottom":
+				y := redZone.BBox.Max.Y + outsidePad
+				if y > uiCutoff-edgeMargin { y = uiCutoff-edgeMargin }
+				x1 := clamp(redZone.BBox.Min.X+35, edgeMargin, w-edgeMargin)
+				x2 := clamp(redZone.BBox.Max.X-35, edgeMargin, w-edgeMargin)
+				p1, p2 = image.Pt(x1, y), image.Pt(x2, y)
+			default: // left
+				x := redZone.BBox.Min.X - outsidePad
+				if x < edgeMargin { x = edgeMargin }
+				fieldTop := int(float64(h) * 0.22)
+				fieldBottom := int(float64(h) * 0.58)
+				y1 := clamp(redZone.BBox.Min.Y+45, fieldTop, fieldBottom)
+				y2 := clamp(redZone.BBox.Max.Y-45, fieldTop, fieldBottom)
+				if y2-y1 < int(float64(h)*0.12) {
+					mid := (fieldTop + fieldBottom) / 2
+					half := int(float64(h) * 0.10)
+					y1, y2 = mid-half, mid+half
+				}
+				p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
+			}
+
+			e.logger.Info().
+				Str("side", deploySide).
+				Interface("red_bbox", redZone.BBox).
+				Interface("p1", p1).
+				Interface("p2", p2).
+				Int("free_space", free[deploySide]).
+				Msg("Windows deploy line locked to widest free side outside live red zone")
+		} else if len(deployLine.Points) >= 2 {
+			// Existing calculator already keeps these points near the outer
+			// edge; use them if red-line detection itself was unavailable.
+			p1 = deployLine.Points[0]
+			p2 = deployLine.Points[len(deployLine.Points)-1]
+			e.logger.Warn().
+				Interface("p1", p1).
+				Interface("p2", p2).
+				Msg("Windows red zone unavailable; using calculated outer deploy line")
+		} else {
+			// Last-resort line hugs the LEFT border rather than the middle.
+			p1 = image.Pt(edgeMargin, int(float64(h)*0.25))
+			p2 = image.Pt(edgeMargin, int(float64(h)*0.68))
+			e.logger.Warn().Msg("Windows deploy line fallback: hugging outer left border")
+		}
+
+		tapExec := NewTapExecutor(e.client, e.cal, e.logger)
+		tapExec.StartDeployBudget()
+		// Candidate deploy lines MUST all stay on the SAME verified outside
+		// side of the live red boundary. The previous implementation rotated
+		// retries through hard-coded left/right/top/bottom lines; on irregular
+		// bases those fallback lines could be INSIDE the red no-deploy polygon,
+		// which is exactly why Clash displayed "You cannot deploy troops on the
+		// red area!" even though the first line was correct.
+		//
+		// Build progressively-more-outward variants instead. If the first line
+		// is rejected, every retry moves AWAY from the village / red boundary,
+		// never across it.
+		safeLines := make([][2]image.Point, 0, 4)
+		baseLine := [2]image.Point{p1, p2}
+		safeLines = append(safeLines, baseLine)
+
+		nudgeOutside := func(line [2]image.Point, pixels int) [2]image.Point {
+			out := line
+			switch deploySide {
+			case "right":
+				out[0].X = clamp(out[0].X+pixels, edgeMargin, w-edgeMargin)
+				out[1].X = clamp(out[1].X+pixels, edgeMargin, w-edgeMargin)
+			case "top":
+				out[0].Y = clamp(out[0].Y-pixels, edgeMargin, uiCutoff-edgeMargin)
+				out[1].Y = clamp(out[1].Y-pixels, edgeMargin, uiCutoff-edgeMargin)
+			case "bottom":
+				out[0].Y = clamp(out[0].Y+pixels, edgeMargin, uiCutoff-edgeMargin)
+				out[1].Y = clamp(out[1].Y+pixels, edgeMargin, uiCutoff-edgeMargin)
+			default: // left
+				out[0].X = clamp(out[0].X-pixels, edgeMargin, w-edgeMargin)
+				out[1].X = clamp(out[1].X-pixels, edgeMargin, w-edgeMargin)
+			}
+			return out
+		}
+
+		// One stable line only on Windows. Repeatedly nudging farther outward
+		// eventually pushed taps into screen chrome / HUD. The base line is
+		// already outside the detected red boundary by outsidePad.
+		_ = nudgeOutside
+		e.logger.Info().
+			Str("side", deploySide).
+			Int("safe_lines", len(safeLines)).
+			Interface("closest", safeLines[0]).
+			Interface("furthest", safeLines[len(safeLines)-1]).
+			Msg("Windows safe deploy corridor locked behind red boundary")
+
+		// One helper for initial deploy + reconciliation. Every troop-like card
+		// uses this verified outside corridor. Retries only move farther OUT.
+		// Spells intentionally target inside.
+		deploySlot := func(slot *TrackedSlot, n int) {
+			if n <= 0 {
+				n = 1
+			}
+			if n > 40 {
+				n = 40
+			}
+
+			tapExec.TapSlot(slot, 3)
+			tapExec.HumanSleep(80, 15)
+
+			if slot.Category == "Spell" {
+				spellPoint := image.Pt(w/2, int(float64(uiCutoff)*0.50))
+				if redZone.Valid {
+					spellPoint = image.Pt(
+						(redZone.BBox.Min.X+redZone.BBox.Max.X)/2,
+						(redZone.BBox.Min.Y+redZone.BBox.Max.Y)/2,
+					)
+				}
+				tapExec.TapDeployPoint(spellPoint, n, 2)
+			} else {
+				// Keep the whole army on one coherent deployment line. The old
+				// code advanced to another parallel band for every retry/card,
+				// which made the attack look like scattered "balls" and could
+				// waste taps near the red boundary. Use the furthest verified
+				// safe line consistently for normal troops.
+				line := safeLines[len(safeLines)-1]
+				e.logger.Info().
+					Str("unit", slot.UnitName).
+					Str("category", slot.Category).
+					Interface("p1", line[0]).
+					Interface("p2", line[1]).
+					Msg("Windows deploy: using outer-edge line")
+
+				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
+					tapExec.TapDeployPoint(image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2), 1, 2)
+				} else {
+					// Windows/BlueStacks can drop rapid tap triples under load.
+					// Use paced one-by-one line deployment so a 9-count EDrag
+					// card does not end with 1-2 troops still sitting in the bar.
+					tapExec.TapDeployLineReliable(line[0], line[1], n, 2)
+				}
+			}
+		}
+
+		// Windows live deployment MUST re-read the troop bar after every card.
+		// CoC compacts the bar when a troop/siege/spell card is emptied. Keeping
+		// the initial X positions therefore makes every later tap drift onto the
+		// next card (and eventually onto hero ability buttons). This is exactly
+		// the observed "select ED -> jump to siege -> hammer last hero" failure.
+		categoryPriority := func(cat string) int {
+			switch cat {
+			case "Hero":
+				return 0
+			case "Siege", "CC":
+				return 1
+			case "Troop":
+				return 2
+			case "Spell":
+				return 3
+			default:
+				return 2
+			}
+		}
+		var armyState *ArmyStateManager
+		if farmControlled {
+			armyState = NewArmyStateManager(farmProfile)
+			defer writeAttackTrace(s.Name, armyState)
+			e.logger.Info().
+				Int("town_hall", farmProfile.TownHall).
+				Str("profile", farmProfile.Label).
+				Int("troop_capacity", farmProfile.TroopCapacity).
+				Int("spell_capacity", farmProfile.SpellCapacity).
+				Msg("Windows deployment controlled by farm composition profile")
+		}
+		oneShotDone := make(map[string]bool)
+		// Structurally detected heroes may not have a portrait-template name.
+		// Their relative left-to-right order remains stable even as troop cards
+		// disappear, so remember how many anonymous hero cards were already
+		// deployed and skip exactly that many on subsequent rescans.
+		unknownHeroesDeployed := 0
+		cardAttempts := make(map[string]int)
+		profileFirstDeploy := make(map[string]bool)
+		liveRemaining := 0
+		spentOnlyReached := false
+
+		// Hero abilities are intentionally delayed instead of being fired
+		// immediately after deployment. The live Windows bar keeps hero ability
+		// cards visible after the heroes are dropped, so we can reacquire their
+		// CURRENT coordinates later even if troop cards have compacted.
+		const heroAbilityDelay = 30 * time.Second
+		var heroAbilityDue time.Time
+		heroAbilitiesActivated := false
+
+		oneShotKey := func(slot *TrackedSlot) string {
+			name := strings.ToLower(strings.TrimSpace(slot.UnitName))
+			if name == "" {
+				name = fmt.Sprintf("x%d", slot.X)
+			}
+			return slot.Category + ":" + name
+		}
+
+		for liveRound := 1; liveRound <= 18 && !tapExec.DeployBudgetExhausted(); liveRound++ {
+			fresh, capErr := tapExec.CaptureFresh()
+			if capErr != nil || fresh.Empty() {
+				if !fresh.Empty() { fresh.Close() }
+				e.logger.Warn().Int("round", liveRound).Msg("Windows live deployment capture failed")
+				tapExec.HumanSleep(140, 20)
+				continue
+			}
+
+			liveMgr := NewSlotManager(fresh, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+			liveSlots := append([]*TrackedSlot(nil), liveMgr.GetAllSlots()...)
+			if len(liveSlots) == 0 {
+				fresh.Close()
+				liveRemaining = 0
+				e.logger.Info().Int("round", liveRound).Msg("Windows live deployment: no active cards remain")
+				break
+			}
+
+			sort.SliceStable(liveSlots, func(i, j int) bool {
+				pi := categoryPriority(liveSlots[i].Category)
+				pj := categoryPriority(liveSlots[j].Category)
+				if pi != pj { return pi < pj }
+				return liveSlots[i].X < liveSlots[j].X
+			})
+
+			liveCounts := troopCounter.DetectCounts(fresh, liveSlots, liveMgr.GetBarY())
+
+			// Hero portraits vary heavily with skins/levels. If template identity
+			// missed one but the card has no troop-count overlay and carries the
+			// structural hero health strip, promote it before choosing a card.
+			// This is what prevents King/Queen/Prince/Warden cards from being left
+			// behind as generic zero-count troops.
+			for _, slot := range liveSlots {
+				if slot.Category != "Troop" {
+					continue
+				}
+				// Hero cards show their LEVEL (e.g. 91/95/69) in the same lower
+				// area where troop OCR looks for quantity. Treating that number
+				// as a troop count prevented real King/Queen/Prince/Warden cards
+				// from entering the hero path. A verified green hero-health strip
+				// wins over numeric OCR.
+				if looksLikeHeroCardStatic(fresh, slot.X, liveMgr.GetBarY(), w, h) {
+					slot.Category = "Hero"
+					e.logger.Info().Int("x", slot.X).Str("unit", slot.UnitName).
+						Msg("Windows live deployment: structural hero card overrides count OCR")
+				}
+			}
+			sort.SliceStable(liveSlots, func(i, j int) bool {
+				pi := categoryPriority(liveSlots[i].Category)
+				pj := categoryPriority(liveSlots[j].Category)
+				if pi != pj { return pi < pj }
+				return liveSlots[i].X < liveSlots[j].X
+			})
+
+			// Fire hero abilities once, ~30s after the first hero was deployed.
+			// Reacquiring the CURRENT hero-card X positions avoids stale-slot taps
+			// after the battle bar compacts.
+			if !heroAbilitiesActivated && !heroAbilityDue.IsZero() && !time.Now().Before(heroAbilityDue) {
+				activated := 0
+				for _, heroSlot := range liveSlots {
+					if heroSlot == nil || heroSlot.Category != "Hero" || !e.shouldDeployLiveCategory("Hero") {
+						continue
+					}
+					tapExec.TapHeroAbility(heroSlot)
+					activated++
+					tapExec.HumanSleep(70, 10)
+				}
+				if activated > 0 {
+					heroAbilitiesActivated = true
+					e.logger.Info().
+						Int("count", activated).
+						Dur("delay", heroAbilityDelay).
+						Msg("Windows hero abilities activated after delayed trigger")
+					fresh.Close()
+					tapExec.HumanSleep(120, 15)
+					continue
+				}
+			}
+
+			var chosen *TrackedSlot
+			chosenCount := 0
+			chosenActivity := 0.0
+
+			anonymousHeroIndex := 0
+			for _, slot := range liveSlots {
+				key := oneShotKey(slot)
+				// Player preferences are hard policy, not hints. Keep disabled
+				// hero/Clan Castle cards untouched and continue evaluating the
+				// remaining live bar. This is especially important in Easy Mode,
+				// where a single "Use heroes" switch must cover every hero rather
+				// than only legacy Queen/Warden code paths.
+				if !e.shouldDeployLiveCategory(slot.Category) {
+					continue
+				}
+				// Skip every identity explicitly blacklisted for this battle.
+				if oneShotDone[key] {
+					continue
+				}
+				if slot.Category == "Hero" && strings.TrimSpace(slot.UnitName) == "" {
+					if anonymousHeroIndex < unknownHeroesDeployed {
+						anonymousHeroIndex++
+						continue
+					}
+					anonymousHeroIndex++
+				}
+
+				// The farm profile is a TARGET, never a reason to strand a live
+				// card. Actual battle-bar contents are authoritative: seasonal
+				// troops, a different siege, or a user's chosen hero lineup
+				// must still be deployed. Profile counts are used below when
+				// the unit is known; deviations are diagnostic only.
+				if farmControlled && strings.TrimSpace(slot.UnitName) != "" {
+					switch slot.Category {
+					case "Hero":
+						if !farmProfile.UsesHero(slot.UnitName) {
+							e.logger.Debug().Str("unit", slot.UnitName).Msg("live hero differs from farm target; deploying live hero")
+						}
+					case "Siege", "CC":
+						if strings.TrimSpace(farmProfile.Siege) == "" || !strings.EqualFold(strings.TrimSpace(farmProfile.Siege), strings.TrimSpace(slot.UnitName)) {
+							e.logger.Debug().Str("unit", slot.UnitName).Msg("live siege/CC differs from farm target; deploying live card")
+						}
+					case "Troop", "Spell":
+						if farmProfile.DesiredCount(slot.UnitName) <= 0 {
+							e.logger.Debug().Str("unit", slot.UnitName).Str("category", slot.Category).Msg("live card not in farm target; deploying observed amount")
+						}
+					}
+				}
+
+				activity := GetSlotActivityRatioStatic(fresh, slot.X, slot.Y, w)
+				if activity < 0.08 {
+					continue
+				}
+
+				count := GetCountForSlot(liveCounts, slot.X)
+				if count > 50 { count = 0 }
+				if armyState != nil && count > 0 && strings.TrimSpace(slot.UnitName) != "" {
+					armyState.ObserveRemaining(slot.UnitName, count)
+				}
+
+				chosen = slot
+				chosenCount = count
+				chosenActivity = activity
+				break
+			}
+
+			if chosen == nil {
+				fresh.Close()
+				liveRemaining = 0
+				spentOnlyReached = true
+				e.logger.Info().Int("round", liveRound).Msg("Windows live deployment: only spent/ability cards remain")
+				break
+			}
+
+			key := oneShotKey(chosen)
+			cardAttempts[key]++
+			e.logger.Info().
+				Int("round", liveRound).
+				Str("unit", chosen.UnitName).
+				Str("category", chosen.Category).
+				Int("slot_x", chosen.X).
+				Int("slot_y", chosen.Y).
+				Int("ocr_count", chosenCount).
+				Float64("activity", chosenActivity).
+				Int("attempt", cardAttempts[key]).
+				Msg("Windows live deployment: freshly reacquired current card")
+
+			// Use the current fresh coordinates only. Close the frame before
+			// sending ADB input; the card will be reacquired again afterwards.
+			fresh.Close()
+
+			if chosen.Category == "Hero" || chosen.Category == "Siege" || chosen.Category == "CC" {
+				line := safeLines[len(safeLines)-1]
+				pt := image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2)
+				tapExec.TapSlot(chosen, 1)
+				tapExec.HumanSleep(90, 12)
+				tapExec.TapDeployPoint(pt, 1, 1)
+				oneShotDone[key] = true
+				if chosen.Category == "Hero" {
+					if heroAbilityDue.IsZero() {
+						heroAbilityDue = time.Now().Add(heroAbilityDelay)
+						e.logger.Info().
+							Time("activate_at", heroAbilityDue).
+							Dur("delay", heroAbilityDelay).
+							Msg("Windows hero ability timer armed")
+					}
+				}
+				if chosen.Category == "Hero" && strings.TrimSpace(chosen.UnitName) == "" {
+					unknownHeroesDeployed++
+					e.logger.Info().
+						Int("anonymous_heroes_deployed", unknownHeroesDeployed).
+						Msg("Windows anonymous hero deployed once; advancing structural hero cursor")
+				}
+				if armyState != nil && strings.TrimSpace(chosen.UnitName) != "" {
+					armyState.CompleteOneShot(chosen.UnitName)
+				}
+				e.logger.Info().
+					Str("unit", chosen.UnitName).
+					Str("category", chosen.Category).
+					Interface("deploy_point", pt).
+					Msg("Windows one-shot card deployed once and permanently blacklisted from re-selection")
+				tapExec.HumanSleep(100, 15)
+				continue
+			}
+
+			count := chosenCount
+			desired := 0
+			if farmControlled && strings.TrimSpace(chosen.UnitName) != "" {
+				desired = farmProfile.DesiredCount(chosen.UnitName)
+				// Live OCR is authoritative whenever it produced a sane positive
+				// count. Using the profile amount over a smaller live amount can
+				// keep firing battlefield taps after the selected card empties,
+				// at which point CoC may compact/select another card. That is a
+				// direct path to "EDrags skipped, then siege/spells dumped".
+				//
+				// The profile is only a fallback when OCR genuinely failed.
+				if desired > 0 && !profileFirstDeploy[key] {
+					profileFirstDeploy[key] = true
+					if chosenCount <= 0 {
+						count = desired
+						e.logger.Info().
+							Str("unit", chosen.UnitName).
+							Int("profile_count", desired).
+							Msg("farm profile: OCR unavailable; using configured count as guarded fallback")
+					} else {
+						e.logger.Debug().
+							Str("unit", chosen.UnitName).
+							Int("profile_count", desired).
+							Int("ocr_count", chosenCount).
+							Msg("farm profile: live OCR count wins over configured target")
+					}
+				}
+			}
+			if count <= 0 {
+				// Unknown-count cards use a deliberately bounded burst, then
+				// the next loop recaptures/reacquires the whole bar. Never send
+				// a full profile count blindly through a shifting troop bar.
+				if chosen.Category == "Spell" {
+					count = 3
+				} else {
+					count = 10
+				}
+			}
+			if count > 40 { count = 40 }
+
+			deploySlot(chosen, count)
+			if armyState != nil && strings.TrimSpace(chosen.UnitName) != "" {
+				armyState.Attempt(chosen.UnitName, count)
+			}
+			tapExec.HumanSleep(85, 15)
+
+			// Do not trust old coordinates after this point. On the next loop
+			// the whole bar is captured and re-indexed from scratch.
+			if cardAttempts[key] >= 2 && chosen.UnitName != "" && chosenCount <= 0 {
+				e.logger.Warn().
+					Str("unit", chosen.UnitName).
+					Str("category", chosen.Category).
+					Msg("Windows live deployment card persisted with unknown count after 2 bursts; blacklisting to avoid a stuck loop")
+				oneShotDone["Troop:"+strings.ToLower(strings.TrimSpace(chosen.UnitName))] = true
+				if armyState != nil {
+					armyState.Fail(chosen.UnitName)
+				}
+			}
+		}
+
+		// If deployment finished before the 30-second hero timer, wait only the
+		// remaining time, then reacquire the live bar and fire each visible hero
+		// ability once. This keeps the trigger tied to hero deployment time rather
+		// than total attack duration.
+		if !heroAbilitiesActivated && !heroAbilityDue.IsZero() {
+			if wait := time.Until(heroAbilityDue); wait > 0 {
+				time.Sleep(wait)
+			}
+			abilityFrame, abilityErr := tapExec.CaptureFresh()
+			if abilityErr == nil && !abilityFrame.Empty() {
+				abilityMgr := NewSlotManager(abilityFrame, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+				activated := 0
+				for _, heroSlot := range abilityMgr.GetAllSlots() {
+					if heroSlot == nil {
+						continue
+					}
+					if heroSlot.Category == "Troop" && looksLikeHeroCardStatic(abilityFrame, heroSlot.X, abilityMgr.GetBarY(), w, h) {
+						heroSlot.Category = "Hero"
+					}
+					if heroSlot.Category != "Hero" || !e.shouldDeployLiveCategory("Hero") {
+						continue
+					}
+					tapExec.TapHeroAbility(heroSlot)
+					activated++
+					tapExec.HumanSleep(70, 10)
+				}
+				abilityFrame.Close()
+				if activated > 0 {
+					heroAbilitiesActivated = true
+					e.logger.Info().
+						Int("count", activated).
+						Dur("delay", heroAbilityDelay).
+						Msg("Windows hero abilities activated after delayed trigger")
+				}
+			}
+		}
+
+		// One final read decides whether genuinely deployable normal/spell cards
+		// remain. Deployed hero ability cards are intentionally ignored.
+		finalFrame, finalErr := tapExec.CaptureFresh()
+		if finalErr == nil && !finalFrame.Empty() {
+			finalMgr := NewSlotManager(finalFrame, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+			finalCounts := troopCounter.DetectCounts(finalFrame, finalMgr.GetAllSlots(), finalMgr.GetBarY())
+			liveRemaining = 0
+			anonymousHeroesVisible := 0
+			for _, slot := range finalMgr.GetAllSlots() {
+				if !e.shouldDeployLiveCategory(slot.Category) {
+					continue
+				}
+				count := GetCountForSlot(finalCounts, slot.X)
+				if slot.Category == "Troop" &&
+					looksLikeHeroCardStatic(finalFrame, slot.X, finalMgr.GetBarY(), w, h) {
+					slot.Category = "Hero"
+				}
+				if slot.Category == "Hero" {
+					name := strings.ToLower(strings.TrimSpace(slot.UnitName))
+					if name == "" {
+						anonymousHeroesVisible++
+					} else if !oneShotDone["Hero:"+name] {
+						liveRemaining++
+						e.logger.Warn().Str("hero", name).Msg("final deployment verification found hero never deployed")
+					}
+					continue
+				}
+				if slot.Category == "Siege" || slot.Category == "CC" {
+					name := strings.ToLower(strings.TrimSpace(slot.UnitName))
+					if name != "" && !oneShotDone[slot.Category+":"+name] {
+						liveRemaining++
+					}
+					continue
+				}
+				activity := GetSlotActivityRatioStatic(finalFrame, slot.X, slot.Y, w)
+				if count > 0 || activity >= 0.12 {
+					liveRemaining++
+				}
+			}
+			if anonymousHeroesVisible > unknownHeroesDeployed {
+				missing := anonymousHeroesVisible - unknownHeroesDeployed
+				if spentOnlyReached {
+					// After the live loop positively concluded that only spent/ability
+					// cards remain, anonymous hero-looking cards are ability buttons,
+					// not undeployed heroes. Do not turn that into a false deploy failure.
+					e.logger.Debug().
+						Int("visible_anonymous_heroes", anonymousHeroesVisible).
+						Int("deployed_anonymous_heroes", unknownHeroesDeployed).
+						Int("ignored", missing).
+						Msg("ignoring anonymous hero ability cards during final verification")
+				} else {
+					liveRemaining += missing
+					e.logger.Warn().
+						Int("visible_anonymous_heroes", anonymousHeroesVisible).
+						Int("deployed_anonymous_heroes", unknownHeroesDeployed).
+						Int("missing", missing).
+						Msg("final deployment verification found undeployed anonymous hero cards")
+				}
+			}
+			finalFrame.Close()
+		}
+
+		profileIncomplete := 0
+		if armyState != nil {
+			profileIncomplete = armyState.IncompleteCount()
+			if profileIncomplete > 0 {
+				e.logger.Warn().
+					Int("profile_incomplete", profileIncomplete).
+					Interface("units", armyState.IncompleteUnits()).
+					Msg("farm profile still has undeployed expected units")
+			}
+		}
+
+		totalRemaining := liveRemaining
+		if profileIncomplete > totalRemaining {
+			totalRemaining = profileIncomplete
+		}
+
+		e.logger.Info().
+			Int("visible_remaining", liveRemaining).
+			Int("profile_incomplete", profileIncomplete).
+			Int("remaining", totalRemaining).
+			Msg("Windows dynamic live-bar deployment complete")
+		if totalRemaining > 0 {
+			return totalRemaining, fmt.Errorf("%d expected/deployable card(s) still incomplete after dynamic live deployment", totalRemaining)
+		}
+		return 0, nil
+	}
 	// troopCounter is threaded below to NewHeroManager / NewSweeper /
 	// NewVerifier so they can live-OCR per-slot counts at deploy time
 	// and reconcile until the slot is truly empty (fixes the
@@ -507,7 +1235,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			tapExec.HumanSleep(150, 30)
 
 			detectedCount := GetCountForSlot(troopCounts, up.Slot.X)
-			heroMgr.DeployTroops(up.Unit, up.Slot, plan.Phase.Pattern, plan.Phase.Offset, plan.Phase.Pattern, deployScreen, detectedCount)
+			heroMgr.DeployTroops(up.Unit, up.Slot, plan.Phase.Pattern, plan.Phase.Offset, plan.Phase.Pattern, screen, detectedCount)
 		}
 
 		// Deploy siege
@@ -547,7 +1275,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				heroUnits = append(heroUnits, up.Unit)
 			}
 			if len(heroUnits) > 0 {
-				heroMgr.DeployHeroes(heroUnits, deployScreen)
+				heroMgr.DeployHeroes(heroUnits, screen)
 			}
 		}
 
