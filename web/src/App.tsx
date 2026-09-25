@@ -539,13 +539,21 @@ function App() {
     await ApplyUpdate();
   };
   const handleUpdaterOneClick = async () => {
-    // The Go-side InstallAndRestart takes care of stopping the bot,
-    // saving stats, marking the restarting state, spawning the helper,
-    // and exiting the process after a 1s IPC flush window.
+    // True one-click Windows update:
+    // 1) if the release is only "available", download + SHA256 verify it;
+    // 2) once state is "ready", let Go stop the bot, swap the bundle and restart.
+    // The old handler called InstallAndRestart() immediately, which can only
+    // work from StateReady and therefore failed on the very first click.
+    let status = await GetUpdateStatus();
+    if (status.state !== 'ready') {
+      await DownloadUpdate();
+      status = await GetUpdateStatus();
+      setUpdateStatus(status);
+    }
+    if (status.state !== 'ready') {
+      throw new Error(status.error || 'La mise à jour n’est pas prête à être installée.');
+    }
     await InstallAndRestart();
-    // The status will flip to 'restarting' and the React side will
-    // switch to the non-dismissible splash automatically via the
-    // updater_status event listener.
   };
   const handleUpdaterSkip = async () => {
     await SkipCurrentVersion();
