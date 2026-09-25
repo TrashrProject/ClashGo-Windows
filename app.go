@@ -1516,6 +1516,27 @@ func (a *App) InstallAndRestart() error {
 		return fmt.Errorf("updater not initialized")
 	}
 
+	// Make this binding a true one-click operation even for older/stale UI
+	// snapshots. If the release is available but not yet READY, download and
+	// SHA256-verify it here before trying to spawn the installer helper.
+	// This removes the fragile frontend dependency that caused
+	// "download not ready — call Download() first".
+	st := a.updater.GetStatus()
+	if st.State != updater.StateReady {
+		if !st.Available {
+			if _, err := a.updater.Check(a.ctx); err != nil {
+				return fmt.Errorf("check update before install: %w", err)
+			}
+		}
+		if _, err := a.updater.Download(a.ctx); err != nil {
+			return fmt.Errorf("download update before install: %w", err)
+		}
+		st = a.updater.GetStatus()
+		if st.State != updater.StateReady {
+			return fmt.Errorf("update download finished without reaching ready state")
+		}
+	}
+
 	// Step 1: stop the bot synchronously if running.
 	if a.IsRunning() {
 		log.Info().Msg("InstallAndRestart: stopping bot to drain ADB before exit")
