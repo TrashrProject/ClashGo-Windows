@@ -127,7 +127,7 @@ func NewClient(opts ...Option) *Client {
 		jitterDelays:    true,
 		maxJitterPixels: 2.0,
 		jitterFraction:  0.15,
-		minCaptureGap:   120 * time.Millisecond,
+		minCaptureGap:   220 * time.Millisecond,
 	}
 	for _, o := range opts {
 		o(c)
@@ -170,6 +170,14 @@ func (c *Client) Connect() error {
 	}
 	c.log.Info("ADB device connected")
 	return nil
+}
+
+// EmulatorProcessRunning reports whether the platform VM/player process is
+// still alive. On Windows this maps to HD-Player.exe; on macOS it maps to the
+// existing VM signal helper. Recovery uses this to skip pointless ADB resets
+// when the emulator process itself has already died.
+func (c *Client) EmulatorProcessRunning() bool {
+	return c.firstVMSignal() != ""
 }
 
 func (c *Client) EnsureConnected() error {
