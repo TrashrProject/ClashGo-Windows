@@ -699,6 +699,31 @@ func (b *Bot) recoverEmulator() {
 		return
 	}
 
+	// If the emulator process itself is already gone, ADB reconnect/reset
+	// attempts cannot possibly help. Skip straight to relaunch so a BlueStacks
+	// crash recovers in seconds instead of burning the transport ladder first.
+	if !b.client.EmulatorProcessRunning() {
+		b.logger.Error().Msg("BlueStacks process is no longer running; relaunching instance immediately")
+		b.blueStacksRestarts.Add(1)
+		if err := b.client.EnsureBlueStacks(b.cfg.Device.Width, b.cfg.Device.Height, b.cfg.Device.DPI); err != nil {
+			b.logger.Error().Err(err).Msg("immediate BlueStacks relaunch failed; deferring to next watchdog cycle")
+			return
+		}
+		for i := 0; i < 45; i++ {
+			if deviceOK() {
+				b.logger.Info().Msg("BlueStacks recovered after process crash")
+				b.restartGame()
+				b.recoverySuccesses.Add(1)
+				return
+			}
+			if !b.sleepResponsive(2 * time.Second) {
+				return
+			}
+		}
+		b.logger.Error().Msg("BlueStacks relaunched but ADB did not become ready inside recovery window")
+		return
+	}
+
 	b.logger.Warn().Msg("device unresponsive to wm size; reconnecting ADB transport")
 	if err := b.client.Reconnect(); err != nil {
 		b.logger.Warn().Err(err).Msg("transport reconnect failed")
