@@ -1,12 +1,19 @@
 param(
     [string]$Version = "0.6.0-windows-beta",
-    [string]$AccountServiceURL = $env:CLASHGO_ACCOUNT_API_URL,
+    [string]$AccountServiceURL = "",
     [switch]$SkipSync,
     [switch]$SkipTests
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+# Only inherit CLASHGO_ACCOUNT_API_URL when the caller did not explicitly
+# provide -AccountServiceURL. This lets packaging scripts intentionally pass
+# an empty value even if the developer shell contains a stale/bad env var.
+if (-not $PSBoundParameters.ContainsKey("AccountServiceURL") -and $env:CLASHGO_ACCOUNT_API_URL) {
+    $AccountServiceURL = $env:CLASHGO_ACCOUNT_API_URL
+}
 Push-Location $repoRoot
 try {
     if (-not $SkipSync -and -not (Test-Path ".\assets\templates\btn_attack.png")) { & ".\tools\sync-upstream-runtime.ps1" }
