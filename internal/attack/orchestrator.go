@@ -611,7 +611,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			}
 
 			tapExec.TapSlot(slot, 3)
-			tapExec.HumanSleep(110, 20)
+			tapExec.HumanSleep(80, 15)
 
 			if slot.Category == "Spell" {
 				spellPoint := image.Pt(w/2, int(float64(uiCutoff)*0.50))
@@ -686,6 +686,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		cardAttempts := make(map[string]int)
 		profileFirstDeploy := make(map[string]bool)
 		liveRemaining := 0
+		spentOnlyReached := false
 
 		oneShotKey := func(slot *TrackedSlot) string {
 			name := strings.ToLower(strings.TrimSpace(slot.UnitName))
@@ -695,7 +696,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			return slot.Category + ":" + name
 		}
 
-		for liveRound := 1; liveRound <= 36 && !tapExec.DeployBudgetExhausted(); liveRound++ {
+		for liveRound := 1; liveRound <= 24 && !tapExec.DeployBudgetExhausted(); liveRound++ {
 			fresh, capErr := tapExec.CaptureFresh()
 			if capErr != nil || fresh.Empty() {
 				if !fresh.Empty() { fresh.Close() }
@@ -818,6 +819,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			if chosen == nil {
 				fresh.Close()
 				liveRemaining = 0
+				spentOnlyReached = true
 				e.logger.Info().Int("round", liveRound).Msg("Windows live deployment: only spent/ability cards remain")
 				break
 			}
@@ -843,7 +845,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				line := safeLines[len(safeLines)-1]
 				pt := image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2)
 				tapExec.TapSlot(chosen, 1)
-				tapExec.HumanSleep(130, 15)
+				tapExec.HumanSleep(90, 12)
 				tapExec.TapDeployPoint(pt, 1, 1)
 				oneShotDone[key] = true
 				if chosen.Category == "Hero" && strings.TrimSpace(chosen.UnitName) == "" {
@@ -860,7 +862,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 					Str("category", chosen.Category).
 					Interface("deploy_point", pt).
 					Msg("Windows one-shot card deployed once and permanently blacklisted from re-selection")
-				tapExec.HumanSleep(180, 20)
+				tapExec.HumanSleep(100, 15)
 				continue
 			}
 
@@ -899,7 +901,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				if chosen.Category == "Spell" {
 					count = 2
 				} else {
-					count = 6
+					count = 8
 				}
 			}
 			if count > 40 { count = 40 }
@@ -908,15 +910,15 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			if armyState != nil && strings.TrimSpace(chosen.UnitName) != "" {
 				armyState.Attempt(chosen.UnitName, count)
 			}
-			tapExec.HumanSleep(150, 20)
+			tapExec.HumanSleep(85, 15)
 
 			// Do not trust old coordinates after this point. On the next loop
 			// the whole bar is captured and re-indexed from scratch.
-			if cardAttempts[key] >= 8 && chosen.UnitName != "" && chosenCount <= 0 {
+			if cardAttempts[key] >= 4 && chosen.UnitName != "" && chosenCount <= 0 {
 				e.logger.Warn().
 					Str("unit", chosen.UnitName).
 					Str("category", chosen.Category).
-					Msg("Windows live deployment card persisted with unknown count after 8 bursts; blacklisting to avoid a stuck loop")
+					Msg("Windows live deployment card persisted with unknown count after 4 bursts; blacklisting to avoid a stuck loop")
 				oneShotDone["Troop:"+strings.ToLower(strings.TrimSpace(chosen.UnitName))] = true
 				if armyState != nil {
 					armyState.Fail(chosen.UnitName)
@@ -965,12 +967,23 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			}
 			if anonymousHeroesVisible > unknownHeroesDeployed {
 				missing := anonymousHeroesVisible - unknownHeroesDeployed
-				liveRemaining += missing
-				e.logger.Warn().
-					Int("visible_anonymous_heroes", anonymousHeroesVisible).
-					Int("deployed_anonymous_heroes", unknownHeroesDeployed).
-					Int("missing", missing).
-					Msg("final deployment verification found undeployed anonymous hero cards")
+				if spentOnlyReached {
+					// After the live loop positively concluded that only spent/ability
+					// cards remain, anonymous hero-looking cards are ability buttons,
+					// not undeployed heroes. Do not turn that into a false deploy failure.
+					e.logger.Debug().
+						Int("visible_anonymous_heroes", anonymousHeroesVisible).
+						Int("deployed_anonymous_heroes", unknownHeroesDeployed).
+						Int("ignored", missing).
+						Msg("ignoring anonymous hero ability cards during final verification")
+				} else {
+					liveRemaining += missing
+					e.logger.Warn().
+						Int("visible_anonymous_heroes", anonymousHeroesVisible).
+						Int("deployed_anonymous_heroes", unknownHeroesDeployed).
+						Int("missing", missing).
+						Msg("final deployment verification found undeployed anonymous hero cards")
+				}
 			}
 			finalFrame.Close()
 		}
