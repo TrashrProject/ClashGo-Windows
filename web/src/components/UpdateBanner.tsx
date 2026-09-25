@@ -139,6 +139,10 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
   // WebView. The body now guards against null/falsy `status` instead.
   React.useEffect(() => {
     if (!status || status.state !== 'ready') return;
+    // A previous first-click failure from an older client can leave
+    // "download not ready" visible even though the download has since
+    // completed. Ready is authoritative: clear that stale UI error.
+    setLastError(null);
     setMountedChecksumFlash(true);
     const t = setTimeout(() => setMountedChecksumFlash(false), 1800);
     return () => clearTimeout(t);
@@ -290,7 +294,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                     onDismiss();
                   }}
                   className="w-9 h-9 rounded-xl bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center justify-center text-zinc-500 dark:text-zinc-400 transition-colors"
-                  aria-label="Close update dialog"
+                  aria-label="Fermer la fenêtre de mise à jour"
                 >
                   <span className="material-symbols-outlined text-base">close</span>
                 </button>
@@ -371,7 +375,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                   className="h-10 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 text-zinc-700 dark:text-zinc-300 text-[10px] font-black uppercase tracking-[0.2em] transition-colors flex items-center justify-center gap-1.5"
                 >
                   <span className="material-symbols-outlined text-[14px]">folder_open</span>
-                  Open in Finder
+                  Ouvrir le dossier
                 </button>
               </div>
 
@@ -518,7 +522,7 @@ const ReadyBody: React.FC<{
         verified_user
       </span>
       <span className="text-xs font-bold text-zinc-950 dark:text-white">
-        Verified. Prête à installer.
+        Vérifiée. Prête à installer.
       </span>
     </div>
     {status.download_path && (
