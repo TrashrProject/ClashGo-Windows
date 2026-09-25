@@ -1965,8 +1965,6 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	var targetEdge string = "Unknown"
 
 	searchStart := time.Now()
-	consecutiveNextFailures := 0
-	skipsSinceRest := 0
 	skipsThisSearch := 0
 	for {
 		// Stop check: a user Stop must abort the search loop even
@@ -2072,134 +2070,33 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		}
 
 		b.logger.Info().Msg("loot too low, skipping base...")
-
-		// BlueStacks stability guard: changing opponents endlessly at full
-		// speed can put sustained pressure on HD-Player.exe. Rest briefly
-		// every few successful skips instead of hammering Next/capture forever.
-		if skipsSinceRest >= 8 {
-			b.logger.Info().Msg("matchmaking stability pause after 8 skips")
-			if !b.sleepResponsive(1500 * time.Millisecond) { lootRec.Close(); return }
-			skipsSinceRest = 0
+		b.skipsCount.Add(1)
+		skipsThisSearch++
+		if b.OnStatsUpdate != nil {
+			b.OnStatsUpdate()
 		}
 
-		// NEXT is handled as a state transition, not as a blind tap.
-		// A successful ADB tap only means Android received the event; it does
-		// NOT mean Clash accepted it. We click once, then wait until clouds /
-		// loading / Unknown proves that matchmaking actually advanced.
-		clickNextFresh := func() bool {
-			fresh, capErr := b.client.CaptureToMat()
-			if capErr != nil || fresh.Empty() {
-				if !fresh.Empty() { fresh.Close() }
-				return false
-			}
-			defer fresh.Close()
-
-			if x, y, ok := b.locateNextButtonColor(fresh); ok {
-				b.logger.Info().Int("x", x).Int("y", y).Msg("Next button freshly verified; precision clicking")
-				if err := b.client.TapFast(x, y, 0.6); err == nil {
-					b.recordActivity()
-					return true
-				}
-			}
-			return false
-		}
-
-		// Use the already-live frame first.
-		nextClicked := false
-		if x, y, ok := b.locateNextButtonColor(screen); ok {
-			b.logger.Info().Int("x", x).Int("y", y).Msg("Next button verified; precision clicking detected center")
-			if err := b.client.TapFast(x, y, 0.6); err == nil {
+		// Xingchen-style skip path: click the verified Next target and move on.
+		// Do not restart Clash merely because the coarse classifier failed to
+		// observe the short clouds transition.
+		if !b.findAndClick("btn_next", "Next Match", 2) {
+			b.logger.Warn().Msg("Next template path failed; using one bounded color/pinpoint fallback")
+			searchROI := image.Rect(b.cal.PhysicalW/2, b.cal.PhysicalH/2, b.cal.PhysicalW, b.cal.PhysicalH)
+			orangePt, pxErr := vision.PixelSearch(screen, searchROI, 252, 186, 54, 50)
+			if pxErr == nil {
+				b.logger.Info().Msg("clicking Next via Xingchen orange-color fallback")
+				_ = b.client.TapRandomized(orangePt.X, orangePt.Y)
 				b.recordActivity()
-				nextClicked = true
+			} else {
+				nextX, nextY := b.cal.ScaleRef(796, 565)
+				b.logger.Warn().Int("x", nextX).Int("y", nextY).Msg("Next color fallback unavailable; using single Xingchen reference tap")
+				_ = b.client.TapRandomized(nextX, nextY)
+				b.recordActivity()
 			}
 		}
 		screen.Close()
+		if !b.sleepResponsive(650 * time.Millisecond) { lootRec.Close(); return }
 
-		if !nextClicked {
-			nextClicked = clickNextFresh()
-		}
-
-		transitioned := false
-		if nextClicked {
-			// Give Clash/BlueStacks time to start the clouds transition before
-			// asking for another screenshot. The old 220ms polling burst could
-			// issue 8-12 PNG screencaps immediately after every Next tap and
-			// was correlated with HD-Player.exe access-violation crashes.
-			if !b.sleepResponsive(650 * time.Millisecond) { lootRec.Close(); return }
-			for verify := 0; verify < 3 && !transitioned; verify++ {
-				probe, capErr := b.client.CaptureToMat()
-				if capErr == nil && !probe.Empty() {
-					st, _ := b.classify(probe)
-					probe.Close()
-					if st == game.StateSearchMap || st == game.StateLoading || st == game.StateUnknown {
-						transitioned = true
-						break
-					}
-				} else if !probe.Empty() {
-					probe.Close()
-				}
-				if verify < 2 {
-					if !b.sleepResponsive(550 * time.Millisecond) { lootRec.Close(); return }
-				}
-			}
-		}
-
-		// If Clash ignored the first tap, reacquire the button and try ONCE.
-		// This replaces the situation where the bot looked "lost" until the
-		// user manually clicked Next, while also preventing rapid tap spam.
-		if !transitioned {
-			b.logger.Warn().Msg("Next tap did not start matchmaking; reacquiring button for one controlled retry")
-			if !b.sleepResponsive(450 * time.Millisecond) { lootRec.Close(); return }
-			if clickNextFresh() {
-				if !b.sleepResponsive(700 * time.Millisecond) { lootRec.Close(); return }
-				for verify := 0; verify < 3 && !transitioned; verify++ {
-					probe, capErr := b.client.CaptureToMat()
-					if capErr == nil && !probe.Empty() {
-						st, _ := b.classify(probe)
-						probe.Close()
-						if st == game.StateSearchMap || st == game.StateLoading || st == game.StateUnknown {
-							transitioned = true
-							break
-						}
-					} else if !probe.Empty() {
-						probe.Close()
-					}
-					if verify < 2 {
-						if !b.sleepResponsive(600 * time.Millisecond) { lootRec.Close(); return }
-					}
-				}
-			}
-		}
-
-		if transitioned {
-			consecutiveNextFailures = 0
-			skipsSinceRest++
-			skipsThisSearch++
-			b.skipsCount.Add(1)
-			if b.OnStatsUpdate != nil {
-				b.OnStatsUpdate()
-			}
-			b.logger.Info().Msg("matchmaking transition confirmed after Next")
-			if !b.sleepResponsive(700 * time.Millisecond) { lootRec.Close(); return }
-			continue
-		}
-
-		// Never fall back to repeated blind coordinates. If two verified
-		// attempts fail, back off. After 3 consecutive failures restart only
-		// Clash (not BlueStacks) to recover a wedged matchmaking UI.
-		consecutiveNextFailures++
-		b.logger.Warn().
-			Int("failures", consecutiveNextFailures).
-			Msg("Next transition not confirmed; backing off instead of spamming taps")
-
-		if consecutiveNextFailures >= 3 {
-			b.logger.Error().Msg("Next remained unresponsive after controlled retries; restarting Clash to recover matchmaking")
-			lootRec.Close()
-			b.restartGame()
-			return
-		}
-
-		if !b.sleepResponsive(900 * time.Millisecond) { lootRec.Close(); return }
 	}
 
 	// The matchmaking OCR is no longer needed once a base was accepted.
@@ -3055,113 +2952,22 @@ func (b *Bot) selectArmySlot() bool {
 	}
 
 	if slot == 1 {
-		before, err := b.client.CaptureToMat()
-		if err != nil || before.Empty() {
-			if !before.Empty() { before.Close() }
-			return false
-		}
-		stateBefore, _ := b.classify(before)
-		if stateBefore != game.StateArmySelection && stateBefore != game.StateArmyCamp {
-			before.Close()
-			b.logger.Warn().Str("state", stateBefore.String()).Msg("refusing Army 1 selection outside verified army menu")
-			return false
-		}
-
-		if !b.findAndClick("btn_army_1", "Army 1", 1) {
-			before.Close()
-			return false
-		}
-		if !b.sleepResponsive(180 * time.Millisecond) {
-			before.Close()
-			return false
-		}
-
-		after, capErr := b.client.CaptureToMat()
-		if capErr != nil || after.Empty() {
-			before.Close()
-			if !after.Empty() { after.Close() }
-			return false
-		}
-		refX, refY := b.cal.ScaleRef(513, 230)
-		delta := localVisualDelta(before, after, image.Pt(refX, refY), int(95*b.cal.ScaleX), int(42*b.cal.ScaleY))
-		stateAfter, _ := b.classify(after)
-		before.Close()
-		after.Close()
-
-		if delta < 0.012 && stateAfter == stateBefore {
-			b.logger.Warn().
-				Float64("visual_delta", delta).
-				Str("state", stateAfter.String()).
-				Msg("Army 1 tap produced no verified UI progress")
-			return false
-		}
-		b.recordActivity()
-		b.logger.Info().Float64("visual_delta", delta).Msg("Army 1 recipe selection verified")
-		return true
+		return b.findAndClick("btn_army_1", "Army 1", 1)
 	}
 
-	// Slots 2+ do not have dedicated templates yet. Never treat a coordinate
-	// tap alone as success: first prove we are still on an army menu, then
-	// require a local visual change around the selected recipe card.
-	before, err := b.client.CaptureToMat()
-	if err != nil || before.Empty() {
-		if !before.Empty() { before.Close() }
-		b.logger.Warn().Err(err).Int("army_slot", slot).Msg("cannot verify army recipe before selection")
-		return false
-	}
-	stateBefore, _ := b.classify(before)
-	if stateBefore != game.StateArmySelection && stateBefore != game.StateArmyCamp {
-		before.Close()
-		b.logger.Warn().Str("state", stateBefore.String()).Int("army_slot", slot).Msg("refusing army recipe tap outside verified army menu")
-		return false
-	}
-
+	// Card rows in the saved-recipes list (reference resolution).
+	// cardY is the vertical center of the Nth card body; tapping the
+	// card body sets it as the active army (verified live: slot 4 at
+	// y≈403 fired the "Recipe ... set as active army!" toast).
 	cardY := 227 + (slot-1)*54
-	if cardY < 180 || cardY > 590 {
-		before.Close()
-		b.logger.Warn().Int("army_slot", slot).Int("card_y", cardY).Msg("army recipe slot outside safe visible card range")
-		return false
-	}
 	tapX, tapY := b.cal.ScaleRef(430, cardY)
 
-	b.logger.Info().Int("army_slot", slot).Int("x", tapX).Int("y", tapY).Msg("selecting saved army recipe card with visual verification")
-	if err := b.client.TapFast(tapX, tapY, 0.7); err != nil {
-		before.Close()
+	b.logger.Info().Int("army_slot", slot).Int("x", tapX).Int("y", tapY).Msg("selecting saved army recipe card")
+	if err := b.client.TapRandomized(tapX, tapY); err != nil {
 		b.logger.Warn().Err(err).Msg("army recipe card tap failed")
 		return false
 	}
-	if !b.sleepResponsive(180 * time.Millisecond) {
-		before.Close()
-		return false
-	}
-
-	after, capErr := b.client.CaptureToMat()
-	if capErr != nil || after.Empty() {
-		before.Close()
-		if !after.Empty() { after.Close() }
-		b.logger.Warn().Err(capErr).Int("army_slot", slot).Msg("army recipe selection could not be visually confirmed")
-		return false
-	}
-
-	delta := localVisualDelta(before, after, image.Pt(tapX, tapY), int(70*b.cal.ScaleX), int(30*b.cal.ScaleY))
-	stateAfter, _ := b.classify(after)
-	before.Close()
-	after.Close()
-
-	// Either the card/toast changed materially, or the menu transitioned to a
-	// different known army state. Anything else is an unproven tap.
-	verified := delta >= 0.012 || stateAfter != stateBefore
-	if !verified {
-		b.logger.Warn().
-			Int("army_slot", slot).
-			Float64("visual_delta", delta).
-			Str("state", stateAfter.String()).
-			Msg("army recipe tap produced no verified UI progress")
-		return false
-	}
-
 	b.recordActivity()
-	b.logger.Info().Int("army_slot", slot).Float64("visual_delta", delta).Msg("army recipe selection verified")
 	return true
 }
 
@@ -3270,153 +3076,21 @@ func (b *Bot) clickReturnHomeVerified(maxAttempts int) bool {
 }
 
 func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
-	// Never treat a hard-coded coordinate as a successful match. On Windows
-	// the old fast path tapped the reference coordinate unconditionally and
-	// returned true even when the expected screen was not visible. That made
-	// clickSequence advance through Attack -> Find Match -> Army -> Battle on
-	// the village screen and then falsely report "searching".
-	//
-	// Coordinates remain useful only as a last-resort diagnostic reference;
-	// normal progression must be backed by an actual template/color match.
-	tpl, ok := b.templates.Get(templateName)
-	if !ok {
-		b.logger.Error().Str("template", templateName).Msg("template not loaded")
-		return false
+	// Compatibility wrapper for older callers. The old implementation fired
+	// the calibrated pinpoint BEFORE looking at the screen, which was fast but
+	// could click a stale UI. Reuse the visual gate so every normal action is
+	// evidence-first. maxRetries only scales the bounded wait.
+	if maxRetries < 1 {
+		maxRetries = 1
 	}
-
-	roi := b.buttonROI(templateName)
-
-	physROI := image.Rect(
-		int(float64(roi.Min.X)*b.cal.ScaleX),
-		int(float64(roi.Min.Y)*b.cal.ScaleY),
-		int(float64(roi.Max.X)*b.cal.ScaleX),
-		int(float64(roi.Max.Y)*b.cal.ScaleY),
-	)
-
-	for retry := 0; retry < maxRetries; retry++ {
-		screen, err := b.client.CaptureToMat()
-		if err != nil {
-			b.logger.Warn().Err(err).Str("step", stepName).Msg("capture failed")
-			if !b.sleepResponsive(250 * time.Millisecond) { return false }
-			continue
-		}
-
-		if screen.Empty() {
-			screen.Close()
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-
-		if templateName == "btn_battle" && retry == 0 {
-			altX, altY := b.cal.ScaleRef(525, 247)
-			if b.isGreen(screen, altX, altY) {
-				screen.Close()
-				b.logger.Info().Str("step", stepName).Msg("secondary pinpoint match (upper battle), clicking...")
-				if err := b.client.TapFast(altX, altY, 0.6); err == nil {
-					b.recordActivity()
-					return true
-				}
-				var recaptureErr error
-				screen, recaptureErr = b.client.CaptureToMat()
-				if recaptureErr != nil || screen.Empty() {
-					if !screen.Empty() { screen.Close() }
-					b.logger.Warn().Err(recaptureErr).Str("step", stepName).Msg("battle fallback recapture failed")
-					continue
-				}
-			}
-		}
-
-		threshold := float32(0.45)
-		if templateName == "btn_attack" {
-			threshold = 0.35
-		}
-		matches, err := vision.MatchMultiScaleROICached(screen, tpl, templateName, 0.2, 2.0, 5, threshold, physROI)
-
-		if err != nil {
-			screen.Close()
-			b.logger.Warn().Err(err).Str("step", stepName).Msg("match error")
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-
-		if len(matches) == 0 {
-			screen.Close()
-			if retry == 0 {
-				b.logger.Debug().Str("step", stepName).Msg("not found, retrying...")
-			}
-			b.dismissInterruptions()
-			if !b.sleepResponsive(350 * time.Millisecond) { return false }
-			continue
-		}
-
-		best := matches[0]
-		px, py := best.Point.X, best.Point.Y
-
-		if templateName == "btn_attack" {
-			expectedX, expectedY := b.cal.ScaleRef(64, 666)
-			dx := px - expectedX
-			if dx < 0 {
-				dx = -dx
-			}
-			dy := py - expectedY
-			if dy < 0 {
-				dy = -dy
-			}
-			if dx > 80 || dy > 60 {
-				screen.Close()
-				b.logger.Warn().
-					Float64("conf", best.Confidence).
-					Int("match_x", px).
-					Int("match_y", py).
-					Int("expected_x", expectedX).
-					Int("expected_y", expectedY).
-					Msg("rejected false Attack match outside safe button area")
-				continue
-			}
-
-			// Once the template confirms the Attack button is present in its
-			// tightly constrained ROI, tap the calibrated canonical center.
-			// This prevents an imperfect template center from hitting a
-			// neighboring HUD control.
-			px, py = expectedX, expectedY
-		}
-
-		b.logger.Info().
-			Str("step", stepName).
-			Float64("conf", best.Confidence).
-			Int("x", px).Int("y", py).
-			Msg("clicking verified button")
-
-		// IMPORTANT: SaveScreenshots previously called IMWrite after
-		// screen.Close(), handing OpenCV a freed native cv::Mat*. On Windows
-		// that is a process-level access violation (0xc0000005), which exactly
-		// matched the crash immediately after "clicking (fallback match)".
-		// Keep the Mat alive through the optional diagnostic write, then close.
-		if b.cfg.Debug.SaveScreenshots {
-			gocv.IMWrite(paths.ResolveConfig(fmt.Sprintf("diag_fallback_%s.png", templateName)), screen)
-		}
-		screen.Close()
-
-		if err := b.client.TapFast(px, py, 0.7); err != nil {
-			b.logger.Error().Err(err).Msg("tap failed")
-			return false
-		}
-		b.recordActivity()
-
-		return true
+	timeout := time.Duration(maxRetries) * 900 * time.Millisecond
+	if timeout < 900*time.Millisecond {
+		timeout = 900 * time.Millisecond
 	}
-
-	if pp, ok := villagePinpoints[templateName]; ok {
-		px, py := b.cal.ScaleRef(pp.X, pp.Y)
-		b.logger.Warn().
-			Str("step", pp.Name).
-			Int("reference_x", px).
-			Int("reference_y", py).
-			Msg("template/color verification failed; refusing blind tap")
+	if timeout > 4*time.Second {
+		timeout = 4 * time.Second
 	}
-
-	b.logger.Error().Str("step", stepName).Int("retries", maxRetries).Msg("failed after retries")
-	return false
+	return b.waitAndClickButton(templateName, stepName, timeout)
 }
 
 // resultPanelHash returns a cheap content hash of the end-of-battle
