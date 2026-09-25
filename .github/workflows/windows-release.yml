@@ -6,11 +6,11 @@ on:
       version:
         description: Release version without leading v
         required: true
-        default: 0.6.1-windows-beta
+        default: 0.6.2-windows-beta
       notes:
         description: Release notes
         required: false
-        default: Windows stability update: proactive 3-attack runtime recycle, updater one-click fixes, deployment and matchmaking reliability
+        default: Windows updater hotfix: reliable one-click install/restart plus runtime stability improvements
 
 permissions:
   contents: write
