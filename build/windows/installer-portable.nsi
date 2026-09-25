@@ -6,7 +6,7 @@ SetCompressor /SOLID lzma
 !include "x64.nsh"
 
 !ifndef VERSION
-  !define VERSION "0.6.1-windows-beta"
+  !define VERSION "0.6.2-windows-beta"
 !endif
 !ifndef BUNDLE_DIR
   !error "BUNDLE_DIR must point to the portable ClashGO-Windows bundle"
@@ -27,8 +27,8 @@ InstallDirRegKey HKCU "${UNINSTALL_KEY}" "InstallLocation"
 ShowInstDetails show
 ShowUninstDetails show
 
-VIProductVersion "0.6.1.0"
-VIFileVersion "0.6.1.0"
+VIProductVersion "0.6.2.0"
+VIFileVersion "0.6.2.0"
 VIAddVersionKey "ProductName" "${PRODUCT_NAME}"
 VIAddVersionKey "FileDescription" "${PRODUCT_NAME} Installer"
 VIAddVersionKey "CompanyName" "${COMPANY_NAME}"
