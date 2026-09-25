@@ -479,6 +479,9 @@ func (s *Service) absorbManifest(m Manifest) Status {
 	spec, ok := m.Platforms[plat]
 
 	s.statusMu.Lock()
+	prevState := s.status.State
+	prevDownloadPath := s.status.DownloadPath
+	prevLatest := s.status.LatestVersion
 	s.status.LatestVersion = normalizeVersion(m.Version)
 	s.status.MinSupported = m.MinSupported
 	s.status.Notes = m.Notes
@@ -493,7 +496,25 @@ func (s *Service) absorbManifest(m Manifest) Status {
 		s.status.SkipVersion,
 		s.status.MinSupported,
 	)
-	s.status.State = StateIdle
+	// Do not destroy a completed download just because a periodic/manual
+	// metadata check ran afterwards. This was the cause of the Windows
+	// "Verified. Ready to install" UI followed by "download not ready".
+	// Preserve READY only when it belongs to the same latest version and the
+	// verified archive still exists.
+	keepReady := prevState == StateReady &&
+		prevLatest == s.status.LatestVersion &&
+		prevDownloadPath != ""
+	if keepReady {
+		if _, err := os.Stat(prevDownloadPath); err == nil {
+			s.status.State = StateReady
+			s.status.DownloadPath = prevDownloadPath
+		} else {
+			s.status.State = StateIdle
+			s.status.DownloadPath = ""
+		}
+	} else {
+		s.status.State = StateIdle
+	}
 	if ok {
 		s.status.AssetName = spec.AssetName
 		s.status.ExpectedSize = spec.Size
