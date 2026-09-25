@@ -704,7 +704,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			return slot.Category + ":" + name
 		}
 
-		for liveRound := 1; liveRound <= 24 && !tapExec.DeployBudgetExhausted(); liveRound++ {
+		for liveRound := 1; liveRound <= 18 && !tapExec.DeployBudgetExhausted(); liveRound++ {
 			fresh, capErr := tapExec.CaptureFresh()
 			if capErr != nil || fresh.Empty() {
 				if !fresh.Empty() { fresh.Close() }
@@ -941,9 +941,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				// the next loop recaptures/reacquires the whole bar. Never send
 				// a full profile count blindly through a shifting troop bar.
 				if chosen.Category == "Spell" {
-					count = 2
+					count = 3
 				} else {
-					count = 8
+					count = 10
 				}
 			}
 			if count > 40 { count = 40 }
@@ -956,11 +956,11 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 			// Do not trust old coordinates after this point. On the next loop
 			// the whole bar is captured and re-indexed from scratch.
-			if cardAttempts[key] >= 4 && chosen.UnitName != "" && chosenCount <= 0 {
+			if cardAttempts[key] >= 2 && chosen.UnitName != "" && chosenCount <= 0 {
 				e.logger.Warn().
 					Str("unit", chosen.UnitName).
 					Str("category", chosen.Category).
-					Msg("Windows live deployment card persisted with unknown count after 4 bursts; blacklisting to avoid a stuck loop")
+					Msg("Windows live deployment card persisted with unknown count after 2 bursts; blacklisting to avoid a stuck loop")
 				oneShotDone["Troop:"+strings.ToLower(strings.TrimSpace(chosen.UnitName))] = true
 				if armyState != nil {
 					armyState.Fail(chosen.UnitName)
