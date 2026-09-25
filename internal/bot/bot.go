@@ -1999,6 +1999,30 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				screen.Close()
 				continue
 			}
+
+			// Matchmaking can land on Clash's "Unable to attack Village! Try
+			// again later." screen. It carries a Return Home button and therefore
+			// classifies as BattleEnd/ReturnHome even though no battle happened.
+			// While we are still in PhaseSearching this is never a genuine result
+			// screen: return to the village and let the automation brain start a
+			// fresh matchmaking cycle, without restarting Clash or BlueStacks.
+			if state == game.StateBattleEnd || state == game.StateReturnHome {
+				screen.Close()
+				b.logger.Warn().
+					Str("state", state.String()).
+					Msg("matchmaking reached unavailable-village Return Home screen; recovering to village without game restart")
+				lootRec.Close()
+				b.setRuntimePhase(PhaseReturningHome)
+				if b.clickReturnHomeVerified(3) {
+					b.logger.Info().Msg("unavailable-village matchmaking screen cleared; village restored")
+					b.lastAttackEnd = time.Time{} // no real attack occurred; do not arm inter-attack cooldown
+					b.recordActivity()
+					return
+				}
+				b.logger.Warn().Msg("could not clear unavailable-village screen; leaving sequence for bounded runtime recovery")
+				return
+			}
+
 			b.logger.Info().Str("state", state.String()).Msg("searching area (wait)...")
 
 			b.dismissInterruptions()
