@@ -3292,6 +3292,7 @@ func (b *Bot) dismissSelection() {
 
 func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
+	lastBattleRetry := time.Time{}
 	for time.Now().Before(deadline) {
 		screen, err := b.client.CaptureToMat()
 		if err != nil {
@@ -3300,6 +3301,32 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 		}
 
 		state, _ := b.classify(screen)
+
+		// The current localized Windows UI often keeps the coarse classifier on
+		// MainVillage while the army/search overlay is already open. Use the
+		// live controls as the source of truth:
+		//   * visible Next => an enemy base/search result is already ready;
+		//   * visible green Battle => we are still in the army screen, so retry
+		//     that exact detected center instead of waiting 60s on MainVillage.
+		if _, _, nextVisible := b.locateNextButtonColor(screen); nextVisible {
+			screen.Close()
+			b.logger.Info().Msg("battle/search screen confirmed by live Next button; entering search loop")
+			return true
+		}
+
+		if bx, by, battleVisible := b.locateBattleButtonColor(screen); battleVisible {
+			screen.Close()
+			if lastBattleRetry.IsZero() || time.Since(lastBattleRetry) >= 900*time.Millisecond {
+				lastBattleRetry = time.Now()
+				b.logger.Info().Int("x", bx).Int("y", by).Msg("army screen still visible after Battle tap; retrying detected Battle center")
+				if err := b.client.TapFast(bx, by, 0.6); err == nil {
+					b.recordActivity()
+				}
+			}
+			if !b.sleepResponsive(350 * time.Millisecond) { return false }
+			continue
+		}
+
 		screen.Close()
 
 		switch {
@@ -3311,7 +3338,7 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 			if !b.sleepResponsive(250 * time.Millisecond) { return false }
 			continue
 		case state == game.StateArmySelection || state == game.StateArmyCamp:
-			b.logger.Info().Msg("in army menu, retrying Battle Attack button...")
+			b.logger.Info().Msg("in army menu, reacquiring Battle Attack button...")
 			if retryScreen, capErr := b.client.CaptureToMat(); capErr == nil {
 				if x, y, ok := b.locateBattleButtonColor(retryScreen); ok {
 					retryScreen.Close()
@@ -3323,15 +3350,20 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 					b.findAndClick("btn_battle", "Battle Retry", 1)
 				}
 			}
-			if !b.sleepResponsive(250 * time.Millisecond) { return false }
+			if !b.sleepResponsive(300 * time.Millisecond) { return false }
 		default:
-			b.logger.Debug().Str("state", state.String()).Msg("waiting for battle/search state...")
-			b.dismissInterruptions()
-			if !b.sleepResponsive(180 * time.Millisecond) { return false }
+			// MainVillage here is frequently a stale classifier result for the
+			// army/search overlay. Do not dismiss or press Back; just keep looking
+			// for the authoritative Battle/Next controls above.
+			b.logger.Debug().Str("state", state.String()).Msg("waiting for live battle/search evidence...")
+			if isTransientRuntimeState(state) {
+				b.dismissInterruptions()
+			}
+			if !b.sleepResponsive(250 * time.Millisecond) { return false }
 		}
 	}
 
-	b.logger.Warn().Dur("timeout", timeout).Msg("timed out waiting for battle")
+	b.logger.Warn().Dur("timeout", timeout).Msg("timed out waiting for battle/search evidence")
 	return false
 }
 
