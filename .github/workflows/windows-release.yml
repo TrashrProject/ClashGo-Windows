@@ -6,11 +6,11 @@ on:
       version:
         description: Release version without leading v
         required: true
-        default: 0.6.2-windows-beta
+        default: 0.6.3-windows-beta
       notes:
         description: Release notes
         required: false
-        default: Windows updater hotfix: reliable one-click install/restart plus runtime stability improvements
+        default: Test updater Windows: one-click download, install and restart verification
 
 permissions:
   contents: write
