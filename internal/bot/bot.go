@@ -2456,19 +2456,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 
 	b.setRuntimePhase(PhaseReturningHome)
-	returnedHome := false
-	if err := b.attackExec.ReturnHome(); err == nil {
-		returnedHome = true
-	} else {
-		b.logger.Warn().Err(err).Msg("ReturnHome failed, attempting template fallback")
-		for i := 0; i < 3; i++ {
-			if b.findAndClick("btn_return_home", "Return Home", 1) {
-				returnedHome = true
-				break
-			}
-			time.Sleep(1 * time.Second)
-		}
-	}
+	// Use the visually-located Return Home button as the primary Windows path.
+	// The previous fixed-coordinate Executor.ReturnHome() clicked (430,566),
+	// which no longer matches every current result overlay.
+	returnedHome := b.clickReturnHomeVerified(3)
 
 	if !returnedHome {
 		// Live Windows traces show an ADB transport drop can happen exactly on
@@ -2478,8 +2469,8 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		b.logger.Warn().Msg("return home failed after battle; reconnecting device transport before recovery")
 		if err := b.client.Reconnect(); err == nil {
 			if b.sleepResponsive(250 * time.Millisecond) {
-				if err := b.attackExec.ReturnHome(); err == nil {
-					returnedHome = true
+				returnedHome = b.clickReturnHomeVerified(2)
+				if returnedHome {
 					b.logger.Info().Msg("return home recovered after ADB reconnect")
 				}
 			}
@@ -3169,6 +3160,83 @@ var villagePinpoints = map[string]Pinpoint{
 	"btn_next":        {X: 794, Y: 577, Name: "Next Match"},
 	"btn_return_home": {X: 431, Y: 581, Name: "Return Home"},
 	"btn_okay":        {X: 430, Y: 520, Name: "Okay"},
+}
+
+// clickReturnHomeVerified locates the live Return Home button from the
+// current result screen, clicks its detected CENTER, then waits for positive
+// village evidence. A successful ADB tap alone is never treated as success.
+// This fixes the live Windows case where the old fixed (430,566) tap missed
+// the current button and the generic template fallback returned true even
+// though the game never left the result screen.
+func (b *Bot) clickReturnHomeVerified(maxAttempts int) bool {
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+	tpl, ok := b.templates.Get("btn_return_home")
+	if !ok || tpl.Empty() {
+		b.logger.Error().Msg("Return Home template unavailable")
+		return false
+	}
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		screen, err := b.client.CaptureToMat()
+		if err != nil || screen.Empty() {
+			if !screen.Empty() { screen.Close() }
+			b.logger.Warn().Err(err).Int("attempt", attempt).Msg("Return Home capture failed")
+			if !b.sleepResponsive(300 * time.Millisecond) { return false }
+			continue
+		}
+
+		// Search the whole lower half. Current CoC layouts may place Return Home
+		// near the lower-left OR lower-center depending on the overlay.
+		y0 := int(float64(screen.Rows()) * 0.48)
+		roi := image.Rect(0, y0, screen.Cols(), screen.Rows())
+		matches, matchErr := vision.MatchMultiScaleROICached(
+			screen, tpl, "btn_return_home", 0.35, 1.8, 6, 0.40, roi,
+		)
+		if matchErr != nil || len(matches) == 0 {
+			screen.Close()
+			b.logger.Warn().Err(matchErr).Int("attempt", attempt).Msg("Return Home button not visually located")
+			if !b.sleepResponsive(400 * time.Millisecond) { return false }
+			continue
+		}
+
+		best := matches[0]
+		x, y := best.Point.X, best.Point.Y
+		screen.Close()
+		b.logger.Info().
+			Int("attempt", attempt).
+			Int("x", x).Int("y", y).
+			Float64("confidence", best.Confidence).
+			Msg("Return Home button locked; tapping detected center")
+
+		if err := b.client.TapFast(x, y, 0.5); err != nil {
+			b.logger.Warn().Err(err).Msg("Return Home tap failed")
+			continue
+		}
+		b.recordActivity()
+
+		// Clouds/loading can classify Unknown for several seconds. Wait for
+		// actual village proof instead of immediately declaring failure/success.
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if !b.sleepResponsive(350 * time.Millisecond) { return false }
+			probe, capErr := b.client.CaptureToMat()
+			if capErr != nil || probe.Empty() {
+				if !probe.Empty() { probe.Close() }
+				continue
+			}
+			state, _ := b.classify(probe)
+			atVillage := state == game.StateMainVillage || b.findAttackButton(probe, 0.30)
+			probe.Close()
+			if atVillage {
+				b.logger.Info().Int("attempt", attempt).Msg("Return Home confirmed at village")
+				return true
+			}
+		}
+		b.logger.Warn().Int("attempt", attempt).Msg("Return Home tap sent but village not confirmed; retrying")
+	}
+	return false
 }
 
 func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
