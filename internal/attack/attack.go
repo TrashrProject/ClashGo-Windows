@@ -1768,7 +1768,8 @@ func (e *Executor) endButtonVisible(screen gocv.Mat, sCfg StallConfig) bool {
 }
 
 func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
+	battleWaitStarted := time.Now()
+	deadline := battleWaitStarted.Add(timeout)
 	ticker := time.NewTicker(1000 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -2095,7 +2096,13 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 					}
 				}
 
-				if e.earlyExitAllowed && e.cfg.StallTimerSeconds > 0 && endAtPct == 0 {
+				// Never surrender from the generic stall detector during the opening
+				// minute. Live Windows traces showed a false-positive stall ~13s
+				// after deployment, which ended the attack with only the first hero
+				// on the field. Natural result detection remains active throughout.
+				const minimumBattleBeforeStallExit = 75 * time.Second
+				if e.earlyExitAllowed && e.cfg.StallTimerSeconds > 0 && endAtPct == 0 &&
+					time.Since(battleWaitStarted) >= minimumBattleBeforeStallExit {
 					if currentPct > lastPct {
 						lastPct = currentPct
 						lastPctTime = time.Now()
