@@ -1,6 +1,6 @@
 param(
-    [string]$Version = "0.6.6-windows-beta",
-    [string]$Notes = "Correctif updater Windows : lancement du helper avant passage en redemarrage, installation automatique fiable."
+    [string]$Version = "0.6.7-windows-beta",
+    [string]$Notes = "Test updater 0.6.6 vers 0.6.7 : detection, telechargement, verification, installation et redemarrage automatique."
 )
 
 $ErrorActionPreference = "Stop"
