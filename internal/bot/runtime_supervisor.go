@@ -171,6 +171,15 @@ func (b *Bot) runtimeSupervisorLoop() {
 
 			state := game.GameState(b.runtimeState.Load())
 
+			// A successful attack return is positively verified before
+			// lastAttackEnd is stamped. CoC/BlueStacks can nevertheless keep the
+			// coarse classifier on Battle for a short while afterwards. Do not
+			// let the generic watchdog undo a verified return-home by immediately
+			// restarting the game.
+			if state == game.StateBattle && !b.lastAttackEnd.IsZero() && now.Sub(b.lastAttackEnd) < 90*time.Second {
+				continue
+			}
+
 			// Windows/BlueStacks may classify the first visually usable frames
 			// as Unknown while localized HUD assets and template caches settle.
 			// Preserve the proven startup grace from the Windows branch, but do
