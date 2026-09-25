@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"math/rand"
+	"runtime"
 	"strings"
 	"time"
 
@@ -61,6 +62,121 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	redDetector := NewRedLineDetector(e.logger)
 	uiCutoff := int(float64(h) * 0.85) // above troop bar
 	redZone := redDetector.Detect(screen, uiCutoff)
+
+	// Keep the Xingchen strategy planner, but restore the Windows-safe red-zone
+	// camera preparation that was proven on the live BlueStacks build. This
+	// moves the map only with single-pointer swipes, reacquires the red boundary
+	// after every movement, and hands the fresh frame to the Xingchen deployer.
+	deployScreen := screen
+	var cameraFrame gocv.Mat
+	cameraFrameOwned := false
+	defer func() {
+		if cameraFrameOwned && !cameraFrame.Empty() {
+			cameraFrame.Close()
+		}
+	}()
+
+	if runtime.GOOS == "windows" {
+		freeSpace := func(z RedZone) (string, int) {
+			if !z.Valid {
+				return "", 0
+			}
+			free := map[string]int{
+				"left":   z.BBox.Min.X,
+				"right":  w - z.BBox.Max.X,
+				"top":    z.BBox.Min.Y,
+				"bottom": uiCutoff - z.BBox.Max.Y,
+			}
+			side := "left"
+			best := free[side]
+			// Avoid the lower HUD as a preferred troop-drop side.
+			for _, s := range []string{"right", "top"} {
+				if free[s] > best {
+					side, best = s, free[s]
+				}
+			}
+			return side, best
+		}
+
+		refreshCamera := func(reason string) bool {
+			fresh, err := e.client.CaptureToMat()
+			if err != nil || fresh.Empty() {
+				if !fresh.Empty() { fresh.Close() }
+				e.logger.Warn().Err(err).Str("reason", reason).Msg("adaptive red-zone capture failed")
+				return false
+			}
+			if cameraFrameOwned && !cameraFrame.Empty() {
+				cameraFrame.Close()
+			}
+			cameraFrame = fresh
+			cameraFrameOwned = true
+			deployScreen = cameraFrame
+			redZone = redDetector.Detect(deployScreen, uiCutoff)
+			side, free := freeSpace(redZone)
+			e.logger.Info().
+				Str("reason", reason).
+				Bool("red_zone_valid", redZone.Valid).
+				Str("best_side", side).
+				Int("free_space", free).
+				Msg("adaptive camera re-evaluated red deployment zone")
+			return true
+		}
+
+		minSafeFree := int(90.0 * float64(w) / 860.0)
+		if minSafeFree < 64 {
+			minSafeFree = 64
+		}
+
+		side, free := freeSpace(redZone)
+		e.logger.Info().
+			Bool("red_zone_valid", redZone.Valid).
+			Str("best_side", side).
+			Int("free_space", free).
+			Int("required_free_space", minSafeFree).
+			Msg("adaptive camera evaluating live red deployment zone")
+
+		// Never use native pinch zoom on this BlueStacks/Windows path. The
+		// earlier live tests showed multi-touch injection can destabilize
+		// HD-Player. Single-pointer pan is enough to expose a legal strip.
+		for panTry := 1; panTry <= 2 && redZone.Valid && free < minSafeFree; panTry++ {
+			cx := w / 2
+			cy := int(float64(uiCutoff) * 0.52)
+			dx := int(float64(w) * 0.20)
+			dy := int(float64(uiCutoff) * 0.18)
+			x2, y2 := cx, cy
+			switch side {
+			case "left":
+				x2 = cx + dx
+			case "right":
+				x2 = cx - dx
+			case "top":
+				y2 = cy + dy
+			}
+			e.logger.Info().
+				Int("attempt", panTry).
+				Str("target_safe_side", side).
+				Msg("adaptive camera: panning map to expose legal red-zone corridor")
+			if err := e.client.Swipe(cx, cy, x2, y2, 260); err != nil {
+				e.logger.Warn().Err(err).Msg("adaptive red-zone map pan failed")
+				break
+			}
+			time.Sleep(360 * time.Millisecond)
+			if !refreshCamera("map_pan") {
+				break
+			}
+			side, free = freeSpace(redZone)
+		}
+
+		if redZone.Valid {
+			e.logger.Info().
+				Str("selected_side", side).
+				Int("free_space", free).
+				Interface("red_bbox", redZone.BBox).
+				Msg("live red-zone corridor restored for Xingchen deployment")
+		} else {
+			e.logger.Warn().Msg("live red deployment zone unavailable after camera preparation")
+		}
+	}
 
 	// 2. Load precision config FIRST so we can detect user-pinned coords
 	//    before computing the deploy line. "Pinned" = user-authored non-zero
@@ -239,14 +355,14 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	}
 
 	// 4. Initialize SlotManager
-	slotMgr := NewSlotManager(screen, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+	slotMgr := NewSlotManager(deployScreen, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
 	if len(slotMgr.GetAllSlots()) == 0 {
 		return 0, fmt.Errorf("no active slots detected")
 	}
 
 	// 5. Detect troop counts
 	troopCounter := NewTroopCounter(pCfg.Width, pCfg.Height, e.logger)
-	troopCounts := troopCounter.DetectCounts(screen, slotMgr.GetAllSlots(), mBarY)
+	troopCounts := troopCounter.DetectCounts(deployScreen, slotMgr.GetAllSlots(), mBarY)
 	countMap := GetAllCounts(troopCounts)
 	e.logger.Info().Interface("counts", countMap).Msg("detected troop counts")
 	// troopCounter is threaded below to NewHeroManager / NewSweeper /
@@ -391,7 +507,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			tapExec.HumanSleep(150, 30)
 
 			detectedCount := GetCountForSlot(troopCounts, up.Slot.X)
-			heroMgr.DeployTroops(up.Unit, up.Slot, plan.Phase.Pattern, plan.Phase.Offset, plan.Phase.Pattern, screen, detectedCount)
+			heroMgr.DeployTroops(up.Unit, up.Slot, plan.Phase.Pattern, plan.Phase.Offset, plan.Phase.Pattern, deployScreen, detectedCount)
 		}
 
 		// Deploy siege
@@ -431,7 +547,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				heroUnits = append(heroUnits, up.Unit)
 			}
 			if len(heroUnits) > 0 {
-				heroMgr.DeployHeroes(heroUnits, screen)
+				heroMgr.DeployHeroes(heroUnits, deployScreen)
 			}
 		}
 
