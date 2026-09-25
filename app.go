@@ -1547,25 +1547,23 @@ func (a *App) InstallAndRestart() error {
 	// even when no bot is running.
 	a.saveStats()
 
-	// Step 3: cover the Wails exit + helper wait window.
-	// We deliberately do NOT emit "updater_status" here — the 2s
-	// ticker in forwardUpdaterStatus emits within ~2s and we don't
-	// want React to receive two close-in-time events (the IPC emit
-	// + the ticker race). SetState alone is enough.
-	a.updater.SetState(updater.StateRestarting)
-
-	// Step 4: detach the helper script. Returns (started, error).
-	// If false, the helper is missing (e.g. dev build); fall back to
-	// Finder-open and don't exit.
+	// Step 3: detach the helper while updater state is still READY.
+	// ApplyAuto validates StateReady before it will launch the helper.
+	// The previous ordering changed the state to RESTARTING first,
+	// which made ApplyAuto reject every click with:
+	// "download not ready — call Download() first".
 	started, err := a.updater.ApplyAuto()
 	if err != nil || !started {
-		log.Warn().Err(err).Msg("InstallAndRestart: helper unavailable, falling back to Finder")
+		log.Warn().Err(err).Msg("InstallAndRestart: helper unavailable, falling back to manual reveal")
 		_ = a.updater.Apply()
-		// Revert state so the UI comes back to "ready" instead of
-		// staying on the restart splash.
 		a.updater.SetState(updater.StateReady)
 		return err
 	}
+
+	// Step 4: only after the helper has successfully started do we expose
+	// RESTARTING to React. This keeps the backend state machine valid and
+	// still gives the UI its non-dismissible restart splash.
+	a.updater.SetState(updater.StateRestarting)
 
 	// Step 5: exit cleanly so the helper script's PID wait resolves.
 	// 1s delay gives the Wails JS bridge time to flush our success
