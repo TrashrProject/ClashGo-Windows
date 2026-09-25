@@ -1818,6 +1818,13 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 	lootRec := game.NewLootRecognizer(e.cal, tStore, e.logger)
 	defer lootRec.Close()
 
+	// The result overlay can briefly classify as Unknown/MainVillage on the
+	// localized Windows/BlueStacks capture while its animation settles. Keep a
+	// direct visual proof for the Return Home button so battle completion is not
+	// mistaken for an unexpected escape back to the village.
+	returnHomeTpl, hasReturnHomeTpl := tStore.Get("btn_return_home")
+	unexpectedExitHits := 0
+
 	var pRoi image.Rectangle
 	if hasStallROI {
 		scaleX, scaleY := float64(e.cal.PhysicalW)/float64(sCfg.RefWidth), float64(e.cal.PhysicalH)/float64(sCfg.RefHeight)
@@ -1858,6 +1865,21 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			}
 			state, _ := e.classify(screen)
 
+			// Prefer direct Return Home evidence over the coarse state classifier.
+			if hasReturnHomeTpl && !returnHomeTpl.Empty() {
+				rx0, ry0 := e.cal.ScaleRef(220, 430)
+				rx1, ry1 := e.cal.ScaleRef(650, 700)
+				roi := image.Rect(rx0, ry0, rx1, ry1).Intersect(image.Rect(0, 0, screen.Cols(), screen.Rows()))
+				if roi.Dx() > returnHomeTpl.Cols() && roi.Dy() > returnHomeTpl.Rows() {
+					matches, matchErr := vision.MatchMultiScaleROICached(screen, returnHomeTpl, "btn_return_home", 0.35, 1.8, 5, 0.42, roi)
+					if matchErr == nil && len(matches) > 0 {
+						e.logger.Info().Float64("confidence", matches[0].Confidence).Msg("battle result Return Home button visually confirmed")
+						screen.Close()
+						return true
+					}
+				}
+			}
+
 			switch state {
 			case game.StateBattleEnd, game.StateReturnHome:
 				screen.Close()
@@ -1874,12 +1896,18 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 				}
 				continue
 			case game.StateMainVillage, game.StateArmyCamp, game.StateArmySelection:
-				// Definitive evidence that the battle flow already ended or
-				// reloaded somewhere unexpected. Fail fast so the orchestrator
-				// can recover rather than burning the remaining deadline.
-				screen.Close()
-				e.logger.Warn().Str("state", state.String()).Msg("battle flow exited unexpectedly; aborting battle-end wait")
-				return false
+				// A single MainVillage/army classification is not enough to prove
+				// the battle escaped: the first result-animation frames can look
+				// like these states on Windows. Require repeated confirmation.
+				unexpectedExitHits++
+				if unexpectedExitHits >= 3 {
+					screen.Close()
+					e.logger.Warn().Str("state", state.String()).Int("confirmations", unexpectedExitHits).Msg("battle flow exited unexpectedly after repeated confirmation; aborting battle-end wait")
+					return false
+				}
+				e.logger.Debug().Str("state", state.String()).Int("confirmations", unexpectedExitHits).Msg("transient non-battle state during result transition; waiting for confirmation")
+			default:
+				unexpectedExitHits = 0
 			}
 
 			// Continuously sample the live Available Loot counters. Accept only
