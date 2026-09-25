@@ -874,6 +874,21 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 
 	state, score := b.classify(screen)
 
+	// The current Windows village can still satisfy loose battle anchors
+	// (resource icons / stale Next-template pixels) for several seconds after
+	// Return Home. The localized Attack button lives in a tight village-only
+	// bottom-left ROI and is stronger evidence than those generic battle
+	// anchors. If it is positively visible, force the semantic state back to
+	// MainVillage so the runtime supervisor cannot restart a healthy village as
+	// a supposedly stuck battle.
+	if state == game.StateBattle && b.findAttackButton(screen, 0.30) {
+		b.logger.Warn().
+			Int("classifier_score", score).
+			Msg("battle classification contradicted by verified village Attack button; overriding to MainVillage")
+		state = game.StateMainVillage
+		score = 1000
+	}
+
 	// Keep the console useful without flooding Wails/React at the faster
 	// capture cadence. Log immediately on state changes and at most roughly
 	// once per 750ms while a state remains stable.
