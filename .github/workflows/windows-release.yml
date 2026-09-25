@@ -6,11 +6,11 @@ on:
       version:
         description: Release version without leading v
         required: true
-        default: 0.6.5-windows-beta
+        default: 0.6.6-windows-beta
       notes:
         description: Release notes
         required: false
-        default: Final updater test: detect, download, install and restart 0.6.5
+        default: Updater hotfix: launch helper before restarting state
 
 permissions:
   contents: write
