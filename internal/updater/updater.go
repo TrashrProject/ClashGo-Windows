@@ -320,7 +320,13 @@ func (s *Service) Check(ctx context.Context) (Status, error) {
 	s.lastCheckMu.Unlock()
 
 	s.statusMu.Lock()
-	s.status.State = StateChecking
+	// A metadata refresh must never destroy a verified READY download.
+	// Previously Check() changed READY -> CHECKING before absorbManifest()
+	// could preserve the completed archive, so clicking Install afterwards
+	// failed with "download not ready — call Download() first".
+	if s.status.State != StateReady {
+		s.status.State = StateChecking
+	}
 	s.status.Error = ""
 	s.statusMu.Unlock()
 
