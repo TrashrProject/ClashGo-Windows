@@ -36,6 +36,9 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "LegalCopyright" "ClashGO MIT upstream © Diego Sargent; Windows fork © 2026 TrashrProject"
 
 !define MUI_ABORTWARNING
+!define MUI_LANGDLL_REGISTRY_ROOT "HKCU"
+!define MUI_LANGDLL_REGISTRY_KEY "${UNINSTALL_KEY}"
+!define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${PRODUCT_EXE}"
 !define MUI_FINISHPAGE_RUN_TEXT "Launch ClashGO Windows"
 
@@ -50,6 +53,7 @@ VIAddVersionKey "LegalCopyright" "ClashGO MIT upstream © Diego Sargent; Windows
 !insertmacro MUI_LANGUAGE "French"
 
 Function .onInit
+  !insertmacro MUI_LANGDLL_DISPLAY
   ${IfNot} ${RunningX64}
     MessageBox MB_ICONSTOP|MB_OK "ClashGO Windows currently requires 64-bit Windows."
     Abort
