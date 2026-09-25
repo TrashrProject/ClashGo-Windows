@@ -881,12 +881,18 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 	// anchors. If it is positively visible, force the semantic state back to
 	// MainVillage so the runtime supervisor cannot restart a healthy village as
 	// a supposedly stuck battle.
-	if state == game.StateBattle && b.findAttackButton(screen, 0.30) {
-		b.logger.Warn().
-			Int("classifier_score", score).
-			Msg("battle classification contradicted by verified village Attack button; overriding to MainVillage")
-		state = game.StateMainVillage
-		score = 1000
+	if state == game.StateBattle && !b.seqRunning.Load() {
+		// Only the localized orange-region detector is strong enough to override
+		// Battle. The generic Attack template can false-match the live battle HUD
+		// and previously flipped an ACTIVE attack back to MainVillage, causing the
+		// search/deploy flow to run against the wrong screen.
+		if _, _, villageAttackVisible := b.locateAttackButtonColor(screen); villageAttackVisible {
+			b.logger.Warn().
+				Int("classifier_score", score).
+				Msg("battle classification contradicted by localized village Attack button; overriding to MainVillage")
+			state = game.StateMainVillage
+			score = 1000
+		}
 	}
 
 	// Keep the console useful without flooding Wails/React at the faster
