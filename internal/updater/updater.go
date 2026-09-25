@@ -849,7 +849,7 @@ func (s *Service) Apply() error {
 // missing, returns an error so the UI can fall back to Finder.
 func (s *Service) ApplyAuto() (bool, error) {
 	st := s.GetStatus()
-	if st.State != StateReady || st.DownloadPath == "" {
+	if (st.State != StateReady && st.State != StateRestarting) || st.DownloadPath == "" {
 		return false, errors.New("download not ready — call Download() first")
 	}
 
