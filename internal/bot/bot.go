@@ -3248,10 +3248,19 @@ func (b *Bot) clickReturnHomeVerified(maxAttempts int) bool {
 				continue
 			}
 			state, _ := b.classify(probe)
-			atVillage := state == game.StateMainVillage || b.findAttackButton(probe, 0.30)
+			_, _, localizedAttack := b.locateAttackButtonColor(probe)
+			atVillage := state == game.StateMainVillage || localizedAttack
 			probe.Close()
 			if atVillage {
-				b.logger.Info().Int("attempt", attempt).Msg("Return Home confirmed at village")
+				now := time.Now()
+				b.runtimeState.Store(int32(game.StateMainVillage))
+				b.runtimeStateSince.Store(now.UnixNano())
+				b.runtimeProgress.Store(now.UnixNano())
+				b.logger.Info().
+					Int("attempt", attempt).
+					Bool("localized_attack", localizedAttack).
+					Str("classifier_state", state.String()).
+					Msg("Return Home confirmed at village")
 				return true
 			}
 		}
