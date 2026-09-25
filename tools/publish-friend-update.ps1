@@ -1,6 +1,6 @@
 param(
-    [string]$Version = "0.6.4-windows-beta",
-    [string]$Notes = "Correctif critique de la mise a jour Windows : conservation de l'etat pret apres verification, installation et redemarrage fiables."
+    [string]$Version = "0.6.5-windows-beta",
+    [string]$Notes = "Test final de la mise a jour integree : detection 0.6.5, telechargement verifie, installation et redemarrage automatique."
 )
 
 $ErrorActionPreference = "Stop"
