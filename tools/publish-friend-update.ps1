@@ -70,7 +70,14 @@ $latestPath = Join-Path $dist "latest.json"
 [System.IO.File]::WriteAllText($latestPath, $manifestJson, $utf8NoBom)
 
 $tag = "v$Version"
-& $gh.Source release view $tag --repo TrashrProject/ClashGo-Windows *> $null
+
+# gh writes "release not found" to stderr for a perfectly normal missing tag.
+# With ErrorActionPreference=Stop, PowerShell 5 turns that stderr line into a
+# terminating NativeCommandError before we can inspect $LASTEXITCODE. Probe
+# existence through cmd.exe so a missing release is treated as "create it".
+$ghPath = $gh.Source
+$probe = '"{0}" release view "{1}" --repo TrashrProject/ClashGo-Windows >nul 2>nul' -f $ghPath, $tag
+cmd.exe /d /s /c $probe
 $exists = ($LASTEXITCODE -eq 0)
 
 if ($exists) {
