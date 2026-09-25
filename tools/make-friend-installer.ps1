@@ -11,7 +11,10 @@ Write-Host ""
 Write-Host "=== ClashGO - package ami ==="
 Write-Host "Version: $Version"
 
-$buildArgs = @("-Version", $Version)
+# Friend builds should not accidentally inherit a malformed
+# CLASHGO_ACCOUNT_API_URL from the developer shell. No hosted account service
+# is required for the portable installer, so explicitly build without one.
+$buildArgs = @("-Version", $Version, "-AccountServiceURL", "")
 if ($SkipTests) { $buildArgs += "-SkipTests" }
 & (Join-Path $repoRoot "tools\build-windows.ps1") @buildArgs
 if ($LASTEXITCODE -ne 0) { throw "ClashGO Windows build failed." }
