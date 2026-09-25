@@ -704,7 +704,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			return slot.Category + ":" + name
 		}
 
-		for liveRound := 1; liveRound <= 18 && !tapExec.DeployBudgetExhausted(); liveRound++ {
+		for liveRound := 1; liveRound <= 30 && !tapExec.DeployBudgetExhausted(); liveRound++ {
 			fresh, capErr := tapExec.CaptureFresh()
 			if capErr != nil || fresh.Empty() {
 				if !fresh.Empty() { fresh.Close() }
@@ -956,16 +956,75 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 			// Do not trust old coordinates after this point. On the next loop
 			// the whole bar is captured and re-indexed from scratch.
-			if cardAttempts[key] >= 2 && chosen.UnitName != "" && chosenCount <= 0 {
+			if cardAttempts[key] >= 5 && chosen.UnitName != "" && chosenCount <= 0 {
 				e.logger.Warn().
 					Str("unit", chosen.UnitName).
 					Str("category", chosen.Category).
-					Msg("Windows live deployment card persisted with unknown count after 2 bursts; blacklisting to avoid a stuck loop")
+					Msg("Windows live deployment card persisted with unknown count after 5 bursts; blacklisting to avoid a stuck loop")
 				oneShotDone["Troop:"+strings.ToLower(strings.TrimSpace(chosen.UnitName))] = true
 				if armyState != nil {
 					armyState.Fail(chosen.UnitName)
 				}
 			}
+		}
+
+		// Final Windows rescue sweep: the normal loop can still leave cards when
+		// OCR is uncertain or when the bar compacts faster than our identity map.
+		// Reacquire the LIVE bar after every rescue burst and drain any remaining
+		// deployable troop/spell card. Hero cards are deliberately excluded here
+		// because deployed heroes remain visible as ability buttons.
+		for rescueRound := 1; rescueRound <= 12 && !tapExec.DeployBudgetExhausted(); rescueRound++ {
+			rescueFrame, rescueErr := tapExec.CaptureFresh()
+			if rescueErr != nil || rescueFrame.Empty() {
+				if !rescueFrame.Empty() { rescueFrame.Close() }
+				break
+			}
+			rescueMgr := NewSlotManager(rescueFrame, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+			rescueSlots := rescueMgr.GetAllSlots()
+			rescueCounts := troopCounter.DetectCounts(rescueFrame, rescueSlots, rescueMgr.GetBarY())
+			var rescueSlot *TrackedSlot
+			rescueCount := 0
+			for _, slot := range rescueSlots {
+				if slot == nil || !e.shouldDeployLiveCategory(slot.Category) {
+					continue
+				}
+				if slot.Category == "Troop" && looksLikeHeroCardStatic(rescueFrame, slot.X, rescueMgr.GetBarY(), w, h) {
+					continue
+				}
+				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
+					continue
+				}
+				activity := GetSlotActivityRatioStatic(rescueFrame, slot.X, slot.Y, w)
+				if activity < 0.10 {
+					continue
+				}
+				rescueSlot = slot
+				rescueCount = GetCountForSlot(rescueCounts, slot.X)
+				if rescueCount > 50 { rescueCount = 0 }
+				break
+			}
+			if rescueSlot == nil {
+				rescueFrame.Close()
+				e.logger.Info().Int("round", rescueRound).Msg("Windows final rescue sweep: no deployable troop/spell cards remain")
+				break
+			}
+			name := rescueSlot.UnitName
+			category := rescueSlot.Category
+			x := rescueSlot.X
+			rescueFrame.Close()
+			if rescueCount <= 0 {
+				if category == "Spell" { rescueCount = 2 } else { rescueCount = 6 }
+			}
+			if rescueCount > 20 { rescueCount = 20 }
+			e.logger.Warn().
+				Int("round", rescueRound).
+				Str("unit", name).
+				Str("category", category).
+				Int("slot_x", x).
+				Int("count", rescueCount).
+				Msg("Windows final rescue sweep draining leftover live card")
+			deploySlot(rescueSlot, rescueCount)
+			tapExec.HumanSleep(100, 20)
 		}
 
 		// If deployment finished before the 30-second hero timer, wait only the
