@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.6.1-windows-beta",
+    [string]$Version = "0.6.2-windows-beta",
     [string]$Notes = "Mise a jour stabilite Windows : recyclage preventif apres 3 attaques, deploiement plus robuste, matchmaking accelere et mise a jour en un clic."
 )
 
