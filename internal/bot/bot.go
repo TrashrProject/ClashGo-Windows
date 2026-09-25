@@ -2100,20 +2100,37 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			b.OnStatsUpdate()
 		}
 
-		// Xingchen-style skip path: click the verified Next target and move on.
-		// Do not restart Clash merely because the coarse classifier failed to
-		// observe the short clouds transition.
-		if !b.findAndClick("btn_next", "Next Match", 2) {
-			b.logger.Warn().Msg("Next template path failed; using one bounded color/pinpoint fallback")
+		// Fast Windows/Xingchen-style skip path: the localized orange Next
+		// detector is already reliable on the live matchmaking screen, so use it
+		// FIRST. The previous template-first path spent ~2s failing on every
+		// single low-loot base before falling back to the same orange button.
+		nextClicked := false
+		if x, y, ok := b.locateNextButtonColor(screen); ok {
+			b.logger.Info().Int("x", x).Int("y", y).Msg("clicking Next via verified live orange button")
+			if err := b.client.TapFast(x, y, 0.6); err == nil {
+				b.recordActivity()
+				nextClicked = true
+			}
+		}
+
+		if !nextClicked {
+			// Keep the Xingchen broad-orange fallback as a bounded secondary path.
 			searchROI := image.Rect(b.cal.PhysicalW/2, b.cal.PhysicalH/2, b.cal.PhysicalW, b.cal.PhysicalH)
 			orangePt, pxErr := vision.PixelSearch(screen, searchROI, 252, 186, 54, 50)
 			if pxErr == nil {
-				b.logger.Info().Msg("clicking Next via Xingchen orange-color fallback")
+				b.logger.Warn().Msg("localized Next detector missed; clicking Xingchen orange-color fallback")
 				_ = b.client.TapRandomized(orangePt.X, orangePt.Y)
 				b.recordActivity()
-			} else {
+				nextClicked = true
+			}
+		}
+
+		if !nextClicked {
+			// Final evidence-based fallback. Only pay the template wait cost when
+			// both color paths genuinely failed.
+			if !b.findAndClick("btn_next", "Next Match", 1) {
 				nextX, nextY := b.cal.ScaleRef(796, 565)
-				b.logger.Warn().Int("x", nextX).Int("y", nextY).Msg("Next color fallback unavailable; using single Xingchen reference tap")
+				b.logger.Warn().Int("x", nextX).Int("y", nextY).Msg("Next visual detectors unavailable; using one bounded reference tap")
 				_ = b.client.TapRandomized(nextX, nextY)
 				b.recordActivity()
 			}
