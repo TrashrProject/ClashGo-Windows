@@ -10,18 +10,19 @@ on:
   pull_request:
     branches:
       - main
+      - windows/core-port
+      - windows/core-port
     types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
 
 concurrency:
-  group: windows-core-port-build-${{ github.sha }}
-  cancel-in-progress: false
+  group: windows-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'windows/core-port'
     runs-on: windows-latest
     env:
       BUILD_VERSION: ${{ github.event.inputs.version || '0.6.0-windows-beta' }}
@@ -32,10 +33,9 @@ jobs:
       GOFLAGS: -tags=customenv,gocv_specific_modules
     timeout-minutes: 120
     steps:
-      - name: Checkout Windows branch
+      - name: Checkout tested revision
         uses: actions/checkout@v4
         with:
-          ref: windows/core-port
           fetch-depth: 0
 
       - name: Setup Go
@@ -48,8 +48,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
 
       - name: Validate PowerShell scripts
         shell: powershell

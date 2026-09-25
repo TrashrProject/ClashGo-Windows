@@ -127,7 +127,7 @@ func NewClient(opts ...Option) *Client {
 		jitterDelays:    true,
 		maxJitterPixels: 2.0,
 		jitterFraction:  0.15,
-		minCaptureGap:   120 * time.Millisecond,
+		minCaptureGap:   220 * time.Millisecond,
 	}
 	for _, o := range opts {
 		o(c)
@@ -170,6 +170,14 @@ func (c *Client) Connect() error {
 	}
 	c.log.Info("ADB device connected")
 	return nil
+}
+
+// EmulatorProcessRunning reports whether the platform VM/player process is
+// still alive. On Windows this maps to HD-Player.exe; on macOS it maps to the
+// existing VM signal helper. Recovery uses this to skip pointless ADB resets
+// when the emulator process itself has already died.
+func (c *Client) EmulatorProcessRunning() bool {
+	return c.firstVMSignal() != ""
 }
 
 func (c *Client) EnsureConnected() error {
@@ -458,7 +466,9 @@ func (c *Client) Tap(x, y int) error {
 		actualY += oy
 	}
 	c.log.Debugf("ADB TAP: (%d, %d) actual: (%d, %d)", x, y, actualX, actualY)
-	err := c.routeTap("input tap", actualX, actualY, false)
+	c.mu.Lock()
+	err := c.routeTapLocked("input tap", actualX, actualY, false)
+	c.mu.Unlock()
 	c.fireTapHook(TapEvent{Type: "tap", X: x, Y: y, ActualX: actualX, ActualY: actualY, StdDev: stdDev, Error: errStr(err)})
 	return err
 }
@@ -479,14 +489,18 @@ func (c *Client) TapAsync(x, y int) error {
 		actualY += oy
 	}
 	c.log.Debugf("ADB TAP-ASYNC: (%d, %d) actual: (%d, %d)", x, y, actualX, actualY)
-	err := c.routeTap("input tap", actualX, actualY, true)
+	c.mu.Lock()
+	err := c.routeTapLocked("input tap", actualX, actualY, true)
+	c.mu.Unlock()
 	c.fireTapHook(TapEvent{Type: "tap_async", X: x, Y: y, ActualX: actualX, ActualY: actualY, StdDev: stdDev, Error: errStr(err)})
 	return err
 }
 
 // routeTap is the shared router for Tap/TapAsync/TapFast through either
 // the persistent pipe (when alive) or the legacy transport.Exec fallback.
-func (c *Client) routeTap(cmd string, x, y int, async bool) error {
+// Caller MUST hold c.mu. Keeping the lock contract in the name prevents new
+// tap call sites from bypassing transport serialization.
+func (c *Client) routeTapLocked(cmd string, x, y int, async bool) error {
 	if p := c.currentPipe(); p != nil {
 		full := fmt.Sprintf("%s %d %d", cmd, x, y)
 		if async {
@@ -545,7 +559,7 @@ func (c *Client) TapFast(x, y int, stdDev float64) error {
 	ox := int(r.NormFloat64() * stdDev)
 	oy := int(r.NormFloat64() * stdDev)
 	c.mu.Lock()
-	err := c.routeTap("input tap", x+ox, y+oy, false)
+	err := c.routeTapLocked("input tap", x+ox, y+oy, false)
 	c.mu.Unlock()
 	c.fireTapHook(TapEvent{Type: "tap_fast", X: x, Y: y, ActualX: x + ox, ActualY: y + oy, StdDev: stdDev, Error: errStr(err)})
 	return err
@@ -556,7 +570,9 @@ func (c *Client) TapFastAsync(x, y int, stdDev float64) error {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	ox := int(r.NormFloat64() * stdDev)
 	oy := int(r.NormFloat64() * stdDev)
-	err := c.routeTap("input tap", x+ox, y+oy, true)
+	c.mu.Lock()
+	err := c.routeTapLocked("input tap", x+ox, y+oy, true)
+	c.mu.Unlock()
 	c.fireTapHook(TapEvent{Type: "tap_fast_async", X: x, Y: y, ActualX: x + ox, ActualY: y + oy, StdDev: stdDev, Error: errStr(err)})
 	return err
 }
@@ -585,13 +601,13 @@ func (c *Client) TapDual(x1, y1 int, stdDev1 float64, x2, y2 int, stdDev2 float6
 	oy2 := int(r2.NormFloat64() * stdDev2)
 
 	c.log.Debugf("ADB DUAL TAP (sequential): (%d, %d), (%d, %d)", x1+ox1, y1+oy1, x2+ox2, y2+oy2)
-	err1 := c.routeTap("input tap", x1+ox1, y1+oy1, false)
+	err1 := c.routeTapLocked("input tap", x1+ox1, y1+oy1, false)
 	c.fireTapHook(TapEvent{Type: "tap_dual_1", X: x1, Y: y1, ActualX: x1 + ox1, ActualY: y1 + oy1, StdDev: stdDev1, Error: errStr(err1)})
 	if err1 != nil {
 		return err1
 	}
 	time.Sleep(50 * time.Millisecond)
-	err2 := c.routeTap("input tap", x2+ox2, y2+oy2, false)
+	err2 := c.routeTapLocked("input tap", x2+ox2, y2+oy2, false)
 	c.fireTapHook(TapEvent{Type: "tap_dual_2", X: x2, Y: y2, ActualX: x2 + ox2, ActualY: y2 + oy2, StdDev: stdDev2, Error: errStr(err2)})
 	return err2
 }
@@ -625,19 +641,19 @@ func (c *Client) TapTriple(x1, y1 int, stdDev1 float64, x2, y2 int, stdDev2 floa
 	oy3 := int(r3.NormFloat64() * stdDev3)
 
 	c.log.Debugf("ADB TRIPLE TAP (sequential): (%d, %d), (%d, %d), (%d, %d)", x1+ox1, y1+oy1, x2+ox2, y2+oy2, x3+ox3, y3+oy3)
-	err1 := c.routeTap("input tap", x1+ox1, y1+oy1, false)
+	err1 := c.routeTapLocked("input tap", x1+ox1, y1+oy1, false)
 	c.fireTapHook(TapEvent{Type: "tap_triple_1", X: x1, Y: y1, ActualX: x1 + ox1, ActualY: y1 + oy1, StdDev: stdDev1, Error: errStr(err1)})
 	if err1 != nil {
 		return err1
 	}
 	time.Sleep(50 * time.Millisecond)
-	err2 := c.routeTap("input tap", x2+ox2, y2+oy2, false)
+	err2 := c.routeTapLocked("input tap", x2+ox2, y2+oy2, false)
 	c.fireTapHook(TapEvent{Type: "tap_triple_2", X: x2, Y: y2, ActualX: x2 + ox2, ActualY: y2 + oy2, StdDev: stdDev2, Error: errStr(err2)})
 	if err2 != nil {
 		return err2
 	}
 	time.Sleep(50 * time.Millisecond)
-	err3 := c.routeTap("input tap", x3+ox3, y3+oy3, false)
+	err3 := c.routeTapLocked("input tap", x3+ox3, y3+oy3, false)
 	c.fireTapHook(TapEvent{Type: "tap_triple_3", X: x3, Y: y3, ActualX: x3 + ox3, ActualY: y3 + oy3, StdDev: stdDev3, Error: errStr(err3)})
 	return err3
 }

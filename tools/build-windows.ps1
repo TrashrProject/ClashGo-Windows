@@ -1,12 +1,19 @@
 param(
-    [string]$Version = "0.6.0-windows-beta",
-    [string]$AccountServiceURL = $env:CLASHGO_ACCOUNT_API_URL,
+    [string]$Version = "0.6.7-windows-beta",
+    [string]$AccountServiceURL = "",
     [switch]$SkipSync,
     [switch]$SkipTests
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+# Only inherit CLASHGO_ACCOUNT_API_URL when the caller did not explicitly
+# provide -AccountServiceURL. This lets packaging scripts intentionally pass
+# an empty value even if the developer shell contains a stale/bad env var.
+if (-not $PSBoundParameters.ContainsKey("AccountServiceURL") -and $env:CLASHGO_ACCOUNT_API_URL) {
+    $AccountServiceURL = $env:CLASHGO_ACCOUNT_API_URL
+}
 Push-Location $repoRoot
 try {
     if (-not $SkipSync -and -not (Test-Path ".\assets\templates\btn_attack.png")) { & ".\tools\sync-upstream-runtime.ps1" }
@@ -111,7 +118,31 @@ $env:CGO_LDFLAGS = "-LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -l
 
     $distRoot = Join-Path $repoRoot "dist"
     $bundle = Join-Path $distRoot "ClashGO-Windows"
-    if (Test-Path $bundle) { Remove-Item $bundle -Recurse -Force }
+
+    # A previous packaged ClashGO.exe may still be running from dist and lock
+    # its own bundle. Stop only processes whose executable path lives inside
+    # this exact bundle, then retry cleanup a few times before failing.
+    if (Test-Path $bundle) {
+        Get-CimInstance Win32_Process -Filter "Name='ClashGO.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($bundle, [System.StringComparison]::OrdinalIgnoreCase) } |
+            ForEach-Object {
+                Write-Host "Stopping packaged ClashGO instance (PID $($_.ProcessId)) before rebuilding..."
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+
+        $removed = $false
+        for ($attempt = 1; $attempt -le 5 -and -not $removed; $attempt++) {
+            try {
+                Remove-Item $bundle -Recurse -Force -ErrorAction Stop
+                $removed = $true
+            }
+            catch {
+                if ($attempt -ge 5) { throw }
+                Write-Host "Bundle still locked; retrying cleanup ($attempt/5)..."
+                Start-Sleep -Milliseconds 600
+            }
+        }
+    }
     New-Item -ItemType Directory -Force -Path $bundle | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $bundle "resources") | Out-Null
     Copy-Item $exe (Join-Path $bundle "ClashGO.exe") -Force

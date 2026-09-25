@@ -15,6 +15,24 @@ import (
 	"gocv.io/x/gocv"
 )
 
+// shouldDeployLiveCategory applies player-facing battle preferences to the
+// Windows live-bar path. The live bar is authoritative for what exists, but
+// "available" is not the same as "authorized": disabled heroes/CC must remain
+// untouched instead of being deployed merely because vision found a card.
+func (e *Executor) shouldDeployLiveCategory(category string) bool {
+	if e == nil || e.cfg == nil {
+		return true
+	}
+	switch category {
+	case "Hero":
+		return e.cfg.UseHeroes
+	case "CC":
+		return e.cfg.UseClanCastle
+	default:
+		return true
+	}
+}
+
 // DeployDynamicV2 deploys troops using dynamic red line detection.
 // No hardcoded precision_config.json needed - detects deployment boundary live.
 //
@@ -593,7 +611,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			}
 
 			tapExec.TapSlot(slot, 3)
-			tapExec.HumanSleep(110, 20)
+			tapExec.HumanSleep(80, 15)
 
 			if slot.Category == "Spell" {
 				spellPoint := image.Pt(w/2, int(float64(uiCutoff)*0.50))
@@ -636,16 +654,16 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// the observed "select ED -> jump to siege -> hammer last hero" failure.
 		categoryPriority := func(cat string) int {
 			switch cat {
-			case "Troop":
-				return 0
 			case "Hero":
-				return 1
+				return 0
 			case "Siege", "CC":
+				return 1
+			case "Troop":
 				return 2
 			case "Spell":
 				return 3
 			default:
-				return 0
+				return 2
 			}
 		}
 		var armyState *ArmyStateManager
@@ -668,6 +686,15 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		cardAttempts := make(map[string]int)
 		profileFirstDeploy := make(map[string]bool)
 		liveRemaining := 0
+		spentOnlyReached := false
+
+		// Hero abilities are intentionally delayed instead of being fired
+		// immediately after deployment. The live Windows bar keeps hero ability
+		// cards visible after the heroes are dropped, so we can reacquire their
+		// CURRENT coordinates later even if troop cards have compacted.
+		const heroAbilityDelay = 30 * time.Second
+		var heroAbilityDue time.Time
+		heroAbilitiesActivated := false
 
 		oneShotKey := func(slot *TrackedSlot) string {
 			name := strings.ToLower(strings.TrimSpace(slot.UnitName))
@@ -677,7 +704,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			return slot.Category + ":" + name
 		}
 
-		for liveRound := 1; liveRound <= 36 && !tapExec.DeployBudgetExhausted(); liveRound++ {
+		for liveRound := 1; liveRound <= 30 && !tapExec.DeployBudgetExhausted(); liveRound++ {
 			fresh, capErr := tapExec.CaptureFresh()
 			if capErr != nil || fresh.Empty() {
 				if !fresh.Empty() { fresh.Close() }
@@ -703,6 +730,59 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			})
 
 			liveCounts := troopCounter.DetectCounts(fresh, liveSlots, liveMgr.GetBarY())
+
+			// Hero portraits vary heavily with skins/levels. If template identity
+			// missed one but the card has no troop-count overlay and carries the
+			// structural hero health strip, promote it before choosing a card.
+			// This is what prevents King/Queen/Prince/Warden cards from being left
+			// behind as generic zero-count troops.
+			for _, slot := range liveSlots {
+				if slot.Category != "Troop" {
+					continue
+				}
+				// Hero cards show their LEVEL (e.g. 91/95/69) in the same lower
+				// area where troop OCR looks for quantity. Treating that number
+				// as a troop count prevented real King/Queen/Prince/Warden cards
+				// from entering the hero path. A verified green hero-health strip
+				// wins over numeric OCR.
+				if looksLikeHeroCardStatic(fresh, slot.X, liveMgr.GetBarY(), w, h) {
+					slot.Category = "Hero"
+					e.logger.Info().Int("x", slot.X).Str("unit", slot.UnitName).
+						Msg("Windows live deployment: structural hero card overrides count OCR")
+				}
+			}
+			sort.SliceStable(liveSlots, func(i, j int) bool {
+				pi := categoryPriority(liveSlots[i].Category)
+				pj := categoryPriority(liveSlots[j].Category)
+				if pi != pj { return pi < pj }
+				return liveSlots[i].X < liveSlots[j].X
+			})
+
+			// Fire hero abilities once, ~30s after the first hero was deployed.
+			// Reacquiring the CURRENT hero-card X positions avoids stale-slot taps
+			// after the battle bar compacts.
+			if !heroAbilitiesActivated && !heroAbilityDue.IsZero() && !time.Now().Before(heroAbilityDue) {
+				activated := 0
+				for _, heroSlot := range liveSlots {
+					if heroSlot == nil || heroSlot.Category != "Hero" || !e.shouldDeployLiveCategory("Hero") {
+						continue
+					}
+					tapExec.TapHeroAbility(heroSlot)
+					activated++
+					tapExec.HumanSleep(70, 10)
+				}
+				if activated > 0 {
+					heroAbilitiesActivated = true
+					e.logger.Info().
+						Int("count", activated).
+						Dur("delay", heroAbilityDelay).
+						Msg("Windows hero abilities activated after delayed trigger")
+					fresh.Close()
+					tapExec.HumanSleep(120, 15)
+					continue
+				}
+			}
+
 			var chosen *TrackedSlot
 			chosenCount := 0
 			chosenActivity := 0.0
@@ -710,6 +790,14 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			anonymousHeroIndex := 0
 			for _, slot := range liveSlots {
 				key := oneShotKey(slot)
+				// Player preferences are hard policy, not hints. Keep disabled
+				// hero/Clan Castle cards untouched and continue evaluating the
+				// remaining live bar. This is especially important in Easy Mode,
+				// where a single "Use heroes" switch must cover every hero rather
+				// than only legacy Queen/Warden code paths.
+				if !e.shouldDeployLiveCategory(slot.Category) {
+					continue
+				}
 				// Skip every identity explicitly blacklisted for this battle.
 				if oneShotDone[key] {
 					continue
@@ -764,6 +852,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			if chosen == nil {
 				fresh.Close()
 				liveRemaining = 0
+				spentOnlyReached = true
 				e.logger.Info().Int("round", liveRound).Msg("Windows live deployment: only spent/ability cards remain")
 				break
 			}
@@ -789,9 +878,18 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				line := safeLines[len(safeLines)-1]
 				pt := image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2)
 				tapExec.TapSlot(chosen, 1)
-				tapExec.HumanSleep(130, 15)
+				tapExec.HumanSleep(90, 12)
 				tapExec.TapDeployPoint(pt, 1, 1)
 				oneShotDone[key] = true
+				if chosen.Category == "Hero" {
+					if heroAbilityDue.IsZero() {
+						heroAbilityDue = time.Now().Add(heroAbilityDelay)
+						e.logger.Info().
+							Time("activate_at", heroAbilityDue).
+							Dur("delay", heroAbilityDelay).
+							Msg("Windows hero ability timer armed")
+					}
+				}
 				if chosen.Category == "Hero" && strings.TrimSpace(chosen.UnitName) == "" {
 					unknownHeroesDeployed++
 					e.logger.Info().
@@ -806,7 +904,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 					Str("category", chosen.Category).
 					Interface("deploy_point", pt).
 					Msg("Windows one-shot card deployed once and permanently blacklisted from re-selection")
-				tapExec.HumanSleep(180, 20)
+				tapExec.HumanSleep(100, 15)
 				continue
 			}
 
@@ -843,9 +941,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				// the next loop recaptures/reacquires the whole bar. Never send
 				// a full profile count blindly through a shifting troop bar.
 				if chosen.Category == "Spell" {
-					count = 2
+					count = 3
 				} else {
-					count = 6
+					count = 10
 				}
 			}
 			if count > 40 { count = 40 }
@@ -854,18 +952,114 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			if armyState != nil && strings.TrimSpace(chosen.UnitName) != "" {
 				armyState.Attempt(chosen.UnitName, count)
 			}
-			tapExec.HumanSleep(150, 20)
+			tapExec.HumanSleep(85, 15)
 
 			// Do not trust old coordinates after this point. On the next loop
 			// the whole bar is captured and re-indexed from scratch.
-			if cardAttempts[key] >= 8 && chosen.UnitName != "" && chosenCount <= 0 {
+			if cardAttempts[key] >= 5 && chosen.UnitName != "" && chosenCount <= 0 {
 				e.logger.Warn().
 					Str("unit", chosen.UnitName).
 					Str("category", chosen.Category).
-					Msg("Windows live deployment card persisted with unknown count after 8 bursts; blacklisting to avoid a stuck loop")
+					Msg("Windows live deployment card persisted with unknown count after 5 bursts; blacklisting to avoid a stuck loop")
 				oneShotDone["Troop:"+strings.ToLower(strings.TrimSpace(chosen.UnitName))] = true
 				if armyState != nil {
 					armyState.Fail(chosen.UnitName)
+				}
+			}
+		}
+
+		// Final Windows rescue sweep: the normal loop can still leave cards when
+		// OCR is uncertain or when the bar compacts faster than our identity map.
+		// Reacquire the LIVE bar after every rescue burst and drain any remaining
+		// deployable troop/spell card. Hero cards are deliberately excluded here
+		// because deployed heroes remain visible as ability buttons.
+		for rescueRound := 1; rescueRound <= 12 && !tapExec.DeployBudgetExhausted(); rescueRound++ {
+			rescueFrame, rescueErr := tapExec.CaptureFresh()
+			if rescueErr != nil || rescueFrame.Empty() {
+				if !rescueFrame.Empty() { rescueFrame.Close() }
+				break
+			}
+			rescueMgr := NewSlotManager(rescueFrame, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+			rescueSlots := rescueMgr.GetAllSlots()
+			rescueCounts := troopCounter.DetectCounts(rescueFrame, rescueSlots, rescueMgr.GetBarY())
+			var rescueSlot *TrackedSlot
+			rescueCount := 0
+			for _, slot := range rescueSlots {
+				if slot == nil || !e.shouldDeployLiveCategory(slot.Category) {
+					continue
+				}
+				if slot.Category == "Troop" && looksLikeHeroCardStatic(rescueFrame, slot.X, rescueMgr.GetBarY(), w, h) {
+					continue
+				}
+				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
+					continue
+				}
+				activity := GetSlotActivityRatioStatic(rescueFrame, slot.X, slot.Y, w)
+				if activity < 0.10 {
+					continue
+				}
+				rescueSlot = slot
+				rescueCount = GetCountForSlot(rescueCounts, slot.X)
+				if rescueCount > 50 { rescueCount = 0 }
+				break
+			}
+			if rescueSlot == nil {
+				rescueFrame.Close()
+				e.logger.Info().Int("round", rescueRound).Msg("Windows final rescue sweep: no deployable troop/spell cards remain")
+				break
+			}
+			name := rescueSlot.UnitName
+			category := rescueSlot.Category
+			x := rescueSlot.X
+			rescueFrame.Close()
+			if rescueCount <= 0 {
+				if category == "Spell" { rescueCount = 2 } else { rescueCount = 6 }
+			}
+			if rescueCount > 20 { rescueCount = 20 }
+			e.logger.Warn().
+				Int("round", rescueRound).
+				Str("unit", name).
+				Str("category", category).
+				Int("slot_x", x).
+				Int("count", rescueCount).
+				Msg("Windows final rescue sweep draining leftover live card")
+			deploySlot(rescueSlot, rescueCount)
+			tapExec.HumanSleep(100, 20)
+		}
+
+		// If deployment finished before the 30-second hero timer, wait only the
+		// remaining time, then reacquire the live bar and fire each visible hero
+		// ability once. This keeps the trigger tied to hero deployment time rather
+		// than total attack duration.
+		if !heroAbilitiesActivated && !heroAbilityDue.IsZero() {
+			if wait := time.Until(heroAbilityDue); wait > 0 {
+				time.Sleep(wait)
+			}
+			abilityFrame, abilityErr := tapExec.CaptureFresh()
+			if abilityErr == nil && !abilityFrame.Empty() {
+				abilityMgr := NewSlotManager(abilityFrame, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+				activated := 0
+				for _, heroSlot := range abilityMgr.GetAllSlots() {
+					if heroSlot == nil {
+						continue
+					}
+					if heroSlot.Category == "Troop" && looksLikeHeroCardStatic(abilityFrame, heroSlot.X, abilityMgr.GetBarY(), w, h) {
+						heroSlot.Category = "Hero"
+					}
+					if heroSlot.Category != "Hero" || !e.shouldDeployLiveCategory("Hero") {
+						continue
+					}
+					tapExec.TapHeroAbility(heroSlot)
+					activated++
+					tapExec.HumanSleep(70, 10)
+				}
+				abilityFrame.Close()
+				if activated > 0 {
+					heroAbilitiesActivated = true
+					e.logger.Info().
+						Int("count", activated).
+						Dur("delay", heroAbilityDelay).
+						Msg("Windows hero abilities activated after delayed trigger")
 				}
 			}
 		}
@@ -877,14 +1071,56 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			finalMgr := NewSlotManager(finalFrame, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
 			finalCounts := troopCounter.DetectCounts(finalFrame, finalMgr.GetAllSlots(), finalMgr.GetBarY())
 			liveRemaining = 0
+			anonymousHeroesVisible := 0
 			for _, slot := range finalMgr.GetAllSlots() {
-				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
+				if !e.shouldDeployLiveCategory(slot.Category) {
 					continue
 				}
 				count := GetCountForSlot(finalCounts, slot.X)
+				if slot.Category == "Troop" &&
+					looksLikeHeroCardStatic(finalFrame, slot.X, finalMgr.GetBarY(), w, h) {
+					slot.Category = "Hero"
+				}
+				if slot.Category == "Hero" {
+					name := strings.ToLower(strings.TrimSpace(slot.UnitName))
+					if name == "" {
+						anonymousHeroesVisible++
+					} else if !oneShotDone["Hero:"+name] {
+						liveRemaining++
+						e.logger.Warn().Str("hero", name).Msg("final deployment verification found hero never deployed")
+					}
+					continue
+				}
+				if slot.Category == "Siege" || slot.Category == "CC" {
+					name := strings.ToLower(strings.TrimSpace(slot.UnitName))
+					if name != "" && !oneShotDone[slot.Category+":"+name] {
+						liveRemaining++
+					}
+					continue
+				}
 				activity := GetSlotActivityRatioStatic(finalFrame, slot.X, slot.Y, w)
 				if count > 0 || activity >= 0.12 {
 					liveRemaining++
+				}
+			}
+			if anonymousHeroesVisible > unknownHeroesDeployed {
+				missing := anonymousHeroesVisible - unknownHeroesDeployed
+				if spentOnlyReached {
+					// After the live loop positively concluded that only spent/ability
+					// cards remain, anonymous hero-looking cards are ability buttons,
+					// not undeployed heroes. Do not turn that into a false deploy failure.
+					e.logger.Debug().
+						Int("visible_anonymous_heroes", anonymousHeroesVisible).
+						Int("deployed_anonymous_heroes", unknownHeroesDeployed).
+						Int("ignored", missing).
+						Msg("ignoring anonymous hero ability cards during final verification")
+				} else {
+					liveRemaining += missing
+					e.logger.Warn().
+						Int("visible_anonymous_heroes", anonymousHeroesVisible).
+						Int("deployed_anonymous_heroes", unknownHeroesDeployed).
+						Int("missing", missing).
+						Msg("final deployment verification found undeployed anonymous hero cards")
 				}
 			}
 			finalFrame.Close()

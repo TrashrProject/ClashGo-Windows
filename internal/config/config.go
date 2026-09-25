@@ -22,6 +22,19 @@ type BotConfig struct {
 	Automation AutomationConfig `json:"automation"`
 }
 
+type SimplePreferences struct {
+	// Keep the beginner surface intentionally small. These are player-facing
+	// choices; technical CV/ADB thresholds stay internal.
+	AutoDonate          bool   `json:"auto_donate"`
+	DonateOnlyRequested bool   `json:"donate_only_requested"`
+	UseHeroes           bool   `json:"use_heroes"`
+	UseClanCastle       bool   `json:"use_clan_castle"`
+	WaitForFullArmy     bool   `json:"wait_for_full_army"`
+	AutoRetrain         bool   `json:"auto_retrain"`
+	AutoUpgradeWalls    bool   `json:"auto_upgrade_walls"`
+	LootPreset          string `json:"loot_preset"` // relaxed | balanced | rich
+}
+
 type AutomationConfig struct {
 	// SimpleMode is the default user experience: ClashGO derives sane values
 	// from the linked account and only exposes a few meaningful controls.
@@ -40,6 +53,9 @@ type AutomationConfig struct {
 
 	// AutoProfileSync keeps account data fresh without manual Sync clicks.
 	AutoProfileSync bool `json:"auto_profile_sync"`
+
+	// Preferences contains the tiny set of choices exposed in Easy Mode.
+	Preferences SimplePreferences `json:"preferences"`
 }
 
 type AccountConfig struct {
@@ -83,6 +99,7 @@ type AttackConfig struct {
 	DropDelay           Duration `json:"drop_delay"`
 	SpellDelay          Duration `json:"spell_delay"`
 	EndBattleDelay      Duration `json:"end_battle_delay"`
+	UseHeroes           bool     `json:"use_heroes"`
 	UseQueen            bool     `json:"use_queen"`
 	UseWarden           bool     `json:"use_warden"`
 	UseClanCastle       bool     `json:"use_clan_castle"`
@@ -92,12 +109,9 @@ type AttackConfig struct {
 	StallTimerSeconds   int      `json:"stall_timer_seconds"`
 	LootExitEnabled     bool     `json:"loot_exit_enabled"`
 	LootExitPercent     int      `json:"loot_exit_percent"`
-	// MinSecondsBetweenAttacks is the minimum pause between the end of one
-	// battle (Return Home) and the start of the next attack sequence.
-	// Armies take real time to retrain; without this gate the bot attacked
-	// back-to-back ~8s apart with whatever the camps held (observed live:
-	// three near-identical defeats in under four minutes). 0 disables the
-	// pause.
+	// MinSecondsBetweenAttacks is a short UI/recovery cooldown after Return
+	// Home. Modern Clash applies army recipes instantly, so this is no longer
+	// a troop-training timer. 0 disables the pause.
 	MinSecondsBetweenAttacks int `json:"min_seconds_between_attacks"`
 
 	// FarmComposition gives the Windows live deployer a deterministic army
@@ -187,6 +201,11 @@ func defaultFarmProfiles() map[string]FarmProfile {
 
 type SearchConfig struct {
 	Enabled              bool `json:"enabled"`
+	// MaxSkipsBeforeForceAttack mirrors the proven "force attack after N
+	// searches" escape hatch used by mature CoC automation. 0 disables it.
+	// A high default keeps normal loot filtering intact while guaranteeing
+	// the bot cannot spend an entire unattended session cycling bases forever.
+	MaxSkipsBeforeForceAttack int `json:"max_skips_before_force_attack"`
 	MinTrophies          int  `json:"min_trophies"`
 	MaxTrophies          int  `json:"max_trophies"`
 	MinTownHall          int  `json:"min_town_hall"`
@@ -276,13 +295,17 @@ func DefaultConfig() *BotConfig {
 			DropDelay:                Duration{500 * time.Millisecond},
 			SpellDelay:               Duration{2 * time.Second},
 			EndBattleDelay:           Duration{30 * time.Second},
+			UseHeroes:                true,
+			UseQueen:                 true,
+			UseWarden:                true,
+			UseClanCastle:            true,
 			QueenChargeAtPct:         50,
 			WardenUseAtPct:           30,
 			ReserveDEPercent:         200,
 			StallTimerSeconds:        10,
 			LootExitEnabled:          false,
 			LootExitPercent:          100,
-			MinSecondsBetweenAttacks: 30,
+			MinSecondsBetweenAttacks: 3,
 			Farm: FarmConfig{
 				Enabled:  false,
 				TownHall: 18,
@@ -290,7 +313,8 @@ func DefaultConfig() *BotConfig {
 			},
 		},
 		Search: SearchConfig{
-			Enabled:              true,
+			Enabled:                   true,
+			MaxSkipsBeforeForceAttack: 999,
 			MinTrophies:          0,
 			MaxTrophies:          3000,
 			MinTownHall:          7,
@@ -323,6 +347,16 @@ func DefaultConfig() *BotConfig {
 			AutoArmyGuard:         true,
 			AutoResourceTracking:  true,
 			AutoProfileSync:       true,
+			Preferences: SimplePreferences{
+				AutoDonate:          false,
+				DonateOnlyRequested: true,
+				UseHeroes:           true,
+				UseClanCastle:       true,
+				WaitForFullArmy:     true,
+				AutoRetrain:         true,
+				AutoUpgradeWalls:    false,
+				LootPreset:          "balanced",
+			},
 		},
 	}
 }
@@ -370,6 +404,36 @@ func Load(path string) (*BotConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+
+	// Backward-compatible migration for fields introduced by the Windows
+	// automation scheduler. We need presence information here, not just bool
+	// values: an omitted JSON bool and an explicitly-false bool both decode to
+	// false. Preserve old user intent when legacy fields are present while
+	// retaining new-install defaults when they are absent altogether.
+	var presence struct {
+		Attack map[string]json.RawMessage `json:"attack"`
+		Upgrade struct {
+			UpgradeWalls *bool `json:"upgrade_walls"`
+		} `json:"upgrade"`
+		Automation struct {
+			Preferences map[string]json.RawMessage `json:"preferences"`
+		} `json:"automation"`
+	}
+	if json.Unmarshal(data, &presence) == nil {
+		if _, hasGenericHeroes := presence.Attack["use_heroes"]; !hasGenericHeroes {
+			_, hadQueen := presence.Attack["use_queen"]
+			_, hadWarden := presence.Attack["use_warden"]
+			if hadQueen || hadWarden {
+				cfg.Attack.UseHeroes = cfg.Attack.UseQueen || cfg.Attack.UseWarden
+			}
+		}
+
+		if _, hasWallPreference := presence.Automation.Preferences["auto_upgrade_walls"]; !hasWallPreference &&
+			presence.Upgrade.UpgradeWalls != nil {
+			cfg.Automation.Preferences.AutoUpgradeWalls = *presence.Upgrade.UpgradeWalls
+		}
+	}
+
 	normalizeStrategyFile(&cfg)
 
 	return &cfg, nil

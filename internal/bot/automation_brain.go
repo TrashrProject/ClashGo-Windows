@@ -1,0 +1,210 @@
+package bot
+
+import "time"
+
+// VillageAction is the single decision emitted by the village automation
+// coordinator. Keeping arbitration in one place prevents donations, resource
+// scans and matchmaking from racing each other.
+type VillageAction int
+
+const (
+	VillageActionIdle VillageAction = iota
+	VillageActionHold
+	VillageActionDonate
+	VillageActionScanResources
+	VillageActionUpgradeWalls
+	VillageActionCheckArmy
+	VillageActionWaitArmy
+	VillageActionCooldown
+	VillageActionSessionComplete
+	VillageActionAttack
+)
+
+func (a VillageAction) String() string {
+	switch a {
+	case VillageActionHold:
+		return "holding"
+	case VillageActionDonate:
+		return "donating"
+	case VillageActionScanResources:
+		return "reading resources"
+	case VillageActionUpgradeWalls:
+		return "upgrading walls"
+	case VillageActionCheckArmy:
+		return "checking army"
+	case VillageActionWaitArmy:
+		return "checking army"
+	case VillageActionCooldown:
+		return "cooldown"
+	case VillageActionSessionComplete:
+		return "session complete"
+	case VillageActionAttack:
+		return "starting attack"
+	default:
+		return "idle"
+	}
+}
+
+type VillageDecisionInput struct {
+	Now                 time.Time
+	VillageVerified     bool
+	SequenceRunning     bool
+	ActiveTaskName      string
+	DonationInFlight    bool
+	DonationEnabled     bool
+	LastDonationScan    time.Time
+	DonationNextCheck   time.Time
+	DonationInterval    time.Duration
+	ResourceEnabled     bool
+	LastResourceScan    time.Time
+	ResourceInterval    time.Duration
+	WallsEnabled        bool
+	WallsDue            bool
+	ArmyCheckEnabled    bool
+	ArmyCheckDue        bool
+	ArmyWaitUntil       time.Time
+	AttackEnabled       bool
+	AttackCapReached    bool
+	AttackNotBefore     time.Time
+	AttackButtonVisible bool
+}
+
+type VillageDecision struct {
+	Action VillageAction
+	Reason string
+	NextAt time.Time
+}
+
+// decideVillageAction is deliberately pure so priority rules are testable.
+//
+// Priority:
+//   1. never overlap an existing sequence/action;
+//   2. donation opportunity (short and bounded);
+//   3. periodic resource read;
+//   4. queued wall maintenance;
+//   5. explicit retry backoff after an uncertain/failed army check;
+//   6. standalone army preflight;
+//   7. matchmaking.
+//
+// This means useful village housekeeping can happen while an army retry or
+// attack cooldown is active, but nothing competes with the one task that owns
+// the game controls.
+func earlierFuture(now time.Time, values ...time.Time) time.Time {
+	var best time.Time
+	for _, value := range values {
+		if value.IsZero() || !value.After(now) {
+			continue
+		}
+		if best.IsZero() || value.Before(best) {
+			best = value
+		}
+	}
+	return best
+}
+
+func decideVillageAction(in VillageDecisionInput) VillageDecision {
+	if !in.VillageVerified {
+		return VillageDecision{Action: VillageActionIdle, Reason: "village not positively verified"}
+	}
+	if in.SequenceRunning {
+		reason := "exclusive automation task is active"
+		if in.ActiveTaskName != "" {
+			reason = "exclusive task active: " + in.ActiveTaskName
+		}
+		return VillageDecision{Action: VillageActionHold, Reason: reason}
+	}
+	if in.DonationInFlight {
+		return VillageDecision{Action: VillageActionDonate, Reason: "donation cycle is already running"}
+	}
+
+	// A completed attack session should wind down immediately. The only
+	// intentional post-cap task is wall maintenance queued by the final
+	// battle; donations/resource reads/army preflight must not keep a capped
+	// session alive.
+	if in.AttackCapReached {
+		if in.WallsEnabled && in.WallsDue {
+			return VillageDecision{Action: VillageActionUpgradeWalls, Reason: "finishing queued wall maintenance before session stop"}
+		}
+		return VillageDecision{Action: VillageActionSessionComplete, Reason: "session attack limit reached"}
+	}
+
+	donationInterval := in.DonationInterval
+	if donationInterval <= 0 {
+		donationInterval = 90 * time.Second
+	}
+	donationDue := in.LastDonationScan.IsZero() || in.Now.Sub(in.LastDonationScan) >= donationInterval
+	if !in.DonationNextCheck.IsZero() && in.Now.Before(in.DonationNextCheck) {
+		donationDue = false
+	}
+
+	resourceInterval := in.ResourceInterval
+	if resourceInterval <= 0 {
+		resourceInterval = 15 * time.Second
+	}
+	resourceDue := in.ResourceEnabled && (in.LastResourceScan.IsZero() || in.Now.Sub(in.LastResourceScan) >= resourceInterval)
+
+	// Post-attack maintenance keeps priority because it was explicitly queued
+	// by the previous battle. Everything else is housekeeping and must not make
+	// a player wait after pressing Start when the village can already attack.
+	if in.WallsEnabled && in.WallsDue {
+		return VillageDecision{Action: VillageActionUpgradeWalls, Reason: "wall maintenance is queued after the previous attack"}
+	}
+
+	if !in.ArmyWaitUntil.IsZero() && in.Now.Before(in.ArmyWaitUntil) {
+		return VillageDecision{Action: VillageActionWaitArmy, Reason: "army readiness retry backoff is active", NextAt: in.ArmyWaitUntil}
+	}
+
+	// Fast farm path: when Attack is available, enter the single attack task
+	// immediately. clickSequence performs the army guard/repair inline under
+	// that same exclusive lease, avoiding a duplicate Attack -> Army -> Home ->
+	// Attack round-trip before every battle.
+	if in.AttackEnabled && in.AttackButtonVisible {
+		return VillageDecision{Action: VillageActionAttack, Reason: "attack ready; army verification will run inline"}
+	}
+
+	// Housekeeping fills idle/cooldown time instead of delaying matchmaking.
+	if in.DonationEnabled && donationDue {
+		return VillageDecision{Action: VillageActionDonate, Reason: "clan donation check is due"}
+	}
+	if resourceDue {
+		return VillageDecision{Action: VillageActionScanResources, Reason: "resource snapshot is due"}
+	}
+
+	if in.AttackEnabled && in.ArmyCheckEnabled && in.ArmyCheckDue {
+		return VillageDecision{Action: VillageActionCheckArmy, Reason: "army preflight is due while attack entry is unavailable"}
+	}
+
+	donationWake := time.Time{}
+	if in.DonationEnabled {
+		if !in.DonationNextCheck.IsZero() && in.DonationNextCheck.After(in.Now) {
+			donationWake = in.DonationNextCheck
+		} else if !in.LastDonationScan.IsZero() {
+			donationWake = in.LastDonationScan.Add(donationInterval)
+		}
+	}
+	resourceWake := time.Time{}
+	if in.ResourceEnabled && !in.LastResourceScan.IsZero() {
+		resourceWake = in.LastResourceScan.Add(resourceInterval)
+	}
+
+	if !in.AttackEnabled {
+		return VillageDecision{
+			Action: VillageActionIdle,
+			Reason: "automatic attacks are disabled",
+			NextAt: earlierFuture(in.Now, donationWake, resourceWake),
+		}
+	}
+	if !in.AttackNotBefore.IsZero() && in.Now.Before(in.AttackNotBefore) {
+		return VillageDecision{Action: VillageActionCooldown, Reason: "waiting between attacks", NextAt: in.AttackNotBefore}
+	}
+
+	if in.AttackButtonVisible {
+		return VillageDecision{Action: VillageActionAttack, Reason: "village ready and attack entry is available"}
+	}
+
+	return VillageDecision{
+		Action: VillageActionIdle,
+		Reason: "waiting for a verified action opportunity",
+		NextAt: earlierFuture(in.Now, donationWake, resourceWake),
+	}
+}

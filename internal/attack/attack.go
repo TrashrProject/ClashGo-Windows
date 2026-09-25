@@ -884,17 +884,11 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 
 		for _, slot := range remainingActiveSlots {
 
-			alreadyDeployed := false
-			for ux := range globalUsedSlots {
-				if math.Abs(float64(slot.X-ux)) < float64(w)*0.04 {
-					alreadyDeployed = true
-					break
-				}
-			}
-			if alreadyDeployed {
-				e.logger.Debug().Int("x", slot.X).Msg("skipping main-phase-deployed slot in verify")
-				continue
-			}
+			// globalUsedSlots means "attempted during the main phase", not
+			// "confirmed empty". If the slot is still visibly active here,
+			// the deployment did not finish and it MUST enter the recovery
+			// pass. Previously these slots were skipped, which could leave
+			// troops undeployed after a rejected red-zone click.
 
 			isDeployedUnit := false
 			for _, hp := range deployedHeroSlots {
@@ -911,67 +905,42 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 				continue
 			}
 
-			e.logger.Info().Int("x", slot.X).Str("category", slot.Category).Msg("re-deploying remaining slot")
+			e.logger.Info().
+				Int("x", slot.X).
+				Str("category", slot.Category).
+				Msg("re-deploying remaining slot through verified recovery")
 
-			e.client.TapFast(slot.X, slot.Y, 2.0)
-			e.client.HumanSleep(35, 10)
-
-			var p1, p2 image.Point
-			if slot.Category == "Spell" {
-				if edge, ok := pCfg.SpellEdgesB[targetEdge]; ok {
-					p1, p2 = edge.P1, edge.P2
-
-					centerX, centerY := w/2, h/2
-					pct := 0.20
-					p1 = image.Pt(int(float64(p1.X)+float64(centerX-p1.X)*pct), int(float64(p1.Y)+float64(centerY-p1.Y)*pct))
-					p2 = image.Pt(int(float64(p2.X)+float64(centerX-p2.X)*pct), int(float64(p2.Y)+float64(centerY-p2.Y)*pct))
-				}
-			}
-			if p1.X == 0 && p1.Y == 0 {
-				if edge, ok := pCfg.Edges[targetEdge]; ok {
-					p1, p2 = edge.P1, edge.P2
-				} else {
-					p1 = image.Pt(w/2, h/2)
-					p2 = p1
-				}
-			}
-
-			maxRetryAttempts := 2
-			for batch := 0; batch < maxRetryAttempts; batch++ {
-				if p1 == p2 {
-
-					e.client.TapTriple(p1.X, p1.Y, 12.0, p1.X, p1.Y, 12.0, p1.X, p1.Y, 12.0)
-				} else {
-
-					steps := 9
-					for i := 0; i < steps; i += 3 {
-						pct1 := float64(i) / float64(steps-1)
-						pct2 := float64(i+1) / float64(steps-1)
-						pct3 := float64(i+2) / float64(steps-1)
-						tx1, ty1 := int(float64(p1.X)+float64(p2.X-p1.X)*pct1), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct1)
-						tx2, ty2 := int(float64(p1.X)+float64(p2.X-p1.X)*pct2), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct2)
-						tx3, ty3 := int(float64(p1.X)+float64(p2.X-p1.X)*pct3), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct3)
-						e.client.TapTriple(tx1, ty1, 15.0, tx2, ty2, 15.0, tx3, ty3, 15.0)
-					}
-				}
-
-				time.Sleep(80 * time.Millisecond)
-				checkMat, err := e.client.CaptureToMat()
-				if err != nil {
-					break
-				}
-				isEmpty := e.isSlotEmpty(checkMat, slot.X, slot.Y)
-				checkMat.Close()
-
-				if isEmpty {
-					break
-				}
-
-				e.client.TapFast(slot.X, slot.Y, 2.0)
-				time.Sleep(50 * time.Millisecond)
+			if !e.recoverRemainingSlot(slot, pCfg, targetEdge, w, h) {
+				e.logger.Warn().
+					Int("x", slot.X).
+					Str("category", slot.Category).
+					Msg("final recovery could not confirm this slot")
 			}
 			e.client.HumanSleep(35, 10)
 		}
+	}
+
+	// Recount after the recovery attempts. The previous value was measured
+	// before re-deployment and could incorrectly report failure even when the
+	// retry emptied every remaining troop/spell/CC card.
+	if finalScreen, err := e.client.CaptureToMat(); err == nil && !finalScreen.Empty() {
+		finalSlots := e.ParseLayout(finalScreen, pCfg, w, h, mBarY)
+		remainingCount = 0
+		for _, slot := range finalSlots {
+			if slot.Category == "Siege" || e.isSiegeTapped(slot.X, w) {
+				continue
+			}
+			ratio := e.getSlotActivityRatio(finalScreen, slot.X, slot.Y)
+			if ratio >= 0.4 && (slot.Category == "Troop" || slot.Category == "Spell" || slot.Category == "CC") {
+				remainingCount++
+			}
+		}
+		finalScreen.Close()
+	}
+	if remainingCount == 0 {
+		e.logger.Info().Msg("final verified deployment check passed: no active troop/spell/CC slots remain")
+	} else {
+		e.logger.Warn().Int("remaining_slots", remainingCount).Msg("final verified deployment check still has active slots")
 	}
 
 	return remainingCount, nil
@@ -1128,8 +1097,30 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 	if isHero {
 		e.client.HumanSleep(250, 50)
 	} else {
-
 		e.client.HumanSleep(35, 10)
+	}
+
+	// Selecting a troop/hero makes Clash render the red no-deploy overlay.
+	// Capture that exact frame once and reuse it for every planned tap for
+	// this unit. Spells ignore troop deployment restrictions and abilities do
+	// not place a unit, so neither needs this extra capture.
+	deploySafetyFrame := gocv.NewMat()
+	hasDeploySafetyFrame := false
+	if !isSpell && !isAbility {
+		e.client.HumanSleep(45, 10)
+		if frame, capErr := e.client.CaptureToMat(); capErr == nil && !frame.Empty() {
+			deploySafetyFrame = frame
+			hasDeploySafetyFrame = true
+			defer deploySafetyFrame.Close()
+		} else if !frame.Empty() {
+			frame.Close()
+		}
+	}
+	resolveDeploy := func(points []image.Point) []image.Point {
+		if !hasDeploySafetyFrame {
+			return points
+		}
+		return e.adaptDeployPointsToBoundary(deploySafetyFrame, points)
 	}
 
 	isDragonDuke := strings.Contains(unitName, "duke")
@@ -1384,10 +1375,23 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 					tx1, ty1 := int(float64(p1.X)+float64(p2.X-p1.X)*pct1), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct1)
 					tx2, ty2 := int(float64(p1.X)+float64(p2.X-p1.X)*pct2), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct2)
 					tx3, ty3 := int(float64(p1.X)+float64(p2.X-p1.X)*pct3), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct3)
-					j1 := e.addJitter(image.Pt(tx1, ty1), 8)
-					j2 := e.addJitter(image.Pt(tx2, ty2), 8)
-					j3 := e.addJitter(image.Pt(tx3, ty3), 8)
-					e.client.TapTriple(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0, j3.X, j3.Y, 12.0)
+					safe := resolveDeploy([]image.Point{
+						image.Pt(tx1, ty1),
+						image.Pt(tx2, ty2),
+						image.Pt(tx3, ty3),
+					})
+					for j := range safe {
+						safe[j] = e.addJitter(safe[j], 8)
+					}
+					if len(safe) > 0 {
+						if !e.deployTroopBatchVerified(uPt, safe) {
+							e.logger.Warn().
+								Str("unit", unit.Name).
+								Str("edge", edgeName).
+								Msg("FourSides batch rejected after relocation retry; leaving remainder for final recovery pass")
+							return false
+						}
+					}
 					time.Sleep(45 * time.Millisecond)
 				}
 			}
@@ -1435,8 +1439,14 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 		}
 
 		if isHero {
+			safe := resolveDeploy([]image.Point{p1})
+			if len(safe) == 0 {
+				e.logger.Warn().Str("unit", unit.Name).Msg("hero deployment blocked by red no-deploy zone")
+				return false
+			}
+			p1 = safe[0]
 			jPt := e.addJitter(p1, 10)
-			e.logger.Info().Str("unit", unit.Name).Int("x", jPt.X).Int("y", jPt.Y).Msg("deploying hero")
+			e.logger.Info().Str("unit", unit.Name).Int("x", jPt.X).Int("y", jPt.Y).Msg("deploying hero on verified safe point")
 
 			j2 := e.addJitter(p1, 10)
 			j3 := e.addJitter(p1, 10)
@@ -1458,26 +1468,39 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 			}
 
 			if p1 == p2 {
-				e.logger.Info().Str("unit", unit.Name).Int("count", maxTaps).Msg("deploying troop point batch")
+				safe := resolveDeploy([]image.Point{p1})
+				if len(safe) == 0 {
+					e.logger.Warn().Str("unit", unit.Name).Msg("troop point deployment blocked by red no-deploy zone")
+					return false
+				}
+				p1 = safe[0]
+				e.logger.Info().Str("unit", unit.Name).Int("count", maxTaps).Interface("safe_point", p1).Msg("deploying troop point batch")
 				for i := 0; i < maxTaps; {
-					rem := maxTaps - i
-					if rem >= 3 {
-						j1 := e.addJitter(p1, 8)
-						j2 := e.addJitter(p1, 8)
-						j3 := e.addJitter(p1, 8)
-						e.client.TapTriple(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0, j3.X, j3.Y, 12.0)
-						i += 3
-					} else if rem == 2 {
-						j1 := e.addJitter(p1, 8)
-						j2 := e.addJitter(p1, 8)
-						e.client.TapDual(j1.X, j1.Y, 12.0, j2.X, j2.Y, 12.0)
-						i += 2
-					} else {
-						j1 := e.addJitter(p1, 8)
-						e.client.TapFast(j1.X, j1.Y, 12.0)
-						i += 1
+					batchSize := maxTaps - i
+					if batchSize > 3 {
+						batchSize = 3
 					}
-					e.client.HumanSleep(200, 40)
+					batch := make([]image.Point, 0, batchSize)
+					for j := 0; j < batchSize; j++ {
+						batch = append(batch, e.addJitter(p1, 8))
+					}
+					if !e.deployTroopBatchVerified(uPt, batch) {
+						e.logger.Warn().
+							Str("unit", unit.Name).
+							Int("deployed_before_failure", i).
+							Msg("troop point batch was rejected twice; stopping this unit for final recovery pass")
+						return false
+					}
+					i += batchSize
+					e.client.HumanSleep(110, 25)
+					if verify, err := e.client.CaptureToMat(); err == nil {
+						empty := e.isSlotEmpty(verify, uPt.X, slotY)
+						verify.Close()
+						if empty {
+							e.logger.Info().Str("unit", unit.Name).Msg("slot emptied during verified point deployment")
+							break
+						}
+					}
 				}
 			} else {
 				e.logger.Info().Str("unit", unit.Name).Int("count", maxTaps).Msg("deploying troop line precisely")
@@ -1489,7 +1512,15 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 					}
 					tx := int(float64(p1.X) + float64(p2.X-p1.X)*pct)
 					ty := int(float64(p1.Y) + float64(p2.Y-p1.Y)*pct)
-					points = append(points, e.addJitter(image.Pt(tx, ty), 10))
+					points = append(points, image.Pt(tx, ty))
+				}
+				points = resolveDeploy(points)
+				if len(points) == 0 {
+					e.logger.Warn().Str("unit", unit.Name).Msg("all troop line points blocked by red no-deploy zone")
+					return false
+				}
+				for i := range points {
+					points[i] = e.addJitter(points[i], 10)
 				}
 
 				if rand.Float64() < 0.5 {
@@ -1500,19 +1531,21 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 				}
 
 				for i := 0; i < len(points); {
-					rem := len(points) - i
-					if rem >= 3 {
-						e.client.TapTriple(points[i].X, points[i].Y, 15.0, points[i+1].X, points[i+1].Y, 15.0, points[i+2].X, points[i+2].Y, 15.0)
-						i += 3
-					} else if rem == 2 {
-						e.client.TapDual(points[i].X, points[i].Y, 15.0, points[i+1].X, points[i+1].Y, 15.0)
-						i += 2
-					} else {
-						e.client.TapFast(points[i].X, points[i].Y, 15.0)
-						i += 1
+					batchSize := len(points) - i
+					if batchSize > 3 {
+						batchSize = 3
 					}
+					batch := append([]image.Point(nil), points[i:i+batchSize]...)
+					if !e.deployTroopBatchVerified(uPt, batch) {
+						e.logger.Warn().
+							Str("unit", unit.Name).
+							Int("deployed_before_failure", i).
+							Msg("troop line batch was rejected twice; stopping this unit for final recovery pass")
+						return false
+					}
+					i += batchSize
 
-					sleepBase := 200
+					sleepBase := 120
 					sleepDev := 40
 					if rand.Float64() < 0.10 {
 
@@ -1735,7 +1768,8 @@ func (e *Executor) endButtonVisible(screen gocv.Mat, sCfg StallConfig) bool {
 }
 
 func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
+	battleWaitStarted := time.Now()
+	deadline := battleWaitStarted.Add(timeout)
 	ticker := time.NewTicker(1000 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -1772,9 +1806,25 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 		e.logger.Error().Err(err).Msg("failed to create template store for stall detection")
 		return false
 	}
-	tStore.LoadTemplates()
+	if err := tStore.LoadTemplates(); err != nil {
+		tStore.Close()
+		e.logger.Error().Err(err).Msg("failed to load templates for battle-end detection")
+		return false
+	}
+	// Battle-end created a fresh native OpenCV template store every attack but
+	// never released it. On Windows that leaks cv::Mat allocations until the
+	// first/next result transition can terminate the process inside native code.
+	// Close recognizer-owned clones first, then the store itself.
+	defer tStore.Close()
 	lootRec := game.NewLootRecognizer(e.cal, tStore, e.logger)
 	defer lootRec.Close()
+
+	// The result overlay can briefly classify as Unknown/MainVillage on the
+	// localized Windows/BlueStacks capture while its animation settles. Keep a
+	// direct visual proof for the Return Home button so battle completion is not
+	// mistaken for an unexpected escape back to the village.
+	returnHomeTpl, hasReturnHomeTpl := tStore.Get("btn_return_home")
+	unexpectedExitHits := 0
 
 	var pRoi image.Rectangle
 	if hasStallROI {
@@ -1816,9 +1866,49 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			}
 			state, _ := e.classify(screen)
 
-			if state == game.StateBattleEnd || state == game.StateReturnHome {
+			// Prefer direct Return Home evidence over the coarse state classifier.
+			if hasReturnHomeTpl && !returnHomeTpl.Empty() {
+				rx0, ry0 := e.cal.ScaleRef(220, 430)
+				rx1, ry1 := e.cal.ScaleRef(650, 700)
+				roi := image.Rect(rx0, ry0, rx1, ry1).Intersect(image.Rect(0, 0, screen.Cols(), screen.Rows()))
+				if roi.Dx() > returnHomeTpl.Cols() && roi.Dy() > returnHomeTpl.Rows() {
+					matches, matchErr := vision.MatchMultiScaleROICached(screen, returnHomeTpl, "btn_return_home", 0.35, 1.8, 5, 0.42, roi)
+					if matchErr == nil && len(matches) > 0 {
+						e.logger.Info().Float64("confidence", matches[0].Confidence).Msg("battle result Return Home button visually confirmed")
+						screen.Close()
+						return true
+					}
+				}
+			}
+
+			switch state {
+			case game.StateBattleEnd, game.StateReturnHome:
 				screen.Close()
 				return true
+			case game.StateConnectionLost:
+				// The outer capture loop yields while the attack sequence owns
+				// the UI, so reconnect here instead of waiting for the full
+				// battle timeout.
+				screen.Close()
+				x, y := e.cal.ScaleRef(300, 478)
+				e.logger.Warn().Msg("connection lost during battle; tapping TRY AGAIN")
+				if tapErr := e.client.TapRandomized(x, y); tapErr != nil {
+					e.logger.Warn().Err(tapErr).Msg("battle reconnect tap failed")
+				}
+				continue
+			case game.StateMainVillage, game.StateArmyCamp, game.StateArmySelection:
+				// A single MainVillage/army classification is not enough to prove
+				// the battle escaped: the first result-animation frames can look
+				// like these states on Windows. Require repeated confirmation.
+				unexpectedExitHits++
+				if unexpectedExitHits >= 3 {
+					screen.Close()
+					e.logger.Warn().Str("state", state.String()).Int("confirmations", unexpectedExitHits).Msg("battle flow exited unexpectedly after repeated confirmation; aborting battle-end wait")
+					return false
+				}
+				e.logger.Debug().Str("state", state.String()).Int("confirmations", unexpectedExitHits).Msg("transient non-battle state during result transition; waiting for confirmation")
+			default:
+				unexpectedExitHits = 0
 			}
 
 			// Continuously sample the live Available Loot counters. Accept only
@@ -2006,7 +2096,13 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 					}
 				}
 
-				if e.earlyExitAllowed && e.cfg.StallTimerSeconds > 0 && endAtPct == 0 {
+				// Never surrender from the generic stall detector during the opening
+				// minute. Live Windows traces showed a false-positive stall ~13s
+				// after deployment, which ended the attack with only the first hero
+				// on the field. Natural result detection remains active throughout.
+				const minimumBattleBeforeStallExit = 75 * time.Second
+				if e.earlyExitAllowed && e.cfg.StallTimerSeconds > 0 && endAtPct == 0 &&
+					time.Since(battleWaitStarted) >= minimumBattleBeforeStallExit {
 					if currentPct > lastPct {
 						lastPct = currentPct
 						lastPctTime = time.Now()
@@ -2041,10 +2137,11 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 }
 
 func (e *Executor) SweepRemainingSlots(screen gocv.Mat, pCfg PrecisionConfig, targetEdge string, w, h int, mBarY int, usedSlots map[int]bool, siegeXs []int, allSlots []TroopSlot, slotY int) {
-	e.logger.Info().Msg("starting sweep of remaining/event slots...")
+	e.logger.Info().Msg("starting verified sweep of remaining/event slots...")
 
 	for _, slot := range allSlots {
 		x := slot.X
+		slot.Y = slotY
 
 		if slot.Category == "Siege" || e.isSiegeTapped(x, w) {
 			continue
@@ -2057,67 +2154,24 @@ func (e *Executor) SweepRemainingSlots(screen gocv.Mat, pCfg PrecisionConfig, ta
 				break
 			}
 		}
-		if alreadyUsed {
+		if alreadyUsed || e.isSlotEmpty(screen, x, slotY) {
 			continue
 		}
 
-		if !e.isSlotEmpty(screen, x, slotY) {
-			e.logger.Info().Int("x", x).Str("category", slot.Category).Msg("found undeployed troop slot during sweep, deploying...")
+		e.logger.Info().
+			Int("x", x).
+			Str("category", slot.Category).
+			Msg("found undeployed slot during sweep; using verified recovery path")
 
-			e.client.TapFast(x, slotY, 2.0)
-			e.client.HumanSleep(35, 10)
-
-			var p1, p2 image.Point
-			if slot.Category == "Spell" {
-				if edge, ok := pCfg.SpellEdgesB[targetEdge]; ok {
-					p1, p2 = edge.P1, edge.P2
-				}
-			}
-			if p1.X == 0 && p1.Y == 0 {
-				if edge, ok := pCfg.Edges[targetEdge]; ok {
-					p1, p2 = edge.P1, edge.P2
-				} else {
-					p1 = image.Pt(w/2, h/2)
-					p2 = p1
-				}
-			}
-
-			maxSweepAttempts := 2
-			for batch := 0; batch < maxSweepAttempts; batch++ {
-				if p1 == p2 {
-					e.client.TapTriple(p1.X, p1.Y, 12.0, p1.X, p1.Y, 12.0, p1.X, p1.Y, 12.0)
-				} else {
-					steps := 9
-					for i := 0; i < steps; i += 3 {
-						pct1 := float64(i) / float64(steps-1)
-						pct2 := float64(i+1) / float64(steps-1)
-						pct3 := float64(i+2) / float64(steps-1)
-						tx1, ty1 := int(float64(p1.X)+float64(p2.X-p1.X)*pct1), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct1)
-						tx2, ty2 := int(float64(p1.X)+float64(p2.X-p1.X)*pct2), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct2)
-						tx3, ty3 := int(float64(p1.X)+float64(p2.X-p1.X)*pct3), int(float64(p1.Y)+float64(p2.Y-p1.Y)*pct3)
-						e.client.TapTriple(tx1, ty1, 15.0, tx2, ty2, 15.0, tx3, ty3, 15.0)
-					}
-				}
-
-				time.Sleep(200 * time.Millisecond)
-				checkMat, err := e.client.CaptureToMat()
-				if err != nil {
-					break
-				}
-				isEmpty := e.isSlotEmpty(checkMat, x, slotY)
-				checkMat.Close()
-
-				if isEmpty {
-					e.logger.Info().Int("x", x).Msg("swept slot empty, finished deploying")
-					break
-				}
-				e.client.TapFast(x, slotY, 2.0)
-				time.Sleep(50 * time.Millisecond)
-			}
-
+		if e.recoverRemainingSlot(slot, pCfg, targetEdge, w, h) {
 			usedSlots[x] = true
-			e.client.HumanSleep(35, 10)
+		} else {
+			e.logger.Warn().
+				Int("x", x).
+				Str("category", slot.Category).
+				Msg("sweep could not confirm deployment; leaving slot for final verification")
 		}
+		e.client.HumanSleep(35, 10)
 	}
 }
 

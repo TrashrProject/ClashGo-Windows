@@ -262,9 +262,14 @@ func mergeStats(acc, current bot.BotStats) bot.BotStats {
 		AdbHealth:        current.AdbHealth,
 		CPUTimeSec:       current.CPUTimeSec,
 		CPUCores:          current.CPUCores,
-		RecoveryAttempts:  acc.RecoveryAttempts + current.RecoveryAttempts,
-		RecoverySuccesses: acc.RecoverySuccesses + current.RecoverySuccesses,
+		RecoveryAttempts:   acc.RecoveryAttempts + current.RecoveryAttempts,
+		RecoverySuccesses:  acc.RecoverySuccesses + current.RecoverySuccesses,
 		BlueStacksRestarts: acc.BlueStacksRestarts + current.BlueStacksRestarts,
+		RuntimeState:       current.RuntimeState,
+		RuntimePhase:       current.RuntimePhase,
+		RuntimeStateAge:    current.RuntimeStateAge,
+		RuntimePhaseAge:    current.RuntimePhaseAge,
+		LastProgressAgo:    current.LastProgressAgo,
 	}
 }
 
@@ -400,6 +405,10 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 	cfg.Search.MinLootElixir = elixir
 	cfg.Search.MinLootDarkElixir = dark
 	cfg.Upgrade.UpgradeWalls = upgradeWalls
+	// Keep the beginner preference and the underlying runtime flag in sync.
+	// Otherwise changing Walls in Advanced mode could be silently undone the
+	// next time Easy Mode reapplies its preferences.
+	cfg.Automation.Preferences.AutoUpgradeWalls = upgradeWalls
 	cfg.Search.Enabled = searchEnabled
 
 	// Create a placeholder to indicate the bot is starting. The
@@ -791,6 +800,32 @@ func applySimpleAutomationDefaults(cfg *config.BotConfig) {
 	cfg.Automation.AutoResourceTracking = true
 	cfg.Automation.AutoProfileSync = true
 
+	// New installs get safe, understandable Easy Mode defaults. Existing
+	// configs that predate Preferences may deserialize zero-values, so fill
+	// the preset and the non-controversial automation defaults here.
+	if cfg.Automation.Preferences.LootPreset == "" {
+		cfg.Automation.Preferences.LootPreset = "balanced"
+		cfg.Automation.Preferences.DonateOnlyRequested = true
+		cfg.Automation.Preferences.UseHeroes = true
+		cfg.Automation.Preferences.UseClanCastle = true
+		cfg.Automation.Preferences.WaitForFullArmy = true
+		cfg.Automation.Preferences.AutoRetrain = true
+	}
+
+	cfg.Attack.UseHeroes = cfg.Automation.Preferences.UseHeroes
+	cfg.Attack.UseQueen = cfg.Automation.Preferences.UseHeroes
+	cfg.Attack.UseWarden = cfg.Automation.Preferences.UseHeroes
+	cfg.Attack.UseClanCastle = cfg.Automation.Preferences.UseClanCastle
+	cfg.Upgrade.UpgradeWalls = cfg.Automation.Preferences.AutoUpgradeWalls
+	cfg.Training.Enabled = cfg.Automation.Preferences.AutoRetrain || cfg.Automation.Preferences.WaitForFullArmy
+	cfg.Training.TrainDeadTroops = cfg.Automation.Preferences.AutoRetrain
+	cfg.Training.FullArmyBeforeAttack = cfg.Automation.Preferences.WaitForFullArmy
+
+	// Clash Anytime removed army training waits. Easy Mode keeps only a tiny
+	// post-battle settle so the village UI can finish returning before the next
+	// verified action begins.
+	cfg.Attack.MinSecondsBetweenAttacks = 3
+
 	// Keep automatic mode quiet and stable. Explicit failure diagnostics still
 	// write their targeted captures when something goes wrong.
 	cfg.Debug.SaveScreenshots = false
@@ -851,6 +886,70 @@ func (a *App) SetSimpleMode(enabled bool) error {
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
 	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(paths.ResolveConfig("config.json"), data, 0600)
+}
+
+
+// SaveSimplePreferences persists only the small, player-facing choices exposed
+// in Easy Mode. It deliberately translates them into the underlying technical
+// config so beginners never need to understand those lower-level settings.
+func (a *App) SaveSimplePreferences(autoDonate, donateOnlyRequested, useHeroes, useClanCastle, waitForFullArmy, autoRetrain, autoUpgradeWalls bool, lootPreset string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	switch lootPreset {
+	case "relaxed", "balanced", "rich":
+	default:
+		return fmt.Errorf("invalid loot preset %q", lootPreset)
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Automation.Preferences = config.SimplePreferences{
+		AutoDonate:          autoDonate,
+		DonateOnlyRequested: donateOnlyRequested,
+		UseHeroes:           useHeroes,
+		UseClanCastle:       useClanCastle,
+		WaitForFullArmy:     waitForFullArmy,
+		AutoRetrain:         autoRetrain,
+		AutoUpgradeWalls:    autoUpgradeWalls,
+		LootPreset:          lootPreset,
+	}
+
+	// Translate the simple choices into the real runtime config.
+	cfg.Attack.UseHeroes = useHeroes
+	cfg.Attack.UseQueen = useHeroes
+	cfg.Attack.UseWarden = useHeroes
+	cfg.Attack.UseClanCastle = useClanCastle
+	cfg.Upgrade.UpgradeWalls = autoUpgradeWalls
+
+	cfg.Training.Enabled = autoRetrain || waitForFullArmy
+	cfg.Training.TrainDeadTroops = autoRetrain
+	cfg.Training.FullArmyBeforeAttack = waitForFullArmy
+
+	// Three understandable loot levels instead of exposing three raw numbers.
+	switch lootPreset {
+	case "relaxed":
+		cfg.Search.MinLootGold = 250000
+		cfg.Search.MinLootElixir = 250000
+		cfg.Search.MinLootDarkElixir = 1000
+	case "balanced":
+		cfg.Search.MinLootGold = 400000
+		cfg.Search.MinLootElixir = 400000
+		cfg.Search.MinLootDarkElixir = 2000
+	case "rich":
+		cfg.Search.MinLootGold = 700000
+		cfg.Search.MinLootElixir = 700000
+		cfg.Search.MinLootDarkElixir = 3500
+	}
+
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -1417,6 +1516,27 @@ func (a *App) InstallAndRestart() error {
 		return fmt.Errorf("updater not initialized")
 	}
 
+	// Make this binding a true one-click operation even for older/stale UI
+	// snapshots. If the release is available but not yet READY, download and
+	// SHA256-verify it here before trying to spawn the installer helper.
+	// This removes the fragile frontend dependency that caused
+	// "download not ready — call Download() first".
+	st := a.updater.GetStatus()
+	if st.State != updater.StateReady {
+		if !st.Available {
+			if _, err := a.updater.Check(a.ctx); err != nil {
+				return fmt.Errorf("check update before install: %w", err)
+			}
+		}
+		if _, err := a.updater.Download(a.ctx); err != nil {
+			return fmt.Errorf("download update before install: %w", err)
+		}
+		st = a.updater.GetStatus()
+		if st.State != updater.StateReady {
+			return fmt.Errorf("update download finished without reaching ready state")
+		}
+	}
+
 	// Step 1: stop the bot synchronously if running.
 	if a.IsRunning() {
 		log.Info().Msg("InstallAndRestart: stopping bot to drain ADB before exit")
@@ -1427,25 +1547,23 @@ func (a *App) InstallAndRestart() error {
 	// even when no bot is running.
 	a.saveStats()
 
-	// Step 3: cover the Wails exit + helper wait window.
-	// We deliberately do NOT emit "updater_status" here — the 2s
-	// ticker in forwardUpdaterStatus emits within ~2s and we don't
-	// want React to receive two close-in-time events (the IPC emit
-	// + the ticker race). SetState alone is enough.
-	a.updater.SetState(updater.StateRestarting)
-
-	// Step 4: detach the helper script. Returns (started, error).
-	// If false, the helper is missing (e.g. dev build); fall back to
-	// Finder-open and don't exit.
+	// Step 3: detach the helper while updater state is still READY.
+	// ApplyAuto validates StateReady before it will launch the helper.
+	// The previous ordering changed the state to RESTARTING first,
+	// which made ApplyAuto reject every click with:
+	// "download not ready — call Download() first".
 	started, err := a.updater.ApplyAuto()
 	if err != nil || !started {
-		log.Warn().Err(err).Msg("InstallAndRestart: helper unavailable, falling back to Finder")
+		log.Warn().Err(err).Msg("InstallAndRestart: helper unavailable, falling back to manual reveal")
 		_ = a.updater.Apply()
-		// Revert state so the UI comes back to "ready" instead of
-		// staying on the restart splash.
 		a.updater.SetState(updater.StateReady)
 		return err
 	}
+
+	// Step 4: only after the helper has successfully started do we expose
+	// RESTARTING to React. This keeps the backend state machine valid and
+	// still gives the UI its non-dismissible restart splash.
+	a.updater.SetState(updater.StateRestarting)
 
 	// Step 5: exit cleanly so the helper script's PID wait resolves.
 	// 1s delay gives the Wails JS bridge time to flush our success

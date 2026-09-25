@@ -117,6 +117,12 @@ type WallUpgradeHooks struct {
 	// wall-selection after a failed button-template match. May be nil.
 	Dismiss func()
 
+	// MaxIterations bounds one scheduler pass. A large wall backlog must not
+	// monopolize the global automation lease forever; remaining affordable
+	// walls can be picked up after a later attack. Zero keeps the diagnostic
+	// tool's historical unlimited behavior.
+	MaxIterations int
+
 	// StopCheck is consulted at the top of every wall-upgrade
 	// iteration; when it returns true the loop breaks immediately
 	// (between walls, never mid-tap). May be nil. Production wires
@@ -141,8 +147,12 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) {
 		Templates: b.templates,
 		Classify:  b.classify,
 		Dismiss:   b.dismissSelection,
-		// StopCheck lets a user Stop interrupt the otherwise-unbounded
-		// wall-upgrade loop at its next iteration boundary.
+		// Keep a wall backlog from starving donations/army checks/attacks for
+		// an entire session. Twelve walls is a substantial pass while still
+		// returning control to the scheduler predictably.
+		MaxIterations: 12,
+		// StopCheck lets a user Stop interrupt the wall-upgrade loop at its
+		// next iteration boundary.
 		StopCheck: func() bool { return b.ctx.Err() != nil },
 	})
 }
@@ -223,7 +233,16 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 	}
 
 	for upgradeCount := 1; ; upgradeCount++ {
-		// Stop check: the loop is otherwise unbounded (it only exits
+		if h.MaxIterations > 0 && upgradeCount > h.MaxIterations {
+			h.Logger.Info().
+				Int("max_iterations", h.MaxIterations).
+				Msg("wall maintenance pass reached scheduler fairness limit")
+			h.step("pass_limit_reached", map[string]any{"max_iterations": h.MaxIterations})
+			break
+		}
+
+		// Stop check: without the scheduler pass bound or this signal, the loop
+		// would otherwise continue until no affordable wall remains (it only exits
 		// when no affordable wall remains). Breaking at the iteration
 		// boundary keeps a user Stop from leaving the bot tapping
 		// walls for minutes.
@@ -1271,12 +1290,36 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 // 30s-window logic. When Classify is nil (manual mode), returns true
 // after the first successful capture — the user is expected to have
 // navigated to MainVillage themselves.
+func wallSleep(h *WallUpgradeHooks, d time.Duration) bool {
+	if d <= 0 {
+		return h == nil || h.StopCheck == nil || !h.StopCheck()
+	}
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if h != nil && h.StopCheck != nil && h.StopCheck() {
+			return false
+		}
+		remaining := time.Until(deadline)
+		step := 100 * time.Millisecond
+		if remaining < step {
+			step = remaining
+		}
+		if step > 0 {
+			time.Sleep(step)
+		}
+	}
+	return h == nil || h.StopCheck == nil || !h.StopCheck()
+}
+
 func waitForMainVillage(h *WallUpgradeHooks, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
+		if h.StopCheck != nil && h.StopCheck() {
+			return false
+		}
 		screen, err := h.Client.CaptureToMat()
 		if err != nil {
-			time.Sleep(500 * time.Millisecond)
+			if !wallSleep(h, 500*time.Millisecond) { return false }
 			continue
 		}
 		if h.Classify == nil {
@@ -1289,7 +1332,7 @@ func waitForMainVillage(h *WallUpgradeHooks, timeout time.Duration) bool {
 			return true
 		}
 		dismissInterruptionsFor(h)
-		time.Sleep(500 * time.Millisecond)
+		if !wallSleep(h, 500*time.Millisecond) { return false }
 	}
 	return false
 }
@@ -1315,11 +1358,26 @@ func dismissInterruptionsFor(h *WallUpgradeHooks) {
 	screen.Close()
 	switch state {
 	case game.StateObstacleDialog:
-		_ = h.Client.TapRandomized(400, 300)
-		time.Sleep(400 * time.Millisecond)
-		_ = h.Client.Back()
+		x, y := h.Cal.ScaleRef(400, 300)
+		if err := h.Client.TapRandomized(x, y); err != nil {
+			return
+		}
+		if !wallSleep(h, 320*time.Millisecond) {
+			return
+		}
+		verify, capErr := h.Client.CaptureToMat()
+		if capErr != nil || verify.Empty() {
+			if !verify.Empty() { verify.Close() }
+			return
+		}
+		stillOpen, _ := h.Classify(verify)
+		verify.Close()
+		if stillOpen == game.StateObstacleDialog {
+			_ = h.Client.Back()
+		}
 	case game.StateGemDialog, game.StateShieldInfo:
-		_ = h.Client.TapRandomized(175, 30)
+		x, y := h.Cal.ScaleRef(175, 30)
+		_ = h.Client.TapRandomized(x, y)
 	case game.StateWelcomeBack:
 		ox, oy := h.Cal.ScaleRef(430, 520)
 		_ = h.Client.Tap(ox, oy)
@@ -1332,6 +1390,15 @@ func dismissInterruptionsFor(h *WallUpgradeHooks) {
 	case game.StateNewsSplash:
 		// Post-boot news splash — tap the green Continue button.
 		px, py := h.Cal.ScaleRef(403, 535)
+		_ = h.Client.Tap(px, py)
+	case game.StateConnectionLost:
+		// Safety interruption: retry the connection without abandoning the
+		// leased wall task. The next village verification decides progress.
+		px, py := h.Cal.ScaleRef(300, 478)
+		_ = h.Client.Tap(px, py)
+	case game.StateConfirmExit:
+		// A defensive Back must never be allowed to close Clash.
+		px, py := h.Cal.ScaleRef(279, 429)
 		_ = h.Client.Tap(px, py)
 	}
 }
@@ -1367,7 +1434,7 @@ func defensiveDualTapAndLogClose(h *WallUpgradeHooks, xcx, xcy int, xPopupAlt *R
 		acx, acy := xPopupAlt.Center()
 		_ = h.Client.Tap(acx, acy)
 	}
-	time.Sleep(1000 * time.Millisecond)
+	_ = wallSleep(h, 1000*time.Millisecond)
 	h.step("asset_driven_modal_close_failed", map[string]any{
 		"name":             btnName,
 		"reason":           reason,
