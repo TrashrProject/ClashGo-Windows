@@ -1989,7 +1989,13 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 		screen, err := b.client.CaptureToMat()
 		if err != nil {
+			lootRec.Close()
 			return
+		}
+		if screen.Empty() {
+			screen.Close()
+			b.logger.Warn().Msg("matchmaking capture returned an empty frame; retrying without leaking native resources")
+			continue
 		}
 
 		state, _ := b.classify(screen)
@@ -2455,6 +2461,25 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	b.logger.Info().Msg("Tapping side area to dismiss potential post-attack popups...")
 	_ = b.client.Tap(sideX, sideY)
 	time.Sleep(1000 * time.Millisecond)
+
+	// BlueStacks/CoC on Windows has shown a repeatable degradation pattern after
+	// roughly 3-4 back-to-back attacks (native HD-Player faults / stale ADB
+	// transport). Recycle the cheap layers BEFORE the fourth attack instead of
+	// waiting for a crash: reconnect the transport and restart only Clash of
+	// Clans every third completed battle. BlueStacks itself stays running.
+	//
+	// This is intentionally done only after Return Home is positively verified,
+	// while this sequence still owns the UI, so it cannot interrupt deployment
+	// or race the automation scheduler.
+	if runtime.GOOS == "windows" && b.attackCount.Load() > 0 && b.attackCount.Load()%3 == 0 && b.ctx.Err() == nil {
+		b.logger.Info().
+			Int32("attacks", b.attackCount.Load()).
+			Msg("Windows stability checkpoint: recycling ADB transport and Clash before next attack")
+		if err := b.client.Reconnect(); err != nil {
+			b.logger.Warn().Err(err).Msg("Windows stability checkpoint ADB reconnect failed; continuing with game recycle")
+		}
+		b.restartGame()
+	}
 
 	// Wall work is no longer executed inside the attack sequence. Queue it
 	// for the village scheduler so the attack lease is released first and the
