@@ -1,6 +1,6 @@
 param(
-    [string]$Version = "0.6.2-windows-beta",
-    [string]$Notes = "Mise a jour stabilite Windows : recyclage preventif apres 3 attaques, deploiement plus robuste, matchmaking accelere et mise a jour en un clic."
+    [string]$Version = "0.6.3-windows-beta",
+    [string]$Notes = "Test mise a jour automatique ClashGO : verification du telechargement, installation et redemarrage en un clic."
 )
 
 $ErrorActionPreference = "Stop"
