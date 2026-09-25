@@ -688,6 +688,14 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		liveRemaining := 0
 		spentOnlyReached := false
 
+		// Hero abilities are intentionally delayed instead of being fired
+		// immediately after deployment. The live Windows bar keeps hero ability
+		// cards visible after the heroes are dropped, so we can reacquire their
+		// CURRENT coordinates later even if troop cards have compacted.
+		const heroAbilityDelay = 30 * time.Second
+		var heroAbilityDue time.Time
+		heroAbilitiesActivated := false
+
 		oneShotKey := func(slot *TrackedSlot) string {
 			name := strings.ToLower(strings.TrimSpace(slot.UnitName))
 			if name == "" {
@@ -749,6 +757,31 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				if pi != pj { return pi < pj }
 				return liveSlots[i].X < liveSlots[j].X
 			})
+
+			// Fire hero abilities once, ~30s after the first hero was deployed.
+			// Reacquiring the CURRENT hero-card X positions avoids stale-slot taps
+			// after the battle bar compacts.
+			if !heroAbilitiesActivated && !heroAbilityDue.IsZero() && !time.Now().Before(heroAbilityDue) {
+				activated := 0
+				for _, heroSlot := range liveSlots {
+					if heroSlot == nil || heroSlot.Category != "Hero" || !e.shouldDeployLiveCategory("Hero") {
+						continue
+					}
+					tapExec.TapHeroAbility(heroSlot)
+					activated++
+					tapExec.HumanSleep(70, 10)
+				}
+				if activated > 0 {
+					heroAbilitiesActivated = true
+					e.logger.Info().
+						Int("count", activated).
+						Dur("delay", heroAbilityDelay).
+						Msg("Windows hero abilities activated after delayed trigger")
+					fresh.Close()
+					tapExec.HumanSleep(120, 15)
+					continue
+				}
+			}
 
 			var chosen *TrackedSlot
 			chosenCount := 0
@@ -848,6 +881,15 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				tapExec.HumanSleep(90, 12)
 				tapExec.TapDeployPoint(pt, 1, 1)
 				oneShotDone[key] = true
+				if chosen.Category == "Hero" {
+					if heroAbilityDue.IsZero() {
+						heroAbilityDue = time.Now().Add(heroAbilityDelay)
+						e.logger.Info().
+							Time("activate_at", heroAbilityDue).
+							Dur("delay", heroAbilityDelay).
+							Msg("Windows hero ability timer armed")
+					}
+				}
 				if chosen.Category == "Hero" && strings.TrimSpace(chosen.UnitName) == "" {
 					unknownHeroesDeployed++
 					e.logger.Info().
@@ -922,6 +964,43 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				oneShotDone["Troop:"+strings.ToLower(strings.TrimSpace(chosen.UnitName))] = true
 				if armyState != nil {
 					armyState.Fail(chosen.UnitName)
+				}
+			}
+		}
+
+		// If deployment finished before the 30-second hero timer, wait only the
+		// remaining time, then reacquire the live bar and fire each visible hero
+		// ability once. This keeps the trigger tied to hero deployment time rather
+		// than total attack duration.
+		if !heroAbilitiesActivated && !heroAbilityDue.IsZero() {
+			if wait := time.Until(heroAbilityDue); wait > 0 {
+				time.Sleep(wait)
+			}
+			abilityFrame, abilityErr := tapExec.CaptureFresh()
+			if abilityErr == nil && !abilityFrame.Empty() {
+				abilityMgr := NewSlotManager(abilityFrame, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+				activated := 0
+				for _, heroSlot := range abilityMgr.GetAllSlots() {
+					if heroSlot == nil {
+						continue
+					}
+					if heroSlot.Category == "Troop" && looksLikeHeroCardStatic(abilityFrame, heroSlot.X, abilityMgr.GetBarY(), w, h) {
+						heroSlot.Category = "Hero"
+					}
+					if heroSlot.Category != "Hero" || !e.shouldDeployLiveCategory("Hero") {
+						continue
+					}
+					tapExec.TapHeroAbility(heroSlot)
+					activated++
+					tapExec.HumanSleep(70, 10)
+				}
+				abilityFrame.Close()
+				if activated > 0 {
+					heroAbilitiesActivated = true
+					e.logger.Info().
+						Int("count", activated).
+						Dur("delay", heroAbilityDelay).
+						Msg("Windows hero abilities activated after delayed trigger")
 				}
 			}
 		}
