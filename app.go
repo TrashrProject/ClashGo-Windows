@@ -19,6 +19,7 @@ import (
 	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/logger"
 	"github.com/Ducky705/ClashGO/internal/paths"
+	"github.com/Ducky705/ClashGO/internal/telemetry"
 	"github.com/Ducky705/ClashGO/internal/updater"
 	"github.com/labstack/echo/v4"
 	"github.com/rs/zerolog/log"
@@ -53,6 +54,8 @@ type App struct {
 	updater       *updater.Service
 	updaterBgCtx  context.Context
 	updaterBgStop context.CancelFunc
+
+	telemetry *telemetry.Writer
 }
 
 type WailsLogWriter struct {
@@ -91,9 +94,16 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	// Setup log bridge
+	// Setup local/UI logging plus optional privacy-scrubbed remote diagnostics.
+	// Remote collection stays disabled unless CLASHGO_TELEMETRY_ENABLED=1 and
+	// CLASHGO_TELEMETRY_URL are configured by the release/deployment.
 	wailsWriter := &WailsLogWriter{app: a}
-	logger.Init(os.Getenv("DEBUG") != "", wailsWriter)
+	a.telemetry = telemetry.NewFromEnv(version, goruntime.GOOS, goruntime.GOARCH)
+	if a.telemetry != nil {
+		logger.Init(os.Getenv("DEBUG") != "", wailsWriter, a.telemetry)
+	} else {
+		logger.Init(os.Getenv("DEBUG") != "", wailsWriter)
+	}
 	a.loadPersistedStats()
 
 	// Bring up the updater service. If NewApp wasn't used (rare
@@ -188,6 +198,10 @@ func (a *App) shutdown(ctx context.Context) {
 		a.bot.Cancel()
 	}
 	a.mu.Unlock()
+
+	if a.telemetry != nil {
+		a.telemetry.Close()
+	}
 
 	// Persist final stats. saveStats writes through the async writer;
 	// with the worker now flushing synchronously-blocked requests
