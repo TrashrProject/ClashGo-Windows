@@ -6,7 +6,7 @@ workers_dev = true
 [[d1_databases]]
 binding = "DB"
 database_name = "clashgo-telemetry"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "1ce4ea2b-2100-48c1-ac30-450e4ea4f689"
 
 [secrets]
 required = ["ADMIN_TOKEN", "INGEST_TOKEN"]
