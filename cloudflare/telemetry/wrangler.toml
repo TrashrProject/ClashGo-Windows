@@ -8,5 +8,3 @@ binding = "DB"
 database_name = "clashgo-telemetry"
 database_id = "1ce4ea2b-2100-48c1-ac30-450e4ea4f689"
 
-[secrets]
-required = ["ADMIN_TOKEN", "INGEST_TOKEN"]
