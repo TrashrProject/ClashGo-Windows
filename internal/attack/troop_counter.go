@@ -77,6 +77,28 @@ func (tc *TroopCounter) loadDigitTemplates() {
 	tc.logger.Info().Int("loaded", loaded).Msg("digit templates loaded")
 }
 
+// Close releases the digit templates and every scaled-cache Mat owned by the
+// counter. Short-lived counters (for example the pre-battle army guard) must
+// call this to avoid accumulating native OpenCV buffers across repeated checks.
+func (tc *TroopCounter) Close() {
+	if tc == nil {
+		return
+	}
+	for i := range tc.digitTemplates {
+		if !tc.digitTemplates[i].Empty() {
+			tc.digitTemplates[i].Close()
+		}
+	}
+	for key, set := range tc.scaledDigitCache {
+		for i := range set {
+			if !set[i].Empty() {
+				set[i].Close()
+			}
+		}
+		delete(tc.scaledDigitCache, key)
+	}
+}
+
 // DetectCounts detects troop counts for all slots on the bar.
 // The count number appears above each card in the troop bar.
 func (tc *TroopCounter) DetectCounts(screen gocv.Mat, slots []*TrackedSlot, barY int) []TroopCount {
@@ -341,12 +363,19 @@ func tightBoundingBox(bin gocv.Mat) image.Rectangle {
 
 // GetCountForSlot returns the detected count for a specific slot X coordinate.
 func GetCountForSlot(counts []TroopCount, slotX int) int {
-	for _, c := range counts {
-		if c.X == slotX {
-			return c.Count
-		}
+	if c, ok := GetTroopCountForSlot(counts, slotX); ok {
+		return c.Count
 	}
 	return 0
+}
+
+func GetTroopCountForSlot(counts []TroopCount, slotX int) (TroopCount, bool) {
+	for _, c := range counts {
+		if c.X == slotX {
+			return c, true
+		}
+	}
+	return TroopCount{}, false
 }
 
 // GetAllCounts returns a map of slot X -> count.

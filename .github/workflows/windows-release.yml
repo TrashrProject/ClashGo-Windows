@@ -6,11 +6,11 @@ on:
       version:
         description: Release version without leading v
         required: true
-        default: 0.6.0-windows-beta
+        default: 0.6.7-windows-beta
       notes:
         description: Release notes
         required: false
-        default: Windows BlueStacks 5 port beta
+        default: Updater validation test: 0.6.6 to 0.6.7
 
 permissions:
   contents: write
@@ -31,7 +31,7 @@ jobs:
       - name: Checkout Windows branch
         uses: actions/checkout@v4
         with:
-          ref: windows/core-port
+          ref: feature/windows-runtime-supervisor
           fetch-depth: 0
 
       - name: Setup Go
@@ -169,4 +169,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $version = $env:RELEASE_VERSION
-          gh release create "v$version" "${{ steps.manifest.outputs.zip }}" "${{ steps.manifest.outputs.setup }}" "dist\latest.json" "dist\SHA256SUMS.txt" --repo TrashrProject/ClashGo-Windows --title "ClashGO Windows v$version" --notes "$env:RELEASE_NOTES" --target windows/core-port
+          gh release create "v$version" "${{ steps.manifest.outputs.zip }}" "${{ steps.manifest.outputs.setup }}" "dist\latest.json" "dist\SHA256SUMS.txt" --repo TrashrProject/ClashGo-Windows --title "ClashGO Windows v$version" --notes "$env:RELEASE_NOTES" --target feature/windows-runtime-supervisor

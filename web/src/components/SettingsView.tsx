@@ -118,32 +118,64 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Windows Readiness</div>
               <div className="text-lg font-black mt-1">{overallReady ? 'Ready to launch' : 'Setup required'}</div>
+              <div className="text-[11px] text-zinc-400 mt-1">
+                {overallReady
+                  ? 'Everything needed to start the bot is detected.'
+                  : 'Fix the orange items below. Advanced details are optional.'}
+              </div>
             </div>
             <div className={`w-3 h-3 rounded-full ${overallReady ? 'bg-emerald-400 shadow-[0_0_14px_rgba(52,211,153,.7)]' : 'bg-amber-400 animate-pulse'}`}></div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
-              { label: 'Runtime assets', ok: runtimeReady, value: runtimeReady ? 'Ready' : `${systemDiagnostics?.missing_assets?.length ?? 0} missing` },
-              { label: 'BlueStacks 5', ok: playerReady, value: playerReady ? 'Detected' : 'Not found' },
-              { label: 'ADB', ok: adbReady, value: adbReady ? 'Detected' : 'Not found' },
-              { label: 'Instance', ok: !!preferredInstance, value: preferredInstance ? `${preferredInstance.name} · ${preferredInstance.adb_port}` : 'Not detected' },
-              { label: 'BlueStacks running', ok: systemDiagnostics?.emulator.bluestacks_running ?? false, value: systemDiagnostics?.emulator.bluestacks_running ? 'Running' : 'Stopped' },
-              { label: 'ADB access', ok: systemDiagnostics?.emulator.adb_enabled ?? false, value: systemDiagnostics?.emulator.adb_enabled ? 'Enabled' : (systemDiagnostics?.emulator.adb_setting_present ? 'Disabled · auto-fix on Start' : 'Check BlueStacks settings') },
+              { label: 'BlueStacks', ok: playerReady, value: playerReady ? 'Installed' : 'Needs attention' },
+              { label: 'Game connection', ok: adbReady && !!preferredInstance, value: adbReady && !!preferredInstance ? 'Available' : 'Needs attention' },
+              { label: 'ClashGO files', ok: runtimeReady, value: runtimeReady ? 'Ready' : 'Needs attention' },
             ].map((item) => (
               <div key={item.label} className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3 min-w-0">
                 <div className="flex items-center gap-2">
                   <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${item.ok ? 'bg-emerald-400' : 'bg-amber-400'}`}></div>
                   <span className="text-[9px] font-black uppercase tracking-wider text-zinc-500 truncate">{item.label}</span>
                 </div>
-                <div className="text-xs font-bold mt-1.5 truncate" title={item.value}>{item.value}</div>
+                <div className="text-xs font-bold mt-1.5 truncate">{item.value}</div>
               </div>
             ))}
           </div>
-          {systemDiagnostics && !runtimeReady && systemDiagnostics.missing_assets.length > 0 && (
-            <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-[10px] font-mono text-amber-300 break-words">
-              Missing: {systemDiagnostics.missing_assets.join(', ')}
+
+          <details className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/70 overflow-hidden">
+            <summary className="cursor-pointer list-none p-4 flex items-center justify-between gap-4">
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">Technical details</div>
+                <div className="text-[11px] text-zinc-300 mt-1">Only open this when troubleshooting.</div>
+              </div>
+              <span className="material-symbols-outlined text-zinc-500">terminal</span>
+            </summary>
+            <div className="border-t border-zinc-800 p-4">
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: 'Runtime assets', ok: runtimeReady, value: runtimeReady ? 'Ready' : `${systemDiagnostics?.missing_assets?.length ?? 0} missing` },
+                  { label: 'BlueStacks 5', ok: playerReady, value: playerReady ? 'Detected' : 'Not found' },
+                  { label: 'ADB', ok: adbReady, value: adbReady ? 'Detected' : 'Not found' },
+                  { label: 'Instance', ok: !!preferredInstance, value: preferredInstance ? `${preferredInstance.name} · ${preferredInstance.adb_port}` : 'Not detected' },
+                  { label: 'BlueStacks running', ok: systemDiagnostics?.emulator.bluestacks_running ?? false, value: systemDiagnostics?.emulator.bluestacks_running ? 'Running' : 'Stopped' },
+                  { label: 'ADB access', ok: systemDiagnostics?.emulator.adb_enabled ?? false, value: systemDiagnostics?.emulator.adb_enabled ? 'Enabled' : (systemDiagnostics?.emulator.adb_setting_present ? 'Disabled · auto-fix on Start' : 'Check BlueStacks settings') },
+                ].map((item) => (
+                  <div key={item.label} className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${item.ok ? 'bg-emerald-400' : 'bg-amber-400'}`}></div>
+                      <span className="text-[9px] font-black uppercase tracking-wider text-zinc-500 truncate">{item.label}</span>
+                    </div>
+                    <div className="text-xs font-bold mt-1.5 truncate" title={item.value}>{item.value}</div>
+                  </div>
+                ))}
+              </div>
+              {systemDiagnostics && !runtimeReady && systemDiagnostics.missing_assets.length > 0 && (
+                <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-[10px] font-mono text-amber-300 break-words">
+                  Missing: {systemDiagnostics.missing_assets.join(', ')}
+                </div>
+              )}
             </div>
-          )}
+          </details>
 
           {/* Automatic selection is the default. Manual instance choice is
               intentionally tucked away so normal users never need to touch it. */}
@@ -162,7 +194,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             <div className="border-t border-zinc-800 p-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="text-[11px] text-zinc-400 max-w-[250px]">
-                  Leave this on Automatic unless ClashGO detected the wrong BlueStacks instance.
+                  Beginners should leave this on Automatic. Change it only if ClashGO clearly detected the wrong BlueStacks instance.
                 </div>
                 <select
                   value={systemDiagnostics?.configured_instance || ''}
@@ -212,6 +244,16 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           </div>
         </button>
 
+        <details className="rounded-2xl border border-zinc-100/60 dark:border-zinc-800/60 bg-zinc-50/40 dark:bg-zinc-950/20 overflow-hidden">
+          <summary className="cursor-pointer list-none p-5 flex items-center justify-between gap-4">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Technical performance</div>
+              <div className="text-sm font-bold text-zinc-950 dark:text-white mt-1">Connection, capture and recovery details</div>
+              <div className="text-[10px] text-zinc-400 mt-0.5">Normal users can leave this closed.</div>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">monitoring</span>
+          </summary>
+          <div className="border-t border-zinc-100 dark:border-zinc-800 p-4 space-y-4">
           {[
             { label: 'Connection Status', value: stats.adb_health.consecutive_fails === 0 ? 'Optimal' : 'Interrupted', status: stats.adb_health.consecutive_fails === 0 ? 'success' : 'error', icon: 'hub', detail: stats.adb_health.last_error },
             { label: 'ADB Port', value: adbPort.toString(), status: 'info', icon: 'router' },
@@ -248,6 +290,8 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             </div>
           </div>
         ))}
+          </div>
+        </details>
 
         {/* Update row — surfaces current version + a manual check
             button so users can force a refresh without waiting for the

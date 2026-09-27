@@ -33,6 +33,7 @@ import {
   GetPlayerProfile,
   GetVillageResourceHistory,
   SetSimpleMode,
+  SaveSimplePreferences,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
 import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot } from './types';
@@ -133,6 +134,35 @@ function App() {
     recovery_attempts: 0,
     recovery_successes: 0,
     bluestacks_restarts: 0,
+    donation_checks: 0,
+    donations_sent: 0,
+    last_donation_unix: 0,
+    last_donation_result: '',
+    training_items_pending: 0,
+    training_housing_pending: 0,
+    training_plan_uncertain: false,
+    army_check_pending: false,
+    army_verified_until_unix: 0,
+    army_repair_attempts: 0,
+    army_repair_successes: 0,
+    training_pending: [],
+    village_action: 'idle',
+    village_reason: '',
+    village_next_unix: 0,
+    automation_busy: false,
+    automation_task: '',
+    automation_last_task: '',
+    automation_task_started_unix: 0,
+    automation_task_age_sec: 0,
+    automation_tasks_started: 0,
+    automation_tasks_completed: 0,
+    automation_task_panics: 0,
+    wall_upgrade_pending: false,
+    runtime_state: 'Unknown',
+    runtime_phase: 'Idle',
+    runtime_state_age: 0,
+    runtime_phase_age: 0,
+    last_progress_ago: 0,
     adb_health: {
       last_capture: null,
       avg_capture_ms: 0,
@@ -173,6 +203,15 @@ function App() {
   const [lootExitEnabled, setLootExitEnabled] = useState(false);
   const [lootExitPercent, setLootExitPercent] = useState(100);
   const [simpleMode, setSimpleMode] = useState(true);
+  const [autoProfileSync, setAutoProfileSync] = useState(true);
+  const [autoDonate, setAutoDonate] = useState(false);
+  const [donateOnlyRequested, setDonateOnlyRequested] = useState(true);
+  const [useHeroesSimple, setUseHeroesSimple] = useState(true);
+  const [useClanCastleSimple, setUseClanCastleSimple] = useState(true);
+  const [waitForFullArmy, setWaitForFullArmy] = useState(true);
+  const [autoRetrain, setAutoRetrain] = useState(true);
+  const [autoUpgradeWalls, setAutoUpgradeWalls] = useState(false);
+  const [lootPreset, setLootPreset] = useState<'relaxed' | 'balanced' | 'rich'>('balanced');
 
   useEffect(() => {
     const init = async () => {
@@ -194,6 +233,16 @@ function App() {
         setLootExitEnabled(conf.attack.loot_exit_enabled ?? false);
         setLootExitPercent(conf.attack.loot_exit_percent ?? 100);
         setSimpleMode(conf.automation?.simple_mode ?? true);
+        setAutoProfileSync(conf.automation?.auto_profile_sync ?? true);
+        const prefs = conf.automation?.preferences;
+        setAutoDonate(prefs?.auto_donate ?? false);
+        setDonateOnlyRequested(prefs?.donate_only_requested ?? true);
+        setUseHeroesSimple(prefs?.use_heroes ?? true);
+        setUseClanCastleSimple(prefs?.use_clan_castle ?? true);
+        setWaitForFullArmy(prefs?.wait_for_full_army ?? true);
+        setAutoRetrain(prefs?.auto_retrain ?? true);
+        setAutoUpgradeWalls(prefs?.auto_upgrade_walls ?? false);
+        setLootPreset((prefs?.loot_preset === 'relaxed' || prefs?.loot_preset === 'rich') ? prefs.loot_preset : 'balanced');
         setIsRunning(running);
         setIsStarting(false);
         // Never let a null from the Go side reach the Config page — a
@@ -347,6 +396,22 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!autoProfileSync || !playerTag) return;
+
+    // Account metadata does not own the game UI, so it can refresh quietly
+    // alongside the one-task game scheduler. Keep the cadence deliberately
+    // low: the Town Hall/profile rarely changes and the service should never
+    // be polled like live telemetry.
+    const sync = () => {
+      void GetPlayerProfile().catch((err) => {
+        console.warn('Automatic account profile sync failed:', err);
+      });
+    };
+    const id = window.setInterval(sync, 30 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [autoProfileSync, playerTag]);
+
+  useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark');
     } else {
@@ -474,13 +539,21 @@ function App() {
     await ApplyUpdate();
   };
   const handleUpdaterOneClick = async () => {
-    // The Go-side InstallAndRestart takes care of stopping the bot,
-    // saving stats, marking the restarting state, spawning the helper,
-    // and exiting the process after a 1s IPC flush window.
+    // True one-click Windows update:
+    // 1) if the release is only "available", download + SHA256 verify it;
+    // 2) once state is "ready", let Go stop the bot, swap the bundle and restart.
+    // The old handler called InstallAndRestart() immediately, which can only
+    // work from StateReady and therefore failed on the very first click.
+    let status = await GetUpdateStatus();
+    if (status.state !== 'ready') {
+      await DownloadUpdate();
+      status = await GetUpdateStatus();
+      setUpdateStatus(status);
+    }
+    if (status.state !== 'ready') {
+      throw new Error(status.error || 'La mise à jour n’est pas prête à être installée.');
+    }
     await InstallAndRestart();
-    // The status will flip to 'restarting' and the React side will
-    // switch to the non-dismissible splash automatically via the
-    // updater_status event listener.
   };
   const handleUpdaterSkip = async () => {
     await SkipCurrentVersion();
@@ -537,6 +610,50 @@ function App() {
       await SetSimpleMode(enabled);
       setSimpleMode(enabled);
     },
+    simplePreferences: {
+      autoDonate,
+      donateOnlyRequested,
+      useHeroes: useHeroesSimple,
+      useClanCastle: useClanCastleSimple,
+      waitForFullArmy,
+      autoRetrain,
+      autoUpgradeWalls,
+      lootPreset,
+    },
+    onSaveSimplePreferences: async (prefs: {
+      autoDonate: boolean;
+      donateOnlyRequested: boolean;
+      useHeroes: boolean;
+      useClanCastle: boolean;
+      waitForFullArmy: boolean;
+      autoRetrain: boolean;
+      autoUpgradeWalls: boolean;
+      lootPreset: 'relaxed' | 'balanced' | 'rich';
+    }) => {
+      await SaveSimplePreferences(
+        prefs.autoDonate,
+        prefs.donateOnlyRequested,
+        prefs.useHeroes,
+        prefs.useClanCastle,
+        prefs.waitForFullArmy,
+        prefs.autoRetrain,
+        prefs.autoUpgradeWalls,
+        prefs.lootPreset,
+      );
+      setAutoDonate(prefs.autoDonate);
+      setDonateOnlyRequested(prefs.donateOnlyRequested);
+      setUseHeroesSimple(prefs.useHeroes);
+      setUseClanCastleSimple(prefs.useClanCastle);
+      setWaitForFullArmy(prefs.waitForFullArmy);
+      setAutoRetrain(prefs.autoRetrain);
+      setAutoUpgradeWalls(prefs.autoUpgradeWalls);
+      setUpgradeWalls(prefs.autoUpgradeWalls);
+      setLootPreset(prefs.lootPreset);
+      const refreshed = await GetConfig();
+      setGoldThreshold(refreshed.search.min_loot_gold);
+      setElixirThreshold(refreshed.search.min_loot_elixir);
+      setDeThreshold(refreshed.search.min_loot_de);
+    },
     onSave: async () => {
       // Errors intentionally bubble so ConfigView's save-status
       // indicator can show a red "Save failed" pill back to the user.
@@ -548,7 +665,9 @@ function App() {
   }), [
     goldThreshold, elixirThreshold, deThreshold,
     selectedStrategy, strategies, searchEnabled, upgradeWalls, stallTimer,
-    lootExitEnabled, lootExitPercent, simpleMode
+    lootExitEnabled, lootExitPercent, simpleMode,
+    autoDonate, donateOnlyRequested, useHeroesSimple, useClanCastleSimple,
+    waitForFullArmy, autoRetrain, autoUpgradeWalls, lootPreset
   ]);
 
   return (
@@ -595,7 +714,10 @@ function App() {
                   onDismiss={() => setUpdateDismissed(true)}
                 />
               )}
-              <div className="bg-white dark:bg-zinc-900 px-6 py-3.5 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 flex items-center gap-4 shadow-premium dark:shadow-none no-drag backdrop-blur-md" title={`ADB server port ${adbPort} — ${adbStateLabel}`}>
+              <div
+                className="bg-white dark:bg-zinc-900 px-6 py-3.5 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 flex items-center gap-4 shadow-premium dark:shadow-none no-drag backdrop-blur-md"
+                title={simpleMode ? `Game connection — ${adbStateLabel}` : `ADB server port ${adbPort} — ${adbStateLabel}`}
+              >
                 <div className="relative">
                   <div className={`w-2.5 h-2.5 rounded-full ${
                     adbState === 'connected' ? 'bg-emerald-500'
@@ -608,7 +730,11 @@ function App() {
                   adbState === 'connected' ? 'text-zinc-500 dark:text-zinc-400'
                   : adbState === 'disconnected' ? 'text-rose-500'
                   : 'text-amber-600 dark:text-amber-400'
-                }`}>ADB: {adbPort} · {adbStateLabel}</span>
+                }`}>
+                  {simpleMode
+                    ? `Game connection · ${adbState === 'connected' ? 'Ready' : adbState === 'disconnected' ? 'Disconnected' : 'Connecting'}`
+                    : `ADB: ${adbPort} · ${adbStateLabel}`}
+                </span>
               </div>
             </div>
           </header>
@@ -632,7 +758,7 @@ function App() {
                     onClick={() => setTab('settings')}
                     className="rounded-xl border border-zinc-300/70 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
                   >
-                    Windows readiness
+                    Fix setup
                   </button>
                   <button
                     type="button"
@@ -664,7 +790,7 @@ function App() {
               }}
             />
           )}
-          {tab === 'analytics' && <Analytics stats={stats} resourceHistory={resourceHistory} history={history as any} />}
+          {tab === 'analytics' && <Analytics stats={stats} resourceHistory={resourceHistory} history={history as any} logs={logs} />}
           {tab === 'config' && <ConfigView {...configProps} />}
           {tab === 'settings' && (
             <SettingsView

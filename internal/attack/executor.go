@@ -243,9 +243,9 @@ func (t *TapExecutor) TapDeployLineReliable(p1, p2 image.Point, count int, jitte
 	for _, pt := range points {
 		j := t.addJitter(pt, jitterPx)
 		_ = t.client.TapFast(j.X, j.Y, 0.8)
-		// 60-70ms is enough separation for CoC while avoiding the visibly
-		// sluggish 95ms cadence on 8-10 heavy troops.
-		t.client.HumanSleep(65, 10)
+		// ~50ms is enough separation on the verified Windows line while avoiding
+		// the visibly sluggish per-troop cadence on 8-10 heavy troops.
+		t.client.HumanSleep(50, 8)
 	}
 }
 

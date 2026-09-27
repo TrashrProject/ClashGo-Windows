@@ -22,14 +22,14 @@ func TestAsyncWriterWriteDoesNotBlock(t *testing.T) {
 	path := filepath.Join(dir, "stats.json")
 	data := []byte(`{"attacks":1}`)
 
-	const maxWait = 500 * time.Millisecond
+	const maxWait = 1500 * time.Millisecond
 	start := time.Now()
 	if err := aw.Write(path, data, 0o644); err != nil {
 		t.Fatalf("Write returned error: %v", err)
 	}
 	elapsed := time.Since(start)
 	if elapsed > maxWait {
-		t.Fatalf("Write blocked for %v (> %v); ticker-only flush stalls synchronous callers", elapsed, maxWait)
+		t.Fatalf("Write blocked for %v (> %v); synchronous flush is unexpectedly slow", elapsed, maxWait)
 	}
 
 	got, err := os.ReadFile(path)

@@ -320,7 +320,13 @@ func (s *Service) Check(ctx context.Context) (Status, error) {
 	s.lastCheckMu.Unlock()
 
 	s.statusMu.Lock()
-	s.status.State = StateChecking
+	// A metadata refresh must never destroy a verified READY download.
+	// Previously Check() changed READY -> CHECKING before absorbManifest()
+	// could preserve the completed archive, so clicking Install afterwards
+	// failed with "download not ready — call Download() first".
+	if s.status.State != StateReady {
+		s.status.State = StateChecking
+	}
 	s.status.Error = ""
 	s.statusMu.Unlock()
 
@@ -479,6 +485,9 @@ func (s *Service) absorbManifest(m Manifest) Status {
 	spec, ok := m.Platforms[plat]
 
 	s.statusMu.Lock()
+	prevState := s.status.State
+	prevDownloadPath := s.status.DownloadPath
+	prevLatest := s.status.LatestVersion
 	s.status.LatestVersion = normalizeVersion(m.Version)
 	s.status.MinSupported = m.MinSupported
 	s.status.Notes = m.Notes
@@ -493,7 +502,25 @@ func (s *Service) absorbManifest(m Manifest) Status {
 		s.status.SkipVersion,
 		s.status.MinSupported,
 	)
-	s.status.State = StateIdle
+	// Do not destroy a completed download just because a periodic/manual
+	// metadata check ran afterwards. This was the cause of the Windows
+	// "Verified. Ready to install" UI followed by "download not ready".
+	// Preserve READY only when it belongs to the same latest version and the
+	// verified archive still exists.
+	keepReady := prevState == StateReady &&
+		prevLatest == s.status.LatestVersion &&
+		prevDownloadPath != ""
+	if keepReady {
+		if _, err := os.Stat(prevDownloadPath); err == nil {
+			s.status.State = StateReady
+			s.status.DownloadPath = prevDownloadPath
+		} else {
+			s.status.State = StateIdle
+			s.status.DownloadPath = ""
+		}
+	} else {
+		s.status.State = StateIdle
+	}
 	if ok {
 		s.status.AssetName = spec.AssetName
 		s.status.ExpectedSize = spec.Size
@@ -822,7 +849,7 @@ func (s *Service) Apply() error {
 // missing, returns an error so the UI can fall back to Finder.
 func (s *Service) ApplyAuto() (bool, error) {
 	st := s.GetStatus()
-	if st.State != StateReady || st.DownloadPath == "" {
+	if (st.State != StateReady && st.State != StateRestarting) || st.DownloadPath == "" {
 		return false, errors.New("download not ready — call Download() first")
 	}
 

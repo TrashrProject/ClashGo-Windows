@@ -120,3 +120,39 @@ func TestClashAccountServiceURLPrecedence(t *testing.T) {
 		t.Fatalf("config proxy URL fallback=%q", got)
 	}
 }
+
+
+func TestSaveSimplePreferencesMapsSchedulerPolicies(t *testing.T) {
+	t.Setenv("CLASHGO_CONFIG_DIR", t.TempDir())
+	a := NewApp()
+
+	if err := a.SaveSimplePreferences(
+		true,  // auto donate
+		true,  // requested only
+		false, // heroes
+		false, // clan castle
+		true,  // verify army
+		true,  // repair recipe
+		true,  // wall maintenance
+		"rich",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	if !cfg.Automation.Preferences.AutoDonate {
+		t.Fatal("auto donate preference was not persisted")
+	}
+	if cfg.Attack.UseHeroes || cfg.Attack.UseQueen || cfg.Attack.UseWarden {
+		t.Fatal("disabling heroes in Easy Mode must disable every hero policy")
+	}
+	if cfg.Attack.UseClanCastle {
+		t.Fatal("disabling Clan Castle in Easy Mode must reach attack config")
+	}
+	if !cfg.Upgrade.UpgradeWalls || !cfg.Automation.Preferences.AutoUpgradeWalls {
+		t.Fatal("wall maintenance should be enabled in both scheduler config and simple preference")
+	}
+	if cfg.Search.MinLootGold != 700000 || cfg.Search.MinLootElixir != 700000 || cfg.Search.MinLootDarkElixir != 3500 {
+		t.Fatalf("rich preset was not translated correctly: %+v", cfg.Search)
+	}
+}

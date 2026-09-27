@@ -6,7 +6,7 @@ SetCompressor /SOLID lzma
 !include "x64.nsh"
 
 !ifndef VERSION
-  !define VERSION "0.6.0-windows-beta"
+  !define VERSION "0.6.7-windows-beta"
 !endif
 !ifndef BUNDLE_DIR
   !error "BUNDLE_DIR must point to the portable ClashGO-Windows bundle"
@@ -27,8 +27,8 @@ InstallDirRegKey HKCU "${UNINSTALL_KEY}" "InstallLocation"
 ShowInstDetails show
 ShowUninstDetails show
 
-VIProductVersion "0.6.0.0"
-VIFileVersion "0.6.0.0"
+VIProductVersion "0.6.7.0"
+VIFileVersion "0.6.7.0"
 VIAddVersionKey "ProductName" "${PRODUCT_NAME}"
 VIAddVersionKey "FileDescription" "${PRODUCT_NAME} Installer"
 VIAddVersionKey "CompanyName" "${COMPANY_NAME}"
@@ -36,6 +36,9 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "LegalCopyright" "ClashGO MIT upstream © Diego Sargent; Windows fork © 2026 TrashrProject"
 
 !define MUI_ABORTWARNING
+!define MUI_LANGDLL_REGISTRY_ROOT "HKCU"
+!define MUI_LANGDLL_REGISTRY_KEY "${UNINSTALL_KEY}"
+!define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${PRODUCT_EXE}"
 !define MUI_FINISHPAGE_RUN_TEXT "Launch ClashGO Windows"
 
@@ -50,6 +53,7 @@ VIAddVersionKey "LegalCopyright" "ClashGO MIT upstream © Diego Sargent; Windows
 !insertmacro MUI_LANGUAGE "French"
 
 Function .onInit
+  !insertmacro MUI_LANGDLL_DISPLAY
   ${IfNot} ${RunningX64}
     MessageBox MB_ICONSTOP|MB_OK "ClashGO Windows currently requires 64-bit Windows."
     Abort

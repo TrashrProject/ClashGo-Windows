@@ -43,21 +43,21 @@ const formatBytes = (n: number): string => {
 const stateLabel = (state: string): string => {
   switch (state) {
     case 'idle':
-      return 'Up to date';
+      return 'À jour';
     case 'checking':
-      return 'Checking for updates…';
+      return 'Recherche de mises à jour…';
     case 'available':
-      return 'Update available';
+      return 'Mise à jour disponible';
     case 'downloading':
-      return 'Downloading…';
+      return 'Téléchargement…';
     case 'ready':
-      return 'Ready to install';
+      return 'Prête à installer';
     case 'restarting':
-      return 'Restarting…';
+      return 'Redémarrage…';
     case 'error':
-      return 'Update error';
+      return 'Erreur de mise à jour';
     case 'up_to_date':
-      return 'Up to date';
+      return 'À jour';
     default:
       return state;
   }
@@ -139,6 +139,10 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
   // WebView. The body now guards against null/falsy `status` instead.
   React.useEffect(() => {
     if (!status || status.state !== 'ready') return;
+    // A previous first-click failure from an older client can leave
+    // "download not ready" visible even though the download has since
+    // completed. Ready is authoritative: clear that stale UI error.
+    setLastError(null);
     setMountedChecksumFlash(true);
     const t = setTimeout(() => setMountedChecksumFlash(false), 1800);
     return () => clearTimeout(t);
@@ -232,13 +236,13 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
           {stateIcon(status.state)}
         </span>
         {status.state === 'downloading'
-          ? `Downloading ${progressPct}%`
+          ? `Téléchargement ${progressPct}%`
           : status.available
-            ? `Update ${status.latest_version}`
+            ? `MAJ ${status.latest_version}`
             : status.state === 'ready'
-              ? `v${status.latest_version} — Install`
+              ? `v${status.latest_version} — Installer`
               : status.state === 'error'
-                ? 'Update failed'
+                ? 'Échec de la MAJ'
                 : stateLabel(status.state)}
         {status.available && (
           <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
@@ -263,15 +267,15 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                 <div className="flex-1 min-w-0">
                   <div className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.35em] mb-1.5 flex items-center gap-2">
                     <span className="material-symbols-outlined text-xs">rocket_launch</span>
-                    ClashGO Update
+                    Mise à jour ClashGO
                   </div>
                   <h2 id="update-banner-title" className="font-headline text-[1.7rem] font-bold tracking-tight text-zinc-950 dark:text-white leading-tight">
                     {status.available
-                      ? `${status.latest_version} is here`
+                      ? `Version ${status.latest_version} disponible`
                       : stateLabel(status.state)}
                   </h2>
                   <p className="text-[11px] text-zinc-500 dark:text-zinc-500 mt-1.5 font-bold tabular-nums flex items-center gap-2">
-                    <span className="text-zinc-400 dark:text-zinc-600 uppercase tracking-widest text-[10px]">Current</span>
+                    <span className="text-zinc-400 dark:text-zinc-600 uppercase tracking-widest text-[10px]">Actuelle</span>
                     <span className="font-mono">v{appVersion}</span>
                     {status.min_supported && (
                       <>
@@ -290,7 +294,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                     onDismiss();
                   }}
                   className="w-9 h-9 rounded-xl bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center justify-center text-zinc-500 dark:text-zinc-400 transition-colors"
-                  aria-label="Close update dialog"
+                  aria-label="Fermer la fenêtre de mise à jour"
                 >
                   <span className="material-symbols-outlined text-base">close</span>
                 </button>
@@ -314,7 +318,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                 </pre>
               ) : (
                 <div className="text-sm text-zinc-500 dark:text-zinc-400">
-                  No release notes were published for this version.
+                  Aucune note de version n’a été publiée.
                 </div>
               )}
 
@@ -347,11 +351,11 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                   </span>
                   {busy === 'oneclick'
                     ? status.state === 'ready'
-                      ? 'Installing…'
-                      : 'Downloading & installing…'
+                      ? 'Installation…'
+                      : 'Téléchargement et installation…'
                     : status.state === 'ready'
-                      ? 'Install & Restart'
-                      : `Update to v${status.latest_version}`}
+                      ? 'Installer et redémarrer'
+                      : `Mettre à jour vers v${status.latest_version}`}
                 </span>
               </button>
 
@@ -363,7 +367,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                   className="h-10 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 text-zinc-700 dark:text-zinc-300 text-[10px] font-black uppercase tracking-[0.2em] transition-colors flex items-center justify-center gap-1.5"
                 >
                   <span className="material-symbols-outlined text-[14px]">download</span>
-                  {status.state === 'ready' ? 'Re-download' : 'Download only'}
+                  {status.state === 'ready' ? 'Retélécharger' : 'Télécharger seulement'}
                 </button>
                 <button
                   onClick={() => doApply()}
@@ -371,7 +375,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                   className="h-10 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 text-zinc-700 dark:text-zinc-300 text-[10px] font-black uppercase tracking-[0.2em] transition-colors flex items-center justify-center gap-1.5"
                 >
                   <span className="material-symbols-outlined text-[14px]">folder_open</span>
-                  Open in Finder
+                  Ouvrir le dossier
                 </button>
               </div>
 
@@ -446,7 +450,7 @@ const busyLabel = (b: string): string => {
     case 'oneclick':
       return 'Downloading • verifying • installing…';
     case 'download':
-      return 'Downloading…';
+      return 'Téléchargement…';
     case 'apply':
       return 'Opening Finder…';
     case 'check':
@@ -518,7 +522,7 @@ const ReadyBody: React.FC<{
         verified_user
       </span>
       <span className="text-xs font-bold text-zinc-950 dark:text-white">
-        Verified. Ready to install.
+        Vérifiée. Prête à installer.
       </span>
     </div>
     {status.download_path && (
@@ -557,7 +561,7 @@ const ErrorBody: React.FC<{ status: UpdateStatus; lastError: string | null }> = 
 );
 
 // RestartSplash is rendered instead of the modal/pill when the user
-// pressed Install & Restart. It covers the screen for the brief
+// pressed Installer et redémarrer. It covers the screen for the brief
 // window between the helper reading -> running and the new bundle
 // appearing in the dock; non-dismissible on purpose.
 const RestartSplash: React.FC<{ status: UpdateStatus }> = ({ status }) => (

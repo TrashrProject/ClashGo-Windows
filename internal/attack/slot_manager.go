@@ -395,7 +395,11 @@ func looksLikeHeroCardStatic(screen gocv.Mat, x, barY, screenW, screenH int) boo
 	if total <= 0 {
 		return false
 	}
-	return float64(green)/float64(total) >= 0.075
+	// Live Windows captures show some hero skins/disabled-edge shading make
+	// the health strip much thinner than the historical 7.5% threshold.
+	// Keep this conservative enough to require a real green strip, while the
+	// deployer additionally requires a zero troop count before promotion.
+	return float64(green)/float64(total) >= 0.035
 }
 
 // applyPositionalClassification uses hero/spell anchors to classify unidentified slots.
