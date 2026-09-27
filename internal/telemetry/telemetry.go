@@ -185,7 +185,7 @@ func (w *Writer) send(events []Event) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if w.token != "" {
-		req.Header.Set("Authorization", "Bearer "+w.token)
+		req.Header.Set("X-ClashGO-Ingest", w.token)
 	}
 	resp, err := w.client.Do(req)
 	if err != nil {
