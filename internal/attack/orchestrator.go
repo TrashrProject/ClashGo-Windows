@@ -447,6 +447,12 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				Interface("p2", p2).
 				Int("free_space", freeSpace).
 				Msg("Windows deploy corridor locked outside live red zone")
+		} else if redZone.Valid {
+			// A live red zone was detected but no mathematically safe line could
+			// be constructed. Do not silently fall back to historical/manual
+			// coordinates: refusing to tap is safer than deploying into the red
+			// polygon or lower HUD.
+			return len(slotMgr.GetAllSlots()), fmt.Errorf("live red zone detected but no safe Windows deploy corridor exists")
 		} else if len(deployLine.Points) >= 2 {
 			// Existing calculator already keeps these points near the outer
 			// edge; use them if red-line detection itself was unavailable.
