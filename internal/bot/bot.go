@@ -2204,12 +2204,17 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 	sideX := int(537 * b.cal.ScaleX)
 	sideY := int(693 * b.cal.ScaleY)
-	b.logger.Info().Msg("Tapping side area to dismiss potential post-attack popups...")
+	b.logger.Debug().Msg("dismissing potential post-attack popup")
 	_ = b.client.Tap(sideX, sideY)
-	time.Sleep(1000 * time.Millisecond)
-
 	if b.cfg.Upgrade.UpgradeWalls {
+		// Wall automation needs the home HUD fully settled before it starts
+		// scanning/selecting walls. Preserve the conservative settle here.
+		time.Sleep(900 * time.Millisecond)
 		b.UpgradeWalls(gc)
+	} else {
+		// ReturnHome already verified MainVillage. For pure farming, only a
+		// short acknowledgement window is needed for the side tap itself.
+		time.Sleep(300 * time.Millisecond)
 	}
 
 	// Cap check stays after wall upgrades so the graceful shutdown (2s
