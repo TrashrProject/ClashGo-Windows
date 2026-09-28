@@ -413,6 +413,43 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     };
   }, [deployHotPath]);
 
+  const farmEfficiency = React.useMemo(() => {
+    const rows = history ?? [];
+    if (rows.length === 0) {
+      return {
+        attacksPerHour: 0,
+        gePerActiveMinute: 0,
+        gePerTrueMinute: 0,
+        overheadShare: 0,
+        avgTrueLoopSeconds: 0,
+      };
+    }
+
+    let activeMS = 0;
+    let trueMS = 0;
+    let overheadMS = 0;
+    let ge = 0;
+    for (const rep of rows) {
+      const active = (rep.search_duration_ms || 0) + (rep.deploy_duration_ms || 0) + Math.max(0, (rep.battle_duration_ms || 0) - (rep.deploy_duration_ms || 0));
+      const truth = rep.full_routine_duration_ms || rep.cycle_duration_ms || active;
+      activeMS += active;
+      trueMS += truth;
+      overheadMS += Math.max(0, truth - active);
+      ge += (rep.gold_stolen || 0) + (rep.bonus_gold || 0) + (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+    }
+
+    const hours = trueMS > 0 ? trueMS / 3_600_000 : 0;
+    const activeMinutes = activeMS > 0 ? activeMS / 60_000 : 0;
+    const trueMinutes = trueMS > 0 ? trueMS / 60_000 : 0;
+    return {
+      attacksPerHour: hours > 0 ? rows.length / hours : 0,
+      gePerActiveMinute: activeMinutes > 0 ? ge / activeMinutes : 0,
+      gePerTrueMinute: trueMinutes > 0 ? ge / trueMinutes : 0,
+      overheadShare: trueMS > 0 ? overheadMS * 100 / trueMS : 0,
+      avgTrueLoopSeconds: trueMS / Math.max(1, rows.length) / 1000,
+    };
+  }, [history]);
+
   const lootCapture = React.useMemo(() => {
     let offeredGE = 0, stolenGE = 0, offeredDE = 0, stolenDE = 0, targetScore = 0, scored = 0;
     for (const rep of history ?? []) {
@@ -623,6 +660,32 @@ Best optimization target: {pipeline.dominantTunable.label}
               <div className="mt-1 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{compact(lootCapture.stolenGE)}</div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Farm Efficiency</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Real throughput</h3>
+            <p className="text-sm text-zinc-500 mt-1">Uses true routine time when available, including return-home and preparation overhead.</p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">History-weighted</div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {[
+            { label: 'Attacks / h', value: farmEfficiency.attacksPerHour.toFixed(2), detail: 'True loop rate' },
+            { label: 'G+E / active min', value: compact(farmEfficiency.gePerActiveMinute), detail: 'Search + deploy + combat' },
+            { label: 'G+E / true min', value: compact(farmEfficiency.gePerTrueMinute), detail: 'Includes overhead' },
+            { label: 'Overhead share', value: `${farmEfficiency.overheadShare.toFixed(1)}%`, detail: 'Outside active farming' },
+            { label: 'Avg true loop', value: `${farmEfficiency.avgTrueLoopSeconds.toFixed(0)}s`, detail: 'Ready-to-ready' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
         </div>
       </div>
 
