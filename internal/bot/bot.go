@@ -2013,6 +2013,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	var battleDE int = 0
 	var bonusGold, bonusElixir, bonusDE int = 0, 0, 0
 	var parsedResults bool = false
+	starsSource := "unknown"
+	lootSource := "unknown"
+	resultConfidence := "low"
 
 	if b.attackExec.WaitForBattleEndCtx(b.ctx, 4*time.Minute) {
 
@@ -2085,6 +2088,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 		if parsedOK {
 			visualStars := parsedResult.Stars
+			starsSource = "result_ocr"
+			lootSource = "result_ocr"
+			resultConfidence = "medium"
 			battleGold = parsedResult.Loot.Gold
 			battleElixir = parsedResult.Loot.Elixir
 			battleDE = parsedResult.Loot.DarkElixir
@@ -2101,6 +2107,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			battleStars = visualStars
 			if finalPct >= 100 {
 				battleStars = 3
+				starsSource = "battle_outcome"
 			} else if finalPct > 0 {
 				ruleStars := game.StarsFromOutcome(finalPct, b.attackExec.ThDestroyed())
 				if finalPct >= 50 {
@@ -2113,6 +2120,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 					}
 				}
 				if battleStars != visualStars {
+					starsSource = "reconciled_outcome"
 					b.logger.Warn().
 						Int("visual_stars", visualStars).
 						Int("reconciled_stars", battleStars).
@@ -2127,6 +2135,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			// This directly measures what disappeared from the enemy's loot
 			// counters and is substantially more stable across CoC themes.
 			if liveLoot, ok := b.attackExec.EstimatedLootStolen(); ok {
+				lootSource = "live_delta"
+				if finalPct > 0 {
+					resultConfidence = "high"
+				}
 				b.logger.Info().
 					Int("live_gold", liveLoot.Gold).
 					Int("ocr_gold", battleGold).
@@ -2142,6 +2154,8 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		} else {
 			if finalPct > 0 {
 				battleStars = game.StarsFromOutcome(finalPct, b.attackExec.ThDestroyed())
+				starsSource = "battle_outcome"
+				resultConfidence = "medium"
 				b.logger.Warn().
 					Int("stars", battleStars).
 					Int("destruction_pct", finalPct).
@@ -2151,6 +2165,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			}
 
 			if liveLoot, ok := b.attackExec.EstimatedLootStolen(); ok {
+				lootSource = "live_delta"
+				if finalPct > 0 {
+					resultConfidence = "high"
+				}
 				battleGold = liveLoot.Gold
 				battleElixir = liveLoot.Elixir
 				battleDE = liveLoot.DarkElixir
@@ -2236,6 +2254,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		UndeployedSlots:  remainingUndeployed,
 		DeployError:      depErrStr,
 		ParsedResults:    parsedResults,
+		StarsSource:      starsSource,
+		LootSource:       lootSource,
+		ResultConfidence: resultConfidence,
 		Stars:            battleStars,
 		GoldStolen:       battleGold,
 		ElixirStolen:     battleElixir,
@@ -3422,6 +3443,9 @@ type AttackReport struct {
 	UndeployedSlots  int    `json:"undeployed_slots"`
 	DeployError      string `json:"deploy_error,omitempty"`
 	ParsedResults    bool   `json:"parsed_results"`
+	StarsSource      string `json:"stars_source"`
+	LootSource       string `json:"loot_source"`
+	ResultConfidence string `json:"result_confidence"`
 	Stars            int    `json:"stars"`
 	GoldStolen       int    `json:"gold_stolen"`
 	ElixirStolen     int    `json:"elixir_stolen"`
