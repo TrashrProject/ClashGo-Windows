@@ -215,6 +215,21 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         </div>
       </div>
 
+      <div className="xl:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { label: 'Targets seen', value: (stats.targets_seen || 0).toLocaleString(), detail: 'This session' },
+          { label: 'Accept rate', value: `${(stats.target_acceptance_rate || 0).toFixed(1)}%`, detail: 'Accepted / scanned' },
+          { label: 'Skips / attack', value: (stats.avg_skips_per_attack || 0).toFixed(1), detail: 'Lower is faster' },
+          { label: 'Recovery success', value: stats.recovery_attempts > 0 ? `${(stats.recovery_success_rate || 0).toFixed(0)}%` : '—', detail: stats.recovery_attempts > 0 ? `${stats.recovery_successes}/${stats.recovery_attempts}` : 'No recoveries' },
+        ].map((metric) => (
+          <div key={metric.label} className="bg-white dark:bg-zinc-900 rounded-[2rem] border border-zinc-100/70 dark:border-zinc-800/70 p-5 shadow-premium dark:shadow-none">
+            <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-400">{metric.label}</div>
+            <div className="mt-2 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+            <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+          </div>
+        ))}
+      </div>
+
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
           <div>
