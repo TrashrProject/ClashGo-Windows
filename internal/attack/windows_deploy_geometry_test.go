@@ -52,3 +52,22 @@ func TestWindowsDeployCorridorRejectsInvalidZone(t *testing.T) {
 		t.Fatal("invalid red zone must not produce a corridor")
 	}
 }
+
+func TestWindowsCategoryPriorityPreservesDeploymentOrder(t *testing.T) {
+	cases := []struct {
+		category string
+		want     int
+	}{
+		{"Troop", 0},
+		{"Hero", 1},
+		{"Siege", 2},
+		{"CC", 2},
+		{"Spell", 3},
+		{"Event", 0},
+	}
+	for _, tc := range cases {
+		if got := windowsCategoryPriority(tc.category); got != tc.want {
+			t.Errorf("priority(%q)=%d, want %d", tc.category, got, tc.want)
+		}
+	}
+}
