@@ -1796,12 +1796,15 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				b.telemetry.Emit(telemetry.EventAttackStarted, map[string]any{"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir, "search_ms": attackStartedAt.Sub(searchStart).Milliseconds(), "skips": sequenceSkips})
 			}
 			b.attackExec.SetInitialLoot(loot.Gold, loot.Elixir, loot.DarkElixir)
+			deployStarted := time.Now()
 			if strat, err := strategy.ParseYAML(b.cfg.Attack.StrategyFile); err == nil {
 				stratName = strat.Name
 				targetEdge = strat.TargetEdge
+				remainingUndeployed, deployErr = b.deployParsedStrategy(screen, strat)
+			} else {
+				deployErr = err
+				b.logger.Warn().Err(err).Str("path", b.cfg.Attack.StrategyFile).Msg("could not load strategy")
 			}
-			deployStarted := time.Now()
-			remainingUndeployed, deployErr = b.deployTroops(screen)
 			deployDurationMS = time.Since(deployStarted).Milliseconds()
 			if b.telemetry != nil && deployDurationMS >= 90_000 {
 				b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
@@ -3208,6 +3211,13 @@ func (b *Bot) deployTroops(screen gocv.Mat) (int, error) {
 	if err != nil {
 		b.logger.Warn().Err(err).Str("path", b.cfg.Attack.StrategyFile).Msg("could not load strategy")
 		return 0, err
+	}
+	return b.deployParsedStrategy(screen, strat)
+}
+
+func (b *Bot) deployParsedStrategy(screen gocv.Mat, strat *strategy.DynamicStrategy) (int, error) {
+	if strat == nil {
+		return 0, fmt.Errorf("nil dynamic strategy")
 	}
 
 	b.logger.Info().
