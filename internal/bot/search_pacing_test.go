@@ -9,14 +9,16 @@ import (
 
 func TestChooseSearchPacingHealthy(t *testing.T) {
 	p := chooseSearchPacing(adb.Health{AvgCaptureMs: 350})
-	if p.Mode != "Fast" || p.PostTransitionPause != 750*time.Millisecond || p.StabilityRestEvery != 10 || p.StabilityRest != 850*time.Millisecond {
+	if p.Mode != "Fast" || p.PostTransitionPause != 750*time.Millisecond || p.StabilityRestEvery != 10 || p.StabilityRest != 850*time.Millisecond ||
+		p.PrepSettlePause != 350*time.Millisecond || p.PrepRetryPause != 400*time.Millisecond {
 		t.Fatalf("unexpected healthy pacing: %+v", p)
 	}
 }
 
 func TestChooseSearchPacingDegraded(t *testing.T) {
 	p := chooseSearchPacing(adb.Health{AvgCaptureMs: 1000})
-	if p.Mode != "Safe" || p.PostTransitionPause != 1100*time.Millisecond || p.StabilityRestEvery != 8 || p.StabilityRest != 1500*time.Millisecond {
+	if p.Mode != "Safe" || p.PostTransitionPause != 1100*time.Millisecond || p.StabilityRestEvery != 8 || p.StabilityRest != 1500*time.Millisecond ||
+		p.PrepSettlePause != 650*time.Millisecond || p.PrepRetryPause != 650*time.Millisecond {
 		t.Fatalf("unexpected degraded pacing: %+v", p)
 	}
 }
@@ -30,7 +32,8 @@ func TestChooseSearchPacingFailureForcesSafeMode(t *testing.T) {
 
 func TestChooseSearchPacingBalancedByDefault(t *testing.T) {
 	p := chooseSearchPacing(adb.Health{})
-	if p.Mode != "Balanced" || p.PostTransitionPause != 900*time.Millisecond {
+	if p.Mode != "Balanced" || p.PostTransitionPause != 900*time.Millisecond ||
+		p.PrepSettlePause != 500*time.Millisecond || p.PrepRetryPause != 500*time.Millisecond {
 		t.Fatalf("unexpected default pacing: %+v", p)
 	}
 }
