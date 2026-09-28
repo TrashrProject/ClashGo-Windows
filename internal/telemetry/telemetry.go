@@ -79,6 +79,9 @@ type Snapshot struct {
 	AvgAcceptedScore    float64 `json:"avg_accepted_score"`
 	AvgRejectedScore    float64                `json:"avg_rejected_score"`
 	NearMissTargets     int64                  `json:"near_miss_targets"`
+	NearMiss5Targets    int64                  `json:"near_miss_5_targets"`
+	NearMiss10Targets   int64                  `json:"near_miss_10_targets"`
+	NearMiss15Targets   int64                  `json:"near_miss_15_targets"`
 	TopRejectedTargets  []RejectedTargetSample `json:"top_rejected_targets,omitempty"`
 }
 
@@ -120,7 +123,10 @@ type Bus struct {
 	rejectedDESum    atomic.Int64
 	acceptedScoreSum atomic.Int64
 	rejectedScoreSum atomic.Int64
-	nearMissTargets  atomic.Int64
+	nearMissTargets   atomic.Int64
+	nearMiss5Targets  atomic.Int64
+	nearMiss10Targets atomic.Int64
+	nearMiss15Targets atomic.Int64
 }
 
 func New(path string) *Bus {
@@ -219,6 +225,15 @@ func (b *Bus) rememberRejectedTarget(gold, elixir, darkElixir, score, minGold, m
 	}
 	if sample.NearMiss {
 		b.nearMissTargets.Add(1)
+	}
+	if gap > 0 && gap <= 5 {
+		b.nearMiss5Targets.Add(1)
+	}
+	if gap > 0 && gap <= 10 {
+		b.nearMiss10Targets.Add(1)
+	}
+	if gap > 0 && gap <= 15 {
+		b.nearMiss15Targets.Add(1)
 	}
 	b.targetMu.Lock()
 	b.topRejected = append(b.topRejected, sample)
@@ -479,6 +494,9 @@ func (b *Bus) Snapshot() Snapshot {
 		AvgAcceptedScore: avgAcceptedScore,
 		AvgRejectedScore: avgRejectedScore,
 		NearMissTargets: b.nearMissTargets.Load(),
+		NearMiss5Targets: b.nearMiss5Targets.Load(),
+		NearMiss10Targets: b.nearMiss10Targets.Load(),
+		NearMiss15Targets: b.nearMiss15Targets.Load(),
 		TopRejectedTargets: b.topRejectedSnapshot(),
 	}
 }
