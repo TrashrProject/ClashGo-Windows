@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Ducky705/ClashGO/internal/attack"
 	"github.com/Ducky705/ClashGO/internal/bot"
 	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/logger"
@@ -349,6 +350,86 @@ type BotStatus struct {
 	Running bool   `json:"running"`
 	Message string `json:"message"`
 }
+
+type AttackReplayPoint struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+}
+
+type AttackReplayEventView struct {
+	OffsetMS   int64             `json:"offset_ms"`
+	Kind       string            `json:"kind"`
+	Name       string            `json:"name,omitempty"`
+	Category   string            `json:"category,omitempty"`
+	Count      int               `json:"count,omitempty"`
+	SlotX      int               `json:"slot_x,omitempty"`
+	SlotY      int               `json:"slot_y,omitempty"`
+	DeploySide string            `json:"deploy_side,omitempty"`
+	P1         AttackReplayPoint `json:"p1"`
+	P2         AttackReplayPoint `json:"p2"`
+}
+
+type AttackReplayView struct {
+	Available bool                    `json:"available"`
+	Timestamp string                  `json:"timestamp,omitempty"`
+	Strategy  string                  `json:"strategy,omitempty"`
+	Complete  bool                    `json:"complete"`
+	Events    []AttackReplayEventView `json:"events"`
+}
+
+func (a *App) GetLatestAttackReplay() AttackReplayView {
+	dir := paths.ResolveConfig("output/attack_traces")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return AttackReplayView{Events: []AttackReplayEventView{}}
+	}
+
+	var latest string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".json") {
+			continue
+		}
+		if entry.Name() > latest {
+			latest = entry.Name()
+		}
+	}
+	if latest == "" {
+		return AttackReplayView{Events: []AttackReplayEventView{}}
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, latest))
+	if err != nil {
+		return AttackReplayView{Events: []AttackReplayEventView{}}
+	}
+	var trace attack.AttackTrace
+	if err := json.Unmarshal(data, &trace); err != nil {
+		return AttackReplayView{Events: []AttackReplayEventView{}}
+	}
+
+	view := AttackReplayView{
+		Available: true,
+		Timestamp: trace.Timestamp.Format(time.RFC3339Nano),
+		Strategy: trace.Strategy,
+		Complete: trace.Army.Complete,
+		Events: make([]AttackReplayEventView, 0, len(trace.Events)),
+	}
+	for _, ev := range trace.Events {
+		view.Events = append(view.Events, AttackReplayEventView{
+			OffsetMS: ev.OffsetMS,
+			Kind: ev.Kind,
+			Name: ev.Name,
+			Category: ev.Category,
+			Count: ev.Count,
+			SlotX: ev.SlotX,
+			SlotY: ev.SlotY,
+			DeploySide: ev.DeploySide,
+			P1: AttackReplayPoint{X: ev.P1.X, Y: ev.P1.Y},
+			P2: AttackReplayPoint{X: ev.P2.X, Y: ev.P2.Y},
+		})
+	}
+	return view
+}
+
 
 // StartBot starts the bot with the given thresholds
 //
