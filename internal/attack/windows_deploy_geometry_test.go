@@ -94,3 +94,16 @@ func TestWindowsDeployCorridorFailsClosedWhenNoOutsideSpaceExists(t *testing.T) 
 		t.Fatal("expected no safe corridor when live red zone consumes all legal outer space")
 	}
 }
+
+func TestWindowsAnonymousOneShotCategory(t *testing.T) {
+	for _, category := range []string{"Siege", "CC"} {
+		if !windowsAnonymousOneShotCategory(category) {
+			t.Fatalf("%s must be treated as anonymous one-shot", category)
+		}
+	}
+	for _, category := range []string{"Troop", "Hero", "Spell", ""} {
+		if windowsAnonymousOneShotCategory(category) {
+			t.Fatalf("%s must not use anonymous siege/CC one-shot guard", category)
+		}
+	}
+}
