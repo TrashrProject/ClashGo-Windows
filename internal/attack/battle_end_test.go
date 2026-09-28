@@ -1,6 +1,7 @@
 package attack
 
 import (
+	"github.com/Ducky705/ClashGO/internal/adb"
 	"context"
 	"image"
 	"os"
@@ -407,5 +408,33 @@ func TestBattleExitMetricsExposeLatchedValues(t *testing.T) {
 	waitMS, lootPct := e.BattleExitMetrics()
 	if waitMS != 4_200 || lootPct != 92 {
 		t.Fatalf("battle exit metrics = %d/%d want 4200/92", waitMS, lootPct)
+	}
+}
+
+func TestChooseBattleEndPollHealthy(t *testing.T) {
+	h := adb.Health{FastCaptureMs: 350}
+	if got := chooseBattleEndPoll(h, false); got != 800*time.Millisecond {
+		t.Fatalf("healthy natural poll=%v want 800ms", got)
+	}
+	if got := chooseBattleEndPoll(h, true); got != 900*time.Millisecond {
+		t.Fatalf("healthy loot-exit poll=%v want 900ms", got)
+	}
+}
+
+func TestChooseBattleEndPollBalanced(t *testing.T) {
+	h := adb.Health{FastCaptureMs: 650}
+	if got := chooseBattleEndPoll(h, false); got != time.Second {
+		t.Fatalf("balanced poll=%v want 1s", got)
+	}
+}
+
+func TestChooseBattleEndPollDegraded(t *testing.T) {
+	for _, h := range []adb.Health{
+		{FastCaptureMs: 1100},
+		{FastCaptureMs: 300, ConsecutiveFails: 1},
+	} {
+		if got := chooseBattleEndPoll(h, false); got != 1200*time.Millisecond {
+			t.Fatalf("degraded poll=%v want 1.2s for %+v", got, h)
+		}
 	}
 }
