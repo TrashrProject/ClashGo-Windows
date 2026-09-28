@@ -97,3 +97,11 @@ func TestRememberPreferredTemplateScaleRejectsInvalidHints(t *testing.T) {
 		t.Fatal("non-positive preferred scale must be ignored")
 	}
 }
+
+func TestPreferredScaleStatsReset(t *testing.T) {
+	ResetPreferredScaleStats()
+	stats := PreferredScaleRuntimeStats()
+	if stats.Attempts != 0 || stats.Hits != 0 || stats.Fallbacks != 0 {
+		t.Fatalf("reset stats=%+v want all zero", stats)
+	}
+}
