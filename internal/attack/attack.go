@@ -83,6 +83,8 @@ type Executor struct {
 	// zone is unconfigured (TH state unknown).
 	thDestroyed bool
 	lastBattleEndReason string
+	lastBattleWaitMS int64
+	lastLootExitPercent int
 	lastBattleLootOCRSamples int
 	lastBattleLootOCRMicros int64
 
@@ -187,6 +189,10 @@ func (e *Executor) LastBattleEndReason() string {
 		return "unknown"
 	}
 	return e.lastBattleEndReason
+}
+
+func (e *Executor) BattleExitMetrics() (waitMS int64, lootExitPercent int) {
+	return e.lastBattleWaitMS, e.lastLootExitPercent
 }
 
 func (e *Executor) BattleLootOCRMetrics() (samples int, avgMS float64) {
@@ -1869,6 +1875,8 @@ func (e *Executor) ResetBattleOutcome() {
 	e.lastDestructionPct = 0
 	e.thDestroyed = false
 	e.lastBattleEndReason = ""
+	e.lastBattleWaitMS = 0
+	e.lastLootExitPercent = 0
 	e.lastBattleLootOCRSamples = 0
 	e.lastBattleLootOCRMicros = 0
 }
@@ -1928,6 +1936,10 @@ func battleLootSampleDue(lootExitEnabled bool, tick int) bool {
 }
 
 func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duration) bool {
+	waitStarted := time.Now()
+	defer func() {
+		e.lastBattleWaitMS = time.Since(waitStarted).Milliseconds()
+	}()
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(1000 * time.Millisecond)
 	defer ticker.Stop()
@@ -2150,6 +2162,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 									return false
 								}
 								e.lastBattleEndReason = "loot_threshold"
+								e.lastLootExitPercent = lootedPct
 								return true
 							}
 						}
