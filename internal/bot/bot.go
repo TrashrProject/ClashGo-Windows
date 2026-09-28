@@ -2225,20 +2225,16 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		}
 	}
 
-	fmt.Println()
-	fmt.Println("=========================================")
-	fmt.Println("          BATTLE REPORT SUMMARY          ")
-	fmt.Println("=========================================")
-	fmt.Printf("Strategy:      %s\n", rep.Strategy)
-	fmt.Printf("Target Edge:   %s\n", rep.TargetEdge)
-	fmt.Printf("Deploy Health: %s\n", deployStatus)
-	fmt.Printf("Stars Earned:  %d ⭐\n", rep.Stars)
-	fmt.Println("Loot Collected:")
-	fmt.Printf("  - Gold:      %d\n", rep.GoldStolen)
-	fmt.Printf("  - Elixir:    %d\n", rep.ElixirStolen)
-	fmt.Printf("  - DE:        %d\n", rep.DarkElixirStolen)
-	fmt.Println("=========================================")
-	fmt.Println()
+	b.logger.Info().
+		Str("strategy", rep.Strategy).
+		Int("stars", rep.Stars).
+		Int("gold", rep.GoldStolen+rep.BonusGold).
+		Int("elixir", rep.ElixirStolen+rep.BonusElixir).
+		Int("de", rep.DarkElixirStolen+rep.BonusDE).
+		Str("deploy", deployStatus).
+		Int64("cycle_ms", rep.CycleDurationMS).
+		Str("end_reason", rep.BattleEndReason).
+		Msg("battle complete")
 
 	b.logger.Info().
 		Int32("attacks", b.attackCount.Load()).
