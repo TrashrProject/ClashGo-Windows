@@ -71,3 +71,24 @@ func TestAnalyzePerformanceDetectsDeployReliabilityDrop(t *testing.T) {
 		t.Fatalf("deploy reliability regression missing: %+v", got)
 	}
 }
+
+func TestAnalyzePerformanceIgnoresUnavailableLegacyRoutineMetrics(t *testing.T) {
+	samples := make([]PerformanceSample, 20)
+	for i := range samples {
+		samples[i] = stableSample()
+	}
+	// Simulate older history rows written before routine/capture/OCR timing
+	// existed. Missing telemetry is unknown, not "zero milliseconds".
+	for i := 5; i < 20; i++ {
+		samples[i].RoutineMS = 0
+		samples[i].CaptureMS = 0
+		samples[i].TargetScanMS = 0
+	}
+
+	got := AnalyzePerformance(samples)
+	for _, regression := range got.Regressions {
+		if regression.Metric == "routine_ms" || regression.Metric == "capture_ms" || regression.Metric == "target_scan_ms" {
+			t.Fatalf("legacy missing metric created false regression: %+v", regression)
+		}
+	}
+}
