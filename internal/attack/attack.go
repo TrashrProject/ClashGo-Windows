@@ -34,6 +34,10 @@ type Executor struct {
 	classify      func(gocv.Mat) (game.GameState, int)
 	tappedSiegeXs map[int]bool
 	templates     map[string]gocv.Mat
+	// Shared, session-owned loot recognizer. The Bot owns its lifecycle;
+	// Executor borrows it so battle monitoring does not reload TemplateStore
+	// and rebuild digit caches on every attack.
+	lootRecognizer *game.LootRecognizer
 	// activeStrategy mirrors the strategy being executed so the battle-end
 	// wait can honor per-strategy knobs (e.g. EndAtPercent). Nil when no
 	// dynamic deploy has run yet.
@@ -361,6 +365,12 @@ func (e *Executor) Close() {
 
 func (e *Executor) SetClassifier(fn func(gocv.Mat) (game.GameState, int)) {
 	e.classify = fn
+}
+
+// SetLootRecognizer injects the Bot's session-owned recognizer. Executor does
+// not own or close it; Bot.Stop remains the single lifecycle owner.
+func (e *Executor) SetLootRecognizer(lr *game.LootRecognizer) {
+	e.lootRecognizer = lr
 }
 
 // SetActiveStrategy records the strategy being executed so battle-end
@@ -1883,15 +1893,30 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 		hasStallROI = !sCfg.PercentROI.Empty()
 	}
 
-	tStore, err := game.NewTemplateStore(paths.Resolve("templates"))
-	if err != nil {
-		e.lastBattleEndReason = "setup_error"
-		e.logger.Error().Err(err).Msg("failed to create template store for stall detection")
-		return false
+	lootRec := e.lootRecognizer
+	var localStore *game.TemplateStore
+	var localLootRec *game.LootRecognizer
+	if lootRec == nil {
+		// Compatibility fallback for tests/standalone attack.Executor users.
+		// Production injects the already-hot session recognizer, avoiding a full
+		// TemplateStore load + digit-cache rebuild on every battle.
+		var err error
+		localStore, err = game.NewTemplateStore(paths.Resolve("templates"))
+		if err != nil {
+			e.lastBattleEndReason = "setup_error"
+			e.logger.Error().Err(err).Msg("failed to create template store for stall detection")
+			return false
+		}
+		if err := localStore.LoadTemplates(); err != nil {
+			e.logger.Warn().Err(err).Msg("fallback battle template load incomplete")
+		}
+		localLootRec = game.NewLootRecognizer(e.cal, localStore, e.logger)
+		lootRec = localLootRec
+		defer func() {
+			localLootRec.Close()
+			localStore.Close()
+		}()
 	}
-	tStore.LoadTemplates()
-	lootRec := game.NewLootRecognizer(e.cal, tStore, e.logger)
-	defer lootRec.Close()
 
 	var pRoi image.Rectangle
 	if hasStallROI {
