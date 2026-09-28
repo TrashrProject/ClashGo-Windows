@@ -1559,6 +1559,8 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	var remainingUndeployed int
 	var deployErr error
 	var deployDurationMS int64
+	var acceptedTargetGold, acceptedTargetElixir, acceptedTargetDE int
+	var acceptedTargetScore int
 	var stratName string = "Unknown"
 	var targetEdge string = "Unknown"
 	var deploySide string = "Unknown"
@@ -1645,6 +1647,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 		if decision.Accept {
 			attackStartedAt = time.Now()
+			acceptedTargetGold = loot.Gold
+			acceptedTargetElixir = loot.Elixir
+			acceptedTargetDE = loot.DarkElixir
+			acceptedTargetScore = decision.Score
 			b.logger.Info().
 				Int("score", decision.Score).
 				Int("gold", loot.Gold).
@@ -2077,10 +2083,15 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		SearchDurationMS: func() int64 { if attackStartedAt.IsZero() { return 0 }; return attackStartedAt.Sub(searchStart).Milliseconds() }(),
 		CycleDurationMS:  time.Since(searchStart).Milliseconds(),
 		DeployDurationMS: deployDurationMS,
+		BattleDurationMS: func() int64 { if attackStartedAt.IsZero() { return 0 }; return time.Since(attackStartedAt).Milliseconds() }(),
+		TargetGold:       acceptedTargetGold,
+		TargetElixir:     acceptedTargetElixir,
+		TargetDE:         acceptedTargetDE,
+		TargetScore:      acceptedTargetScore,
 	}
 
 	if b.telemetry != nil {
-		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "cycle_ms": rep.CycleDurationMS})
+		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore})
 	}
 
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
@@ -3106,6 +3117,11 @@ type AttackReport struct {
 	SearchDurationMS int64  `json:"search_duration_ms"`
 	CycleDurationMS  int64  `json:"cycle_duration_ms"`
 	DeployDurationMS int64  `json:"deploy_duration_ms"`
+	BattleDurationMS int64  `json:"battle_duration_ms"`
+	TargetGold       int    `json:"target_gold"`
+	TargetElixir     int    `json:"target_elixir"`
+	TargetDE         int    `json:"target_de"`
+	TargetScore      int    `json:"target_score"`
 }
 
 type adbLogAdapter struct {
