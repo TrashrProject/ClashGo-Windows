@@ -43,6 +43,14 @@ type Incident struct {
 	Recent   []Event   `json:"recent_events"`
 }
 
+type RejectedTargetSample struct {
+	At         time.Time `json:"at"`
+	Gold       int       `json:"gold"`
+	Elixir     int       `json:"elixir"`
+	DarkElixir int       `json:"dark_elixir"`
+	Score      int       `json:"score"`
+}
+
 type Snapshot struct {
 	Events             int64   `json:"events"`
 	Searches           int64   `json:"searches"`
@@ -67,7 +75,8 @@ type Snapshot struct {
 	AvgAcceptedDE       float64 `json:"avg_accepted_de"`
 	AvgRejectedDE       float64 `json:"avg_rejected_de"`
 	AvgAcceptedScore    float64 `json:"avg_accepted_score"`
-	AvgRejectedScore    float64 `json:"avg_rejected_score"`
+	AvgRejectedScore    float64                `json:"avg_rejected_score"`
+	TopRejectedTargets  []RejectedTargetSample `json:"top_rejected_targets,omitempty"`
 }
 
 type Bus struct {
@@ -79,6 +88,8 @@ type Bus struct {
 	once      sync.Once
 	recentMu   sync.RWMutex
 	recent     []Event
+	targetMu   sync.RWMutex
+	topRejected []RejectedTargetSample
 
 	events          atomic.Int64
 	searches        atomic.Int64
@@ -176,6 +187,41 @@ func (b *Bus) RecordCaptureMicros(us int64) {
 	b.lastCaptureUS.Store(us)
 }
 
+func (b *Bus) rememberRejectedTarget(gold, elixir, darkElixir, score int) {
+	sample := RejectedTargetSample{
+		At: time.Now().UTC(),
+		Gold: gold,
+		Elixir: elixir,
+		DarkElixir: darkElixir,
+		Score: score,
+	}
+	b.targetMu.Lock()
+	b.topRejected = append(b.topRejected, sample)
+	sort.SliceStable(b.topRejected, func(i, j int) bool {
+		if b.topRejected[i].Score != b.topRejected[j].Score {
+			return b.topRejected[i].Score > b.topRejected[j].Score
+		}
+		geI := b.topRejected[i].Gold + b.topRejected[i].Elixir
+		geJ := b.topRejected[j].Gold + b.topRejected[j].Elixir
+		if geI != geJ {
+			return geI > geJ
+		}
+		return b.topRejected[i].DarkElixir > b.topRejected[j].DarkElixir
+	})
+	if len(b.topRejected) > 5 {
+		b.topRejected = b.topRejected[:5]
+	}
+	b.targetMu.Unlock()
+}
+
+func (b *Bus) topRejectedSnapshot() []RejectedTargetSample {
+	b.targetMu.RLock()
+	defer b.targetMu.RUnlock()
+	out := make([]RejectedTargetSample, len(b.topRejected))
+	copy(out, b.topRejected)
+	return out
+}
+
 func (b *Bus) RecordRejectedTarget(gold, elixir, darkElixir, score int, scanUS int64) {
 	if b == nil {
 		return
@@ -185,6 +231,7 @@ func (b *Bus) RecordRejectedTarget(gold, elixir, darkElixir, score int, scanUS i
 	b.rejectedGESum.Add(int64(gold + elixir))
 	b.rejectedDESum.Add(int64(darkElixir))
 	b.rejectedScoreSum.Add(int64(score))
+	b.rememberRejectedTarget(gold, elixir, darkElixir, score)
 	if scanUS >= 0 {
 		b.targetScanCount.Add(1)
 		b.targetScanMicros.Add(scanUS)
@@ -406,6 +453,7 @@ func (b *Bus) Snapshot() Snapshot {
 		AvgRejectedDE: avgRejectedDE,
 		AvgAcceptedScore: avgAcceptedScore,
 		AvgRejectedScore: avgRejectedScore,
+		TopRejectedTargets: b.topRejectedSnapshot(),
 	}
 }
 
