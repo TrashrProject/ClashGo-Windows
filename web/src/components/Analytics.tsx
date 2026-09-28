@@ -67,6 +67,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       dark: number;
       deployMs: number;
       cycleMs: number;
+      routineMs: number;
       complete: number;
     }>();
     for (const rep of history ?? []) {
@@ -77,7 +78,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       const key = `${strategy}::${side}`;
       const row = map.get(key) ?? {
         key, strategy, side, attacks: 0, stars: 0, goldElixir: 0, dark: 0,
-        deployMs: 0, cycleMs: 0, complete: 0,
+        deployMs: 0, cycleMs: 0, routineMs: 0, complete: 0,
       };
       row.attacks++;
       row.stars += rep.stars || 0;
@@ -85,6 +86,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       row.dark += (rep.dark_elixir_stolen || 0) + (rep.bonus_de || 0);
       row.deployMs += rep.deploy_duration_ms || 0;
       row.cycleMs += rep.cycle_duration_ms || 0;
+      row.routineMs += rep.full_routine_duration_ms || 0;
       if (rep.deploy_success) row.complete++;
       map.set(key, row);
     }
@@ -92,6 +94,30 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       .sort((a, b) => b.attacks - a.attacks)
       .slice(0, 16);
   }, [history]);
+
+  const strategyLab = React.useMemo(() => {
+    return strategySideStats
+      .filter((row) => row.attacks >= 5)
+      .map((row) => {
+        const measuredMs = row.routineMs > 0 ? row.routineMs : row.cycleMs;
+        const hours = measuredMs > 0 ? measuredMs / 3_600_000 : 0;
+        const yieldPerHour = hours > 0 ? row.goldElixir / hours : 0;
+        const confidence = row.attacks >= 25 ? 'Strong' : row.attacks >= 10 ? 'Solid' : 'Building';
+        return {
+          ...row,
+          yieldPerHour,
+          avgStars: row.stars / Math.max(1, row.attacks),
+          fullDeployRate: row.complete * 100 / Math.max(1, row.attacks),
+          confidence,
+        };
+      })
+      .sort((a, b) => {
+        if (b.yieldPerHour !== a.yieldPerHour) return b.yieldPerHour - a.yieldPerHour;
+        if (b.fullDeployRate !== a.fullDeployRate) return b.fullDeployRate - a.fullDeployRate;
+        return b.avgStars - a.avgStars;
+      })
+      .slice(0, 3);
+  }, [strategySideStats]);
 
   const modeStats = React.useMemo(() => {
     const map = new Map<string, {
@@ -1038,6 +1064,50 @@ Best optimization target: {pipeline.dominantTunable.label}
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-8 rounded-[3rem] shadow-premium-lg">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Strategy Lab</div>
+            <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Observed Farming Leaders</h3>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Requires at least 5 attacks per strategy × side. Observation only; ClashGO never changes your strategy from this panel.</p>
+          </div>
+          <span className="material-symbols-outlined text-zinc-500">science</span>
+        </div>
+
+        {strategyLab.length === 0 ? (
+          <div className="py-10 text-center text-zinc-500 text-xs font-black uppercase tracking-widest">
+            Need 5+ attacks on the same strategy × side to compare reliably
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {strategyLab.map((row, index) => (
+              <div key={row.key} className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">Observed #{index + 1}</div>
+                  <div className="text-[9px] font-black uppercase tracking-wider text-zinc-500">{row.confidence} · n={row.attacks}</div>
+                </div>
+                <div className="mt-3 text-lg font-black text-white dark:text-zinc-950 truncate">{row.strategy}</div>
+                <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-zinc-500">{row.side}</div>
+                <div className="mt-5 grid grid-cols-3 gap-2">
+                  <div>
+                    <div className="text-[8px] font-black uppercase tracking-wider text-zinc-500">G+E / h</div>
+                    <div className="mt-1 text-sm font-black text-white dark:text-zinc-950 tabular-nums">{compact(row.yieldPerHour)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[8px] font-black uppercase tracking-wider text-zinc-500">Stars</div>
+                    <div className="mt-1 text-sm font-black text-white dark:text-zinc-950 tabular-nums">{row.avgStars.toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[8px] font-black uppercase tracking-wider text-zinc-500">Full deploy</div>
+                    <div className="mt-1 text-sm font-black text-white dark:text-zinc-950 tabular-nums">{row.fullDeployRate.toFixed(0)}%</div>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
