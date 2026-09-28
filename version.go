@@ -16,4 +16,6 @@ var (
 	// therefore only enter their player tag; they never configure service
 	// URLs or developer credentials.
 	accountServiceURL = ""
+	// updateChannel is injected at build time ("stable" or "beta").
+	updateChannel = "stable"
 )
