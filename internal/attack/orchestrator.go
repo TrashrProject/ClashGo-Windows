@@ -833,6 +833,13 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		if profileIncomplete > totalRemaining {
 			totalRemaining = profileIncomplete
 		}
+		if armyState != nil {
+			if totalRemaining > 0 {
+				armyState.RecordReplayEvent("deployment_incomplete", "", "")
+			} else {
+				armyState.RecordReplayEvent("deployment_complete", "", "")
+			}
+		}
 
 		e.logger.Info().
 			Int("visible_remaining", liveRemaining).
