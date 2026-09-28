@@ -280,6 +280,7 @@ func mergeStats(acc, current bot.BotStats) bot.BotStats {
 		HealthScore:             current.HealthScore,
 		SpeedProfile:            current.SpeedProfile,
 		TargetsSeen:             current.TargetsSeen,
+		TargetsAccepted:         current.TargetsAccepted,
 		TargetAcceptanceRate:    current.TargetAcceptanceRate,
 		AvgSkipsPerAttack:       current.AvgSkipsPerAttack,
 		AverageTargetScanMS:     current.AverageTargetScanMS,
