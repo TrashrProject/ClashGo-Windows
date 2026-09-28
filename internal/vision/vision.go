@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"sync"
+	"sync/atomic"
 )
 
 type Match struct {
@@ -65,6 +66,30 @@ func MatchMultiScaleROI(screen, template gocv.Mat, minScale, maxScale float64, s
 
 var preferredTemplateScales sync.Map
 
+type PreferredScaleStats struct {
+	Attempts  int64 `json:"attempts"`
+	Hits      int64 `json:"hits"`
+	Fallbacks int64 `json:"fallbacks"`
+}
+
+var preferredScaleAttempts atomic.Int64
+var preferredScaleHits atomic.Int64
+var preferredScaleFallbacks atomic.Int64
+
+func ResetPreferredScaleStats() {
+	preferredScaleAttempts.Store(0)
+	preferredScaleHits.Store(0)
+	preferredScaleFallbacks.Store(0)
+}
+
+func PreferredScaleRuntimeStats() PreferredScaleStats {
+	return PreferredScaleStats{
+		Attempts: preferredScaleAttempts.Load(),
+		Hits: preferredScaleHits.Load(),
+		Fallbacks: preferredScaleFallbacks.Load(),
+	}
+}
+
 func RememberPreferredTemplateScale(templateName string, minScale, maxScale float64, steps int, scale float64) {
 	if templateName == "" || scale <= 0 {
 		return
@@ -90,14 +115,17 @@ func preferredTemplateScale(templateName string, minScale, maxScale float64, ste
 // multi-scale matcher used before this optimization.
 func MatchMultiScaleROICachedPreferred(screen, template gocv.Mat, templateName string, minScale, maxScale float64, steps int, threshold float32, roi image.Rectangle) ([]Match, error) {
 	if scale, ok := preferredTemplateScale(templateName, minScale, maxScale, steps); ok {
+		preferredScaleAttempts.Add(1)
 		fastThreshold := threshold + 0.12
 		if fastThreshold > 0.92 {
 			fastThreshold = 0.92
 		}
 		matches, err := MatchMultiScaleROICached(screen, template, templateName, scale, scale, 1, fastThreshold, roi)
 		if err == nil && len(matches) > 0 {
+			preferredScaleHits.Add(1)
 			return matches, nil
 		}
+		preferredScaleFallbacks.Add(1)
 	}
 
 	matches, err := MatchMultiScaleROICached(screen, template, templateName, minScale, maxScale, steps, threshold, roi)
