@@ -56,6 +56,7 @@ type Executor struct {
 	// observed in the optional stall_config th_banner_zone. False when the
 	// zone is unconfigured (TH state unknown).
 	thDestroyed bool
+	lastBattleEndReason string
 
 	// Initial loot snapshot for the currently selected enemy base. The battle
 	// wait compares live "Available Loot" against this baseline when the
@@ -101,6 +102,13 @@ func (e *Executor) LastDestructionPercent() int {
 // the TH state is unknown).
 func (e *Executor) ThDestroyed() bool {
 	return e.thDestroyed
+}
+
+func (e *Executor) LastBattleEndReason() string {
+	if e.lastBattleEndReason == "" {
+		return "unknown"
+	}
+	return e.lastBattleEndReason
 }
 
 func (e *Executor) SetEarlyExitAllowed(allowed bool) {
@@ -1715,6 +1723,7 @@ func validDestructionRead(pct int) bool {
 func (e *Executor) ResetBattleOutcome() {
 	e.lastDestructionPct = 0
 	e.thDestroyed = false
+	e.lastBattleEndReason = ""
 }
 
 // endButtonVisible reports whether the red "End Battle" button is on the
@@ -1796,6 +1805,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 
 	tStore, err := game.NewTemplateStore(paths.Resolve("templates"))
 	if err != nil {
+		e.lastBattleEndReason = "setup_error"
 		e.logger.Error().Err(err).Msg("failed to create template store for stall detection")
 		return false
 	}
@@ -1833,6 +1843,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 	for {
 		select {
 		case <-ctx.Done():
+			e.lastBattleEndReason = "cancelled"
 			e.logger.Info().Msg("battle end wait cancelled (bot stopping)")
 			return false
 		case <-ticker.C:
@@ -1844,6 +1855,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			state, _ := e.classify(screen)
 
 			if state == game.StateBattleEnd || state == game.StateReturnHome {
+				e.lastBattleEndReason = "natural_result"
 				screen.Close()
 				return true
 			}
@@ -1944,9 +1956,11 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 									Msg("loot threshold reached twice; ending battle early")
 								screen.Close()
 								if err := e.EndBattle(); err != nil {
+									e.lastBattleEndReason = "loot_threshold_end_failed"
 									e.logger.Warn().Err(err).Msg("loot-threshold EndBattle tap failed")
 									return false
 								}
+								e.lastBattleEndReason = "loot_threshold"
 								return true
 							}
 						}
@@ -1987,6 +2001,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 					lastPctTime = time.Now()
 					screen.Close()
 					if time.Now().After(deadline) {
+						e.lastBattleEndReason = "timeout"
 						return false
 					}
 					continue
@@ -2029,6 +2044,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 						e.logger.Info().Int("percent", currentPct).Int("threshold", endAtPct).Msg("destruction reached strategy threshold, ending battle!")
 						screen.Close()
 						e.EndBattle()
+						e.lastBattleEndReason = "destruction_threshold"
 						return true
 					}
 				}
@@ -2052,6 +2068,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 								e.logger.Warn().Int("last_pct", lastPct).Dur("elapsed", elapsed).Msg("stall detected, ending battle!")
 								screen.Close()
 								e.EndBattle()
+								e.lastBattleEndReason = "stall"
 								return true
 							}
 						}
@@ -2061,6 +2078,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 
 			screen.Close()
 			if time.Now().After(deadline) {
+				e.lastBattleEndReason = "timeout"
 				return false
 			}
 		}
