@@ -2977,6 +2977,16 @@ func (b *Bot) Stats() BotStats {
 	}
 	tm := telemetry.Snapshot{}
 	if b.telemetry != nil { tm = b.telemetry.Snapshot() }
+	var targetAcceptanceRate, avgSkipsPerAttack, recoverySuccessRate float64
+	if tm.TargetsFound > 0 {
+		targetAcceptanceRate = float64(attacks) * 100 / float64(tm.TargetsFound)
+	}
+	if attacks > 0 {
+		avgSkipsPerAttack = float64(tm.TargetsSkipped) / float64(attacks)
+	}
+	if attempts := b.recoveryAttempts.Load(); attempts > 0 {
+		recoverySuccessRate = float64(b.recoverySuccesses.Load()) * 100 / float64(attempts)
+	}
 	adbHealth := b.client.Health()
 	healthScore := 100
 	healthScore -= adbHealth.ConsecutiveFails * 8
@@ -3012,8 +3022,12 @@ func (b *Bot) Stats() BotStats {
 		LastCaptureMS:      tm.LastCaptureMS,
 		TelemetryEvents:    tm.Events,
 		TargetsSkipped:     tm.TargetsSkipped,
-		HealthScore:        healthScore,
-		SpeedProfile:       chooseSearchPacing(adbHealth).Mode,
+		HealthScore:          healthScore,
+		SpeedProfile:         chooseSearchPacing(adbHealth).Mode,
+		TargetsSeen:          tm.TargetsFound,
+		TargetAcceptanceRate: targetAcceptanceRate,
+		AvgSkipsPerAttack:    avgSkipsPerAttack,
+		RecoverySuccessRate:  recoverySuccessRate,
 	}
 }
 
@@ -3047,8 +3061,12 @@ type BotStats struct {
 	LastCaptureMS    float64 `json:"last_capture_ms"`
 	TelemetryEvents  int64   `json:"telemetry_events"`
 	TargetsSkipped   int64   `json:"targets_skipped"`
-	HealthScore      int     `json:"health_score"`
-	SpeedProfile     string  `json:"speed_profile"`
+	HealthScore          int     `json:"health_score"`
+	SpeedProfile         string  `json:"speed_profile"`
+	TargetsSeen          int64   `json:"targets_seen"`
+	TargetAcceptanceRate float64 `json:"target_acceptance_rate"`
+	AvgSkipsPerAttack    float64 `json:"avg_skips_per_attack"`
+	RecoverySuccessRate  float64 `json:"recovery_success_rate"`
 }
 
 type AttackReport struct {
