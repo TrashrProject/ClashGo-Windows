@@ -38,6 +38,13 @@ export interface BotStats {
   };
 }
 
+export interface ActivityEvent {
+  type: string;
+  at: string;
+  session_id?: string;
+  fields?: Record<string, unknown>;
+}
+
 export interface VillageResourceSnapshot {
   timestamp: string;
   gold: number;
