@@ -81,3 +81,19 @@ func windowsDeployCorridor(zone RedZone, w, h, uiCutoff int) (side string, p1, p
 
 	return side, p1, p2, freeSpace, true
 }
+
+func windowsCategoryPriority(category string) int {
+	switch category {
+	case "Troop":
+		return 0
+	case "Hero":
+		return 1
+	case "Siege", "CC":
+		return 2
+	case "Spell":
+		return 3
+	default:
+		// Seasonal/event troop-like cards keep troop priority.
+		return 0
+	}
+}
