@@ -34,3 +34,23 @@ func TestChooseSearchPacingBalancedByDefault(t *testing.T) {
 		t.Fatalf("unexpected default pacing: %+v", p)
 	}
 }
+
+func TestChooseSearchPacingUsesReactiveLatency(t *testing.T) {
+	p := chooseSearchPacing(adb.Health{
+		AvgCaptureMs: 300,
+		FastCaptureMs: 1050,
+	})
+	if p.Mode != "Safe" {
+		t.Fatalf("reactive slowdown should force Safe mode, got %+v", p)
+	}
+}
+
+func TestChooseSearchPacingReactiveFastWinsOverSlowHistoricalAverage(t *testing.T) {
+	p := chooseSearchPacing(adb.Health{
+		AvgCaptureMs: 700,
+		FastCaptureMs: 420,
+	})
+	if p.Mode != "Fast" {
+		t.Fatalf("reactive recovery should permit Fast mode, got %+v", p)
+	}
+}
