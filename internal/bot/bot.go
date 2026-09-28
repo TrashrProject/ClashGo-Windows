@@ -521,7 +521,7 @@ func (b *Bot) captureLoop() {
 			screen, err := b.client.CaptureToMat()
 			dur := time.Since(start)
 			if b.telemetry != nil {
-				b.telemetry.Emit(telemetry.EventCaptureSample, map[string]any{"duration_us": dur.Microseconds()})
+				b.telemetry.RecordCaptureMicros(dur.Microseconds())
 			}
 			lastCapture = time.Now()
 			b.lastCapture = lastCapture
