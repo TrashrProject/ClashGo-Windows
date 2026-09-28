@@ -56,6 +56,43 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       .slice(0, 8);
   }, [history]);
 
+  const strategySideStats = React.useMemo(() => {
+    const map = new Map<string, {
+      key: string;
+      strategy: string;
+      side: string;
+      attacks: number;
+      stars: number;
+      goldElixir: number;
+      dark: number;
+      deployMs: number;
+      cycleMs: number;
+      complete: number;
+    }>();
+    for (const rep of history ?? []) {
+      const strategy = rep.strategy || 'Unknown';
+      const side = rep.deploy_side && rep.deploy_side !== 'Unknown'
+        ? rep.deploy_side
+        : (rep.target_edge || 'Unknown');
+      const key = `${strategy}::${side}`;
+      const row = map.get(key) ?? {
+        key, strategy, side, attacks: 0, stars: 0, goldElixir: 0, dark: 0,
+        deployMs: 0, cycleMs: 0, complete: 0,
+      };
+      row.attacks++;
+      row.stars += rep.stars || 0;
+      row.goldElixir += (rep.gold_stolen || 0) + (rep.bonus_gold || 0) + (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+      row.dark += (rep.dark_elixir_stolen || 0) + (rep.bonus_de || 0);
+      row.deployMs += rep.deploy_duration_ms || 0;
+      row.cycleMs += rep.cycle_duration_ms || 0;
+      if (rep.deploy_success) row.complete++;
+      map.set(key, row);
+    }
+    return Array.from(map.values())
+      .sort((a, b) => b.attacks - a.attacks)
+      .slice(0, 16);
+  }, [history]);
+
   const sideStats = React.useMemo(() => {
     const map = new Map<string, {
       side: string;
@@ -454,6 +491,53 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div>
+            <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Strategy × Deploy Side</h3>
+            <p className="text-sm text-zinc-500 mt-1">Observed combinations only. These numbers never change deployment automatically.</p>
+          </div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Top 16 samples</div>
+        </div>
+
+        {strategySideStats.length === 0 ? (
+          <div className="py-10 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">Waiting for attack history</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                  <th className="pb-3 pr-4">Strategy</th>
+                  <th className="pb-3 px-3">Side</th>
+                  <th className="pb-3 px-3">Attacks</th>
+                  <th className="pb-3 px-3">Avg stars</th>
+                  <th className="pb-3 px-3">Full deploy</th>
+                  <th className="pb-3 px-3">Avg G+E</th>
+                  <th className="pb-3 px-3">Avg DE</th>
+                  <th className="pb-3 px-3">Deploy</th>
+                  <th className="pb-3 pl-3">Cycle</th>
+                </tr>
+              </thead>
+              <tbody>
+                {strategySideStats.map((row) => (
+                  <tr key={row.key} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                    <td className="py-4 pr-4 text-sm font-black text-zinc-950 dark:text-white">{row.strategy}</td>
+                    <td className="py-4 px-3 text-xs font-black uppercase tracking-wider text-zinc-500">{row.side}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.stars / Math.max(1, row.attacks)).toFixed(2)}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{Math.round(row.complete / Math.max(1, row.attacks) * 100)}%</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{compact(row.goldElixir / Math.max(1, row.attacks))}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{compact(row.dark / Math.max(1, row.attacks))}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.deployMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</td>
+                    <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.cycleMs / Math.max(1, row.attacks) / 1000).toFixed(0)}s</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
