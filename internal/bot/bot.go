@@ -2609,6 +2609,10 @@ func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, 
 // chains taps into an animation that has not finished opening yet.
 func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int, bool), timeout time.Duration) (int, int, bool) {
 	deadline := time.Now().Add(timeout)
+	pollPause := chooseSearchPacing(b.client.Health()).PrepPollPause
+	if pollPause <= 0 {
+		pollPause = 100 * time.Millisecond
+	}
 	var lastX, lastY int
 	stable := 0
 
@@ -2616,14 +2620,14 @@ func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int
 		screen, err := b.client.CaptureToMat()
 		if err != nil || screen.Empty() {
 			if !screen.Empty() { screen.Close() }
-			time.Sleep(90 * time.Millisecond)
+			time.Sleep(pollPause)
 			continue
 		}
 		x, y, ok := locator(screen)
 		screen.Close()
 		if !ok {
 			stable = 0
-			time.Sleep(90 * time.Millisecond)
+			time.Sleep(pollPause)
 			continue
 		}
 
@@ -2644,7 +2648,7 @@ func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int
 			b.logger.Debug().Str("target", name).Int("x", x).Int("y", y).Msg("next UI target is stable and ready")
 			return x, y, true
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(pollPause)
 	}
 	b.logger.Warn().Str("target", name).Dur("timeout", timeout).Msg("next UI target did not become stable in time")
 	return 0, 0, false
