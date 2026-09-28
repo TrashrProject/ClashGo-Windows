@@ -251,24 +251,65 @@ func (a *App) saveStats() {
 // are acc + current. AdbHealth and CPU metrics are live values and are
 // always taken from current.
 func mergeStats(acc, current bot.BotStats) bot.BotStats {
-	return bot.BotStats{
-		AttacksCompleted: acc.AttacksCompleted + current.AttacksCompleted,
-		SearchSkips:      acc.SearchSkips + current.SearchSkips,
-		TotalGold:        acc.TotalGold + current.TotalGold,
-		TotalElixir:      acc.TotalElixir + current.TotalElixir,
-		TotalDE:          acc.TotalDE + current.TotalDE,
-		Stars0:           acc.Stars0 + current.Stars0,
-		Stars1:           acc.Stars1 + current.Stars1,
-		Stars2:           acc.Stars2 + current.Stars2,
-		Stars3:           acc.Stars3 + current.Stars3,
-		Uptime:           acc.Uptime + current.Uptime,
-		AdbHealth:        current.AdbHealth,
-		CPUTimeSec:       current.CPUTimeSec,
+	res := bot.BotStats{
+		AttacksCompleted:  acc.AttacksCompleted + current.AttacksCompleted,
+		SearchSkips:       acc.SearchSkips + current.SearchSkips,
+		TotalGold:         acc.TotalGold + current.TotalGold,
+		TotalElixir:       acc.TotalElixir + current.TotalElixir,
+		TotalDE:           acc.TotalDE + current.TotalDE,
+		Stars0:            acc.Stars0 + current.Stars0,
+		Stars1:            acc.Stars1 + current.Stars1,
+		Stars2:            acc.Stars2 + current.Stars2,
+		Stars3:            acc.Stars3 + current.Stars3,
+		Uptime:            acc.Uptime + current.Uptime,
+		AdbHealth:         current.AdbHealth,
+		CPUTimeSec:        current.CPUTimeSec,
 		CPUCores:          current.CPUCores,
 		RecoveryAttempts:  acc.RecoveryAttempts + current.RecoveryAttempts,
 		RecoverySuccesses: acc.RecoverySuccesses + current.RecoverySuccesses,
 		BlueStacksRestarts: acc.BlueStacksRestarts + current.BlueStacksRestarts,
+
+		// These are runtime-quality metrics, not additive counters. While the
+		// bot is active the newest live value is authoritative; persisting them
+		// still gives the stopped dashboard a useful last-known snapshot.
+		AverageCaptureMS:        current.AverageCaptureMS,
+		LastCaptureMS:           current.LastCaptureMS,
+		TelemetryEvents:         current.TelemetryEvents,
+		TargetsSkipped:          current.TargetsSkipped,
+		HealthScore:             current.HealthScore,
+		SpeedProfile:            current.SpeedProfile,
+		TargetsSeen:             current.TargetsSeen,
+		TargetAcceptanceRate:    current.TargetAcceptanceRate,
+		AvgSkipsPerAttack:       current.AvgSkipsPerAttack,
+		AverageTargetScanMS:     current.AverageTargetScanMS,
+		LastTargetScanMS:        current.LastTargetScanMS,
+		AverageReturnHomeMS:     current.AverageReturnHomeMS,
+		LastReturnHomeMS:        current.LastReturnHomeMS,
+		AverageNextTransitionMS: current.AverageNextTransitionMS,
+		LastNextTransitionMS:    current.LastNextTransitionMS,
 	}
+
+	// Recovery rate is meaningful over the persisted + live totals.
+	if res.RecoveryAttempts > 0 {
+		res.RecoverySuccessRate = float64(res.RecoverySuccesses) * 100 / float64(res.RecoveryAttempts)
+	}
+
+	// Lifetime rates use the same accumulated counters and accumulated uptime,
+	// so restarting the app does not make Gold/h jump merely because the new
+	// process has only been alive for a few minutes.
+	hours := res.Uptime.Hours()
+	if hours > 0 {
+		res.GoldPerHour = float64(res.TotalGold) / hours
+		res.ElixirPerHour = float64(res.TotalElixir) / hours
+		res.DEPerHour = float64(res.TotalDE) / hours
+	}
+	if res.AttacksCompleted > 0 {
+		totalStars := int64(res.Stars1) + 2*int64(res.Stars2) + 3*int64(res.Stars3)
+		res.AverageStars = float64(totalStars) / float64(res.AttacksCompleted)
+		res.ThreeStarRate = float64(res.Stars3) * 100 / float64(res.AttacksCompleted)
+	}
+
+	return res
 }
 
 func (a *App) ResetStats() error {
