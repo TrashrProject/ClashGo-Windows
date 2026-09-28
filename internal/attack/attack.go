@@ -44,6 +44,13 @@ type Executor struct {
 	lastResolvedEdge string
 	lastDeploySide   string
 
+	// Passive deployment safety contract. These fields mirror checks that the
+	// Windows path already performs; they never alter tap coordinates or timing.
+	lastSafetyMode        string
+	lastRedZoneValid      bool
+	lastCorridorVerified  bool
+	lastHUDSafe           bool
+
 	// Windows live-bar observability. These counters measure slot-rescan and
 	// selected-card OCR cost without changing deployment decisions.
 	lastLiveBarRescans        int
@@ -101,6 +108,22 @@ func (e *Executor) LastResolvedEdge() string { return e.lastResolvedEdge }
 // LastDeploySide returns the physical battlefield side actually used by the
 // deployment engine (left/right/top/bottom when known).
 func (e *Executor) LastDeploySide() string { return e.lastDeploySide }
+
+type DeploymentSafetySnapshot struct {
+	Mode               string `json:"mode"`
+	RedZoneValid       bool   `json:"red_zone_valid"`
+	CorridorVerified   bool   `json:"corridor_verified"`
+	HUDSafe            bool   `json:"hud_safe"`
+}
+
+func (e *Executor) DeploymentSafety() DeploymentSafetySnapshot {
+	return DeploymentSafetySnapshot{
+		Mode:             e.lastSafetyMode,
+		RedZoneValid:     e.lastRedZoneValid,
+		CorridorVerified: e.lastCorridorVerified,
+		HUDSafe:          e.lastHUDSafe,
+	}
+}
 
 func (e *Executor) LiveBarMetrics() (rescans int, avgRescanMS, avgDetectMS, avgClassifyMS float64, templatesTried, templatesMatched int, avgSelectedOCRMS float64) {
 	rescans = e.lastLiveBarRescans
