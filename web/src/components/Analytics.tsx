@@ -694,6 +694,50 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     };
   }, [history]);
 
+  const latencyDistribution = React.useMemo(() => {
+    const percentile = (values: number[], p: number) => {
+      const clean = values.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+      if (clean.length === 0) return 0;
+      const idx = Math.min(clean.length - 1, Math.max(0, Math.ceil((p / 100) * clean.length) - 1));
+      return clean[idx];
+    };
+    const rows = history ?? [];
+    const search = rows.map((r) => r.search_duration_ms || 0);
+    const deploy = rows.map((r) => r.deploy_duration_ms || 0);
+    const routine = rows.map((r) => r.full_routine_duration_ms || r.cycle_duration_ms || 0);
+    const capture = rows.map((r) => r.capture_ms || 0);
+    const scan = rows.map((r) => r.target_scan_ms || 0);
+    return {
+      searchP50: percentile(search, 50), searchP95: percentile(search, 95),
+      deployP50: percentile(deploy, 50), deployP95: percentile(deploy, 95),
+      routineP50: percentile(routine, 50), routineP95: percentile(routine, 95),
+      captureP50: percentile(capture, 50), captureP95: percentile(capture, 95),
+      scanP50: percentile(scan, 50), scanP95: percentile(scan, 95),
+    };
+  }, [history]);
+
+  const targetScoreBands = React.useMemo(() => {
+    const bands = [
+      { label: '<60', min: 0, max: 59 },
+      { label: '60–69', min: 60, max: 69 },
+      { label: '70–79', min: 70, max: 79 },
+      { label: '80–89', min: 80, max: 89 },
+      { label: '90–100', min: 90, max: 100 },
+    ];
+    return bands.map((band) => {
+      const rows = (history ?? []).filter((rep) => (rep.target_score || 0) >= band.min && (rep.target_score || 0) <= band.max);
+      let stars = 0, complete = 0, ge = 0, routine = 0;
+      for (const rep of rows) {
+        stars += rep.stars || 0;
+        if (rep.deploy_success) complete++;
+        ge += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0);
+        routine += rep.full_routine_duration_ms || rep.cycle_duration_ms || 0;
+      }
+      const n = rows.length;
+      const hours = routine > 0 ? routine / 3_600_000 : 0;
+      return { ...band, attacks: n, avgStars: n ? stars/n : 0, fullDeployRate: n ? complete*100/n : 0, avgGE: n ? ge/n : 0, gePerHour: hours ? ge/hours : 0 };
+    }).filter((band) => band.attacks > 0);
+  }, [history]);
   const recentPerformance = React.useMemo(() => {
     const summarize = (rows: AttackReport[]) => {
       const n = rows.length;
@@ -1455,6 +1499,55 @@ Best optimization target: {pipeline.dominantTunable.label}
         </div>
       </div>
 
+      <div className="xl:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Stability distribution</div>
+          <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">P50 vs P95 latency</h3>
+          <p className="text-sm text-zinc-500 mt-1">P95 exposes rare slow attacks that averages hide.</p>
+          <div className="mt-5 space-y-3">
+            {[
+              { label: 'Search', p50: latencyDistribution.searchP50, p95: latencyDistribution.searchP95, ms: false },
+              { label: 'Deploy', p50: latencyDistribution.deployP50, p95: latencyDistribution.deployP95, ms: false },
+              { label: 'True loop', p50: latencyDistribution.routineP50, p95: latencyDistribution.routineP95, ms: false },
+              { label: 'ADB capture', p50: latencyDistribution.captureP50, p95: latencyDistribution.captureP95, ms: true },
+              { label: 'Loot OCR', p50: latencyDistribution.scanP50, p95: latencyDistribution.scanP95, ms: true },
+            ].map((row) => (
+              <div key={row.label} className="grid grid-cols-[1fr_auto_auto] gap-4 items-center rounded-xl bg-zinc-50 dark:bg-zinc-950/40 px-4 py-3">
+                <div className="text-[10px] font-black uppercase tracking-wider text-zinc-500">{row.label}</div>
+                <div className="text-xs font-black text-zinc-950 dark:text-white tabular-nums">{'P50 ' + (row.ms ? row.p50.toFixed(0) + 'ms' : (row.p50 / 1000).toFixed(1) + 's')}</div>
+                <div className="text-xs font-black text-zinc-500 tabular-nums">{'P95 ' + (row.ms ? row.p95.toFixed(0) + 'ms' : (row.p95 / 1000).toFixed(1) + 's')}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Target score validation</div>
+          <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Does the score predict good farms?</h3>
+          <p className="text-sm text-zinc-500 mt-1">Observed outcomes only; score bands never change target rules automatically.</p>
+          {targetScoreBands.length === 0 ? (
+            <div className="py-10 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">Waiting for scored attacks</div>
+          ) : (
+            <div className="mt-5 overflow-x-auto">
+              <table className="w-full min-w-[540px] text-left">
+                <thead><tr className="text-[9px] font-black uppercase tracking-wider text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                  <th className="pb-2">Score</th><th className="pb-2 px-2">n</th><th className="pb-2 px-2">Stars</th><th className="pb-2 px-2">Full deploy</th><th className="pb-2 px-2">Avg G+E</th><th className="pb-2 pl-2">G+E/h</th>
+                </tr></thead>
+                <tbody>{targetScoreBands.map((band) => (
+                  <tr key={band.label} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                    <td className="py-3 text-xs font-black text-zinc-950 dark:text-white">{band.label}</td>
+                    <td className="py-3 px-2 text-xs font-bold text-zinc-500">{band.attacks}</td>
+                    <td className="py-3 px-2 text-xs font-bold text-zinc-500">{band.avgStars.toFixed(2)}</td>
+                    <td className="py-3 px-2 text-xs font-bold text-zinc-500">{band.fullDeployRate.toFixed(0) + '%'}</td>
+                    <td className="py-3 px-2 text-xs font-bold text-zinc-500">{compact(band.avgGE)}</td>
+                    <td className="py-3 pl-2 text-xs font-black text-zinc-950 dark:text-white">{compact(band.gePerHour)}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
           <div>
