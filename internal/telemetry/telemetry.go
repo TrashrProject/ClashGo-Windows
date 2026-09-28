@@ -44,11 +44,13 @@ type Incident struct {
 }
 
 type RejectedTargetSample struct {
-	At         time.Time `json:"at"`
-	Gold       int       `json:"gold"`
-	Elixir     int       `json:"elixir"`
-	DarkElixir int       `json:"dark_elixir"`
-	Score      int       `json:"score"`
+	At              time.Time `json:"at"`
+	Gold            int       `json:"gold"`
+	Elixir          int       `json:"elixir"`
+	DarkElixir      int       `json:"dark_elixir"`
+	Score           int       `json:"score"`
+	ThresholdGapPct float64   `json:"threshold_gap_pct"`
+	NearMiss        bool      `json:"near_miss"`
 }
 
 type Snapshot struct {
@@ -76,6 +78,7 @@ type Snapshot struct {
 	AvgRejectedDE       float64 `json:"avg_rejected_de"`
 	AvgAcceptedScore    float64 `json:"avg_accepted_score"`
 	AvgRejectedScore    float64                `json:"avg_rejected_score"`
+	NearMissTargets     int64                  `json:"near_miss_targets"`
 	TopRejectedTargets  []RejectedTargetSample `json:"top_rejected_targets,omitempty"`
 }
 
@@ -117,6 +120,7 @@ type Bus struct {
 	rejectedDESum    atomic.Int64
 	acceptedScoreSum atomic.Int64
 	rejectedScoreSum atomic.Int64
+	nearMissTargets  atomic.Int64
 }
 
 func New(path string) *Bus {
@@ -187,13 +191,34 @@ func (b *Bus) RecordCaptureMicros(us int64) {
 	b.lastCaptureUS.Store(us)
 }
 
-func (b *Bus) rememberRejectedTarget(gold, elixir, darkElixir, score int) {
+func targetThresholdGapPct(gold, elixir, darkElixir, minGold, minElixir, minDE int) float64 {
+	maxGap := 0.0
+	for _, pair := range [][2]int{{gold, minGold}, {elixir, minElixir}, {darkElixir, minDE}} {
+		value, minimum := pair[0], pair[1]
+		if minimum <= 0 || value >= minimum {
+			continue
+		}
+		gap := float64(minimum-value) * 100 / float64(minimum)
+		if gap > maxGap {
+			maxGap = gap
+		}
+	}
+	return maxGap
+}
+
+func (b *Bus) rememberRejectedTarget(gold, elixir, darkElixir, score, minGold, minElixir, minDE int) {
+	gap := targetThresholdGapPct(gold, elixir, darkElixir, minGold, minElixir, minDE)
 	sample := RejectedTargetSample{
 		At: time.Now().UTC(),
 		Gold: gold,
 		Elixir: elixir,
 		DarkElixir: darkElixir,
 		Score: score,
+		ThresholdGapPct: gap,
+		NearMiss: gap > 0 && gap <= 15,
+	}
+	if sample.NearMiss {
+		b.nearMissTargets.Add(1)
 	}
 	b.targetMu.Lock()
 	b.topRejected = append(b.topRejected, sample)
@@ -222,7 +247,7 @@ func (b *Bus) topRejectedSnapshot() []RejectedTargetSample {
 	return out
 }
 
-func (b *Bus) RecordRejectedTarget(gold, elixir, darkElixir, score int, scanUS int64) {
+func (b *Bus) RecordRejectedTarget(gold, elixir, darkElixir, score int, scanUS int64, minGold, minElixir, minDE int) {
 	if b == nil {
 		return
 	}
@@ -231,7 +256,7 @@ func (b *Bus) RecordRejectedTarget(gold, elixir, darkElixir, score int, scanUS i
 	b.rejectedGESum.Add(int64(gold + elixir))
 	b.rejectedDESum.Add(int64(darkElixir))
 	b.rejectedScoreSum.Add(int64(score))
-	b.rememberRejectedTarget(gold, elixir, darkElixir, score)
+	b.rememberRejectedTarget(gold, elixir, darkElixir, score, minGold, minElixir, minDE)
 	if scanUS >= 0 {
 		b.targetScanCount.Add(1)
 		b.targetScanMicros.Add(scanUS)
@@ -453,6 +478,7 @@ func (b *Bus) Snapshot() Snapshot {
 		AvgRejectedDE: avgRejectedDE,
 		AvgAcceptedScore: avgAcceptedScore,
 		AvgRejectedScore: avgRejectedScore,
+		NearMissTargets: b.nearMissTargets.Load(),
 		TopRejectedTargets: b.topRejectedSnapshot(),
 	}
 }
