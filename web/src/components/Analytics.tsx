@@ -99,6 +99,71 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     return Math.round(v).toLocaleString();
   };
 
+  const recentPerformance = React.useMemo(() => {
+    const summarize = (rows: AttackReport[]) => {
+      const n = rows.length;
+      if (n === 0) {
+        return {
+          attacks: 0, avgStars: 0, threeStarRate: 0, fullDeployRate: 0,
+          avgSearchMs: 0, avgDeployMs: 0, avgCycleMs: 0,
+          avgGold: 0, avgElixir: 0, avgDE: 0,
+        };
+      }
+      let stars = 0, triples = 0, complete = 0;
+      let searchMs = 0, deployMs = 0, cycleMs = 0;
+      let gold = 0, elixir = 0, de = 0;
+      for (const rep of rows) {
+        stars += rep.stars || 0;
+        if ((rep.stars || 0) === 3) triples++;
+        if (rep.deploy_success) complete++;
+        searchMs += rep.search_duration_ms || 0;
+        deployMs += rep.deploy_duration_ms || 0;
+        cycleMs += rep.cycle_duration_ms || 0;
+        gold += (rep.gold_stolen || 0) + (rep.bonus_gold || 0);
+        elixir += (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+        de += (rep.dark_elixir_stolen || 0) + (rep.bonus_de || 0);
+      }
+      return {
+        attacks: n,
+        avgStars: stars / n,
+        threeStarRate: triples * 100 / n,
+        fullDeployRate: complete * 100 / n,
+        avgSearchMs: searchMs / n,
+        avgDeployMs: deployMs / n,
+        avgCycleMs: cycleMs / n,
+        avgGold: gold / n,
+        avgElixir: elixir / n,
+        avgDE: de / n,
+      };
+    };
+
+    const current = summarize((history ?? []).slice(0, 10));
+    const previous = summarize((history ?? []).slice(10, 20));
+    return { current, previous };
+  }, [history]);
+
+  const perfDelta = (current: number, previous: number, lowerIsBetter = false) => {
+    if (!Number.isFinite(current) || !Number.isFinite(previous) || previous === 0) return null;
+    const pct = ((current - previous) / Math.abs(previous)) * 100;
+    return lowerIsBetter ? -pct : pct;
+  };
+
+  const bestRecords = React.useMemo(() => {
+    let bestLoot: AttackReport | null = null;
+    let fastestClean: AttackReport | null = null;
+    for (const rep of history ?? []) {
+      const loot = (rep.gold_stolen || 0) + (rep.bonus_gold || 0) + (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+      const bestLootValue = bestLoot
+        ? (bestLoot.gold_stolen || 0) + (bestLoot.bonus_gold || 0) + (bestLoot.elixir_stolen || 0) + (bestLoot.bonus_elixir || 0)
+        : -1;
+      if (loot > bestLootValue) bestLoot = rep;
+      if (rep.deploy_success && (rep.deploy_duration_ms || 0) > 0) {
+        if (!fastestClean || rep.deploy_duration_ms < fastestClean.deploy_duration_ms) fastestClean = rep;
+      }
+    }
+    return { bestLoot, fastestClean };
+  }, [history]);
+
   // CSS-only donut (conic-gradient — no chart dependency). Each
   // segment's sweep is the star-rate percentage mapped to degrees;
   // zero-count segments collapse to a 0deg stop and stay invisible.
@@ -144,6 +209,65 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
               <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
             </div>
           ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Recent form</div>
+            <h3 className="mt-1 text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Last 10 Attacks</h3>
+            <p className="text-sm text-zinc-500 mt-1">Compared with the previous 10 attacks when enough history exists.</p>
+          </div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+            {recentPerformance.current.attacks}/10 sampled
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+          {[
+            { label: 'Avg stars', value: recentPerformance.current.avgStars.toFixed(2), delta: perfDelta(recentPerformance.current.avgStars, recentPerformance.previous.avgStars) },
+            { label: '3★ rate', value: `${recentPerformance.current.threeStarRate.toFixed(0)}%`, delta: perfDelta(recentPerformance.current.threeStarRate, recentPerformance.previous.threeStarRate) },
+            { label: 'Full deploy', value: `${recentPerformance.current.fullDeployRate.toFixed(0)}%`, delta: perfDelta(recentPerformance.current.fullDeployRate, recentPerformance.previous.fullDeployRate) },
+            { label: 'Search', value: `${(recentPerformance.current.avgSearchMs / 1000).toFixed(1)}s`, delta: perfDelta(recentPerformance.current.avgSearchMs, recentPerformance.previous.avgSearchMs, true) },
+            { label: 'Deploy', value: `${(recentPerformance.current.avgDeployMs / 1000).toFixed(1)}s`, delta: perfDelta(recentPerformance.current.avgDeployMs, recentPerformance.previous.avgDeployMs, true) },
+            { label: 'Cycle', value: `${(recentPerformance.current.avgCycleMs / 1000).toFixed(0)}s`, delta: perfDelta(recentPerformance.current.avgCycleMs, recentPerformance.previous.avgCycleMs, true) },
+            { label: 'Avg G+E', value: compact(recentPerformance.current.avgGold + recentPerformance.current.avgElixir), delta: perfDelta(recentPerformance.current.avgGold + recentPerformance.current.avgElixir, recentPerformance.previous.avgGold + recentPerformance.previous.avgElixir) },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/30 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className={`mt-1 text-[9px] font-black uppercase tracking-wider ${
+                metric.delta == null ? 'text-zinc-400' : metric.delta >= 0 ? 'text-emerald-500' : 'text-rose-500'
+              }`}>
+                {metric.delta == null ? 'No baseline' : `${metric.delta >= 0 ? '+' : ''}${metric.delta.toFixed(0)}% vs prev`}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 flex items-center justify-between gap-4">
+            <div>
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Best G+E attack</div>
+              <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">
+                {bestRecords.bestLoot ? compact(
+                  (bestRecords.bestLoot.gold_stolen || 0) + (bestRecords.bestLoot.bonus_gold || 0) +
+                  (bestRecords.bestLoot.elixir_stolen || 0) + (bestRecords.bestLoot.bonus_elixir || 0)
+                ) : '—'}
+              </div>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">trophy</span>
+          </div>
+          <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 flex items-center justify-between gap-4">
+            <div>
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Fastest clean deploy</div>
+              <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">
+                {bestRecords.fastestClean ? `${(bestRecords.fastestClean.deploy_duration_ms / 1000).toFixed(1)}s` : '—'}
+              </div>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">speed</span>
+          </div>
         </div>
       </div>
 
