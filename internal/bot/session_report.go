@@ -68,6 +68,10 @@ type SessionReport struct {
 	HealthScore int `json:"health_score"`
 	SpeedProfile string `json:"speed_profile"`
 	Anomalies int64 `json:"anomalies"`
+	RecoveryAttempts int32 `json:"recovery_attempts"`
+	RecoverySuccesses int32 `json:"recovery_successes"`
+	RecoverySuccessRate float64 `json:"recovery_success_rate"`
+	BlueStacksRestarts int32 `json:"bluestacks_restarts"`
 	PreferredScaleHitRate float64 `json:"preferred_scale_hit_rate"`
 	PreferredScaleEnabled bool `json:"preferred_scale_enabled"`
 }
@@ -81,6 +85,10 @@ func BuildSessionReport(sessionID string, history []AttackReport, stats BotStats
 		HealthScore: stats.HealthScore,
 		SpeedProfile: stats.SpeedProfile,
 		Anomalies: stats.Anomalies,
+		RecoveryAttempts: stats.RecoveryAttempts,
+		RecoverySuccesses: stats.RecoverySuccesses,
+		RecoverySuccessRate: stats.RecoverySuccessRate,
+		BlueStacksRestarts: stats.BlueStacksRestarts,
 		PreferredScaleHitRate: stats.PreferredScaleHitRate,
 		PreferredScaleEnabled: stats.PreferredScaleEnabled,
 	}
