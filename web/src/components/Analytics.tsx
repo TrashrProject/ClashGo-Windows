@@ -1707,7 +1707,7 @@ Best optimization target: {pipeline.dominantTunable.label}
             <p className="text-sm text-zinc-500 mt-1">Session-only aggregation. Rejected bases stay off disk and never slow the matchmaking path.</p>
           </div>
           <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
-            {(stats.targets_accepted || 0).toLocaleString()} accepted · {Math.max(0, (stats.targets_seen || 0) - (stats.targets_accepted || 0)).toLocaleString()} rejected
+            {(stats.targets_accepted || 0).toLocaleString()} accepted · {Math.max(0, (stats.targets_seen || 0) - (stats.targets_accepted || 0)).toLocaleString()} rejected · {(stats.near_miss_targets || 0).toLocaleString()} near-miss
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -1753,6 +1753,11 @@ Best optimization target: {pipeline.dominantTunable.label}
                 </div>
                 <div className="mt-1 text-[10px] font-bold text-zinc-500 tabular-nums">
                   {compact(target.dark_elixir || 0)} DE
+                </div>
+                <div className={`mt-3 inline-flex px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-wider ${
+                  target.near_miss ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' : 'bg-zinc-200/60 dark:bg-zinc-800 text-zinc-500'
+                }`}>
+                  {target.near_miss ? `Near miss · ${target.threshold_gap_pct.toFixed(1)}% gap` : `${target.threshold_gap_pct.toFixed(1)}% threshold gap`}
                 </div>
               </div>
             ))}
