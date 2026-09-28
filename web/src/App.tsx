@@ -10,6 +10,7 @@ import { EventsOn } from '../wailsjs/runtime';
 import {
   GetStats,
   GetAttackHistory,
+  GetActivity,
   GetLogs,
   SaveConfig,
   StartBot,
@@ -35,7 +36,7 @@ import {
   SetSimpleMode,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
-import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot } from './types';
+import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent } from './types';
 import UpdateBanner from './components/UpdateBanner';
 import './App.css';
 
@@ -146,6 +147,7 @@ function App() {
   const [isStarting, setIsStarting] = useState(false);
   const [history, setHistory] = useState<bot.AttackReport[]>([]);
   const [resourceHistory, setResourceHistory] = useState<VillageResourceSnapshot[]>([]);
+  const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [adbPort, setAdbPort] = useState(5555);
   const [darkMode, setDarkMode] = useState(getInitialDarkMode);
@@ -237,13 +239,15 @@ function App() {
 
     const fetchData = async () => {
       try {
-        const [s, h, l] = await Promise.all([
+        const [s, h, a, l] = await Promise.all([
           GetStats(),
           GetAttackHistory(),
+          GetActivity(),
           GetLogs(),
         ]);
         setStats(s);
         setHistory(h);
+        setActivity((a ?? []) as unknown as ActivityEvent[]);
         setLogs(l);
       } catch (err) {
         console.error('Data fetch failed:', err);
@@ -496,8 +500,9 @@ function App() {
   const dashboardProps = useMemo(() => ({
     stats,
     history,
+    activity,
     logs,
-  }), [stats, history, logs]);
+  }), [stats, history, activity, logs]);
 
   // ADB connection state — drives the header status pill. Labels stop
   // calling the local ADB server "localhost:{port}" because the bot
