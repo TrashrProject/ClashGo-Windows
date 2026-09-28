@@ -437,6 +437,12 @@ func (s *Service) fetchLatestRelease(ctx context.Context) (githubRelease, error)
 			s.cfg.RepoOwner, s.cfg.RepoName,
 		)
 	}
+	if s.cfg.Channel == "beta" {
+		url = fmt.Sprintf(
+			"https://api.github.com/repos/%s/%s/releases/tags/beta-latest",
+			s.cfg.RepoOwner, s.cfg.RepoName,
+		)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return githubRelease{}, err
