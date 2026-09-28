@@ -93,6 +93,8 @@ type Health struct {
 	AvgTapMs         float64   `json:"avg_tap_ms"`
 	FastTapMs        float64   `json:"fast_tap_ms"`
 	TapsTotal        uint64    `json:"taps_total"`
+	PipeTapsTotal    uint64    `json:"pipe_taps_total"`
+	LegacyTapsTotal  uint64    `json:"legacy_taps_total"`
 	ConsecutiveFails int       `json:"consecutive_fails"`
 	CapturesTotal    uint64    `json:"captures_total"`
 	ErrorsTotal      uint64    `json:"errors_total"`
@@ -131,6 +133,14 @@ func (h *Health) RecordTap(d time.Duration) {
 		h.FastTapMs = ms
 	} else {
 		h.FastTapMs = h.FastTapMs*0.65 + ms*0.35
+	}
+}
+
+func (h *Health) RecordTapRoute(pipe bool) {
+	if pipe {
+		h.PipeTapsTotal++
+	} else {
+		h.LegacyTapsTotal++
 	}
 }
 
