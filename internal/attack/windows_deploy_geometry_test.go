@@ -71,3 +71,26 @@ func TestWindowsCategoryPriorityPreservesDeploymentOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestWindowsDeployLineSafeRejectsRedZoneCrossing(t *testing.T) {
+	zone := RedZone{Valid: true, BBox: image.Rect(180, 150, 720, 580)}
+	if windowsDeployLineSafe(zone, 860, 732, 622, "left", image.Pt(200, 250), image.Pt(200, 420)) {
+		t.Fatal("line inside/crossing red-zone X must be rejected")
+	}
+}
+
+func TestWindowsDeployLineSafeRejectsLowerHUD(t *testing.T) {
+	zone := RedZone{Valid: true, BBox: image.Rect(180, 150, 720, 580)}
+	if windowsDeployLineSafe(zone, 860, 732, 622, "left", image.Pt(120, 610), image.Pt(120, 650)) {
+		t.Fatal("line entering lower HUD must be rejected")
+	}
+}
+
+func TestWindowsDeployCorridorFailsClosedWhenNoOutsideSpaceExists(t *testing.T) {
+	// Red zone reaches every legal outer edge. Clamping a line would move it
+	// back inside the red box, so the helper must fail closed instead.
+	zone := RedZone{Valid: true, BBox: image.Rect(0, 0, 860, 600)}
+	if _, _, _, _, ok := windowsDeployCorridor(zone, 860, 732, 622); ok {
+		t.Fatal("expected no safe corridor when live red zone consumes all legal outer space")
+	}
+}
