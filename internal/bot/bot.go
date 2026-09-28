@@ -1745,17 +1745,22 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 		// Use the already-live frame first.
 		nextClicked := false
+		transitionStarted := time.Time{}
 		if x, y, ok := b.locateNextButtonColor(screen); ok {
 			b.logger.Debug().Int("x", x).Int("y", y).Msg("Next button verified; precision clicking detected center")
 			if err := b.client.TapFast(x, y, 0.6); err == nil {
 				b.recordActivity()
 				nextClicked = true
+				transitionStarted = time.Now()
 			}
 		}
 		screen.Close()
 
 		if !nextClicked {
 			nextClicked = clickNextFresh()
+			if nextClicked {
+				transitionStarted = time.Now()
+			}
 		}
 
 		transitioned := false
@@ -1790,6 +1795,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			b.logger.Warn().Msg("Next tap did not start matchmaking; reacquiring button for one controlled retry")
 			time.Sleep(450 * time.Millisecond)
 			if clickNextFresh() {
+				transitionStarted = time.Now()
 				time.Sleep(700 * time.Millisecond)
 				for verify := 0; verify < 3 && !transitioned; verify++ {
 					probe, capErr := b.client.CaptureToMat()
@@ -1816,7 +1822,14 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			b.skipsCount.Add(1)
 			sequenceSkips++
 			if b.telemetry != nil {
-				b.telemetry.Emit(telemetry.EventTargetSkipped, map[string]any{"sequence_skips": sequenceSkips})
+				transitionUS := int64(0)
+				if !transitionStarted.IsZero() {
+					transitionUS = time.Since(transitionStarted).Microseconds()
+				}
+				b.telemetry.Emit(telemetry.EventTargetSkipped, map[string]any{
+					"sequence_skips": sequenceSkips,
+					"transition_us": transitionUS,
+				})
 			}
 			// Do not flush stats/history or emit Wails events for every skipped
 			// base. Stats are atomic and the UI polls them every 2s; keeping disk
@@ -3089,6 +3102,8 @@ func (b *Bot) Stats() BotStats {
 		LastTargetScanMS:     tm.LastTargetScanMS,
 		AverageReturnHomeMS:  avgReturnHomeMS,
 		LastReturnHomeMS:     float64(b.lastReturnHomeUS.Load()) / 1000.0,
+		AverageNextTransitionMS: tm.AvgNextTransitionMS,
+		LastNextTransitionMS:    tm.LastNextTransitionMS,
 	}
 }
 
@@ -3131,7 +3146,9 @@ type BotStats struct {
 	AverageTargetScanMS  float64 `json:"average_target_scan_ms"`
 	LastTargetScanMS     float64 `json:"last_target_scan_ms"`
 	AverageReturnHomeMS  float64 `json:"average_return_home_ms"`
-	LastReturnHomeMS     float64 `json:"last_return_home_ms"`
+	LastReturnHomeMS        float64 `json:"last_return_home_ms"`
+	AverageNextTransitionMS float64 `json:"average_next_transition_ms"`
+	LastNextTransitionMS    float64 `json:"last_next_transition_ms"`
 }
 
 type AttackReport struct {
