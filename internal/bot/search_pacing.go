@@ -1,0 +1,47 @@
+package bot
+
+import (
+	"time"
+
+	"github.com/Ducky705/ClashGO/internal/adb"
+)
+
+// searchPacing controls only non-critical matchmaking idle time. It never
+// changes troop-card selection delays, red-zone geometry or deployment tap
+// cadence. The profile automatically falls back to conservative timings when
+// BlueStacks/ADB shows pressure.
+type searchPacing struct {
+	PostTransitionPause time.Duration
+	StabilityRestEvery  int
+	StabilityRest       time.Duration
+}
+
+func chooseSearchPacing(h adb.Health) searchPacing {
+	// Any active transport instability keeps the battle-tested conservative
+	// behavior.
+	if h.ConsecutiveFails > 0 || h.AvgCaptureMs >= 900 {
+		return searchPacing{
+			PostTransitionPause: 1100 * time.Millisecond,
+			StabilityRestEvery:  8,
+			StabilityRest:       1500 * time.Millisecond,
+		}
+	}
+
+	// Fast path for a healthy BlueStacks session. We deliberately keep the
+	// 650ms immediate post-Next settle and verification sleeps elsewhere;
+	// only the redundant pause after a confirmed transition is shortened.
+	if h.AvgCaptureMs > 0 && h.AvgCaptureMs <= 500 {
+		return searchPacing{
+			PostTransitionPause: 750 * time.Millisecond,
+			StabilityRestEvery:  10,
+			StabilityRest:       850 * time.Millisecond,
+		}
+	}
+
+	// Unknown/normal health uses a modest improvement, not an aggressive one.
+	return searchPacing{
+		PostTransitionPause: 900 * time.Millisecond,
+		StabilityRestEvery:  9,
+		StabilityRest:       1100 * time.Millisecond,
+	}
+}
