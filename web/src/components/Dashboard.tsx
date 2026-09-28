@@ -118,6 +118,15 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
           title: ok ? 'Village ready' : 'Return Home fallback',
           detail: `${(numberField(ev, 'duration_ms') / 1000).toFixed(1)}s return-home path`,
         });
+      } else if (ev.type === 'anomaly') {
+        const kind = textField(ev, 'kind') || 'performance_anomaly';
+        const duration = numberField(ev, 'duration_ms');
+        rows.push({
+          at: ev.at,
+          icon: 'monitor_heart',
+          title: 'Performance anomaly',
+          detail: `${kind.replaceAll('_', ' ')}${duration > 0 ? ` · ${(duration / 1000).toFixed(1)}s` : ''}`,
+        });
       }
     }
     return rows;
