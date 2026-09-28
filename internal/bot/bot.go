@@ -106,6 +106,7 @@ type Bot struct {
 	// phases run.
 	armySlot int
 
+	historyMu    sync.RWMutex
 	historyCache []AttackReport
 	telemetry    *telemetry.Bus
 	lastPrepTimings PreparationTimings
@@ -2335,7 +2336,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		_ = AsyncWriteFile(paths.ResolveConfig("last_attack_report.json"), repBytes, 0644)
 	}
 
-	history := b.historyCache
+	history := b.HistorySnapshot()
 	if history == nil {
 		if histData, err := os.ReadFile(paths.ResolveConfig("attack_history.json")); err == nil {
 			_ = json.Unmarshal(histData, &history)
@@ -2345,7 +2346,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	if len(history) > 500 {
 		history = history[:500]
 	}
-	b.historyCache = history
+	b.historyMu.Lock()
+	b.historyCache = append([]AttackReport(nil), history...)
+	b.historyMu.Unlock()
 	if histBytes, err := json.MarshalIndent(history, "", "  "); err == nil {
 		_ = AsyncWriteFile(paths.ResolveConfig("attack_history.json"), histBytes, 0644)
 	}
@@ -2387,11 +2390,15 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	rep.ReturnHomeSuccess = returnedHome
 	rep.FullRoutineDurationMS = time.Since(sequenceStartedAt).Milliseconds()
 
+	b.historyMu.Lock()
 	if len(b.historyCache) > 0 && b.historyCache[0].Timestamp == rep.Timestamp {
 		b.historyCache[0] = rep
-		if histBytes, err := json.MarshalIndent(b.historyCache, "", "  "); err == nil {
-			_ = AsyncWriteFile(paths.ResolveConfig("attack_history.json"), histBytes, 0644)
-		}
+	}
+	postReturnHistory := make([]AttackReport, len(b.historyCache))
+	copy(postReturnHistory, b.historyCache)
+	b.historyMu.Unlock()
+	if histBytes, err := json.MarshalIndent(postReturnHistory, "", "  "); err == nil {
+		_ = AsyncWriteFile(paths.ResolveConfig("attack_history.json"), histBytes, 0644)
 	}
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
 		_ = AsyncWriteFile(paths.ResolveConfig("last_attack_report.json"), repBytes, 0644)
@@ -2404,11 +2411,12 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	// baseline after the true routine duration is known. Diagnostics only —
 	// it never changes strategy, target thresholds or deployment geometry.
 	if b.telemetry != nil {
-		limit := len(b.historyCache)
+		perfHistory := b.HistorySnapshot()
+		limit := len(perfHistory)
 		if limit > 20 { limit = 20 }
 		samples := make([]intelligence.PerformanceSample, 0, limit)
 		for i := 0; i < limit; i++ {
-			h := b.historyCache[i]
+			h := perfHistory[i]
 			samples = append(samples, intelligence.PerformanceSample{
 				SearchMS: h.SearchDurationMS,
 				DeployMS: h.DeployDurationMS,
@@ -3326,6 +3334,20 @@ func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 	b.logger.Info().Msg("bot configuration updated in real-time")
 }
 
+
+// HistorySnapshot returns an immutable copy of the bot's authoritative
+// in-memory attack history. The App uses this to update React immediately at
+// attack boundaries without writing then re-reading attack_history.json.
+func (b *Bot) HistorySnapshot() []AttackReport {
+	if b == nil {
+		return []AttackReport{}
+	}
+	b.historyMu.RLock()
+	defer b.historyMu.RUnlock()
+	out := make([]AttackReport, len(b.historyCache))
+	copy(out, b.historyCache)
+	return out
+}
 
 // RecentActivity returns a compact high-level activity feed for the UI.
 // It deliberately excludes per-frame telemetry and verbose diagnostic logs.
