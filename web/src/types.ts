@@ -68,6 +68,7 @@ export interface AttackReport {
   search_skips: number;
   search_duration_ms: number;
   cycle_duration_ms: number;
+  deploy_duration_ms: number;
 }
 
 export interface BotConfig {
