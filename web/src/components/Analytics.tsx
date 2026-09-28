@@ -771,6 +771,52 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       return { ...band, attacks: n, avgStars: n ? stars/n : 0, fullDeployRate: n ? complete*100/n : 0, avgGE: n ? ge/n : 0, gePerHour: hours ? ge/hours : 0 };
     }).filter((band) => band.attacks > 0);
   }, [history]);
+  const farmingWindows = React.useMemo(() => {
+    const buckets = new Map<number, {
+      hour: number;
+      attacks: number;
+      gold: number;
+      elixir: number;
+      dark: number;
+      stars: number;
+      complete: number;
+      routineMs: number;
+    }>();
+
+    for (const rep of history ?? []) {
+      const ts = Date.parse(rep.timestamp || '');
+      if (!Number.isFinite(ts)) continue;
+      const hour = new Date(ts).getHours();
+      const row = buckets.get(hour) ?? {
+        hour, attacks: 0, gold: 0, elixir: 0, dark: 0,
+        stars: 0, complete: 0, routineMs: 0,
+      };
+      row.attacks++;
+      row.gold += (rep.gold_stolen || 0) + (rep.bonus_gold || 0);
+      row.elixir += (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+      row.dark += (rep.dark_elixir_stolen || 0) + (rep.bonus_de || 0);
+      row.stars += rep.stars || 0;
+      if (rep.deploy_success) row.complete++;
+      row.routineMs += rep.full_routine_duration_ms || rep.cycle_duration_ms || 0;
+      buckets.set(hour, row);
+    }
+
+    return Array.from(buckets.values())
+      .filter((row) => row.attacks >= 3 && row.routineMs > 0)
+      .map((row) => {
+        const hoursMeasured = row.routineMs / 3_600_000;
+        return {
+          ...row,
+          gePerHour: hoursMeasured > 0 ? (row.gold + row.elixir) / hoursMeasured : 0,
+          dePerHour: hoursMeasured > 0 ? row.dark / hoursMeasured : 0,
+          avgStars: row.stars / row.attacks,
+          fullDeployRate: row.complete * 100 / row.attacks,
+        };
+      })
+      .sort((a, b) => b.gePerHour - a.gePerHour)
+      .slice(0, 5);
+  }, [history]);
+
   const farmForecast = React.useMemo(() => {
     const rows = (history ?? []).slice(0, 20).filter((rep) =>
       (rep.full_routine_duration_ms || rep.cycle_duration_ms || 0) > 0
@@ -1789,6 +1835,54 @@ Best optimization target: {pipeline.dominantTunable.label}
           )}
         </div>
       </div>
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex items-end justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Best Farming Windows</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Observed performance by hour</h3>
+            <p className="text-sm text-zinc-500 mt-1">Only hours with at least 3 measured attacks are ranked. Local clock from saved attack timestamps.</p>
+          </div>
+          <span className="material-symbols-outlined text-zinc-400">schedule</span>
+        </div>
+
+        {farmingWindows.length === 0 ? (
+          <div className="py-8 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">
+            Need 3+ attacks in the same hour window
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                  <th className="pb-3 pr-3">Window</th>
+                  <th className="pb-3 px-3">Attacks</th>
+                  <th className="pb-3 px-3">G+E / h</th>
+                  <th className="pb-3 px-3">DE / h</th>
+                  <th className="pb-3 px-3">Avg stars</th>
+                  <th className="pb-3 pl-3">Full deploy</th>
+                </tr>
+              </thead>
+              <tbody>
+                {farmingWindows.map((row, index) => (
+                  <tr key={row.hour} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                    <td className="py-4 pr-3">
+                      <div className="text-sm font-black text-zinc-950 dark:text-white">
+                        #{index + 1} · {String(row.hour).padStart(2, '0')}:00–{String((row.hour + 1) % 24).padStart(2, '0')}:00
+                      </div>
+                    </td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
+                    <td className="py-4 px-3 text-sm font-black text-zinc-950 dark:text-white tabular-nums">{compact(row.gePerHour)}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{compact(row.dePerHour)}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.avgStars.toFixed(2)}</td>
+                    <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{row.fullDeployRate.toFixed(0)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
           <div>
