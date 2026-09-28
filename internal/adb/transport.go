@@ -306,9 +306,22 @@ func (t *Transport) setTransportLocked() error {
 	return t.sendServiceLocked("host:transport:" + t.deviceID)
 }
 
+func preferBlueStacksShellCapture(deviceID string) bool {
+	id := strings.ToLower(strings.TrimSpace(deviceID))
+	return id == "127.0.0.1:5555" || id == "localhost:5555"
+}
+
 func (t *Transport) CaptureScreenPooled() (*[]byte, int, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// BlueStacks Pie64 exposes ADB over localhost:5555. Its exec screencap
+	// service can destabilize the emulator during Clash matchmaking/clouds.
+	// Prefer the wedge-safe shell capture path from the first frame instead
+	// of waiting for exec:/system/bin/screencap to fail after stressing adbd.
+	if preferBlueStacksShellCapture(t.deviceID) {
+		return t.captureViaShellLocked()
+	}
 
 	if t.conn == nil {
 		if err := t.connectLocked(); err != nil {
