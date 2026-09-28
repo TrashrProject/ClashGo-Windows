@@ -180,10 +180,12 @@ func newSlotManager(
 }
 
 type windowsSlotActivityProfile struct {
-	mask gocv.Mat
-	y1   int
-	y2   int
-	size int
+	prefix []int
+	rows   int
+	cols   int
+	y1     int
+	y2     int
+	size   int
 }
 
 func newWindowsSlotActivityProfile(screen gocv.Mat, slotY, screenW int) *windowsSlotActivityProfile {
@@ -239,35 +241,61 @@ func newWindowsSlotActivityProfile(screen gocv.Mat, slotY, screenW int) *windows
 	gocv.BitwiseOr(maskActA, maskActB, &activeContentMask)
 
 	finalMask := gocv.NewMat()
+	defer finalMask.Close()
 	gocv.BitwiseAnd(activeContentMask, notMapMask, &finalMask)
 
-	return &windowsSlotActivityProfile{mask: finalMask, y1: y1, y2: y2, size: size}
-}
+	// Build a per-column prefix sum once. The previous ActivityAt created a
+	// Mat Region and CountNonZero call for every 4px X probe (~200 native
+	// operations per live rescan). This produces the exact same non-zero
+	// ratio with O(1) work per probe.
+	rows, cols := finalMask.Rows(), finalMask.Cols()
+	data := finalMask.ToBytes()
+	if rows <= 0 || cols <= 0 || len(data) < rows*cols {
+		return nil
+	}
+	prefix := make([]int, cols+1)
+	for x := 0; x < cols; x++ {
+		colCount := 0
+		for y := 0; y < rows; y++ {
+			if data[y*cols+x] != 0 {
+				colCount++
+			}
+		}
+		prefix[x+1] = prefix[x] + colCount
+	}
 
-func (p *windowsSlotActivityProfile) Close() {
-	if p != nil && !p.mask.Empty() {
-		p.mask.Close()
+	return &windowsSlotActivityProfile{
+		prefix: prefix,
+		rows: rows,
+		cols: cols,
+		y1: y1,
+		y2: y2,
+		size: size,
 	}
 }
 
+func (p *windowsSlotActivityProfile) Close() {
+	// Kept for call-site symmetry. The optimized profile owns only Go memory;
+	// the temporary OpenCV mask is released inside the constructor.
+}
+
 func (p *windowsSlotActivityProfile) ActivityAt(x int) float64 {
-	if p == nil || p.mask.Empty() {
+	if p == nil || p.rows <= 0 || p.cols <= 0 || len(p.prefix) != p.cols+1 {
 		return 0
 	}
 	x1 := x - p.size
 	x2 := x + p.size
 	if x1 < 0 { x1 = 0 }
-	if x2 > p.mask.Cols() { x2 = p.mask.Cols() }
+	if x2 > p.cols { x2 = p.cols }
 	if x2 <= x1 {
 		return 0
 	}
-	roi := p.mask.Region(image.Rect(x1, 0, x2, p.mask.Rows()))
-	defer roi.Close()
-	total := roi.Rows() * roi.Cols()
+	nonZero := p.prefix[x2] - p.prefix[x1]
+	total := p.rows * (x2 - x1)
 	if total <= 0 {
 		return 0
 	}
-	return float64(gocv.CountNonZero(roi)) / float64(total)
+	return float64(nonZero) / float64(total)
 }
 
 // detectActiveSlots finds all non-empty X positions on the troop bar.
