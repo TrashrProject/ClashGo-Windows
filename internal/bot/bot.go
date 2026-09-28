@@ -2774,7 +2774,7 @@ func (b *Bot) clickSequence() bool {
 				break
 			}
 		}
-		time.Sleep(120 * time.Millisecond)
+		time.Sleep(prepPace.PrepPollPause)
 	}
 
 	armyArrowClicked := false
