@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/Ducky705/ClashGO/internal/bot"
 	"github.com/Ducky705/ClashGO/internal/config"
@@ -118,5 +119,63 @@ func TestClashAccountServiceURLPrecedence(t *testing.T) {
 	accountServiceURL = ""
 	if got := clashAccountServiceURL(cfg); got != "https://config.example" {
 		t.Fatalf("config proxy URL fallback=%q", got)
+	}
+}
+
+func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
+	acc := bot.BotStats{
+		AttacksCompleted: 2,
+		TotalGold:        2_000_000,
+		TotalElixir:      1_000_000,
+		TotalDE:          10_000,
+		Stars3:           1,
+		Stars2:           1,
+		Uptime:           30 * time.Minute,
+		RecoveryAttempts: 1,
+		RecoverySuccesses: 1,
+	}
+	current := bot.BotStats{
+		AttacksCompleted:        2,
+		TotalGold:               1_000_000,
+		TotalElixir:             1_000_000,
+		TotalDE:                 5_000,
+		Stars3:                  2,
+		Uptime:                  30 * time.Minute,
+		RecoveryAttempts:        1,
+		RecoverySuccesses:       0,
+		AverageCaptureMS:        321,
+		AverageTargetScanMS:     42,
+		AverageReturnHomeMS:     880,
+		AverageNextTransitionMS: 735,
+		HealthScore:             94,
+		SpeedProfile:            "Fast",
+		TargetsSeen:             12,
+		TargetAcceptanceRate:    16.7,
+		AvgSkipsPerAttack:       5,
+	}
+
+	got := mergeStats(acc, current)
+
+	if got.AttacksCompleted != 4 || got.TotalGold != 3_000_000 || got.TotalElixir != 2_000_000 {
+		t.Fatalf("additive counters not merged: %+v", got)
+	}
+	if got.SpeedProfile != "Fast" || got.HealthScore != 94 {
+		t.Fatalf("runtime intelligence metrics lost: %+v", got)
+	}
+	if got.AverageCaptureMS != 321 || got.AverageTargetScanMS != 42 ||
+		got.AverageReturnHomeMS != 880 || got.AverageNextTransitionMS != 735 {
+		t.Fatalf("latency metrics lost: %+v", got)
+	}
+	if got.GoldPerHour != 3_000_000 {
+		t.Fatalf("gold/hour=%v want 3000000", got.GoldPerHour)
+	}
+	if got.RecoverySuccessRate != 50 {
+		t.Fatalf("recovery success rate=%v want 50", got.RecoverySuccessRate)
+	}
+	if got.ThreeStarRate != 75 {
+		t.Fatalf("3-star rate=%v want 75", got.ThreeStarRate)
+	}
+	if got.AverageStars != 2.5 {
+		t.Fatalf("average stars=%v want 2.5", got.AverageStars)
 	}
 }
