@@ -6,11 +6,11 @@ on:
       version:
         description: Release version without leading v
         required: true
-        default: 0.6.7-windows-beta
+        default: 0.6.8-windows
       notes:
         description: Release notes
         required: false
-        default: Correctif complet updater Windows + intelligence v2
+        default: Stable Windows release
       source_ref:
         description: Git ref to build and publish
         required: true
@@ -119,7 +119,7 @@ jobs:
 
       - name: Build portable bundle
         shell: powershell
-        run: .\tools\build-windows.ps1 -Version "$env:RELEASE_VERSION" -SkipSync -SkipTests
+        run: .\tools\build-windows.ps1 -Version "$env:RELEASE_VERSION" -Channel stable -SkipSync -SkipTests
 
       - name: Build NSIS installer
         shell: powershell
