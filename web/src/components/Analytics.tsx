@@ -93,6 +93,85 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       .slice(0, 16);
   }, [history]);
 
+  const modeStats = React.useMemo(() => {
+    const map = new Map<string, {
+      mode: string;
+      attacks: number;
+      stars: number;
+      fullDeploys: number;
+      searchMs: number;
+      deployMs: number;
+      cycleMs: number;
+      captureMs: number;
+      scanMs: number;
+      goldElixir: number;
+    }>();
+    for (const rep of history ?? []) {
+      const mode = rep.runtime_mode || 'Unknown';
+      const row = map.get(mode) ?? {
+        mode, attacks: 0, stars: 0, fullDeploys: 0,
+        searchMs: 0, deployMs: 0, cycleMs: 0, captureMs: 0, scanMs: 0, goldElixir: 0,
+      };
+      row.attacks++;
+      row.stars += rep.stars || 0;
+      if (rep.deploy_success) row.fullDeploys++;
+      row.searchMs += rep.search_duration_ms || 0;
+      row.deployMs += rep.deploy_duration_ms || 0;
+      row.cycleMs += rep.cycle_duration_ms || 0;
+      row.captureMs += rep.capture_ms || 0;
+      row.scanMs += rep.target_scan_ms || 0;
+      row.goldElixir += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0);
+      map.set(mode, row);
+    }
+    const order: Record<string, number> = { Fast: 0, Balanced: 1, Safe: 2, Unknown: 3 };
+    return Array.from(map.values()).sort((a, b) =>
+      (order[a.mode] ?? 9) - (order[b.mode] ?? 9)
+    );
+  }, [history]);
+
+  const performanceGuard = React.useMemo(() => {
+    const recent = (history ?? []).slice(0, 5);
+    const baseline = (history ?? []).slice(5, 20);
+    if (recent.length < 3 || baseline.length < 5) {
+      return { status: 'Learning', reasons: ['Need more attacks for a stable baseline'] };
+    }
+
+    const summarize = (rows: AttackReport[]) => {
+      let search = 0, deploy = 0, complete = 0, capture = 0, scan = 0;
+      for (const rep of rows) {
+        search += rep.search_duration_ms || 0;
+        deploy += rep.deploy_duration_ms || 0;
+        capture += rep.capture_ms || 0;
+        scan += rep.target_scan_ms || 0;
+        if (rep.deploy_success) complete++;
+      }
+      const n = rows.length;
+      return {
+        search: search / n,
+        deploy: deploy / n,
+        capture: capture / n,
+        scan: scan / n,
+        completeRate: complete * 100 / n,
+      };
+    };
+
+    const now = summarize(recent);
+    const before = summarize(baseline);
+    const reasons: string[] = [];
+    const slower = (a: number, b: number, pct: number) => b > 0 && a > b * (1 + pct / 100);
+
+    if (slower(now.search, before.search, 35)) reasons.push('Search time is >35% slower than baseline');
+    if (slower(now.deploy, before.deploy, 35)) reasons.push('Deployment time is >35% slower than baseline');
+    if (slower(now.capture, before.capture, 40)) reasons.push('ADB capture latency is >40% slower');
+    if (slower(now.scan, before.scan, 50)) reasons.push('Loot OCR is >50% slower');
+    if (before.completeRate - now.completeRate >= 20) reasons.push('Full-deploy rate dropped by at least 20 points');
+
+    return {
+      status: reasons.length === 0 ? 'Healthy' : 'Watch',
+      reasons: reasons.length === 0 ? ['Recent attacks are within the learned baseline'] : reasons,
+    };
+  }, [history]);
+
   const sideStats = React.useMemo(() => {
     const map = new Map<string, {
       side: string;
@@ -587,6 +666,74 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             ))}
           </div>
         )}
+      </div>
+
+      <div className="xl:col-span-2 grid grid-cols-1 lg:grid-cols-[0.9fr_1.4fr] gap-4">
+        <div className="bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Performance Guard</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">{performanceGuard.status}</h3>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">
+              {performanceGuard.status === 'Healthy' ? 'verified' : performanceGuard.status === 'Watch' ? 'monitor_heart' : 'school'}
+            </span>
+          </div>
+          <div className="mt-5 space-y-2">
+            {performanceGuard.reasons.map((reason) => (
+              <div key={reason} className="rounded-xl bg-zinc-50 dark:bg-zinc-950/40 px-3 py-2 text-[10px] font-bold text-zinc-500">
+                {reason}
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-[9px] font-bold uppercase tracking-wider text-zinc-400">
+            Observation only — never changes deployment coordinates or strategy.
+          </p>
+        </div>
+
+        <div className="bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+          <div className="flex items-center justify-between gap-4 mb-5">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Runtime comparison</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Fast / Balanced / Safe</h3>
+            </div>
+            <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">{history?.length ?? 0} attacks</div>
+          </div>
+          {modeStats.length === 0 ? (
+            <div className="py-8 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">Waiting for runtime samples</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left">
+                <thead>
+                  <tr className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                    <th className="pb-3 pr-3">Mode</th>
+                    <th className="pb-3 px-3">Attacks</th>
+                    <th className="pb-3 px-3">Avg stars</th>
+                    <th className="pb-3 px-3">Full deploy</th>
+                    <th className="pb-3 px-3">Search</th>
+                    <th className="pb-3 px-3">Deploy</th>
+                    <th className="pb-3 px-3">Capture</th>
+                    <th className="pb-3 pl-3">G+E</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {modeStats.map((row) => (
+                    <tr key={row.mode} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                      <td className="py-4 pr-3 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-white">{row.mode}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.stars / Math.max(1, row.attacks)).toFixed(2)}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{Math.round(row.fullDeploys / Math.max(1, row.attacks) * 100)}%</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.searchMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.deployMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.captureMs / Math.max(1, row.attacks)).toFixed(0)}ms</td>
+                      <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{compact(row.goldElixir / Math.max(1, row.attacks))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
