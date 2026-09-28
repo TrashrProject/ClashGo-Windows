@@ -2141,7 +2141,15 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			Msg("Next transition not confirmed; backing off instead of spamming taps")
 
 		if consecutiveNextFailures >= 3 {
-			b.logger.Error().Msg("Next remained unresponsive after controlled retries; restarting Clash to recover matchmaking")
+			b.forceSafePacing("next_unresponsive", 2*time.Minute)
+			if b.telemetry != nil {
+				b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
+					"kind": "next_unresponsive",
+					"failures": consecutiveNextFailures,
+				})
+				b.telemetry.WriteIncident("next_unresponsive")
+			}
+			b.logger.Error().Msg("Next remained unresponsive after controlled retries; restarting Clash and forcing Safe pacing")
 			b.restartGame()
 			return
 		}
