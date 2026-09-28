@@ -56,6 +56,30 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       .slice(0, 8);
   }, [history]);
 
+  const sideStats = React.useMemo(() => {
+    const map = new Map<string, {
+      side: string;
+      attacks: number;
+      stars: number;
+      loot: number;
+      deployMs: number;
+      complete: number;
+    }>();
+    for (const rep of history ?? []) {
+      const side = rep.deploy_side && rep.deploy_side !== 'Unknown'
+        ? rep.deploy_side
+        : (rep.target_edge || 'Unknown');
+      const row = map.get(side) ?? { side, attacks: 0, stars: 0, loot: 0, deployMs: 0, complete: 0 };
+      row.attacks++;
+      row.stars += rep.stars || 0;
+      row.loot += (rep.gold_stolen || 0) + (rep.bonus_gold || 0) + (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+      row.deployMs += rep.deploy_duration_ms || 0;
+      if (rep.deploy_success) row.complete++;
+      map.set(side, row);
+    }
+    return Array.from(map.values()).sort((a, b) => b.attacks - a.attacks);
+  }, [history]);
+
   const totalAttacks = stats.stars_3 + stats.stars_2 + stats.stars_1 + stats.stars_0;
   const getPercent = (count: number) => totalAttacks > 0 ? Math.round((count / totalAttacks) * 100) : 0;
   const threeStarRate = totalAttacks > 0 ? Math.round((stats.stars_3 / totalAttacks) * 100) : 0;
@@ -246,6 +270,48 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div>
+            <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Deployment Side Performance</h3>
+            <p className="text-sm text-zinc-500 mt-1">Measured from the physical side actually used outside the live red zone.</p>
+          </div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Observed only · no automatic strategy changes</div>
+        </div>
+        {sideStats.length === 0 ? (
+          <div className="py-10 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">Waiting for attack history</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {sideStats.map((row) => (
+              <div key={row.side} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/30 p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-black uppercase tracking-wider text-zinc-950 dark:text-white">{row.side}</div>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{row.attacks} attacks</div>
+                </div>
+                <div className="mt-5 grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Avg stars</div>
+                    <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{(row.stars / Math.max(1, row.attacks)).toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Full deploy</div>
+                    <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{Math.round(row.complete / Math.max(1, row.attacks) * 100)}%</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Avg loot</div>
+                    <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white tabular-nums">{compact(row.loot / Math.max(1, row.attacks))}</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Avg deploy</div>
+                    <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white tabular-nums">{(row.deployMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</div>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
