@@ -41,7 +41,7 @@ func TestWindowsDeployCorridorLeftStaysOutsideRedZoneAndHUD(t *testing.T) {
 	if p1.X >= zone.BBox.Min.X || p2.X >= zone.BBox.Min.X {
 		t.Fatalf("left corridor crossed red boundary: p1=%v p2=%v bbox=%v", p1, p2, zone.BBox)
 	}
-	maxSafeY := int(float64(732) * 0.70)
+	maxSafeY := 512 // floor(732 * 0.70); keep compile-time integer on Windows
 	if p1.Y > maxSafeY || p2.Y > maxSafeY {
 		t.Fatalf("corridor entered lower HUD: p1=%v p2=%v max=%d", p1, p2, maxSafeY)
 	}
