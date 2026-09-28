@@ -322,12 +322,14 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 min-w-0 xl:min-w-[650px]">
+            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2 min-w-0 xl:min-w-[760px]">
               {[
                 { label: 'Gold / h', value: new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(sessionReport.gold_per_hour || 0) },
                 { label: 'Zero-touch', value: `${(sessionReport.zero_touch_rate || 0).toFixed(1)}%` },
                 { label: 'Avg stars', value: (sessionReport.average_stars || 0).toFixed(2) },
                 { label: 'Clean streak', value: `${sessionReport.current_zero_touch_streak || 0} / ${sessionReport.best_zero_touch_streak || 0}` },
+                { label: 'Battle end', value: sessionReport.average_battle_end_wait_ms > 0 ? `${(sessionReport.average_battle_end_wait_ms / 1000).toFixed(1)}s` : '—' },
+                { label: 'Early exits', value: `${(sessionReport.early_exit_rate || 0).toFixed(1)}%` },
                 { label: 'Best G+E', value: new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(sessionReport.best_attack?.gold_plus_elixir || 0) },
               ].map((metric) => (
                 <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 px-3 py-3">
@@ -337,6 +339,24 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               ))}
             </div>
           </div>
+
+          {(sessionReport.recommendations ?? []).length > 0 && (
+            <div className="px-6 pb-5">
+              <div className="rounded-[1.5rem] border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-4">
+                <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                  <span className="material-symbols-outlined text-base">diagnosis</span>
+                  Session Doctor
+                </div>
+                <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-2">
+                  {(sessionReport.recommendations ?? []).slice(0, 3).map((recommendation, index) => (
+                    <div key={`${index}-${recommendation}`} className="rounded-xl bg-black/10 dark:bg-white/5 px-3 py-2.5 text-[10px] font-bold leading-relaxed text-zinc-300 dark:text-zinc-600">
+                      {recommendation}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
