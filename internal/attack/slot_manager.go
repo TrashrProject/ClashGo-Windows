@@ -142,6 +142,97 @@ func NewSlotManager(
 	return sm
 }
 
+type windowsSlotActivityProfile struct {
+	mask gocv.Mat
+	y1   int
+	y2   int
+	size int
+}
+
+func newWindowsSlotActivityProfile(screen gocv.Mat, slotY, screenW int) *windowsSlotActivityProfile {
+	if screen.Empty() || screenW <= 0 {
+		return nil
+	}
+	scaleX := float64(screenW) / 860.0
+	size := int(25.0 * scaleX)
+	if size <= 0 {
+		size = 1
+	}
+	y1 := slotY - size
+	y2 := slotY + size
+	if y1 < 0 { y1 = 0 }
+	if y2 > screen.Rows() { y2 = screen.Rows() }
+	if y2 <= y1 {
+		return nil
+	}
+
+	sub := screen.Region(image.Rect(0, y1, screen.Cols(), y2))
+	defer sub.Close()
+
+	hsv := gocv.NewMat()
+	defer hsv.Close()
+	gocv.CvtColor(sub, &hsv, gocv.ColorBGRToHSV)
+
+	maskMap1 := gocv.NewMat()
+	defer maskMap1.Close()
+	gocv.InRangeWithScalar(hsv, gocv.NewScalar(35, 31, 0, 0), gocv.NewScalar(90, 255, 255, 0), &maskMap1)
+
+	maskMap2 := gocv.NewMat()
+	defer maskMap2.Close()
+	gocv.InRangeWithScalar(hsv, gocv.NewScalar(0, 0, 0, 0), gocv.NewScalar(29, 49, 79, 0), &maskMap2)
+
+	isMapMask := gocv.NewMat()
+	defer isMapMask.Close()
+	gocv.BitwiseOr(maskMap1, maskMap2, &isMapMask)
+
+	notMapMask := gocv.NewMat()
+	defer notMapMask.Close()
+	gocv.BitwiseNot(isMapMask, &notMapMask)
+
+	maskActA := gocv.NewMat()
+	defer maskActA.Close()
+	gocv.InRangeWithScalar(hsv, gocv.NewScalar(0, 56, 91, 0), gocv.NewScalar(180, 255, 255, 0), &maskActA)
+
+	maskActB := gocv.NewMat()
+	defer maskActB.Close()
+	gocv.InRangeWithScalar(hsv, gocv.NewScalar(0, 0, 221, 0), gocv.NewScalar(180, 29, 255, 0), &maskActB)
+
+	activeContentMask := gocv.NewMat()
+	defer activeContentMask.Close()
+	gocv.BitwiseOr(maskActA, maskActB, &activeContentMask)
+
+	finalMask := gocv.NewMat()
+	gocv.BitwiseAnd(activeContentMask, notMapMask, &finalMask)
+
+	return &windowsSlotActivityProfile{mask: finalMask, y1: y1, y2: y2, size: size}
+}
+
+func (p *windowsSlotActivityProfile) Close() {
+	if p != nil && !p.mask.Empty() {
+		p.mask.Close()
+	}
+}
+
+func (p *windowsSlotActivityProfile) ActivityAt(x int) float64 {
+	if p == nil || p.mask.Empty() {
+		return 0
+	}
+	x1 := x - p.size
+	x2 := x + p.size
+	if x1 < 0 { x1 = 0 }
+	if x2 > p.mask.Cols() { x2 = p.mask.Cols() }
+	if x2 <= x1 {
+		return 0
+	}
+	roi := p.mask.Region(image.Rect(x1, 0, x2, p.mask.Rows()))
+	defer roi.Close()
+	total := roi.Rows() * roi.Cols()
+	if total <= 0 {
+		return 0
+	}
+	return float64(gocv.CountNonZero(roi)) / float64(total)
+}
+
 // detectActiveSlots finds all non-empty X positions on the troop bar.
 func (sm *SlotManager) detectActiveSlots(screen gocv.Mat) []int {
 
@@ -181,9 +272,15 @@ func (sm *SlotManager) detectActiveSlots(screen gocv.Mat) []int {
 		minSep := int(48.0 * scaleX)
 		if minSep < 36 { minSep = 36 }
 
+		profile := newWindowsSlotActivityProfile(screen, sm.slotY, sm.w)
+		if profile == nil {
+			return []int{}
+		}
+		defer profile.Close()
+
 		var candidates []candidate
 		for x := int(24.0*scaleX); x < sm.w-int(24.0*scaleX); x += 4 {
-			a := GetSlotActivityRatioStatic(screen, x, sm.slotY, sm.w)
+			a := profile.ActivityAt(x)
 			if a >= 0.085 {
 				candidates = append(candidates, candidate{x: x, a: a})
 			}
