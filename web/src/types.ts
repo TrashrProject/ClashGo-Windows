@@ -130,6 +130,8 @@ export interface AttackReport {
   avg_live_bar_rescan_ms: number;
   avg_slot_detect_ms: number;
   avg_slot_classify_ms: number;
+  templates_tried: number;
+  templates_matched: number;
   avg_selected_card_ocr_ms: number;
   preparation_duration_ms: number;
   cooldown_duration_ms: number;
