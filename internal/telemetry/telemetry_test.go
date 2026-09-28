@@ -1,6 +1,8 @@
 package telemetry
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -49,5 +51,38 @@ func TestRecentExcludesCaptureSamplesAndReturnsNewestFirst(t *testing.T) {
 		if ev.Type == EventCaptureSample {
 			t.Fatal("capture samples must never enter activity feed")
 		}
+	}
+}
+
+func TestWriteIncidentCreatesCompactSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	b := New(filepath.Join(dir, "events.ndjson"))
+
+	b.Emit(EventSearchStarted, nil)
+	b.Emit(EventTargetFound, map[string]any{"gold": 900000, "accept": true})
+	b.Emit(EventCaptureSample, map[string]any{"duration_us": int64(1200)})
+
+	path := b.WriteIncident("deployment failed")
+	b.Close()
+
+	if path == "" {
+		t.Fatal("expected incident path")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read incident: %v", err)
+	}
+	var incident Incident
+	if err := json.Unmarshal(data, &incident); err != nil {
+		t.Fatalf("parse incident: %v", err)
+	}
+	if incident.Reason != "deployment failed" {
+		t.Fatalf("reason=%q", incident.Reason)
+	}
+	if len(incident.Recent) != 2 {
+		t.Fatalf("recent events=%d, want 2 high-level events", len(incident.Recent))
+	}
+	if incident.Metrics.LastCaptureMS != 1.2 {
+		t.Fatalf("last capture=%vms, want 1.2", incident.Metrics.LastCaptureMS)
 	}
 }
