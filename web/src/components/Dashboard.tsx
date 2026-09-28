@@ -110,6 +110,14 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
           title: `${mode} farming mode`,
           detail: from ? `${from} → ${mode} · adapted to ADB health` : 'Selected from current ADB health',
         });
+      } else if (ev.type === 'return_home') {
+        const ok = ev.fields?.success === true;
+        rows.push({
+          at: ev.at,
+          icon: ok ? 'home' : 'home_work',
+          title: ok ? 'Village ready' : 'Return Home fallback',
+          detail: `${(numberField(ev, 'duration_ms') / 1000).toFixed(1)}s return-home path`,
+        });
       }
     }
     return rows;
