@@ -232,6 +232,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 	graph.AddNode(game.StateMainVillage)
 
 	startedWall := time.Now()
+	vision.ResetPreferredScaleStats()
 
 	dukePicksDir := paths.ResolveConfig("output/duke_picks")
 	if err := os.MkdirAll(dukePicksDir, 0o755); err != nil {
@@ -3410,6 +3411,11 @@ func (b *Bot) Stats() BotStats {
 	}
 	tm := telemetry.Snapshot{}
 	if b.telemetry != nil { tm = b.telemetry.Snapshot() }
+	scaleStats := vision.PreferredScaleRuntimeStats()
+	scaleHitRate := 0.0
+	if scaleStats.Attempts > 0 {
+		scaleHitRate = float64(scaleStats.Hits) * 100 / float64(scaleStats.Attempts)
+	}
 	avgReturnHomeMS := 0.0
 	if count := b.returnHomeCount.Load(); count > 0 {
 		avgReturnHomeMS = float64(b.returnHomeMicros.Load()) / float64(count) / 1000.0
@@ -3487,6 +3493,10 @@ func (b *Bot) Stats() BotStats {
 		AvgRejectedDE:           tm.AvgRejectedDE,
 		AvgAcceptedScore:        tm.AvgAcceptedScore,
 		AvgRejectedScore:        tm.AvgRejectedScore,
+		PreferredScaleAttempts:  scaleStats.Attempts,
+		PreferredScaleHits:      scaleStats.Hits,
+		PreferredScaleFallbacks: scaleStats.Fallbacks,
+		PreferredScaleHitRate:   scaleHitRate,
 	}
 }
 
@@ -3544,6 +3554,10 @@ type BotStats struct {
 	AvgRejectedDE           float64 `json:"avg_rejected_de"`
 	AvgAcceptedScore        float64 `json:"avg_accepted_score"`
 	AvgRejectedScore        float64 `json:"avg_rejected_score"`
+	PreferredScaleAttempts  int64   `json:"preferred_scale_attempts"`
+	PreferredScaleHits      int64   `json:"preferred_scale_hits"`
+	PreferredScaleFallbacks int64   `json:"preferred_scale_fallbacks"`
+	PreferredScaleHitRate   float64 `json:"preferred_scale_hit_rate"`
 }
 
 type AttackReport struct {
