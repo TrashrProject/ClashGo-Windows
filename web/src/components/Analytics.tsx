@@ -820,6 +820,33 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     };
   }, [stats, history]);
 
+  const resultProvenance = React.useMemo(() => {
+    const rows = history ?? [];
+    const total = rows.length;
+    const count = (predicate: (r: AttackReport) => boolean) => rows.filter(predicate).length;
+    const pct = (n: number) => total > 0 ? n * 100 / total : 0;
+
+    const lootLive = count((r) => r.loot_source === 'live_delta');
+    const lootOCR = count((r) => r.loot_source === 'result_ocr');
+    const starsOutcome = count((r) => r.stars_source === 'battle_outcome' || r.stars_source === 'reconciled_outcome');
+    const starsOCR = count((r) => r.stars_source === 'result_ocr');
+    const high = count((r) => r.result_confidence === 'high');
+    const medium = count((r) => r.result_confidence === 'medium');
+    const low = count((r) => !r.result_confidence || r.result_confidence === 'low');
+
+    return {
+      total,
+      lootLive, lootOCR, starsOutcome, starsOCR, high, medium, low,
+      lootLiveRate: pct(lootLive),
+      lootOCRRate: pct(lootOCR),
+      starsOutcomeRate: pct(starsOutcome),
+      starsOCRRate: pct(starsOCR),
+      highRate: pct(high),
+      mediumRate: pct(medium),
+      lowRate: pct(low),
+    };
+  }, [history]);
+
   const optimizationAdvisor = React.useMemo(() => {
     type Opportunity = {
       key: string;
@@ -994,6 +1021,34 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             { label: 'Consecutive fails', value: (stats.adb_health?.consecutive_fails || 0).toString(), detail: 'Current ADB pressure' },
             { label: 'Tap transport', value: enduranceStats.tapTotal > 0 ? `${enduranceStats.legacyRate.toFixed(0)}% legacy` : '—', detail: `${enduranceStats.tapTotal} routed taps` },
             { label: 'Health score', value: `${stats.health_score ?? 100}/100`, detail: stats.speed_profile ? `${stats.speed_profile} pacing` : 'Adaptive pacing' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Result Provenance</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Where battle numbers come from</h3>
+            <p className="text-sm text-zinc-500 mt-1">Live outcome can supersede themed result-screen OCR when the live signal is more reliable.</p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{resultProvenance.total} attacks</div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {[
+            { label: 'Loot · live delta', value: resultProvenance.total ? `${resultProvenance.lootLiveRate.toFixed(1)}%` : '—', detail: `${resultProvenance.lootLive} attacks` },
+            { label: 'Loot · result OCR', value: resultProvenance.total ? `${resultProvenance.lootOCRRate.toFixed(1)}%` : '—', detail: `${resultProvenance.lootOCR} attacks` },
+            { label: 'Stars · outcome', value: resultProvenance.total ? `${resultProvenance.starsOutcomeRate.toFixed(1)}%` : '—', detail: `${resultProvenance.starsOutcome} reconciled/live` },
+            { label: 'Stars · OCR', value: resultProvenance.total ? `${resultProvenance.starsOCRRate.toFixed(1)}%` : '—', detail: `${resultProvenance.starsOCR} attacks` },
+            { label: 'High confidence', value: resultProvenance.total ? `${resultProvenance.highRate.toFixed(1)}%` : '—', detail: `${resultProvenance.high} attacks` },
+            { label: 'Low confidence', value: resultProvenance.total ? `${resultProvenance.lowRate.toFixed(1)}%` : '—', detail: `${resultProvenance.low} attacks · medium ${resultProvenance.mediumRate.toFixed(1)}%` },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
