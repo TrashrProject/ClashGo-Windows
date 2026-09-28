@@ -85,6 +85,20 @@ func ResetPreferredScaleStats() {
 	preferredScaleEnabled.Store(true)
 }
 
+func evaluatePreferredScaleCircuitBreaker() {
+	attempts := preferredScaleAttempts.Load()
+	if attempts < 20 {
+		return
+	}
+	hits := preferredScaleHits.Load()
+	if float64(hits)*100/float64(attempts) < 15 {
+		// The optimization is not earning its extra probe. Disable it for the
+		// remainder of this bot session; the full multi-scale path remains
+		// authoritative, so accuracy is unchanged.
+		preferredScaleEnabled.Store(false)
+	}
+}
+
 func PreferredScaleRuntimeStats() PreferredScaleStats {
 	return PreferredScaleStats{
 		Attempts: preferredScaleAttempts.Load(),
@@ -131,16 +145,7 @@ func MatchMultiScaleROICachedPreferred(screen, template gocv.Mat, templateName s
 			return matches, nil
 		}
 		preferredScaleFallbacks.Add(1)
-		attempts := preferredScaleAttempts.Load()
-		if attempts >= 20 {
-			hits := preferredScaleHits.Load()
-			if float64(hits)*100/float64(attempts) < 15 {
-				// The optimization is not earning its extra probe. Disable it
-				// for the remainder of this bot session; accuracy is unchanged
-				// because the full multi-scale path below remains authoritative.
-				preferredScaleEnabled.Store(false)
-			}
-		}
+		evaluatePreferredScaleCircuitBreaker()
 	}
 	}
 
