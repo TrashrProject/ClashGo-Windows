@@ -61,6 +61,7 @@ export interface BotStats {
   ui_anchor_hits: number;
   ui_anchor_fallbacks: number;
   ui_anchor_hit_rate: number;
+  ui_anchor_enabled: boolean;
   top_rejected_targets?: RejectedTargetSample[];
   adb_health: {
     avg_capture_ms: number;
