@@ -109,8 +109,12 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         const nextTransitions = numberField(ev, 'next_transitions');
         const nextFirstPass = numberField(ev, 'next_first_pass_rate');
         const reactiveCapture = numberField(ev, 'fast_capture_ms');
+        const modeReason = textField(ev, 'reason');
+        const incident = textField(ev, 'incident');
         let reason = 'Selected from current runtime health';
-        if (nextTransitions >= 5 && nextFirstPass > 0 && nextFirstPass < 92) {
+        if (modeReason === 'safety_governor') {
+          reason = `Safety governor${incident ? ` · ${incident.split('_').join(' ')}` : ''}`;
+        } else if (nextTransitions >= 5 && nextFirstPass > 0 && nextFirstPass < 92) {
           reason = `Next first-pass ${nextFirstPass.toFixed(0)}% · ${nextTransitions.toFixed(0)} samples`;
         } else if (reactiveCapture > 0) {
           reason = `Reactive capture ${reactiveCapture.toFixed(0)}ms`;
