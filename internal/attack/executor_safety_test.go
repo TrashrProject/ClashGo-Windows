@@ -49,7 +49,7 @@ func TestSanitizeWindowsDeployPointBlocksLowerHUD(t *testing.T) {
 
 func TestSanitizeWindowsDeployPointProtectsSurrenderRegion(t *testing.T) {
 	got := sanitizeWindowsDeployPoint(image.Pt(100, 700), 860, 732)
-	wantY := int(float64(732) * 0.62)
+	wantY := 453 // floor(732 * 0.62); keep compile-time integer on Windows
 	if got.Y != wantY {
 		t.Fatalf("surrender-region point y=%d want %d", got.Y, wantY)
 	}
