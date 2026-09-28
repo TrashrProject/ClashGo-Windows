@@ -11,6 +11,7 @@ import {
   GetStats,
   GetAttackHistory,
   GetLatestAttackReplay,
+  GetSessionReport,
   GetActivity,
   GetLogs,
   SaveConfig,
@@ -37,7 +38,7 @@ import {
   SetSimpleMode,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
-import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent, AttackReplayView } from './types';
+import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent, AttackReplayView, SessionReportView } from './types';
 import UpdateBanner from './components/UpdateBanner';
 import './App.css';
 
@@ -150,6 +151,7 @@ function App() {
   const [resourceHistory, setResourceHistory] = useState<VillageResourceSnapshot[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [replay, setReplay] = useState<AttackReplayView>({ available: false, complete: false, events: [] });
+  const [sessionReport, setSessionReport] = useState<SessionReportView | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [adbPort, setAdbPort] = useState(5555);
   const [darkMode, setDarkMode] = useState(getInitialDarkMode);
@@ -288,11 +290,22 @@ function App() {
       }
     };
 
+    const fetchSessionReport = async () => {
+      try {
+        const report = await GetSessionReport();
+        const typed = report as unknown as SessionReportView;
+        setSessionReport(typed && (typed.attacks || 0) > 0 ? typed : null);
+      } catch (err) {
+        console.warn('Session report refresh failed:', err);
+      }
+    };
+
     void fetchFastData();
     void fetchHistory();
     void fetchLogs();
     void fetchResourceHistory();
     void fetchReplay();
+    void fetchSessionReport();
 
     // Keep the high-frequency poll tiny: only live counters + compact activity.
     // History is event-driven at attack completion, logs do not need 2 Hz, and
@@ -303,6 +316,7 @@ function App() {
     const historyInterval = setInterval(fetchHistory, 30000); // recovery fallback
     const resourceInterval = setInterval(fetchResourceHistory, 15000);
     const replayInterval = setInterval(fetchReplay, 30000); // recovery fallback
+    const sessionReportInterval = setInterval(fetchSessionReport, 30000); // cold-start/stop fallback
 
     const fetchDiagnostics = async () => {
       try {
@@ -365,9 +379,10 @@ function App() {
       if (Array.isArray(payload)) {
         setHistory(payload);
       }
-      // Deployment traces are already flushed by the time the attack report is
-      // published. Refresh replay on the event instead of polling it every 5s.
+      // Deployment traces and session aggregates are ready at the attack
+      // boundary, so refresh them event-driven instead of adding hot polling.
       void fetchReplay();
+      void fetchSessionReport();
     });
     const unsubStatsUpdated = safeEventsOn("stats_updated", (payload: bot.BotStats) => {
       if (payload && typeof payload === 'object') {
@@ -381,6 +396,7 @@ function App() {
       clearInterval(historyInterval);
       clearInterval(resourceInterval);
       clearInterval(replayInterval);
+      clearInterval(sessionReportInterval);
       clearInterval(diagnosticsInterval);
       unsubUpdater();
       unsubBotError();
@@ -544,8 +560,9 @@ function App() {
     history,
     activity,
     replay,
+    sessionReport,
     logs,
-  }), [stats, history, activity, replay, logs]);
+  }), [stats, history, activity, replay, sessionReport, logs]);
 
   // ADB connection state — drives the header status pill. Labels stop
   // calling the local ADB server "localhost:{port}" because the bot
