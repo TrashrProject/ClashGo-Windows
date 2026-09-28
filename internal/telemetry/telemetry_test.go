@@ -277,8 +277,8 @@ func TestRecordRejectedTargetMatchesRejectedEventMetrics(t *testing.T) {
 	b := New(filepath.Join(t.TempDir(), "events.ndjson"))
 	defer b.Close()
 
-	b.RecordRejectedTarget(400000, 300000, 1200, 52, 12500)
-	b.RecordRejectedTarget(600000, 500000, 1800, 62, 17500)
+	b.RecordRejectedTarget(400000, 300000, 1200, 52, 12500, 750000, 750000, 2000)
+	b.RecordRejectedTarget(600000, 500000, 1800, 62, 17500, 750000, 750000, 2000)
 
 	s := b.Snapshot()
 	if s.TargetsFound != 2 || s.TargetsAccepted != 0 {
