@@ -151,8 +151,15 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 		SpeedProfile:            "Fast",
 		Anomalies:               2,
 		TargetsSeen:             12,
+		TargetsAccepted:         2,
 		TargetAcceptanceRate:    16.7,
 		AvgSkipsPerAttack:       5,
+		AvgAcceptedGE:           1_900_000,
+		AvgRejectedGE:           850_000,
+		AvgAcceptedDE:           4_500,
+		AvgRejectedDE:           1_200,
+		AvgAcceptedScore:        91,
+		AvgRejectedScore:        57,
 	}
 
 	got := mergeStats(acc, current)
@@ -166,6 +173,11 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 	if got.AverageCaptureMS != 321 || got.AverageTargetScanMS != 42 ||
 		got.AverageReturnHomeMS != 880 || got.AverageNextTransitionMS != 735 {
 		t.Fatalf("latency metrics lost: %+v", got)
+	}
+	if got.TargetsAccepted != 2 || got.AvgAcceptedGE != 1_900_000 || got.AvgRejectedGE != 850_000 ||
+		got.AvgAcceptedDE != 4_500 || got.AvgRejectedDE != 1_200 ||
+		got.AvgAcceptedScore != 91 || got.AvgRejectedScore != 57 {
+		t.Fatalf("search intelligence metrics lost: %+v", got)
 	}
 	if got.GoldPerHour != 3_000_000 {
 		t.Fatalf("gold/hour=%v want 3000000", got.GoldPerHour)
