@@ -259,6 +259,9 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                     }`}>
                       {latestAttack.deploy_success ? 'Deploy complete' : `${latestAttack.undeployed_slots} slot(s) left`}
                     </span>
+                    <span className="px-2 py-1 rounded-lg bg-white/10 text-zinc-300 text-[9px] font-black uppercase tracking-wider">
+                      {(latestAttack.search_duration_ms / 1000 || 0).toFixed(1)}s search · {latestAttack.search_skips || 0} skips
+                    </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
@@ -305,13 +308,14 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[980px]">
+              <table className="w-full text-left border-collapse min-w-[1080px]">
                 <thead>
                   <tr className="bg-zinc-50/70 dark:bg-zinc-800/30">
                     <th className="px-6 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Battle</th>
                     <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Strategy</th>
                     <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Loot</th>
                     <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Deployment</th>
+                    <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Search</th>
                     <th className="px-6 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] text-right">Date</th>
                   </tr>
                 </thead>
@@ -381,6 +385,15 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                           {!rep.parsed_results && (
                             <div className="text-[9px] text-rose-500 font-black uppercase tracking-wider mt-1.5">Result OCR incomplete</div>
                           )}
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <div className="text-sm font-black text-zinc-700 dark:text-zinc-200 tabular-nums">
+                            {((rep.search_duration_ms || 0) / 1000).toFixed(1)}s
+                          </div>
+                          <div className="text-[9px] font-black text-zinc-400 uppercase tracking-wider mt-1">
+                            {rep.search_skips || 0} skips · {((rep.cycle_duration_ms || 0) / 1000).toFixed(0)}s cycle
+                          </div>
                         </td>
 
                         <td className="px-6 py-4 text-right">
