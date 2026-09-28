@@ -34,6 +34,8 @@ func TestBuildSessionReportUsesTrueRoutineTimeAndReliability(t *testing.T) {
 	}
 	stats := BotStats{
 		HealthScore: 97, SpeedProfile: "Fast", Anomalies: 1,
+		RecoveryAttempts: 2, RecoverySuccesses: 2, RecoverySuccessRate: 100,
+		BlueStacksRestarts: 1,
 		PreferredScaleHitRate: 55, PreferredScaleEnabled: true,
 	}
 	report := BuildSessionReport(session, rows, stats, time.Date(2026,9,28,10,10,0,0,time.UTC))
@@ -71,6 +73,10 @@ func TestBuildSessionReportUsesTrueRoutineTimeAndReliability(t *testing.T) {
 	}
 	if report.HealthScore != 97 || !report.PreferredScaleEnabled {
 		t.Fatalf("runtime intelligence fields missing: %+v", report)
+	}
+	if report.RecoveryAttempts != 2 || report.RecoverySuccesses != 2 ||
+		report.RecoverySuccessRate != 100 || report.BlueStacksRestarts != 1 {
+		t.Fatalf("runtime stability fields missing: %+v", report)
 	}
 }
 
