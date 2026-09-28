@@ -19,6 +19,7 @@ import (
 	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/game"
 	"github.com/Ducky705/ClashGO/internal/paths"
+	"github.com/Ducky705/ClashGO/internal/telemetry"
 	"github.com/Ducky705/ClashGO/internal/vision"
 	"github.com/Ducky705/ClashGO/pkg/strategy"
 	"github.com/rs/zerolog"
@@ -89,6 +90,7 @@ type Bot struct {
 	armySlot int
 
 	historyCache []AttackReport
+	telemetry    *telemetry.Bus
 
 	OnStatsUpdate func()
 }
@@ -268,6 +270,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		stuckTimeout:      35 * time.Second,
 		cpuSampler:        newCPUSampler(),
 		dukePicksFile:     dukePicksFile,
+		telemetry:          telemetry.New(paths.ResolveConfig("telemetry/events.ndjson")),
 	}
 
 	// Resolve the strategy's declared army slot once at boot so the
@@ -360,6 +363,9 @@ func (b *Bot) Start() error {
 
 func (b *Bot) Stop() {
 	b.cancel()
+	if b.telemetry != nil {
+		b.telemetry.Close()
+	}
 	b.client.Close()
 	globalAsyncWriter.Close()
 	vision.CloseTemplateCache()
@@ -448,6 +454,9 @@ func (b *Bot) captureLoop() {
 			start := time.Now()
 			screen, err := b.client.CaptureToMat()
 			dur := time.Since(start)
+			if b.telemetry != nil {
+				b.telemetry.Emit(telemetry.EventCaptureSample, map[string]any{"duration_us": dur.Microseconds()})
+			}
 			lastCapture = time.Now()
 			b.lastCapture = lastCapture
 
@@ -867,7 +876,11 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 
 	if gc.ConfirmState(state) {
 		now := time.Now()
+		previousState := gc.State
 		gc.UpdateState(state, now)
+		if b.telemetry != nil && previousState != state {
+			b.telemetry.Emit(telemetry.EventStateChanged, map[string]any{"from": previousState.String(), "to": state.String(), "score": score})
+		}
 
 		select {
 		case gc.StateChange <- game.StateChange{From: gc.PrevState(), To: state, At: now}:
@@ -1493,7 +1506,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		// ("use of closed network connection"), followed by capture/tap failures.
 		// Use the proven one-shot transport path on Windows until the pipe has a
 		// dedicated Windows implementation.
-		b.logger.Info().Msg("persistent adb shell pipe disabled on Windows-safe path")
+		b.logger.Debug().Msg("persistent adb shell pipe disabled on Windows-safe path")
 	}
 
 	if b.attackCount.Load() >= int32(b.cfg.Attack.MaxAttackPerSession) {
@@ -1527,7 +1540,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		return
 	}
 
-	b.logger.Info().Msg("waiting for base to be found...")
+	b.logger.Info().Msg("search started")
+	if b.telemetry != nil {
+		b.telemetry.Emit(telemetry.EventSearchStarted, nil)
+	}
 
 	lootRec := game.NewLootRecognizer(b.cal, b.templates, b.logger)
 
@@ -1537,6 +1553,8 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	var targetEdge string = "Unknown"
 
 	searchStart := time.Now()
+	attackStartedAt := time.Time{}
+	sequenceSkips := 0
 	consecutiveNextFailures := 0
 	skipsSinceRest := 0
 	for {
@@ -1558,7 +1576,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			return
 		}
 
-		time.Sleep(700 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 
 		screen, err := b.client.CaptureToMat()
 		if err != nil {
@@ -1568,11 +1586,11 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		state, _ := b.classify(screen)
 		if state != game.StateBattle {
 			if state == game.StateSearchMap || state == game.StateLoading {
-				b.logger.Info().Str("state", state.String()).Msg("still searching (clouds)...")
+				b.logger.Debug().Str("state", state.String()).Msg("still searching (clouds)")
 				screen.Close()
 				continue
 			}
-			b.logger.Info().Str("state", state.String()).Msg("searching area (wait)...")
+			b.logger.Debug().Str("state", state.String()).Msg("searching area")
 
 			b.dismissInterruptions()
 			screen.Close()
@@ -1592,14 +1610,21 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			Int("gold", loot.Gold).
 			Int("elixir", loot.Elixir).
 			Int("de", loot.DarkElixir).
-			Msg("loot detected")
+			Msg("target scanned")
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventTargetFound, map[string]any{"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir})
+		}
 
 		meetsReq := !b.cfg.Search.Enabled || (loot.Gold >= b.cfg.Search.MinLootGold &&
 			loot.Elixir >= b.cfg.Search.MinLootElixir &&
 			loot.DarkElixir >= b.cfg.Search.MinLootDarkElixir)
 
 		if meetsReq {
-			b.logger.Info().Msg("loot requirements met, starting attack!")
+			attackStartedAt = time.Now()
+			b.logger.Info().Msg("target accepted — attacking")
+			if b.telemetry != nil {
+				b.telemetry.Emit(telemetry.EventAttackStarted, map[string]any{"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir, "search_ms": attackStartedAt.Sub(searchStart).Milliseconds(), "skips": sequenceSkips})
+			}
 			b.attackExec.SetInitialLoot(loot.Gold, loot.Elixir, loot.DarkElixir)
 			if strat, err := strategy.ParseYAML(b.cfg.Attack.StrategyFile); err == nil {
 				stratName = strat.Name
@@ -1629,7 +1654,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			break
 		}
 
-		b.logger.Info().Msg("loot too low, skipping base...")
+		b.logger.Debug().Msg("target below thresholds — skipping")
 
 		// BlueStacks stability guard: changing opponents endlessly at full
 		// speed can put sustained pressure on HD-Player.exe. Rest briefly
@@ -1733,10 +1758,14 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			consecutiveNextFailures = 0
 			skipsSinceRest++
 			b.skipsCount.Add(1)
+			sequenceSkips++
+			if b.telemetry != nil {
+				b.telemetry.Emit(telemetry.EventTargetSkipped, map[string]any{"sequence_skips": sequenceSkips})
+			}
 			if b.OnStatsUpdate != nil {
 				b.OnStatsUpdate()
 			}
-			b.logger.Info().Msg("matchmaking transition confirmed after Next")
+			b.logger.Debug().Msg("matchmaking transition confirmed")
 			time.Sleep(1100 * time.Millisecond)
 			continue
 		}
@@ -1994,6 +2023,13 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		BonusElixir:      bonusElixir,
 		BonusDE:          bonusDE,
 		TotalAttacks:     b.attackCount.Load(),
+		SearchSkips:      sequenceSkips,
+		SearchDurationMS: func() int64 { if attackStartedAt.IsZero() { return 0 }; return attackStartedAt.Sub(searchStart).Milliseconds() }(),
+		CycleDurationMS:  time.Since(searchStart).Milliseconds(),
+	}
+
+	if b.telemetry != nil {
+		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "search_ms": rep.SearchDurationMS, "cycle_ms": rep.CycleDurationMS})
 	}
 
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
@@ -2877,6 +2913,21 @@ func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 }
 
 func (b *Bot) Stats() BotStats {
+	uptime := time.Since(b.startedAt)
+	hours := uptime.Hours()
+	attacks := b.attackCount.Load()
+	var goldPerHour, elixirPerHour, dePerHour, avgStars, threeStarRate float64
+	if hours > 0 {
+		goldPerHour = float64(b.totalGold.Load()) / hours
+		elixirPerHour = float64(b.totalElixir.Load()) / hours
+		dePerHour = float64(b.totalDE.Load()) / hours
+	}
+	if attacks > 0 {
+		avgStars = float64(b.totalStars.Load()) / float64(attacks)
+		threeStarRate = float64(b.stars3.Load()) * 100 / float64(attacks)
+	}
+	tm := telemetry.Snapshot{}
+	if b.telemetry != nil { tm = b.telemetry.Snapshot() }
 	return BotStats{
 		AttacksCompleted: b.attackCount.Load(),
 		SearchSkips:      b.skipsCount.Load(),
@@ -2887,13 +2938,22 @@ func (b *Bot) Stats() BotStats {
 		Stars1:           b.stars1.Load(),
 		Stars2:           b.stars2.Load(),
 		Stars3:           b.stars3.Load(),
-		Uptime:           time.Since(b.startedAt),
+		Uptime:           uptime,
 		AdbHealth:          b.client.Health(),
 		CPUTimeSec:         CPUTime().Seconds(),
 		CPUCores:           b.cpuSampler.Usage(),
 		RecoveryAttempts:   b.recoveryAttempts.Load(),
 		RecoverySuccesses:  b.recoverySuccesses.Load(),
 		BlueStacksRestarts: b.blueStacksRestarts.Load(),
+		GoldPerHour:        goldPerHour,
+		ElixirPerHour:      elixirPerHour,
+		DEPerHour:          dePerHour,
+		AverageStars:       avgStars,
+		ThreeStarRate:      threeStarRate,
+		AverageCaptureMS:   tm.AvgCaptureMS,
+		LastCaptureMS:      tm.LastCaptureMS,
+		TelemetryEvents:    tm.Events,
+		TargetsSkipped:     tm.TargetsSkipped,
 	}
 }
 
@@ -2917,6 +2977,16 @@ type BotStats struct {
 	RecoveryAttempts   int32 `json:"recovery_attempts"`
 	RecoverySuccesses  int32 `json:"recovery_successes"`
 	BlueStacksRestarts int32 `json:"bluestacks_restarts"`
+
+	GoldPerHour      float64 `json:"gold_per_hour"`
+	ElixirPerHour    float64 `json:"elixir_per_hour"`
+	DEPerHour        float64 `json:"de_per_hour"`
+	AverageStars     float64 `json:"average_stars"`
+	ThreeStarRate    float64 `json:"three_star_rate"`
+	AverageCaptureMS float64 `json:"average_capture_ms"`
+	LastCaptureMS    float64 `json:"last_capture_ms"`
+	TelemetryEvents  int64   `json:"telemetry_events"`
+	TargetsSkipped   int64   `json:"targets_skipped"`
 }
 
 type AttackReport struct {
@@ -2935,6 +3005,9 @@ type AttackReport struct {
 	BonusElixir      int    `json:"bonus_elixir"`
 	BonusDE          int    `json:"bonus_de"`
 	TotalAttacks     int32  `json:"total_attacks_session"`
+	SearchSkips      int    `json:"search_skips"`
+	SearchDurationMS int64  `json:"search_duration_ms"`
+	CycleDurationMS  int64  `json:"cycle_duration_ms"`
 }
 
 type adbLogAdapter struct {
