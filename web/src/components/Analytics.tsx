@@ -212,6 +212,54 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       .slice(0, 8);
   }, [history]);
 
+  const latencyPercentiles = React.useMemo(() => {
+    const percentile = (values: number[], q: number) => {
+      const sorted = values.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+      if (sorted.length === 0) return 0;
+      if (sorted.length === 1) return sorted[0];
+      const pos = (sorted.length - 1) * q;
+      const lo = Math.floor(pos);
+      const hi = Math.ceil(pos);
+      if (lo === hi) return sorted[lo];
+      const weight = pos - lo;
+      return sorted[lo] * (1 - weight) + sorted[hi] * weight;
+    };
+    const rows = history ?? [];
+    const search = rows.map((r) => r.search_duration_ms || 0);
+    const deploy = rows.map((r) => r.deploy_duration_ms || 0);
+    const cycle = rows.map((r) => r.cycle_duration_ms || 0);
+    return {
+      searchP50: percentile(search, 0.50),
+      searchP90: percentile(search, 0.90),
+      deployP50: percentile(deploy, 0.50),
+      deployP90: percentile(deploy, 0.90),
+      cycleP50: percentile(cycle, 0.50),
+      cycleP90: percentile(cycle, 0.90),
+    };
+  }, [history]);
+
+  const targetScoreBuckets = React.useMemo(() => {
+    const buckets = [
+      { label: '<60', min: 1, max: 59, attacks: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
+      { label: '60–74', min: 60, max: 74, attacks: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
+      { label: '75–89', min: 75, max: 89, attacks: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
+      { label: '90–100', min: 90, max: 100, attacks: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
+    ];
+    for (const rep of history ?? []) {
+      const score = rep.target_score || 0;
+      if (score <= 0) continue;
+      const bucket = buckets.find((b) => score >= b.min && score <= b.max);
+      if (!bucket) continue;
+      bucket.attacks++;
+      bucket.stars += rep.stars || 0;
+      if (rep.deploy_success) bucket.full++;
+      bucket.stolen += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0);
+      bucket.offered += (rep.target_gold || 0) + (rep.target_elixir || 0);
+      bucket.cycleMs += rep.cycle_duration_ms || 0;
+    }
+    return buckets.filter((b) => b.attacks > 0);
+  }, [history]);
+
   const sideStats = React.useMemo(() => {
     const map = new Map<string, {
       side: string;
@@ -706,6 +754,66 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             ))}
           </div>
         )}
+      </div>
+
+      <div className="xl:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+          <div className="flex items-center justify-between gap-4 mb-5">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Tail latency</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">P50 / P90 Timing</h3>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">speed</span>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: 'Search', p50: latencyPercentiles.searchP50, p90: latencyPercentiles.searchP90 },
+              { label: 'Deploy', p50: latencyPercentiles.deployP50, p90: latencyPercentiles.deployP90 },
+              { label: 'Cycle', p50: latencyPercentiles.cycleP50, p90: latencyPercentiles.cycleP90 },
+            ].map((row) => (
+              <div key={row.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+                <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{row.label}</div>
+                <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{(row.p50 / 1000).toFixed(1)}s</div>
+                <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">P50</div>
+                <div className="mt-3 text-sm font-black text-zinc-700 dark:text-zinc-200 tabular-nums">{(row.p90 / 1000).toFixed(1)}s</div>
+                <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">P90</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+          <div className="flex items-center justify-between gap-4 mb-5">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Target Intelligence</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Score Bucket Results</h3>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">target</span>
+          </div>
+          {targetScoreBuckets.length === 0 ? (
+            <div className="py-8 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">Waiting for scored attacks</div>
+          ) : (
+            <div className="space-y-2">
+              {targetScoreBuckets.map((row) => (
+                <div key={row.label} className="grid grid-cols-[70px_1fr_1fr_1fr] items-center gap-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/40 px-3 py-3">
+                  <div className="text-xs font-black text-zinc-950 dark:text-white">{row.label}</div>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Avg stars</div>
+                    <div className="text-sm font-black text-zinc-700 dark:text-zinc-200 tabular-nums">{(row.stars / row.attacks).toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Loot capture</div>
+                    <div className="text-sm font-black text-zinc-700 dark:text-zinc-200 tabular-nums">{row.offered > 0 ? `${(row.stolen * 100 / row.offered).toFixed(0)}%` : '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Cycle</div>
+                    <div className="text-sm font-black text-zinc-700 dark:text-zinc-200 tabular-nums">{(row.cycleMs / row.attacks / 1000).toFixed(0)}s</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
