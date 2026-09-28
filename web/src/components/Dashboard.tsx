@@ -1,11 +1,12 @@
 import React from 'react';
-import { BotStats, AttackReport } from '../types';
+import { BotStats, AttackReport, ActivityEvent } from '../types';
 import { formatUptime, parseLogLine, LogSeverity } from '../utils';
 import AutomationOverview from './AutomationOverview';
 
 interface DashboardProps {
   stats: BotStats;
   history: AttackReport[];
+  activity: ActivityEvent[];
   logs: string[];
 }
 
@@ -39,6 +40,7 @@ const copyText = async (text: string): Promise<void> => {
 const Dashboard: React.FC<DashboardProps> = React.memo(({
   stats,
   history,
+  activity,
   logs,
 }) => {
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -51,6 +53,56 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
   const [historyLimit, setHistoryLimit] = React.useState(10);
   const copiedTimerRef = React.useRef<number | null>(null);
   const uptimeHours = stats.uptime / (1e9 * 3600);
+
+  const highLevelActivity = React.useMemo(() => {
+    const numberField = (ev: ActivityEvent, key: string): number => {
+      const raw = ev.fields?.[key];
+      return typeof raw === 'number' && Number.isFinite(raw) ? raw : 0;
+    };
+    const textField = (ev: ActivityEvent, key: string): string => {
+      const raw = ev.fields?.[key];
+      return typeof raw === 'string' ? raw : '';
+    };
+    const rows: Array<{ at: string; icon: string; title: string; detail: string }> = [];
+    for (const ev of activity ?? []) {
+      if (rows.length >= 7) break;
+      if (ev.type === 'target_found' && ev.fields?.accept !== true) continue;
+      if (ev.type === 'target_skipped' || ev.type === 'state_changed') continue;
+
+      if (ev.type === 'search_started') {
+        rows.push({ at: ev.at, icon: 'search', title: 'Searching', detail: 'Looking for a profitable base' });
+      } else if (ev.type === 'target_found') {
+        rows.push({
+          at: ev.at,
+          icon: 'target',
+          title: `Target accepted · ${numberField(ev, 'score')}/100`,
+          detail: `${numberField(ev, 'gold').toLocaleString()} G · ${numberField(ev, 'elixir').toLocaleString()} E · ${numberField(ev, 'de').toLocaleString()} DE`,
+        });
+      } else if (ev.type === 'attack_started') {
+        rows.push({
+          at: ev.at,
+          icon: 'bolt',
+          title: 'Attack started',
+          detail: `${(numberField(ev, 'search_ms') / 1000).toFixed(1)}s search · ${numberField(ev, 'skips')} skips`,
+        });
+      } else if (ev.type === 'attack_finished') {
+        rows.push({
+          at: ev.at,
+          icon: 'military_tech',
+          title: `Attack finished · ${numberField(ev, 'stars')}★`,
+          detail: `${numberField(ev, 'gold').toLocaleString()} G · ${(numberField(ev, 'deploy_ms') / 1000).toFixed(1)}s deploy · ${(numberField(ev, 'cycle_ms') / 1000).toFixed(0)}s cycle`,
+        });
+      } else if (ev.type === 'recovery') {
+        rows.push({
+          at: ev.at,
+          icon: 'healing',
+          title: textField(ev, 'stage') === 'success' ? 'Recovery complete' : 'Recovery started',
+          detail: textField(ev, 'bluestacks_restart') ? 'BlueStacks restarted' : 'Automatic recovery',
+        });
+      }
+    }
+    return rows;
+  }, [activity]);
 
   React.useEffect(() => {
     try {
@@ -175,6 +227,42 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
   return (
     <div className="space-y-6">
       <AutomationOverview />
+
+      {/* Compact activity feed: high-level actions only, not raw diagnostics. */}
+      <section className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none overflow-hidden">
+        <div className="px-6 py-5 flex items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-800/70">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Live activity</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">What the bot is doing</h3>
+          </div>
+          <div className="px-3 py-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[9px] font-black uppercase tracking-widest text-zinc-500">
+            Health {stats.health_score ?? 100}/100
+          </div>
+        </div>
+        {highLevelActivity.length === 0 ? (
+          <div className="px-6 py-8 text-sm font-medium text-zinc-400">Waiting for the first farming action…</div>
+        ) : (
+          <div className="divide-y divide-zinc-100 dark:divide-zinc-800/70">
+            {highLevelActivity.map((item, index) => {
+              const date = new Date(item.at);
+              return (
+                <div key={`${item.at}-${index}`} className="px-6 py-3.5 flex items-center gap-4">
+                  <div className="w-9 h-9 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-zinc-500 text-lg">{item.icon}</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{item.title}</div>
+                    <div className="text-[10px] font-bold text-zinc-400 mt-0.5 truncate">{item.detail}</div>
+                  </div>
+                  <div className="text-[10px] font-black text-zinc-400 tabular-nums shrink-0">
+                    {date.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {/* Metrics Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
