@@ -382,7 +382,7 @@ func (b *Bot) Start() error {
 	}
 
 	focusX, focusY := b.cal.ScaleRef(842, 345)
-	b.logger.Info().Int("x", focusX).Int("y", focusY).Msg("performing initial focus click")
+	b.logger.Debug().Int("x", focusX).Int("y", focusY).Msg("performing initial focus click")
 	b.client.Tap(focusX, focusY)
 	b.client.JitteredSleep(250 * time.Millisecond)
 
@@ -1316,7 +1316,7 @@ func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
 		return false
 	}
 
-	b.logger.Info().
+	b.logger.Debug().
 		Float64("conf", best.Confidence).
 		Int("x", best.Point.X).
 		Int("y", best.Point.Y).
@@ -1398,7 +1398,7 @@ func (b *Bot) locateFindMatchButtonColor(screen gocv.Mat) (int, int, bool) {
 	x := x0 + bestRect.Min.X + bestRect.Dx()/2
 	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
 
-	b.logger.Info().
+	b.logger.Debug().
 		Float64("area", bestArea).
 		Int("x", x).
 		Int("y", y).
@@ -1469,7 +1469,7 @@ func (b *Bot) locateNextButtonColor(screen gocv.Mat) (int, int, bool) {
 	x := x0 + bestRect.Min.X + bestRect.Dx()/2
 	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
 
-	b.logger.Info().
+	b.logger.Debug().
 		Float64("area", bestArea).
 		Int("x", x).
 		Int("y", y).
@@ -1536,7 +1536,7 @@ func (b *Bot) locateBattleButtonColor(screen gocv.Mat) (int, int, bool) {
 	x := x0 + bestRect.Min.X + bestRect.Dx()/2
 	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
 
-	b.logger.Info().
+	b.logger.Debug().
 		Float64("area", bestArea).
 		Int("x", x).
 		Int("y", y).
@@ -2179,7 +2179,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				continue
 			}
 			gocv.IMWrite(paths.ResolveConfig("last_battle_result.png"), resultScreen)
-			b.logger.Info().Msg("saved battle result screenshot to last_battle_result.png")
+			b.logger.Debug().Msg("saved battle result screenshot to last_battle_result.png")
 
 			res, rerr := lootRec.ReadBattleResult(resultScreen)
 			hash := resultPanelHash(resultScreen, b.cal)
@@ -2677,7 +2677,7 @@ func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, 
 
 		x := (x1 + x2) / 2
 		y := (y1 + y2) / 2
-		b.logger.Info().
+		b.logger.Debug().
 			Str("button", name).
 			Int("x", x).
 			Int("y", y).
@@ -2769,7 +2769,7 @@ func (b *Bot) clickSequence() bool {
 			if b.findAttackButton(screen, 0.30) {
 				x, y := b.cal.ScaleRef(64, 666)
 				screen.Close()
-				b.logger.Info().Int("x", x).Int("y", y).Msg("Attack fallback verified; precision tapping canonical center")
+				b.logger.Debug().Int("x", x).Int("y", y).Msg("Attack fallback verified; precision tapping canonical center")
 				if err := b.client.TapFast(x, y, 0.5); err == nil {
 					b.recordActivity()
 					attackClicked = true
@@ -2800,7 +2800,7 @@ func (b *Bot) clickSequence() bool {
 		if err := b.client.TapFast(x, y, 0.6); err == nil {
 			b.recordActivity()
 			findMatchClicked = true
-			b.logger.Info().Int("x", x).Int("y", y).Msg("Find Match stable — clicked")
+			b.logger.Debug().Int("x", x).Int("y", y).Msg("Find Match stable — clicked")
 		}
 	} else {
 		b.logger.Warn().Msg("attack menu did not settle on Find Match after Attack click")
@@ -2816,7 +2816,7 @@ func (b *Bot) clickSequence() bool {
 			screen.Close()
 			if state == game.StateFindMatch {
 				x, y := b.cal.ScaleRef(215, 563)
-				b.logger.Info().
+				b.logger.Debug().
 					Int("score", score).
 					Int("x", x).
 					Int("y", y).
@@ -2827,7 +2827,7 @@ func (b *Bot) clickSequence() bool {
 					break
 				}
 			} else {
-				b.logger.Info().
+				b.logger.Debug().
 					Str("state", state.String()).
 					Int("score", score).
 					Msg("Find Match retry: no stable focused target yet")
@@ -2866,7 +2866,7 @@ func (b *Bot) clickSequence() bool {
 			st, _ := b.classify(s)
 			s.Close()
 			if st == game.StateArmySelection || st == game.StateArmyCamp {
-				b.logger.Info().Str("state", st.String()).Msg("army menu state confirmed before next click")
+				b.logger.Debug().Str("state", st.String()).Msg("army menu state confirmed before next click")
 				break
 			}
 		}
@@ -2923,7 +2923,7 @@ func (b *Bot) clickSequence() bool {
 		if err := b.client.TapFast(x, y, 0.6); err == nil {
 			b.recordActivity()
 			battleClicked = true
-			b.logger.Info().Int("x", x).Int("y", y).Msg("Battle Attack stable — clicked")
+			b.logger.Debug().Int("x", x).Int("y", y).Msg("Battle Attack stable — clicked")
 		}
 	}
 
@@ -2975,7 +2975,7 @@ func (b *Bot) selectArmySlot() bool {
 	cardY := 227 + (slot-1)*54
 	tapX, tapY := b.cal.ScaleRef(430, cardY)
 
-	b.logger.Info().Int("army_slot", slot).Int("x", tapX).Int("y", tapY).Msg("selecting saved army recipe card")
+	b.logger.Debug().Int("army_slot", slot).Int("x", tapX).Int("y", tapY).Msg("selecting saved army recipe card")
 	if err := b.client.TapFast(tapX, tapY, 0.7); err != nil {
 		b.logger.Warn().Err(err).Msg("army recipe card tap failed")
 		return false
@@ -3047,7 +3047,7 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 			altX, altY := b.cal.ScaleRef(525, 247)
 			if b.isGreen(screen, altX, altY) {
 				screen.Close()
-				b.logger.Info().Str("step", stepName).Msg("secondary pinpoint match (upper battle), clicking...")
+				b.logger.Debug().Str("step", stepName).Msg("secondary pinpoint match (upper battle), clicking...")
 				if err := b.client.TapFast(altX, altY, 0.6); err == nil {
 					b.recordActivity()
 					return true
@@ -3111,7 +3111,7 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 			px, py = expectedX, expectedY
 		}
 
-		b.logger.Info().
+		b.logger.Debug().
 			Str("step", stepName).
 			Float64("conf", best.Confidence).
 			Int("x", px).Int("y", py).
@@ -3314,7 +3314,7 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 			if retryScreen, capErr := b.client.CaptureToMat(); capErr == nil {
 				if x, y, ok := b.locateBattleButtonColor(retryScreen); ok {
 					retryScreen.Close()
-					b.logger.Info().Int("x", x).Int("y", y).Msg("retrying with detected Battle Attack button center")
+					b.logger.Debug().Int("x", x).Int("y", y).Msg("retrying with detected Battle Attack button center")
 					_ = b.client.TapFast(x, y, 0.6)
 					b.recordActivity()
 				} else {
