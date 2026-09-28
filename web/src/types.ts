@@ -42,6 +42,12 @@ export interface BotStats {
   last_return_home_ms: number;
   average_next_transition_ms: number;
   last_next_transition_ms: number;
+  avg_accepted_ge: number;
+  avg_rejected_ge: number;
+  avg_accepted_de: number;
+  avg_rejected_de: number;
+  avg_accepted_score: number;
+  avg_rejected_score: number;
   adb_health: {
     avg_capture_ms: number;
     fast_capture_ms: number;
