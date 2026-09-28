@@ -3347,7 +3347,11 @@ func (b *Bot) Stats() BotStats {
 	failedRecoveries := int(b.recoveryAttempts.Load() - b.recoverySuccesses.Load())
 	if failedRecoveries > 0 { healthScore -= failedRecoveries * 6 }
 	healthScore -= int(b.blueStacksRestarts.Load()) * 2
-	if adbHealth.AvgCaptureMs > 1200 { healthScore -= 15 } else if adbHealth.AvgCaptureMs > 700 { healthScore -= 7 }
+	captureHealthMS := adbHealth.AvgCaptureMs
+	if adbHealth.FastCaptureMs > captureHealthMS {
+		captureHealthMS = adbHealth.FastCaptureMs
+	}
+	if captureHealthMS > 1200 { healthScore -= 15 } else if captureHealthMS > 700 { healthScore -= 7 }
 	if healthScore < 0 { healthScore = 0 }
 	if healthScore > 100 { healthScore = 100 }
 	return BotStats{
