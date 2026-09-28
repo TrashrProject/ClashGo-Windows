@@ -38,6 +38,8 @@ export interface BotStats {
   last_target_scan_ms: number;
   average_return_home_ms: number;
   last_return_home_ms: number;
+  average_next_transition_ms: number;
+  last_next_transition_ms: number;
   adb_health: {
     avg_capture_ms: number;
     consecutive_fails: number;
