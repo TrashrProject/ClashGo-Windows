@@ -140,3 +140,68 @@ func TestLooksLikeHeroCardStaticGreenHealthBar(t *testing.T) {
 		t.Fatal("empty generic card region should not classify as hero")
 	}
 }
+
+func TestWindowsSlotActivityProfileMatchesLegacyWindowMath(t *testing.T) {
+	const (
+		w = 240
+		h = 140
+		slotY = 95
+	)
+	screen := gocv.NewMatWithSize(h, w, gocv.MatTypeCV8UC3)
+	defer screen.Close()
+
+	// Dark/map-like background.
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			screen.SetVecbAt(y, x, gocv.Vecb{20, 45, 20})
+		}
+	}
+	// Add a vivid card-like patch around x=120.
+	for y := 72; y < 118; y++ {
+		for x := 98; x < 142; x++ {
+			screen.SetVecbAt(y, x, gocv.Vecb{40, 70, 220})
+		}
+	}
+
+	profile := newWindowsSlotActivityProfile(screen, slotY, w)
+	if profile == nil {
+		t.Fatal("expected activity profile")
+	}
+	defer profile.Close()
+
+	for _, x := range []int{40, 92, 120, 148, 200} {
+		legacy := GetSlotActivityRatioStatic(screen, x, slotY, w)
+		fast := profile.ActivityAt(x)
+		diff := legacy - fast
+		if diff < 0 { diff = -diff }
+		if diff > 0.000001 {
+			t.Fatalf("x=%d legacy=%f fast=%f diff=%f", x, legacy, fast, diff)
+		}
+	}
+}
+
+func TestWindowsSlotActivityProfilePreservesActiveThreshold(t *testing.T) {
+	screen := gocv.NewMatWithSize(140, 240, gocv.MatTypeCV8UC3)
+	defer screen.Close()
+
+	for y := 0; y < 140; y++ {
+		for x := 0; x < 240; x++ {
+			screen.SetVecbAt(y, x, gocv.Vecb{20, 45, 20})
+		}
+	}
+	for y := 76; y < 114; y++ {
+		for x := 104; x < 136; x++ {
+			screen.SetVecbAt(y, x, gocv.Vecb{30, 50, 230})
+		}
+	}
+
+	profile := newWindowsSlotActivityProfile(screen, 95, 240)
+	if profile == nil {
+		t.Fatal("expected activity profile")
+	}
+	defer profile.Close()
+
+	if legacy, fast := GetSlotActivityRatioStatic(screen, 120, 95, 240), profile.ActivityAt(120); (legacy >= 0.085) != (fast >= 0.085) {
+		t.Fatalf("active threshold changed: legacy=%f fast=%f", legacy, fast)
+	}
+}
