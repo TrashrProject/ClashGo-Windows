@@ -125,10 +125,19 @@ type serviceConfig struct {
 // future release gets much larger, bump downloadTimeout in
 // streamToFile specifically rather than this global knob.
 func DefaultConfig(currentVersion string) serviceConfig {
+	return DefaultConfigWithChannel(currentVersion, "stable")
+}
+
+func DefaultConfigWithChannel(currentVersion, channel string) serviceConfig {
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	if channel != "beta" {
+		channel = "stable"
+	}
 	return serviceConfig{
 		RepoOwner:      "TrashrProject",
 		RepoName:       "ClashGo-Windows",
 		CurrentVersion: currentVersion,
+		Channel:        channel,
 		HTTPClient:     &http.Client{Timeout: 5 * time.Minute},
 		Now:            time.Now,
 	}
