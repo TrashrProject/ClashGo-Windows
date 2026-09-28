@@ -1705,14 +1705,38 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	searchStart := time.Now()
 	attackStartedAt := time.Time{}
 	sequenceSkips := 0
-	searchPace := chooseSearchPacing(b.client.Health())
+	selectSearchPace := func() searchPacing {
+		tm := telemetry.Snapshot{}
+		if b.telemetry != nil {
+			tm = b.telemetry.Snapshot()
+		}
+		return chooseSearchPacingWithReliability(
+			b.client.Health(),
+			tm.NextTransitions,
+			tm.NextFirstPassRate,
+		)
+	}
+	searchPace := selectSearchPace()
 	if b.telemetry != nil {
 		b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{"mode": searchPace.Mode, "reason": "search_start"})
 	}
 	updateSearchPace := func() {
-		next := chooseSearchPacing(b.client.Health())
+		health := b.client.Health()
+		tm := telemetry.Snapshot{}
+		if b.telemetry != nil {
+			tm = b.telemetry.Snapshot()
+		}
+		next := chooseSearchPacingWithReliability(health, tm.NextTransitions, tm.NextFirstPassRate)
 		if b.telemetry != nil && next.Mode != searchPace.Mode {
-			b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{"from": searchPace.Mode, "mode": next.Mode, "avg_capture_ms": b.client.Health().AvgCaptureMs, "fails": b.client.Health().ConsecutiveFails})
+			b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
+				"from": searchPace.Mode,
+				"mode": next.Mode,
+				"avg_capture_ms": health.AvgCaptureMs,
+				"fast_capture_ms": health.FastCaptureMs,
+				"fails": health.ConsecutiveFails,
+				"next_transitions": tm.NextTransitions,
+				"next_first_pass_rate": tm.NextFirstPassRate,
+			})
 		}
 		searchPace = next
 	}
