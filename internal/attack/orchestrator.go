@@ -613,7 +613,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			}
 
 			rescanStarted := time.Now()
-			liveMgr := NewSlotManager(fresh, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+			liveMgr := NewSlotManagerLiveRescan(fresh, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
 			detectMS, classifyMS := liveMgr.Timing()
 			e.lastSlotDetectMicros += int64(detectMS * 1000)
 			e.lastSlotClassifyMicros += int64(classifyMS * 1000)
@@ -834,7 +834,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// remain. Deployed hero ability cards are intentionally ignored.
 		finalFrame, finalErr := tapExec.CaptureFresh()
 		if finalErr == nil && !finalFrame.Empty() {
-			finalMgr := NewSlotManager(finalFrame, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+			finalMgr := NewSlotManagerLiveRescan(finalFrame, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
 			finalCounts := troopCounter.DetectCounts(finalFrame, finalMgr.GetAllSlots(), finalMgr.GetBarY())
 			liveRemaining = 0
 			for _, slot := range finalMgr.GetAllSlots() {
