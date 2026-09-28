@@ -104,11 +104,20 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       } else if (ev.type === 'speed_profile') {
         const mode = textField(ev, 'mode') || 'Balanced';
         const from = textField(ev, 'from');
+        const nextTransitions = numberField(ev, 'next_transitions');
+        const nextFirstPass = numberField(ev, 'next_first_pass_rate');
+        const reactiveCapture = numberField(ev, 'fast_capture_ms');
+        let reason = 'Selected from current runtime health';
+        if (nextTransitions >= 5 && nextFirstPass > 0 && nextFirstPass < 92) {
+          reason = `Next first-pass ${nextFirstPass.toFixed(0)}% · ${nextTransitions.toFixed(0)} samples`;
+        } else if (reactiveCapture > 0) {
+          reason = `Reactive capture ${reactiveCapture.toFixed(0)}ms`;
+        }
         rows.push({
           at: ev.at,
           icon: mode === 'Fast' ? 'speed' : mode === 'Safe' ? 'shield' : 'tune',
           title: `${mode} farming mode`,
-          detail: from ? `${from} → ${mode} · adapted to ADB health` : 'Selected from current ADB health',
+          detail: from ? `${from} → ${mode} · ${reason}` : reason,
         });
       } else if (ev.type === 'return_home') {
         const ok = ev.fields?.success === true;
