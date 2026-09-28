@@ -51,6 +51,9 @@ export interface BotStats {
   adb_health: {
     avg_capture_ms: number;
     fast_capture_ms: number;
+    avg_tap_ms: number;
+    fast_tap_ms: number;
+    taps_total: number;
     consecutive_fails: number;
     captures_total: number;
     errors_total: number;
