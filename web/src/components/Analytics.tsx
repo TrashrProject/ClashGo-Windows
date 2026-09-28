@@ -835,11 +835,15 @@ Best optimization target: {pipeline.dominantTunable.label}
         </div>
       </div>
 
-      <div className="xl:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="xl:col-span-2 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-4">
         {[
           { label: 'Targets seen', value: (stats.targets_seen || 0).toLocaleString(), detail: 'This session' },
           { label: 'Accept rate', value: `${(stats.target_acceptance_rate || 0).toFixed(1)}%`, detail: 'Accepted / scanned' },
           { label: 'Skips / attack', value: (stats.avg_skips_per_attack || 0).toFixed(1), detail: 'Lower is faster' },
+          { label: 'Next first-pass', value: stats.next_transitions > 0 ? `${(stats.next_first_pass_rate || 0).toFixed(1)}%` : '—', detail: 'No controlled retry' },
+          { label: 'Next retries', value: (stats.next_retries || 0).toLocaleString(), detail: `${stats.next_transitions || 0} transitions` },
+          { label: 'Verify probes', value: (stats.avg_next_verify_probes || 0).toFixed(2), detail: 'Captures / transition' },
+          { label: 'Next latency', value: `${(stats.average_next_transition_ms || 0).toFixed(0)}ms`, detail: 'Tap → transition' },
           { label: 'Recovery success', value: stats.recovery_attempts > 0 ? `${(stats.recovery_success_rate || 0).toFixed(0)}%` : '—', detail: stats.recovery_attempts > 0 ? `${stats.recovery_successes}/${stats.recovery_attempts}` : 'No recoveries' },
         ].map((metric) => (
           <div key={metric.label} className="bg-white dark:bg-zinc-900 rounded-[2rem] border border-zinc-100/70 dark:border-zinc-800/70 p-5 shadow-premium dark:shadow-none">
