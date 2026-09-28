@@ -89,6 +89,9 @@ export interface AttackReport {
   target_elixir: number;
   target_de: number;
   target_score: number;
+  runtime_mode: string;
+  capture_ms: number;
+  target_scan_ms: number;
 }
 
 export interface BotConfig {
