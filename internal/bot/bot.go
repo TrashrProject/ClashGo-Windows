@@ -1567,6 +1567,16 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	attackStartedAt := time.Time{}
 	sequenceSkips := 0
 	searchPace := chooseSearchPacing(b.client.Health())
+	if b.telemetry != nil {
+		b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{"mode": searchPace.Mode, "reason": "search_start"})
+	}
+	updateSearchPace := func() {
+		next := chooseSearchPacing(b.client.Health())
+		if b.telemetry != nil && next.Mode != searchPace.Mode {
+			b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{"from": searchPace.Mode, "mode": next.Mode, "avg_capture_ms": b.client.Health().AvgCaptureMs, "fails": b.client.Health().ConsecutiveFails})
+		}
+		searchPace = next
+	}
 	consecutiveNextFailures := 0
 	skipsSinceRest := 0
 	for {
@@ -1699,7 +1709,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				Msg("matchmaking stability pause")
 			time.Sleep(searchPace.StabilityRest)
 			skipsSinceRest = 0
-			searchPace = chooseSearchPacing(b.client.Health())
+			updateSearchPace()
 		}
 
 		// NEXT is handled as a state transition, not as a blind tap.
@@ -1804,7 +1814,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			// I/O and IPC off the matchmaking hot path makes repeated Next cycles
 			// materially cheaper without changing any farming decision.
 			b.logger.Debug().Msg("matchmaking transition confirmed")
-			searchPace = chooseSearchPacing(b.client.Health())
+			updateSearchPace()
 			time.Sleep(searchPace.PostTransitionPause)
 			continue
 		}
