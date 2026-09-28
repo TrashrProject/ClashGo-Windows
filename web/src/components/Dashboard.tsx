@@ -437,6 +437,35 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                       <rect x="0" y="0" width={replayMap.width} height={replayMap.height} fill="url(#deploy-grid)" />
                       <line x1={replayMap.width / 2} y1="0" x2={replayMap.width / 2} y2={replayMap.height} stroke="currentColor" strokeDasharray="10 10" className="text-zinc-800" />
                       <line x1="0" y1={replayMap.height / 2} x2={replayMap.width} y2={replayMap.height / 2} stroke="currentColor" strokeDasharray="10 10" className="text-zinc-800" />
+
+                      {latestAttack?.red_zone_valid && latestAttack.red_zone_x2 > latestAttack.red_zone_x1 && latestAttack.red_zone_y2 > latestAttack.red_zone_y1 && (
+                        <rect
+                          x={latestAttack.red_zone_x1}
+                          y={latestAttack.red_zone_y1}
+                          width={latestAttack.red_zone_x2 - latestAttack.red_zone_x1}
+                          height={latestAttack.red_zone_y2 - latestAttack.red_zone_y1}
+                          fill="currentColor"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                          strokeDasharray="12 8"
+                          opacity="0.10"
+                          className="text-rose-500"
+                        />
+                      )}
+
+                      {latestAttack?.corridor_verified && (
+                        <line
+                          x1={latestAttack.deploy_line_x1}
+                          y1={latestAttack.deploy_line_y1}
+                          x2={latestAttack.deploy_line_x2}
+                          y2={latestAttack.deploy_line_y2}
+                          stroke="currentColor"
+                          strokeWidth="9"
+                          strokeLinecap="round"
+                          opacity="0.92"
+                          className="text-emerald-400"
+                        />
+                      )}
                       {replayMap.events.slice(-28).map((ev, index) => {
                         const x1 = ev.p1?.x || 0;
                         const y1 = ev.p1?.y || 0;
@@ -475,6 +504,8 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                       ['Hero', 'bg-amber-500'],
                       ['Siege / CC', 'bg-rose-500'],
                       ['Spell', 'bg-violet-500'],
+                      ['Safe line', 'bg-emerald-400'],
+                      ['Red zone', 'bg-rose-400'],
                     ].map(([label, cls]) => (
                       <div key={label} className="rounded-xl border border-zinc-100 dark:border-zinc-800 px-3 py-2 flex items-center gap-2">
                         <span className={`size-2.5 rounded-full ${cls}`} />
