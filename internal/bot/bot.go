@@ -1680,6 +1680,13 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			deployStarted := time.Now()
 			remainingUndeployed, deployErr = b.deployTroops(screen)
 			deployDurationMS = time.Since(deployStarted).Milliseconds()
+			if b.telemetry != nil && deployDurationMS >= 90_000 {
+				b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
+					"kind": "slow_deployment",
+					"duration_ms": deployDurationMS,
+					"remaining": remainingUndeployed,
+				})
+			}
 			if resolved := b.attackExec.LastResolvedEdge(); resolved != "" {
 				targetEdge = resolved
 			}
@@ -1839,6 +1846,13 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 					"sequence_skips": sequenceSkips,
 					"transition_us": transitionUS,
 				})
+				if transitionUS >= 3_000_000 {
+					b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
+						"kind": "slow_next_transition",
+						"duration_ms": transitionUS / 1000,
+						"sequence_skips": sequenceSkips,
+					})
+				}
 			}
 			// Do not flush stats/history or emit Wails events for every skipped
 			// base. Stats are atomic and the UI polls them every 2s; keeping disk
@@ -2190,6 +2204,13 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			"success": returnedHome,
 			"duration_ms": returnHomeDur.Milliseconds(),
 		})
+		if returnHomeDur >= 3*time.Second {
+			b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
+				"kind": "slow_return_home",
+				"duration_ms": returnHomeDur.Milliseconds(),
+				"success": returnedHome,
+			})
+		}
 	}
 
 	if !returnedHome {
@@ -3114,6 +3135,7 @@ func (b *Bot) Stats() BotStats {
 		AverageCaptureMS:   tm.AvgCaptureMS,
 		LastCaptureMS:      tm.LastCaptureMS,
 		TelemetryEvents:    tm.Events,
+		Anomalies:          tm.Anomalies,
 		TargetsSkipped:     tm.TargetsSkipped,
 		HealthScore:          healthScore,
 		SpeedProfile:         chooseSearchPacing(adbHealth).Mode,
@@ -3159,6 +3181,7 @@ type BotStats struct {
 	AverageCaptureMS float64 `json:"average_capture_ms"`
 	LastCaptureMS    float64 `json:"last_capture_ms"`
 	TelemetryEvents  int64   `json:"telemetry_events"`
+	Anomalies        int64   `json:"anomalies"`
 	TargetsSkipped   int64   `json:"targets_skipped"`
 	HealthScore          int     `json:"health_score"`
 	SpeedProfile         string  `json:"speed_profile"`
