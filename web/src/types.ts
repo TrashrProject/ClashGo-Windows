@@ -42,6 +42,10 @@ export interface BotStats {
   last_return_home_ms: number;
   average_next_transition_ms: number;
   last_next_transition_ms: number;
+  next_transitions: number;
+  next_retries: number;
+  next_first_pass_rate: number;
+  avg_next_verify_probes: number;
   avg_accepted_ge: number;
   avg_rejected_ge: number;
   avg_accepted_de: number;
