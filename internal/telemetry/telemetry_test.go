@@ -86,3 +86,24 @@ func TestWriteIncidentCreatesCompactSnapshot(t *testing.T) {
 		t.Fatalf("last capture=%vms, want 1.2", incident.Metrics.LastCaptureMS)
 	}
 }
+
+func TestRecentExcludesRejectedTargetsAndSkips(t *testing.T) {
+	b := New(filepath.Join(t.TempDir(), "events.ndjson"))
+	defer b.Close()
+
+	b.Emit(EventTargetFound, map[string]any{"accept": false, "gold": 100000})
+	b.Emit(EventTargetSkipped, map[string]any{"sequence_skips": 1})
+	b.Emit(EventTargetFound, map[string]any{"accept": true, "gold": 900000})
+
+	recent := b.Recent(10)
+	if len(recent) != 1 {
+		t.Fatalf("recent len=%d, want only accepted target", len(recent))
+	}
+	if recent[0].Type != EventTargetFound || recent[0].Fields["accept"] != true {
+		t.Fatalf("unexpected recent event: %+v", recent[0])
+	}
+	s := b.Snapshot()
+	if s.TargetsFound != 2 || s.TargetsSkipped != 1 {
+		t.Fatalf("memory counters lost rejected/skip samples: %+v", s)
+	}
+}
