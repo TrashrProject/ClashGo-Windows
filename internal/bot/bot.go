@@ -2884,11 +2884,11 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 			b.logger.Info().Msg("battle state detected, entering search loop")
 			return true
 		case state == game.StateSearchMap || state == game.StateLoading:
-			b.logger.Info().Msg("in clouds/loading...")
+			b.logger.Debug().Msg("in clouds/loading")
 			time.Sleep(300 * time.Millisecond)
 			continue
 		case state == game.StateArmySelection || state == game.StateArmyCamp:
-			b.logger.Info().Msg("in army menu, retrying Battle Attack button...")
+			b.logger.Debug().Msg("in army menu, retrying Battle Attack button")
 			if retryScreen, capErr := b.client.CaptureToMat(); capErr == nil {
 				if x, y, ok := b.locateBattleButtonColor(retryScreen); ok {
 					retryScreen.Close()
@@ -2902,7 +2902,7 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 			}
 			time.Sleep(400 * time.Millisecond)
 		default:
-			b.logger.Info().Str("state", state.String()).Msg("waiting for battle state (searching)...")
+			b.logger.Debug().Str("state", state.String()).Msg("waiting for battle state")
 			b.dismissInterruptions()
 			time.Sleep(250 * time.Millisecond)
 		}
