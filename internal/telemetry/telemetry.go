@@ -48,6 +48,8 @@ type Bus struct {
 	ch        chan Event
 	done      chan struct{}
 	once      sync.Once
+	recentMu   sync.RWMutex
+	recent     []Event
 
 	events          atomic.Int64
 	searches        atomic.Int64
@@ -83,12 +85,42 @@ func (b *Bus) Emit(t EventType, fields map[string]any) {
 	if t == EventCaptureSample {
 		return
 	}
+	b.remember(ev)
 	select {
 	case b.ch <- ev:
 	default:
 		// Telemetry must never block the farming path. If the writer falls
 		// behind, metrics remain correct and the event file may drop samples.
 	}
+}
+
+func (b *Bus) remember(ev Event) {
+	b.recentMu.Lock()
+	b.recent = append(b.recent, ev)
+	if len(b.recent) > 80 {
+		copy(b.recent, b.recent[len(b.recent)-80:])
+		b.recent = b.recent[:80]
+	}
+	b.recentMu.Unlock()
+}
+
+// Recent returns the newest high-level events first. Capture samples are
+// intentionally excluded so this remains an understandable activity feed,
+// not another noisy log stream.
+func (b *Bus) Recent(limit int) []Event {
+	if b == nil || limit <= 0 {
+		return []Event{}
+	}
+	b.recentMu.RLock()
+	defer b.recentMu.RUnlock()
+	if limit > len(b.recent) {
+		limit = len(b.recent)
+	}
+	out := make([]Event, 0, limit)
+	for i := len(b.recent) - 1; i >= len(b.recent)-limit; i-- {
+		out = append(out, b.recent[i])
+	}
+	return out
 }
 
 func (b *Bus) record(ev Event) {
