@@ -856,16 +856,12 @@ func (s *Service) ApplyAuto() (bool, error) {
 		if helper == "" {
 			return false, errors.New("Windows update helper is missing from the installation")
 		}
-		if err := checkInstallDirWritable(installDir); err != nil {
-			return false, err
-		}
 		tempHelperPath, err := prepareWindowsUpdateHelper(helper)
 		if err != nil {
 			return false, err
 		}
 
-		cmd := exec.Command(
-			"powershell.exe",
+		args := []string{
 			"-NoProfile",
 			"-ExecutionPolicy", "Bypass",
 			"-File", tempHelperPath,
@@ -873,14 +869,36 @@ func (s *Service) ApplyAuto() (bool, error) {
 			"-InstallDir", installDir,
 			"-ExePath", exe,
 			"-ParentPID", fmt.Sprintf("%d", os.Getpid()),
-		)
+		}
+
+		// Portable installs can usually update in place without elevation. An
+		// NSIS install under Program Files cannot, so transparently request UAC
+		// instead of failing before the helper even starts.
+		if err := checkInstallDirWritable(installDir); err == nil {
+			cmd := exec.Command("powershell.exe", args...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Start(); err != nil {
+				_ = os.Remove(tempHelperPath)
+				return false, fmt.Errorf("start Windows update helper: %w", err)
+			}
+			go func() { _ = cmd.Wait() }()
+			return true, nil
+		}
+
+		quotePS := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
+		psArgs := make([]string, 0, len(args))
+		for _, arg := range args {
+			psArgs = append(psArgs, quotePS(arg))
+		}
+		launch := "$p = Start-Process -FilePath 'powershell.exe' -ArgumentList @(" + strings.Join(psArgs, ",") + ") -Verb RunAs -PassThru; if (-not $p) { exit 1 }"
+		cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", launch)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		if err := cmd.Start(); err != nil {
+		if err := cmd.Run(); err != nil {
 			_ = os.Remove(tempHelperPath)
-			return false, fmt.Errorf("start Windows update helper: %w", err)
+			return false, fmt.Errorf("start elevated Windows update helper: %w", err)
 		}
-		go func() { _ = cmd.Wait() }()
 		return true, nil
 	}
 
