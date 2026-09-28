@@ -36,6 +36,11 @@ type App struct {
 	mu        sync.Mutex
 	stopping  bool
 	lastStats bot.BotStats
+
+	// Logs are high-frequency and unrelated to bot lifecycle ownership.
+	// Keep them off the main App mutex so console traffic cannot delay
+	// Start/Stop/GetStats or bot assignment.
+	logMu     sync.RWMutex
 	logBuffer []string
 
 	// cachedHistory is the in-memory mirror of attack_history.json
@@ -71,12 +76,12 @@ type WailsLogWriter struct {
 func (w *WailsLogWriter) Write(p []byte) (n int, err error) {
 	msg := string(p)
 
-	w.app.mu.Lock()
+	w.app.logMu.Lock()
 	w.app.logBuffer = append(w.app.logBuffer, msg)
 	if len(w.app.logBuffer) > 100 {
 		w.app.logBuffer = w.app.logBuffer[len(w.app.logBuffer)-100:]
 	}
-	w.app.mu.Unlock()
+	w.app.logMu.Unlock()
 
 	return len(p), nil
 }
@@ -1260,9 +1265,9 @@ func (a *App) GetVillageResourceHistory() []VillageResourceSnapshot {
 }
 
 func (a *App) GetLogs() []string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	// Return a copy to avoid race conditions
+	a.logMu.RLock()
+	defer a.logMu.RUnlock()
+	// Return a copy to avoid race conditions.
 	res := make([]string, len(a.logBuffer))
 	copy(res, a.logBuffer)
 	return res
