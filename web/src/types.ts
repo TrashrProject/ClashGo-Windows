@@ -63,6 +63,9 @@ export interface BotStats {
   ui_anchor_hit_rate: number;
   ui_anchor_enabled: boolean;
   near_miss_targets: number;
+  near_miss_5_targets: number;
+  near_miss_10_targets: number;
+  near_miss_15_targets: number;
   top_rejected_targets?: RejectedTargetSample[];
   adb_health: {
     avg_capture_ms: number;
