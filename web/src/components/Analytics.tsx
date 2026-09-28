@@ -790,6 +790,33 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     ];
   }, [history, stats]);
 
+  const enduranceStats = React.useMemo(() => {
+    const captures = stats.adb_health?.captures_total || 0;
+    const errors = stats.adb_health?.errors_total || 0;
+    const adbEvents = captures + errors;
+    const adbErrorRate = adbEvents > 0 ? errors * 100 / adbEvents : 0;
+    const attacks = Math.max(0, stats.attacks_completed || history?.length || 0);
+    const anomalyRate = attacks > 0 ? (stats.anomalies || 0) * 100 / attacks : 0;
+    const restartRate = attacks > 0 ? (stats.bluestacks_restarts || 0) * 100 / attacks : 0;
+    const tapTotal = stats.adb_health?.taps_total || 0;
+    const legacy = stats.adb_health?.legacy_taps_total || 0;
+    const pipe = stats.adb_health?.pipe_taps_total || 0;
+
+    return {
+      adbErrorRate,
+      anomalyRate,
+      restartRate,
+      captures,
+      errors,
+      attacks,
+      tapTotal,
+      legacy,
+      pipe,
+      legacyRate: tapTotal > 0 ? legacy * 100 / tapTotal : 0,
+      captureHealth: adbEvents === 0 ? 'Learning' : adbErrorRate <= 0.5 ? 'Excellent' : adbErrorRate <= 2 ? 'Watch' : 'Degraded',
+    };
+  }, [stats, history]);
+
   const optimizationAdvisor = React.useMemo(() => {
     type Opportunity = {
       key: string;
@@ -942,6 +969,33 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">{metric.label}</div>
               <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Endurance</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Long-run stability</h3>
+            <p className="text-sm text-zinc-500 mt-1">Transport and recovery pressure normalized so a long session can be compared with a short one.</p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{enduranceStats.captureHealth}</div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {[
+            { label: 'ADB error rate', value: enduranceStats.captures + enduranceStats.errors > 0 ? `${enduranceStats.adbErrorRate.toFixed(2)}%` : '—', detail: `${enduranceStats.errors} errors / ${enduranceStats.captures} captures` },
+            { label: 'Anomalies / 100', value: enduranceStats.attacks > 0 ? enduranceStats.anomalyRate.toFixed(1) : '—', detail: `${stats.anomalies || 0} total anomalies` },
+            { label: 'Restarts / 100', value: enduranceStats.attacks > 0 ? enduranceStats.restartRate.toFixed(1) : '—', detail: `${stats.bluestacks_restarts || 0} BlueStacks restarts` },
+            { label: 'Consecutive fails', value: (stats.adb_health?.consecutive_fails || 0).toString(), detail: 'Current ADB pressure' },
+            { label: 'Tap transport', value: enduranceStats.tapTotal > 0 ? `${enduranceStats.legacyRate.toFixed(0)}% legacy` : '—', detail: `${enduranceStats.tapTotal} routed taps` },
+            { label: 'Health score', value: `${stats.health_score ?? 100}/100`, detail: stats.speed_profile ? `${stats.speed_profile} pacing` : 'Adaptive pacing' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
             </div>
           ))}
         </div>
