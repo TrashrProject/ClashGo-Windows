@@ -52,6 +52,10 @@ export interface BotStats {
   avg_rejected_de: number;
   avg_accepted_score: number;
   avg_rejected_score: number;
+  preferred_scale_attempts: number;
+  preferred_scale_hits: number;
+  preferred_scale_fallbacks: number;
+  preferred_scale_hit_rate: number;
   adb_health: {
     avg_capture_ms: number;
     fast_capture_ms: number;
