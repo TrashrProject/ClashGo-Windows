@@ -1429,12 +1429,13 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
           </div>
           <span className="material-symbols-outlined text-zinc-400">my_location</span>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {[
             { label: 'Anchor attempts', value: (stats.ui_anchor_attempts || 0).toLocaleString(), detail: 'Verified local probes' },
             { label: 'Anchor hits', value: (stats.ui_anchor_hits || 0).toLocaleString(), detail: 'Local verification success' },
             { label: 'Fallback scans', value: (stats.ui_anchor_fallbacks || 0).toLocaleString(), detail: 'Full locator preserved' },
             { label: 'Hit rate', value: (stats.ui_anchor_attempts || 0) > 0 ? `${(stats.ui_anchor_hit_rate || 0).toFixed(1)}%` : 'Learning', detail: 'Higher = less vision work' },
+            { label: 'Circuit breaker', value: stats.ui_anchor_enabled === false ? 'FULL SCAN' : 'ACTIVE', detail: stats.ui_anchor_enabled === false ? 'Cache paused · full locator only' : 'Local verification enabled' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
