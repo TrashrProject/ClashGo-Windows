@@ -1525,6 +1525,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		return
 	}
 
+	sequenceStartedAt := time.Now()
 	var cooldownDurationMS int64
 	var preparationDurationMS int64
 
@@ -2145,6 +2146,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		BattleEndReason:  b.attackExec.LastBattleEndReason(),
 		DestructionPct:   b.attackExec.LastDestructionPercent(),
 		TownHallDestroyed: b.attackExec.ThDestroyed(),
+		ReturnHomeSuccess: false,
 	}
 
 	if b.telemetry != nil {
@@ -2199,6 +2201,26 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	b.returnHomeCount.Add(1)
 	b.returnHomeMicros.Add(returnHomeDur.Microseconds())
 	b.lastReturnHomeUS.Store(returnHomeDur.Microseconds())
+	// Enrich the already-published attack report with post-battle overhead.
+	// The initial row is intentionally saved before ReturnHome so battle loot
+	// appears immediately; this second lightweight write adds the true
+	// ready-to-ready timing once ReturnHome finishes.
+	rep.ReturnHomeDurationMS = returnHomeDur.Milliseconds()
+	rep.ReturnHomeSuccess = returnedHome
+	rep.FullRoutineDurationMS = time.Since(sequenceStartedAt).Milliseconds()
+
+	if len(b.historyCache) > 0 && b.historyCache[0].Timestamp == rep.Timestamp {
+		b.historyCache[0] = rep
+		if histBytes, err := json.MarshalIndent(b.historyCache, "", "  "); err == nil {
+			_ = AsyncWriteFile(paths.ResolveConfig("attack_history.json"), histBytes, 0644)
+		}
+	}
+	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
+		_ = AsyncWriteFile(paths.ResolveConfig("last_attack_report.json"), repBytes, 0644)
+	}
+	if b.OnStatsUpdate != nil {
+		b.OnStatsUpdate()
+	}
 	if b.telemetry != nil {
 		b.telemetry.Emit(telemetry.EventReturnHome, map[string]any{
 			"success": returnedHome,
@@ -3233,7 +3255,10 @@ type AttackReport struct {
 	CooldownDurationMS    int64  `json:"cooldown_duration_ms"`
 	BattleEndReason   string  `json:"battle_end_reason"`
 	DestructionPct    int     `json:"destruction_pct"`
-	TownHallDestroyed bool    `json:"town_hall_destroyed"`
+	TownHallDestroyed     bool  `json:"town_hall_destroyed"`
+	ReturnHomeDurationMS  int64 `json:"return_home_duration_ms"`
+	ReturnHomeSuccess     bool  `json:"return_home_success"`
+	FullRoutineDurationMS int64 `json:"full_routine_duration_ms"`
 }
 
 type adbLogAdapter struct {
