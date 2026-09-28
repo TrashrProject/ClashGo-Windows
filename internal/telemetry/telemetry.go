@@ -89,6 +89,13 @@ func New(path string) *Bus {
 	return b
 }
 
+func (b *Bus) SessionID() string {
+	if b == nil {
+		return ""
+	}
+	return b.sessionID
+}
+
 func (b *Bus) Emit(t EventType, fields map[string]any) {
 	if b == nil {
 		return
