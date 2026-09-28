@@ -2194,7 +2194,11 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		// zero) value is the true result. Every attempt overwrites
 		// last_battle_result.png with the freshest frame so the saved
 		// artifact matches the final parse.
-		b.client.JitteredSleep(1800 * time.Millisecond)
+		resultSettleDuration, resultPanelStable := b.waitForStableResultPanel(1800 * time.Millisecond)
+		b.logger.Debug().
+			Dur("duration", resultSettleDuration).
+			Bool("stable", resultPanelStable).
+			Msg("result panel settle completed")
 
 		// Authoritative star signal: the destruction percentage the battle
 		// wait sampled from the stall ROI (proven live: valk runs tracked
@@ -3384,6 +3388,58 @@ func resultPanelHash(screen gocv.Mat, cal *game.Calibration) uint64 {
 		}
 	}
 	return h
+}
+
+// waitForStableResultPanel replaces the old blind 1.8s result-screen sleep
+// with a bounded visual settle. It can finish sooner on fast devices, but it
+// never waits longer than maxWait and never changes result parsing rules.
+func (b *Bot) waitForStableResultPanel(maxWait time.Duration) (time.Duration, bool) {
+	started := time.Now()
+	if maxWait <= 0 {
+		return 0, false
+	}
+
+	// The overlay needs a short guaranteed paint window before frame stability
+	// is meaningful. This is still far below the historical 1.8s blind sleep.
+	initial := 600 * time.Millisecond
+	if initial > maxWait {
+		initial = maxWait
+	}
+	select {
+	case <-time.After(initial):
+	case <-b.ctx.Done():
+		return time.Since(started), false
+	}
+
+	var previous uint64
+	for time.Since(started) < maxWait {
+		screen, err := b.client.CaptureToMat()
+		if err == nil && !screen.Empty() {
+			hash := resultPanelHash(screen, b.cal)
+			screen.Close()
+			if hash != 0 && hash == previous {
+				return time.Since(started), true
+			}
+			previous = hash
+		} else if !screen.Empty() {
+			screen.Close()
+		}
+
+		remaining := maxWait - time.Since(started)
+		if remaining <= 0 {
+			break
+		}
+		pause := 250 * time.Millisecond
+		if pause > remaining {
+			pause = remaining
+		}
+		select {
+		case <-time.After(pause):
+		case <-b.ctx.Done():
+			return time.Since(started), false
+		}
+	}
+	return time.Since(started), false
 }
 
 func (b *Bot) isGreen(screen gocv.Mat, x, y int) bool {
