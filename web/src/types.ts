@@ -44,6 +44,7 @@ export interface BotStats {
   last_next_transition_ms: number;
   adb_health: {
     avg_capture_ms: number;
+    fast_capture_ms: number;
     consecutive_fails: number;
     captures_total: number;
     errors_total: number;
