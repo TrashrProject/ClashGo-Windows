@@ -15,6 +15,11 @@ type searchPacing struct {
 	PostTransitionPause time.Duration
 	StabilityRestEvery  int
 	StabilityRest       time.Duration
+
+	// Preparation pacing affects only menu/UI settling before matchmaking.
+	// It never changes battle deployment timing.
+	PrepSettlePause     time.Duration
+	PrepRetryPause      time.Duration
 }
 
 func chooseSearchPacing(h adb.Health) searchPacing {
@@ -34,6 +39,8 @@ func chooseSearchPacing(h adb.Health) searchPacing {
 			PostTransitionPause: 1100 * time.Millisecond,
 			StabilityRestEvery:  8,
 			StabilityRest:       1500 * time.Millisecond,
+			PrepSettlePause:     650 * time.Millisecond,
+			PrepRetryPause:      650 * time.Millisecond,
 		}
 	}
 
@@ -46,6 +53,8 @@ func chooseSearchPacing(h adb.Health) searchPacing {
 			PostTransitionPause: 750 * time.Millisecond,
 			StabilityRestEvery:  10,
 			StabilityRest:       850 * time.Millisecond,
+			PrepSettlePause:     350 * time.Millisecond,
+			PrepRetryPause:      400 * time.Millisecond,
 		}
 	}
 
@@ -55,5 +64,7 @@ func chooseSearchPacing(h adb.Health) searchPacing {
 		PostTransitionPause: 900 * time.Millisecond,
 		StabilityRestEvery:  9,
 		StabilityRest:       1100 * time.Millisecond,
+		PrepSettlePause:     500 * time.Millisecond,
+		PrepRetryPause:      500 * time.Millisecond,
 	}
 }
