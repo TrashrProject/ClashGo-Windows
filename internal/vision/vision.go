@@ -5,6 +5,7 @@ import (
 	"gocv.io/x/gocv"
 	"image"
 	"image/color"
+	"sync"
 )
 
 type Match struct {
@@ -60,6 +61,50 @@ func MatchMultiScale(screen, template gocv.Mat, minScale, maxScale float64, step
 
 func MatchMultiScaleROI(screen, template gocv.Mat, minScale, maxScale float64, steps int, threshold float32, roi image.Rectangle) ([]Match, error) {
 	return MatchMultiScaleROICached(screen, template, "", minScale, maxScale, steps, threshold, roi)
+}
+
+var preferredTemplateScales sync.Map
+
+func RememberPreferredTemplateScale(templateName string, minScale, maxScale float64, steps int, scale float64) {
+	if templateName == "" || scale <= 0 {
+		return
+	}
+	preferredTemplateScales.Store(scaleKey(templateName, minScale, maxScale, steps), scale)
+}
+
+func preferredTemplateScale(templateName string, minScale, maxScale float64, steps int) (float64, bool) {
+	if templateName == "" {
+		return 0, false
+	}
+	v, ok := preferredTemplateScales.Load(scaleKey(templateName, minScale, maxScale, steps))
+	if !ok {
+		return 0, false
+	}
+	scale, ok := v.(float64)
+	return scale, ok && scale > 0
+}
+
+// MatchMultiScaleROICachedPreferred tries a previously successful scale first.
+// It only short-circuits on a deliberately stronger confidence threshold; any
+// doubtful or missing preferred-scale result falls back to the exact full
+// multi-scale matcher used before this optimization.
+func MatchMultiScaleROICachedPreferred(screen, template gocv.Mat, templateName string, minScale, maxScale float64, steps int, threshold float32, roi image.Rectangle) ([]Match, error) {
+	if scale, ok := preferredTemplateScale(templateName, minScale, maxScale, steps); ok {
+		fastThreshold := threshold + 0.12
+		if fastThreshold > 0.92 {
+			fastThreshold = 0.92
+		}
+		matches, err := MatchMultiScaleROICached(screen, template, templateName, scale, scale, 1, fastThreshold, roi)
+		if err == nil && len(matches) > 0 {
+			return matches, nil
+		}
+	}
+
+	matches, err := MatchMultiScaleROICached(screen, template, templateName, minScale, maxScale, steps, threshold, roi)
+	if err == nil && len(matches) > 0 {
+		RememberPreferredTemplateScale(templateName, minScale, maxScale, steps, matches[0].Scale)
+	}
+	return matches, err
 }
 
 func MatchMultiScaleROICached(screen, template gocv.Mat, templateName string, minScale, maxScale float64, steps int, threshold float32, roi image.Rectangle) ([]Match, error) {
