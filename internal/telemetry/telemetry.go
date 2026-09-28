@@ -23,6 +23,7 @@ const (
 	EventAttackFinished  EventType = "attack_finished"
 	EventRecovery        EventType = "recovery"
 	EventCaptureSample   EventType = "capture_sample"
+	EventSpeedProfile    EventType = "speed_profile"
 )
 
 type Event struct {
