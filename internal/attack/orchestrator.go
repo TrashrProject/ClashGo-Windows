@@ -61,6 +61,10 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 	e.lastResolvedEdge = targetEdge
 	e.lastDeploySide = cornerToSide(targetEdge)
+	e.lastSafetyMode = "not_evaluated"
+	e.lastRedZoneValid = false
+	e.lastCorridorVerified = false
+	e.lastHUDSafe = false
 	e.lastLiveBarRescans = 0
 	e.lastLiveBarRescanMicros = 0
 	e.lastSlotDetectMicros = 0
@@ -74,6 +78,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	redDetector := NewRedLineDetector(e.logger)
 	uiCutoff := int(float64(h) * 0.85) // above troop bar
 	redZone := redDetector.Detect(screen, uiCutoff)
+	e.lastRedZoneValid = redZone.Valid
 
 	// Windows adaptive camera search.
 	//
@@ -118,6 +123,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			cameraFrameOwned = true
 			deployScreen = cameraFrame
 			redZone = redDetector.Detect(deployScreen, uiCutoff)
+			e.lastRedZoneValid = redZone.Valid
 			side, free := freeSpace(redZone)
 			e.logger.Debug().
 				Str("reason", reason).
@@ -449,6 +455,10 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		if side, rp1, rp2, freeSpace, ok := windowsDeployCorridor(redZone, w, h, uiCutoff); ok {
 			deploySide, p1, p2 = side, rp1, rp2
 			e.lastDeploySide = deploySide
+			e.lastSafetyMode = "live_red_zone"
+			e.lastRedZoneValid = true
+			e.lastCorridorVerified = true
+			e.lastHUDSafe = p1.Y < uiCutoff && p2.Y < uiCutoff
 			e.logger.Info().
 				Str("side", deploySide).
 				Interface("red_bbox", redZone.BBox).
@@ -467,6 +477,10 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			// edge; use them if red-line detection itself was unavailable.
 			p1 = deployLine.Points[0]
 			p2 = deployLine.Points[len(deployLine.Points)-1]
+			e.lastSafetyMode = "pinned_or_calculated"
+			e.lastRedZoneValid = false
+			e.lastCorridorVerified = false
+			e.lastHUDSafe = p1.Y < uiCutoff && p2.Y < uiCutoff
 			e.logger.Warn().
 				Interface("p1", p1).
 				Interface("p2", p2).
@@ -475,6 +489,10 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			// Last-resort line hugs the LEFT border rather than the middle.
 			p1 = image.Pt(edgeMargin, int(float64(h)*0.25))
 			p2 = image.Pt(edgeMargin, int(float64(h)*0.68))
+			e.lastSafetyMode = "fallback_outer_edge"
+			e.lastRedZoneValid = false
+			e.lastCorridorVerified = false
+			e.lastHUDSafe = p1.Y < uiCutoff && p2.Y < uiCutoff
 			e.logger.Warn().Msg("Windows deploy line fallback: hugging outer left border")
 		}
 
