@@ -187,7 +187,10 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             <h3 className="mt-2 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Farm Velocity</h3>
             <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">The numbers that show whether ClashGO is farming fast, not just staying busy.</p>
           </div>
-          <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-zinc-500">
+            <span className="px-3 py-2 rounded-full bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10">
+              {stats.speed_profile || 'Balanced'} mode
+            </span>
             <span className="px-3 py-2 rounded-full bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10">
               Health {stats.health_score ?? 100}/100
             </span>
