@@ -1557,6 +1557,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 	var remainingUndeployed int
 	var deployErr error
+	var deployDurationMS int64
 	var stratName string = "Unknown"
 	var targetEdge string = "Unknown"
 
@@ -1643,7 +1644,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				stratName = strat.Name
 				targetEdge = strat.TargetEdge
 			}
+			deployStarted := time.Now()
 			remainingUndeployed, deployErr = b.deployTroops(screen)
+			deployDurationMS = time.Since(deployStarted).Milliseconds()
 			b.attackExec.SetEarlyExitAllowed(deployErr == nil && remainingUndeployed == 0)
 			if deployErr != nil || remainingUndeployed > 0 {
 				b.logger.Warn().
@@ -2042,10 +2045,11 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		SearchSkips:      sequenceSkips,
 		SearchDurationMS: func() int64 { if attackStartedAt.IsZero() { return 0 }; return attackStartedAt.Sub(searchStart).Milliseconds() }(),
 		CycleDurationMS:  time.Since(searchStart).Milliseconds(),
+		DeployDurationMS: deployDurationMS,
 	}
 
 	if b.telemetry != nil {
-		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "search_ms": rep.SearchDurationMS, "cycle_ms": rep.CycleDurationMS})
+		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "cycle_ms": rep.CycleDurationMS})
 	}
 
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
@@ -3035,6 +3039,7 @@ type AttackReport struct {
 	SearchSkips      int    `json:"search_skips"`
 	SearchDurationMS int64  `json:"search_duration_ms"`
 	CycleDurationMS  int64  `json:"cycle_duration_ms"`
+	DeployDurationMS int64  `json:"deploy_duration_ms"`
 }
 
 type adbLogAdapter struct {
