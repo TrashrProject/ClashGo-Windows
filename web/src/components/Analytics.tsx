@@ -59,6 +59,18 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   const totalAttacks = stats.stars_3 + stats.stars_2 + stats.stars_1 + stats.stars_0;
   const getPercent = (count: number) => totalAttacks > 0 ? Math.round((count / totalAttacks) * 100) : 0;
   const threeStarRate = totalAttacks > 0 ? Math.round((stats.stars_3 / totalAttacks) * 100) : 0;
+  const avgSearchSeconds = history?.length
+    ? history.reduce((sum, r) => sum + (r.search_duration_ms || 0), 0) / history.length / 1000
+    : 0;
+  const avgCycleSeconds = history?.length
+    ? history.reduce((sum, r) => sum + (r.cycle_duration_ms || 0), 0) / history.length / 1000
+    : 0;
+  const compact = (v: number) => {
+    const abs = Math.abs(v);
+    if (abs >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+    if (abs >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+    return Math.round(v).toLocaleString();
+  };
 
   // CSS-only donut (conic-gradient — no chart dependency). Each
   // segment's sweep is the star-rate percentage mapped to degrees;
@@ -75,6 +87,34 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 max-w-6xl mx-auto">
+
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5 mb-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Intelligence V2</div>
+            <h3 className="mt-2 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Farm Velocity</h3>
+            <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">The numbers that show whether ClashGO is farming fast, not just staying busy.</p>
+          </div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+            {stats.telemetry_events?.toLocaleString?.() ?? 0} runtime events
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {[
+            { label: 'Gold / h', value: compact(stats.gold_per_hour || 0) },
+            { label: 'Elixir / h', value: compact(stats.elixir_per_hour || 0) },
+            { label: 'DE / h', value: compact(stats.de_per_hour || 0) },
+            { label: 'Avg search', value: `${avgSearchSeconds.toFixed(1)}s` },
+            { label: 'Avg cycle', value: `${avgCycleSeconds.toFixed(1)}s` },
+            { label: 'Capture', value: `${(stats.average_capture_ms || 0).toFixed(0)}ms` },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
