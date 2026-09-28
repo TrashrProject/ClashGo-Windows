@@ -1690,7 +1690,6 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		select {
 		case <-b.ctx.Done():
 			b.logger.Info().Msg("search loop cancelled by stop, abandoning attack sequence")
-			lootRec.Close()
 			return
 		default:
 		}
@@ -1698,7 +1697,6 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		if time.Since(searchStart) > 5*time.Minute {
 			b.logger.Error().Msg("searching/skipping bases took too long (stuck in clouds?), restarting game...")
 			b.restartGame()
-			lootRec.Close()
 			return
 		}
 
@@ -1964,7 +1962,6 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 		if consecutiveNextFailures >= 3 {
 			b.logger.Error().Msg("Next remained unresponsive after controlled retries; restarting Clash to recover matchmaking")
-			lootRec.Close()
 			b.restartGame()
 			return
 		}
