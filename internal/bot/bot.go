@@ -2938,6 +2938,16 @@ func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 	b.logger.Info().Msg("bot configuration updated in real-time")
 }
 
+
+// RecentActivity returns a compact high-level activity feed for the UI.
+// It deliberately excludes per-frame telemetry and verbose diagnostic logs.
+func (b *Bot) RecentActivity(limit int) []telemetry.Event {
+	if b == nil || b.telemetry == nil {
+		return []telemetry.Event{}
+	}
+	return b.telemetry.Recent(limit)
+}
+
 func (b *Bot) Stats() BotStats {
 	uptime := time.Since(b.startedAt)
 	hours := uptime.Hours()
