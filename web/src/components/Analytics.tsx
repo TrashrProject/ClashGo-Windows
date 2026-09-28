@@ -68,6 +68,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       deployMs: number;
       cycleMs: number;
       routineMs: number;
+      effectiveRoutineMs: number;
       complete: number;
     }>();
     for (const rep of history ?? []) {
@@ -78,7 +79,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       const key = `${strategy}::${side}`;
       const row = map.get(key) ?? {
         key, strategy, side, attacks: 0, stars: 0, goldElixir: 0, dark: 0,
-        deployMs: 0, cycleMs: 0, routineMs: 0, complete: 0,
+        deployMs: 0, cycleMs: 0, routineMs: 0, effectiveRoutineMs: 0, complete: 0,
       };
       row.attacks++;
       row.stars += rep.stars || 0;
@@ -87,6 +88,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       row.deployMs += rep.deploy_duration_ms || 0;
       row.cycleMs += rep.cycle_duration_ms || 0;
       row.routineMs += rep.full_routine_duration_ms || 0;
+      row.effectiveRoutineMs += rep.full_routine_duration_ms || rep.cycle_duration_ms || 0;
       if (rep.deploy_success) row.complete++;
       map.set(key, row);
     }
@@ -99,7 +101,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     return strategySideStats
       .filter((row) => row.attacks >= 5)
       .map((row) => {
-        const measuredMs = row.routineMs > 0 ? row.routineMs : row.cycleMs;
+        const measuredMs = row.effectiveRoutineMs;
         const hours = measuredMs > 0 ? measuredMs / 3_600_000 : 0;
         const yieldPerHour = hours > 0 ? row.goldElixir / hours : 0;
         const confidence = row.attacks >= 25 ? 'Strong' : row.attacks >= 10 ? 'Solid' : 'Building';
@@ -164,19 +166,20 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
 
     const summarize = (rows: AttackReport[]) => {
       let search = 0, deploy = 0, complete = 0, capture = 0, scan = 0;
+      let searchN = 0, deployN = 0, captureN = 0, scanN = 0;
       for (const rep of rows) {
-        search += rep.search_duration_ms || 0;
-        deploy += rep.deploy_duration_ms || 0;
-        capture += rep.capture_ms || 0;
-        scan += rep.target_scan_ms || 0;
+        if ((rep.search_duration_ms || 0) > 0) { search += rep.search_duration_ms; searchN++; }
+        if ((rep.deploy_duration_ms || 0) > 0) { deploy += rep.deploy_duration_ms; deployN++; }
+        if ((rep.capture_ms || 0) > 0) { capture += rep.capture_ms; captureN++; }
+        if ((rep.target_scan_ms || 0) > 0) { scan += rep.target_scan_ms; scanN++; }
         if (rep.deploy_success) complete++;
       }
       const n = rows.length;
       return {
-        search: search / n,
-        deploy: deploy / n,
-        capture: capture / n,
-        scan: scan / n,
+        search: searchN > 0 ? search / searchN : 0,
+        deploy: deployN > 0 ? deploy / deployN : 0,
+        capture: captureN > 0 ? capture / captureN : 0,
+        scan: scanN > 0 ? scan / scanN : 0,
         completeRate: complete * 100 / n,
       };
     };
