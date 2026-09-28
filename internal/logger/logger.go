@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Ducky705/ClashGO/internal/paths"
@@ -17,6 +18,38 @@ import (
 // cleanWriter trims trailing spaces from the console output.
 type cleanWriter struct {
 	w io.Writer
+}
+
+// dedupeWriter suppresses immediately repeated console lines while leaving the
+// JSON file log untouched. This keeps the UI/terminal readable during clouds,
+// retries and polling loops without throwing away diagnostics.
+type dedupeWriter struct {
+	w      io.Writer
+	window time.Duration
+	mu     sync.Mutex
+	last   string
+	lastAt time.Time
+}
+
+func (dw *dedupeWriter) Write(p []byte) (int, error) {
+	line := string(p)
+	key := strings.TrimSpace(line)
+	// ConsoleWriter prefixes HH:MM:SS. Exclude that prefix from duplicate
+	// detection so identical messages emitted on adjacent seconds collapse.
+	if len(key) > 9 && key[2] == ':' && key[5] == ':' {
+		key = strings.TrimSpace(key[8:])
+	}
+	now := time.Now()
+	dw.mu.Lock()
+	if key != "" && key == dw.last && now.Sub(dw.lastAt) < dw.window {
+		dw.lastAt = now
+		dw.mu.Unlock()
+		return len(p), nil
+	}
+	dw.last, dw.lastAt = key, now
+	dw.mu.Unlock()
+	_, err := dw.w.Write(p)
+	return len(p), err
 }
 
 func (cw cleanWriter) Write(p []byte) (n int, err error) {
@@ -46,7 +79,7 @@ func Init(debug bool, extraWriters ...io.Writer) {
 
 	// 2. Setup Clean Console Logging (Story Mode)
 	consoleWriter := zerolog.ConsoleWriter{
-		Out:        cleanWriter{w: os.Stdout},
+		Out:        &dedupeWriter{w: cleanWriter{w: os.Stdout}, window: 2 * time.Second},
 		TimeFormat: "15:04:05",
 		NoColor:    false,
 		// PartsOrder defines the order of the parts. We only want Time, Level, and Message.
