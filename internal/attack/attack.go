@@ -297,6 +297,21 @@ func (e *Executor) loadTemplates() {
 	}
 }
 
+// Close releases native OpenCV templates owned by the attack executor.
+// The method is idempotent and must only run after the active attack sequence
+// has stopped using the executor.
+func (e *Executor) Close() {
+	if e == nil {
+		return
+	}
+	for name, mat := range e.templates {
+		if !mat.Closed() {
+			mat.Close()
+		}
+		delete(e.templates, name)
+	}
+}
+
 func (e *Executor) SetClassifier(fn func(gocv.Mat) (game.GameState, int)) {
 	e.classify = fn
 }
