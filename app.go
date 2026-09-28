@@ -232,22 +232,35 @@ func (a *App) forwardUpdaterStatus(ctx context.Context) {
 	}
 }
 
-func (a *App) saveStats() {
+func (a *App) marshalStatsSnapshot() ([]byte, error) {
 	a.mu.Lock()
 	stats := a.lastStats
 	if a.bot != nil {
 		stats = mergeStats(a.lastStats, a.bot.Stats())
 	}
 	a.mu.Unlock()
+	return json.MarshalIndent(stats, "", "  ")
+}
 
-	bytes, err := json.MarshalIndent(stats, "", "  ")
+func (a *App) saveStats() {
+	bytes, err := a.marshalStatsSnapshot()
 	if err != nil {
 		log.Error().Err(err).Msg("failed to marshal stats")
 		return
 	}
-
 	if err := bot.AsyncWriteFile(paths.ResolveConfig("stats.json"), bytes, 0644); err != nil {
 		log.Error().Err(err).Msg("failed to write stats.json")
+	}
+}
+
+func (a *App) saveStatsSoon() {
+	bytes, err := a.marshalStatsSnapshot()
+	if err != nil {
+		log.Error().Err(err).Msg("failed to marshal stats")
+		return
+	}
+	if err := bot.AsyncWriteFileSoon(paths.ResolveConfig("stats.json"), bytes, 0644); err != nil {
+		log.Error().Err(err).Msg("failed to queue stats.json")
 	}
 }
 
@@ -607,7 +620,7 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			copy(a.cachedHistory, history)
 			a.cachedHistoryMu.Unlock()
 
-			a.saveStats()
+			a.saveStatsSoon()
 
 			if a.ctx != nil {
 				runtime.EventsEmit(a.ctx, "attack_history_updated", history)
