@@ -84,6 +84,11 @@ export interface AttackReport {
   search_duration_ms: number;
   cycle_duration_ms: number;
   deploy_duration_ms: number;
+  battle_duration_ms: number;
+  target_gold: number;
+  target_elixir: number;
+  target_de: number;
+  target_score: number;
 }
 
 export interface BotConfig {
