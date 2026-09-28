@@ -574,6 +574,11 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				Msg("Windows deployment controlled by farm composition profile")
 		}
 		oneShotDone := make(map[string]bool)
+		// Anonymous Siege/CC cards must be blacklisted by CATEGORY after their
+		// first deployment, not by X. The live bar compacts after cards empty;
+		// an unnamed siege can therefore move to a new X and otherwise look like
+		// a fresh one-shot card on the next scan.
+		anonymousOneShotDone := make(map[string]bool)
 		// Structurally detected heroes may not have a portrait-template name.
 		// Their relative left-to-right order remains stable even as troop cards
 		// disappear, so remember how many anonymous hero cards were already
@@ -626,6 +631,11 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				key := oneShotKey(slot)
 				// Skip every identity explicitly blacklisted for this battle.
 				if oneShotDone[key] {
+					continue
+				}
+				if strings.TrimSpace(slot.UnitName) == "" &&
+					(slot.Category == "Siege" || slot.Category == "CC") &&
+					anonymousOneShotDone[slot.Category] {
 					continue
 				}
 				if slot.Category == "Hero" && strings.TrimSpace(slot.UnitName) == "" {
@@ -717,6 +727,10 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				tapExec.HumanSleep(130, 15)
 				tapExec.TapDeployPoint(pt, 1, 1)
 				oneShotDone[key] = true
+				if strings.TrimSpace(chosen.UnitName) == "" &&
+					(chosen.Category == "Siege" || chosen.Category == "CC") {
+					anonymousOneShotDone[chosen.Category] = true
+				}
 				if chosen.Category == "Hero" && strings.TrimSpace(chosen.UnitName) == "" {
 					unknownHeroesDeployed++
 					e.logger.Debug().
