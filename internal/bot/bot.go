@@ -3497,6 +3497,7 @@ func (b *Bot) Stats() BotStats {
 		PreferredScaleHits:      scaleStats.Hits,
 		PreferredScaleFallbacks: scaleStats.Fallbacks,
 		PreferredScaleHitRate:   scaleHitRate,
+		PreferredScaleEnabled:   scaleStats.Enabled,
 	}
 }
 
@@ -3558,6 +3559,7 @@ type BotStats struct {
 	PreferredScaleHits      int64   `json:"preferred_scale_hits"`
 	PreferredScaleFallbacks int64   `json:"preferred_scale_fallbacks"`
 	PreferredScaleHitRate   float64 `json:"preferred_scale_hit_rate"`
+	PreferredScaleEnabled   bool    `json:"preferred_scale_enabled"`
 }
 
 type AttackReport struct {
