@@ -65,6 +65,7 @@ export interface VillageResourceSnapshot {
 
 export interface AttackReport {
   timestamp: string;
+  session_id?: string;
   strategy: string;
   target_edge: string;
   deploy_side: string;
