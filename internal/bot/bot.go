@@ -18,6 +18,7 @@ import (
 	"github.com/Ducky705/ClashGO/internal/attack"
 	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/game"
+	"github.com/Ducky705/ClashGO/internal/intelligence"
 	"github.com/Ducky705/ClashGO/internal/paths"
 	"github.com/Ducky705/ClashGO/internal/telemetry"
 	"github.com/Ducky705/ClashGO/internal/vision"
@@ -1606,22 +1607,27 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			})
 		}
 
-		b.logger.Info().
-			Int("gold", loot.Gold).
-			Int("elixir", loot.Elixir).
-			Int("de", loot.DarkElixir).
-			Msg("target scanned")
+		decision := intelligence.EvaluateTarget(intelligence.Target{
+			Gold: loot.Gold, Elixir: loot.Elixir, DarkElixir: loot.DarkElixir,
+		}, intelligence.TargetRules{
+			MinGold: b.cfg.Search.MinLootGold,
+			MinElixir: b.cfg.Search.MinLootElixir,
+			MinDarkElixir: b.cfg.Search.MinLootDarkElixir,
+			DarkOverride: b.cfg.Search.AttackIfDarkElixirGT,
+			SearchEnabled: b.cfg.Search.Enabled,
+		})
 		if b.telemetry != nil {
-			b.telemetry.Emit(telemetry.EventTargetFound, map[string]any{"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir})
+			b.telemetry.Emit(telemetry.EventTargetFound, map[string]any{"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir, "score": decision.Score, "accept": decision.Accept, "reason": decision.Reason})
 		}
 
-		meetsReq := !b.cfg.Search.Enabled || (loot.Gold >= b.cfg.Search.MinLootGold &&
-			loot.Elixir >= b.cfg.Search.MinLootElixir &&
-			loot.DarkElixir >= b.cfg.Search.MinLootDarkElixir)
-
-		if meetsReq {
+		if decision.Accept {
 			attackStartedAt = time.Now()
-			b.logger.Info().Msg("target accepted — attacking")
+			b.logger.Info().
+				Int("score", decision.Score).
+				Int("gold", loot.Gold).
+				Int("elixir", loot.Elixir).
+				Int("de", loot.DarkElixir).
+				Msg("target accepted — attacking")
 			if b.telemetry != nil {
 				b.telemetry.Emit(telemetry.EventAttackStarted, map[string]any{"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir, "search_ms": attackStartedAt.Sub(searchStart).Milliseconds(), "skips": sequenceSkips})
 			}
@@ -1654,7 +1660,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			break
 		}
 
-		b.logger.Debug().Msg("target below thresholds — skipping")
+		b.logger.Debug().
+			Int("score", decision.Score).
+			Str("reason", decision.Reason).
+			Msg("target rejected")
 
 		// BlueStacks stability guard: changing opponents endlessly at full
 		// speed can put sustained pressure on HD-Player.exe. Rest briefly
