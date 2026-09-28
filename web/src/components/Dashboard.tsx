@@ -1,5 +1,5 @@
 import React from 'react';
-import { BotStats, AttackReport, ActivityEvent, AttackReplayView } from '../types';
+import { BotStats, AttackReport, ActivityEvent, AttackReplayView, SessionReportView } from '../types';
 import { formatUptime, parseLogLine, LogSeverity } from '../utils';
 import AutomationOverview from './AutomationOverview';
 
@@ -8,6 +8,7 @@ interface DashboardProps {
   history: AttackReport[];
   activity: ActivityEvent[];
   replay: AttackReplayView;
+  sessionReport: SessionReportView | null;
   logs: string[];
 }
 
@@ -43,6 +44,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
   history,
   activity,
   replay,
+  sessionReport,
   logs,
 }) => {
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -274,6 +276,44 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
   return (
     <div className="space-y-6">
       <AutomationOverview />
+
+      {sessionReport && sessionReport.attacks > 0 && (
+        <section className="bg-zinc-950 dark:bg-white rounded-[2.5rem] shadow-premium-lg overflow-hidden">
+          <div className="px-6 py-5 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-5">
+            <div className="min-w-0">
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Session Brief</div>
+              <div className="mt-1 flex flex-wrap items-center gap-3">
+                <h3 className="text-xl font-black text-white dark:text-zinc-950 tracking-tight">
+                  {sessionReport.attacks} attack{sessionReport.attacks === 1 ? '' : 's'} · {sessionReport.speed_profile || 'Balanced'}
+                </h3>
+                <span className="px-2.5 py-1 rounded-full bg-white/10 dark:bg-zinc-950/10 text-[9px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
+                  Health {sessionReport.health_score || 0}/100
+                </span>
+              </div>
+              <div className="mt-2 text-[10px] font-bold text-zinc-500">
+                Bottleneck: {(sessionReport.bottleneck || 'learning').split('_').join(' ')}
+                {sessionReport.top_strategy ? ` · ${sessionReport.top_strategy}` : ''}
+                {sessionReport.top_deploy_side ? ` · ${sessionReport.top_deploy_side}` : ''}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 min-w-0 xl:min-w-[650px]">
+              {[
+                { label: 'Gold / h', value: new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(sessionReport.gold_per_hour || 0) },
+                { label: 'Zero-touch', value: `${(sessionReport.zero_touch_rate || 0).toFixed(1)}%` },
+                { label: 'Avg stars', value: (sessionReport.average_stars || 0).toFixed(2) },
+                { label: 'Clean streak', value: `${sessionReport.current_zero_touch_streak || 0} / ${sessionReport.best_zero_touch_streak || 0}` },
+                { label: 'Best G+E', value: new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(sessionReport.best_attack?.gold_plus_elixir || 0) },
+              ].map((metric) => (
+                <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 px-3 py-3">
+                  <div className="text-[8px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
+                  <div className="mt-1 text-lg font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Compact activity feed: high-level actions only, not raw diagnostics. */}
       <section className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none overflow-hidden">
