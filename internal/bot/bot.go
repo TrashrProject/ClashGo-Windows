@@ -657,6 +657,7 @@ func (b *Bot) recoverEmulator() {
 	b.recoveryAttempts.Add(1)
 	if b.telemetry != nil {
 		b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "start", "attempt": b.recoveryAttempts.Load()})
+		b.telemetry.WriteIncident("device_recovery")
 	}
 	b.logger.Warn().Msg("capture pipeline dead; beginning device recovery ladder")
 
@@ -1657,6 +1658,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			}
 			b.attackExec.SetEarlyExitAllowed(deployErr == nil && remainingUndeployed == 0)
 			if deployErr != nil || remainingUndeployed > 0 {
+				if b.telemetry != nil {
+					b.telemetry.WriteIncident("deployment_failed")
+				}
 				b.logger.Warn().
 					Err(deployErr).
 					Int("remaining", remainingUndeployed).
