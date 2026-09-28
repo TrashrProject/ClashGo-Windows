@@ -1,5 +1,5 @@
 import React from 'react';
-import { BotStats, AttackReport, ActivityEvent } from '../types';
+import { BotStats, AttackReport, ActivityEvent, AttackReplayView } from '../types';
 import { formatUptime, parseLogLine, LogSeverity } from '../utils';
 import AutomationOverview from './AutomationOverview';
 
@@ -7,6 +7,7 @@ interface DashboardProps {
   stats: BotStats;
   history: AttackReport[];
   activity: ActivityEvent[];
+  replay: AttackReplayView;
   logs: string[];
 }
 
@@ -41,6 +42,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
   stats,
   history,
   activity,
+  replay,
   logs,
 }) => {
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -272,6 +274,58 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
           </div>
         )}
       </section>
+
+      {replay?.available && (
+        <section className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none overflow-hidden">
+          <div className="px-6 py-5 flex flex-wrap items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-800/70">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Attack Replay</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">{replay.strategy || 'Latest deployment'}</h3>
+            </div>
+            <div className={`px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${
+              replay.complete
+                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+            }`}>
+              {replay.complete ? 'Complete' : 'Partial'}
+            </div>
+          </div>
+
+          {(replay.events ?? []).length === 0 ? (
+            <div className="px-6 py-8 text-sm font-medium text-zinc-400">No deployment actions recorded in the latest trace.</div>
+          ) : (
+            <div className="px-6 py-5 overflow-x-auto">
+              <div className="flex gap-3 min-w-max">
+                {(replay.events ?? []).slice(-14).map((ev, index) => {
+                  const pointMode = ev.p1?.x === ev.p2?.x && ev.p1?.y === ev.p2?.y;
+                  const title = ev.name || ev.category || ev.kind;
+                  return (
+                    <div key={`${ev.offset_ms}-${index}`} className="w-52 rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/30 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
+                          T+{((ev.offset_ms || 0) / 1000).toFixed(2)}s
+                        </span>
+                        <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{ev.category || ev.kind}</span>
+                      </div>
+                      <div className="mt-2 text-sm font-black text-zinc-950 dark:text-white truncate">{title}</div>
+                      <div className="mt-1 text-[10px] font-bold text-zinc-500">
+                        {ev.count ? `×${ev.count}` : 'event'}{ev.deploy_side ? ` · ${ev.deploy_side}` : ''}
+                      </div>
+                      <div className="mt-3 text-[9px] font-mono text-zinc-400 leading-relaxed">
+                        {ev.kind === 'deploy' ? (
+                          pointMode
+                            ? `point (${ev.p1?.x ?? 0}, ${ev.p1?.y ?? 0})`
+                            : `line (${ev.p1?.x ?? 0}, ${ev.p1?.y ?? 0}) → (${ev.p2?.x ?? 0}, ${ev.p2?.y ?? 0})`
+                        ) : ev.kind}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Metrics Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
