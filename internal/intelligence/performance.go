@@ -96,23 +96,38 @@ func summarizePerformance(samples []PerformanceSample) performanceSummary {
 	}
 	var out performanceSummary
 	var success int
+	var searchN, deployN, routineN, captureN, scanN int
 	for _, s := range samples {
-		out.searchMS += float64(s.SearchMS)
-		out.deployMS += float64(s.DeployMS)
-		out.routineMS += float64(s.RoutineMS)
-		out.captureMS += s.CaptureMS
-		out.scanMS += s.TargetScanMS
+		if s.SearchMS > 0 {
+			out.searchMS += float64(s.SearchMS)
+			searchN++
+		}
+		if s.DeployMS > 0 {
+			out.deployMS += float64(s.DeployMS)
+			deployN++
+		}
+		if s.RoutineMS > 0 {
+			out.routineMS += float64(s.RoutineMS)
+			routineN++
+		}
+		if s.CaptureMS > 0 {
+			out.captureMS += s.CaptureMS
+			captureN++
+		}
+		if s.TargetScanMS > 0 {
+			out.scanMS += s.TargetScanMS
+			scanN++
+		}
 		if s.DeploySuccess {
 			success++
 		}
 	}
-	n := float64(len(samples))
-	out.searchMS /= n
-	out.deployMS /= n
-	out.routineMS /= n
-	out.captureMS /= n
-	out.scanMS /= n
-	out.deploySuccessRate = float64(success) * 100 / n
+	if searchN > 0 { out.searchMS /= float64(searchN) }
+	if deployN > 0 { out.deployMS /= float64(deployN) }
+	if routineN > 0 { out.routineMS /= float64(routineN) }
+	if captureN > 0 { out.captureMS /= float64(captureN) }
+	if scanN > 0 { out.scanMS /= float64(scanN) }
+	out.deploySuccessRate = float64(success) * 100 / float64(len(samples))
 	return out
 }
 
