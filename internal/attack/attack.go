@@ -38,6 +38,11 @@ type Executor struct {
 	// wait can honor per-strategy knobs (e.g. EndAtPercent). Nil when no
 	// dynamic deploy has run yet.
 	activeStrategy *strategy.DynamicStrategy
+	// lastResolvedEdge is the concrete corner after resolving Rotate/Random.
+	// lastDeploySide is the physical side actually used for troop drops; on
+	// Windows it may differ because red-zone safety always wins.
+	lastResolvedEdge string
+	lastDeploySide   string
 
 	// lastDestructionPct is the highest destruction percentage the battle
 	// wait measured from the stall ROI (monotonic in practice). It is the
@@ -76,6 +81,14 @@ type Executor struct {
 
 	OnDukePick func(targetEdge string, chosenEdge string)
 }
+
+// LastResolvedEdge returns the concrete strategy corner selected for the
+// current attack after resolving Random/Rotate.
+func (e *Executor) LastResolvedEdge() string { return e.lastResolvedEdge }
+
+// LastDeploySide returns the physical battlefield side actually used by the
+// deployment engine (left/right/top/bottom when known).
+func (e *Executor) LastDeploySide() string { return e.lastDeploySide }
 
 // LastDestructionPercent returns the highest destruction percentage the
 // battle-end wait measured from the stall ROI (0 when nothing was read).
