@@ -186,12 +186,15 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       searchMs: number;
       deployMs: number;
       newestAt: number;
+      oldestAt: number;
+      firstCycleMs: number;
     }>();
     for (const rep of history ?? []) {
       if (!rep.session_id) continue;
       const row = map.get(rep.session_id) ?? {
         id: rep.session_id, attacks: 0, stars: 0, triples: 0, complete: 0,
-        gold: 0, elixir: 0, dark: 0, cycleMs: 0, searchMs: 0, deployMs: 0, newestAt: 0,
+        gold: 0, elixir: 0, dark: 0, cycleMs: 0, searchMs: 0, deployMs: 0,
+        newestAt: 0, oldestAt: 0, firstCycleMs: 0,
       };
       row.attacks++;
       row.stars += rep.stars || 0;
@@ -204,7 +207,13 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       row.searchMs += rep.search_duration_ms || 0;
       row.deployMs += rep.deploy_duration_ms || 0;
       const ts = Date.parse(rep.timestamp || '');
-      if (Number.isFinite(ts) && ts > row.newestAt) row.newestAt = ts;
+      if (Number.isFinite(ts)) {
+        if (ts > row.newestAt) row.newestAt = ts;
+        if (row.oldestAt === 0 || ts < row.oldestAt) {
+          row.oldestAt = ts;
+          row.firstCycleMs = rep.cycle_duration_ms || 0;
+        }
+      }
       map.set(rep.session_id, row);
     }
     return Array.from(map.values())
@@ -848,7 +857,13 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
               </thead>
               <tbody>
                 {sessionStats.map((row, index) => {
-                  const hours = row.cycleMs > 0 ? row.cycleMs / 3_600_000 : 0;
+                  // Use wall-clock span between the first and last result,
+                  // plus the first attack's own cycle. Unlike summing cycles,
+                  // this includes Return Home / cooldown / preparation gaps.
+                  const wallMs = row.attacks <= 1
+                    ? row.cycleMs
+                    : Math.max(row.firstCycleMs, row.newestAt - row.oldestAt + row.firstCycleMs);
+                  const hours = wallMs > 0 ? wallMs / 3_600_000 : 0;
                   return (
                     <tr key={row.id} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
                       <td className="py-4 pr-4">
