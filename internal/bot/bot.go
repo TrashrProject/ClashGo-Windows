@@ -2104,6 +2104,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 	attackHealth := b.client.Health()
 	attackMode := chooseSearchPacing(attackHealth).Mode
+	liveBarRescans, avgLiveBarRescanMS, avgSelectedCardOCRMS := b.attackExec.LiveBarMetrics()
 	attackTelemetry := telemetry.Snapshot{}
 	sessionID := ""
 	if b.telemetry != nil {
@@ -2141,6 +2142,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		RuntimeMode:      attackMode,
 		CaptureMS:        attackHealth.AvgCaptureMs,
 		TargetScanMS:     attackTelemetry.AvgTargetScanMS,
+		LiveBarRescans:  liveBarRescans,
+		AvgLiveBarRescanMS: avgLiveBarRescanMS,
+		AvgSelectedCardOCRMS: avgSelectedCardOCRMS,
 		PreparationDurationMS: preparationDurationMS,
 		CooldownDurationMS:    cooldownDurationMS,
 		BattleEndReason:  b.attackExec.LastBattleEndReason(),
@@ -2150,7 +2154,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 
 	if b.telemetry != nil {
-		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "cooldown_ms": rep.CooldownDurationMS, "prep_ms": rep.PreparationDurationMS, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore, "end_reason": rep.BattleEndReason, "destruction_pct": rep.DestructionPct, "town_hall_destroyed": rep.TownHallDestroyed})
+		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "cooldown_ms": rep.CooldownDurationMS, "prep_ms": rep.PreparationDurationMS, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore, "live_bar_rescans": rep.LiveBarRescans, "live_bar_rescan_ms": rep.AvgLiveBarRescanMS, "selected_card_ocr_ms": rep.AvgSelectedCardOCRMS, "end_reason": rep.BattleEndReason, "destruction_pct": rep.DestructionPct, "town_hall_destroyed": rep.TownHallDestroyed})
 	}
 
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
@@ -3280,6 +3284,9 @@ type AttackReport struct {
 	RuntimeMode      string  `json:"runtime_mode"`
 	CaptureMS        float64 `json:"capture_ms"`
 	TargetScanMS          float64 `json:"target_scan_ms"`
+	LiveBarRescans       int     `json:"live_bar_rescans"`
+	AvgLiveBarRescanMS   float64 `json:"avg_live_bar_rescan_ms"`
+	AvgSelectedCardOCRMS float64 `json:"avg_selected_card_ocr_ms"`
 	PreparationDurationMS int64  `json:"preparation_duration_ms"`
 	CooldownDurationMS    int64  `json:"cooldown_duration_ms"`
 	BattleEndReason   string  `json:"battle_end_reason"`
