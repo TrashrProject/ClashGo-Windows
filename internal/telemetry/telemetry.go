@@ -52,6 +52,8 @@ type Snapshot struct {
 	LastCaptureMS      float64 `json:"last_capture_ms"`
 	AvgTargetScanMS    float64 `json:"avg_target_scan_ms"`
 	LastTargetScanMS   float64 `json:"last_target_scan_ms"`
+	AvgNextTransitionMS float64 `json:"avg_next_transition_ms"`
+	LastNextTransitionMS float64 `json:"last_next_transition_ms"`
 }
 
 type Bus struct {
@@ -75,7 +77,10 @@ type Bus struct {
 	lastCaptureUS    atomic.Int64
 	targetScanCount  atomic.Int64
 	targetScanMicros atomic.Int64
-	lastTargetScanUS atomic.Int64
+	lastTargetScanUS   atomic.Int64
+	nextTransitionCount atomic.Int64
+	nextTransitionMicros atomic.Int64
+	lastNextTransitionUS atomic.Int64
 }
 
 func New(path string) *Bus {
@@ -174,6 +179,22 @@ func (b *Bus) record(ev Event) {
 		}
 	case EventTargetSkipped:
 		b.targetsSkipped.Add(1)
+		if raw, ok := ev.Fields["transition_us"]; ok {
+			switch v := raw.(type) {
+			case int64:
+				b.nextTransitionCount.Add(1)
+				b.nextTransitionMicros.Add(v)
+				b.lastNextTransitionUS.Store(v)
+			case int:
+				b.nextTransitionCount.Add(1)
+				b.nextTransitionMicros.Add(int64(v))
+				b.lastNextTransitionUS.Store(int64(v))
+			case float64:
+				b.nextTransitionCount.Add(1)
+				b.nextTransitionMicros.Add(int64(v))
+				b.lastNextTransitionUS.Store(int64(v))
+			}
+		}
 	case EventAttackFinished:
 		b.attacksFinished.Add(1)
 	case EventRecovery:
@@ -208,6 +229,11 @@ func (b *Bus) Snapshot() Snapshot {
 	if scanCount > 0 {
 		avgScan = float64(b.targetScanMicros.Load()) / float64(scanCount) / 1000.0
 	}
+	nextCount := b.nextTransitionCount.Load()
+	avgNext := 0.0
+	if nextCount > 0 {
+		avgNext = float64(b.nextTransitionMicros.Load()) / float64(nextCount) / 1000.0
+	}
 	return Snapshot{
 		Events:          b.events.Load(),
 		Searches:        b.searches.Load(),
@@ -219,6 +245,8 @@ func (b *Bus) Snapshot() Snapshot {
 		LastCaptureMS:    float64(b.lastCaptureUS.Load()) / 1000.0,
 		AvgTargetScanMS:  avgScan,
 		LastTargetScanMS: float64(b.lastTargetScanUS.Load()) / 1000.0,
+		AvgNextTransitionMS: avgNext,
+		LastNextTransitionMS: float64(b.lastNextTransitionUS.Load()) / 1000.0,
 	}
 }
 
