@@ -10,6 +10,7 @@ import { EventsOn } from '../wailsjs/runtime';
 import {
   GetStats,
   GetAttackHistory,
+  GetLatestAttackReplay,
   GetActivity,
   GetLogs,
   SaveConfig,
@@ -36,7 +37,7 @@ import {
   SetSimpleMode,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
-import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent } from './types';
+import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent, AttackReplayView } from './types';
 import UpdateBanner from './components/UpdateBanner';
 import './App.css';
 
@@ -148,6 +149,7 @@ function App() {
   const [history, setHistory] = useState<bot.AttackReport[]>([]);
   const [resourceHistory, setResourceHistory] = useState<VillageResourceSnapshot[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
+  const [replay, setReplay] = useState<AttackReplayView>({ available: false, complete: false, events: [] });
   const [logs, setLogs] = useState<string[]>([]);
   const [adbPort, setAdbPort] = useState(5555);
   const [darkMode, setDarkMode] = useState(getInitialDarkMode);
@@ -263,10 +265,21 @@ function App() {
       }
     };
 
+    const fetchReplay = async () => {
+      try {
+        const latest = await GetLatestAttackReplay();
+        setReplay((latest ?? { available: false, complete: false, events: [] }) as unknown as AttackReplayView);
+      } catch (err) {
+        console.warn('Attack replay refresh failed:', err);
+      }
+    };
+
     fetchData();
     void fetchResourceHistory();
+    void fetchReplay();
     const interval = setInterval(fetchData, 2000);
     const resourceInterval = setInterval(fetchResourceHistory, 15000);
+    const replayInterval = setInterval(fetchReplay, 5000);
 
     const fetchDiagnostics = async () => {
       try {
@@ -339,6 +352,7 @@ function App() {
     return () => {
       clearInterval(interval);
       clearInterval(resourceInterval);
+      clearInterval(replayInterval);
       clearInterval(diagnosticsInterval);
       unsubUpdater();
       unsubBotError();
@@ -501,8 +515,9 @@ function App() {
     stats,
     history,
     activity,
+    replay,
     logs,
-  }), [stats, history, activity, logs]);
+  }), [stats, history, activity, replay, logs]);
 
   // ADB connection state — drives the header status pill. Labels stop
   // calling the local ADB server "localhost:{port}" because the bot
