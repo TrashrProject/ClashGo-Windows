@@ -89,6 +89,7 @@ func WithJitterFraction(v float64) Option {
 type Health struct {
 	LastCapture      time.Time `json:"last_capture"`
 	AvgCaptureMs     float64   `json:"avg_capture_ms"`
+	FastCaptureMs    float64   `json:"fast_capture_ms"`
 	ConsecutiveFails int       `json:"consecutive_fails"`
 	CapturesTotal    uint64    `json:"captures_total"`
 	ErrorsTotal      uint64    `json:"errors_total"`
@@ -103,6 +104,13 @@ func (h *Health) RecordSuccess(d time.Duration) {
 		h.AvgCaptureMs = ms
 	} else {
 		h.AvgCaptureMs = h.AvgCaptureMs*0.9 + ms*0.1
+	}
+	// Faster EWMA used only by the adaptive pacing governor. Keep the
+	// long-horizon AvgCaptureMs untouched for stable reporting/analytics.
+	if h.FastCaptureMs == 0 {
+		h.FastCaptureMs = ms
+	} else {
+		h.FastCaptureMs = h.FastCaptureMs*0.65 + ms*0.35
 	}
 	h.ConsecutiveFails = 0
 	h.LastError = ""
