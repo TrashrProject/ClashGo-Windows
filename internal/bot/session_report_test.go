@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"strings"
 	"encoding/csv"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ func TestBuildSessionReportUsesTrueRoutineTimeAndReliability(t *testing.T) {
 			CooldownDurationMS: 30_000, PreparationDurationMS: 5_000, SearchDurationMS: 10_000,
 			DeployDurationMS: 20_000, BattleDurationMS: 120_000,
 			ReturnHomeDurationMS: 1_000, FullRoutineDurationMS: 150_000,
-			TargetScore: 90, BattleEndReason: "natural",
+			BattleEndWaitMS: 60_000, TargetScore: 90, BattleEndReason: "natural_result",
 		},
 		{
 			Timestamp: "2026-09-28T10:05:00Z", SessionID: session,
@@ -31,7 +32,8 @@ func TestBuildSessionReportUsesTrueRoutineTimeAndReliability(t *testing.T) {
 			CooldownDurationMS: 20_000, PreparationDurationMS: 6_000, SearchDurationMS: 12_000,
 			DeployDurationMS: 18_000, BattleDurationMS: 110_000,
 			ReturnHomeDurationMS: 1_200, FullRoutineDurationMS: 140_000,
-			TargetScore: 80, BattleEndReason: "natural",
+			BattleEndWaitMS: 45_000, LootExitPercent: 90,
+			TargetScore: 80, BattleEndReason: "loot_threshold",
 		},
 		{Timestamp: "2026-09-28T09:00:00Z", SessionID: "other", GoldStolen: 99_000_000},
 	}
@@ -66,6 +68,18 @@ func TestBuildSessionReportUsesTrueRoutineTimeAndReliability(t *testing.T) {
 	}
 	if report.AverageCooldownMS != 25_000 {
 		t.Fatalf("avg cooldown=%v want 25000", report.AverageCooldownMS)
+	}
+	if report.AverageBattleEndWaitMS != 52_500 {
+		t.Fatalf("avg battle-end wait=%v want 52500", report.AverageBattleEndWaitMS)
+	}
+	if report.NaturalBattleEndWaitMS != 60_000 || report.EarlyBattleEndWaitMS != 45_000 {
+		t.Fatalf("unexpected natural/early wait: %v/%v", report.NaturalBattleEndWaitMS, report.EarlyBattleEndWaitMS)
+	}
+	if report.EarlyExitRate != 50 || report.AverageLootExitPercent != 90 {
+		t.Fatalf("unexpected early-exit stats: rate=%v loot=%v", report.EarlyExitRate, report.AverageLootExitPercent)
+	}
+	if len(report.Recommendations) == 0 {
+		t.Fatal("expected descriptive session recommendations")
 	}
 	if report.OptimizationTarget == "deployment_protected" || report.OptimizationTarget == "cooldown_intentional" {
 		t.Fatalf("protected/intentional stage chosen as optimization target: %q", report.OptimizationTarget)
@@ -136,5 +150,28 @@ func TestWriteSessionReportCSVWritesHeaderAndSingleRow(t *testing.T) {
 	}
 	if len(rows[0]) != len(rows[1]) {
 		t.Fatalf("CSV header/data column mismatch: %d vs %d", len(rows[0]), len(rows[1]))
+	}
+}
+
+func TestBuildSessionReportRecommendationsProtectDeploymentSafety(t *testing.T) {
+	rows := []AttackReport{
+		{
+			SessionID: "s", DeploySuccess: false, ReturnHomeSuccess: true,
+			CorridorVerified: false, HUDSafe: false,
+			FullRoutineDurationMS: 100_000, SearchDurationMS: 25_000,
+		},
+		{
+			SessionID: "s", DeploySuccess: true, ReturnHomeSuccess: true,
+			CorridorVerified: true, HUDSafe: true, RedZoneValid: true,
+			FullRoutineDurationMS: 100_000, SearchDurationMS: 20_000,
+		},
+	}
+	report := BuildSessionReport("s", rows, BotStats{}, time.Now())
+	joined := strings.Join(report.Recommendations, " | ")
+	if !strings.Contains(joined, "Deployment reliability is below 95%") {
+		t.Fatalf("missing deployment safety recommendation: %v", report.Recommendations)
+	}
+	if !strings.Contains(joined, "Safe corridor certification is below 98%") {
+		t.Fatalf("missing corridor safety recommendation: %v", report.Recommendations)
 	}
 }
