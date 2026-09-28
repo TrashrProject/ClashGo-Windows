@@ -2,8 +2,9 @@ package bot
 
 import (
 	"image"
-	"time"
+	"image/color"
 	"testing"
+	"time"
 
 	"gocv.io/x/gocv"
 )
@@ -20,11 +21,9 @@ func TestLocateColoredButtonNearRequiresRealBlob(t *testing.T) {
 	}
 
 	// A valid orange/gold button-like rectangle centered at ~160,120.
-	for y := 105; y < 136; y++ {
-		for x := 138; x < 183; x++ {
-			screen.SetVecbAt(y, x, gocv.Vecb{20, 150, 220})
-		}
-	}
+	// Use GoCV's drawing API instead of SetVecbAt, which is not available in
+	// the Windows GoCV build used by CI.
+	gocv.Rectangle(&screen, image.Rect(138, 105, 183, 136), color.RGBA{R: 220, G: 150, B: 20, A: 255}, -1)
 
 	x, y, ok := locateColoredButtonNear(screen, image.Pt(160, 120), spec)
 	if !ok {
