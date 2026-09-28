@@ -1391,7 +1391,7 @@ Best optimization target: {pipeline.dominantTunable.label}
             { label: 'G+E / search sec', value: compact(searchEfficiency.gePerSearchSecond), detail: 'Loot yield vs search time' },
             { label: 'Search share', value: `${searchEfficiency.searchShare.toFixed(1)}%`, detail: 'Of true ready-to-ready loop' },
             { label: 'Accepted G+E', value: compact(searchEfficiency.avgAcceptedGE), detail: 'Average selected target' },
-            { label: 'Quality premium', value: searchEfficiency.avgRejectedGE > 0 ? `+${searchEfficiency.qualityPremium.toFixed(0)}%` : '—', detail: 'Accepted vs rejected G+E' },
+            { label: 'Quality premium', value: searchEfficiency.avgRejectedGE > 0 ? `${searchEfficiency.qualityPremium >= 0 ? '+' : ''}${searchEfficiency.qualityPremium.toFixed(0)}%` : '—', detail: 'Accepted vs rejected G+E' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
