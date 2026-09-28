@@ -1728,6 +1728,41 @@ Best optimization target: {pipeline.dominantTunable.label}
         </div>
       </div>
 
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-6 rounded-[2.5rem] shadow-premium-lg">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Threshold Sensitivity</div>
+            <h3 className="mt-1 text-xl font-black text-white dark:text-zinc-950 tracking-tight">How close rejected targets were</h3>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">
+              Observational only. These counters do not change your configured loot thresholds.
+            </p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-500">
+            {(stats.near_miss_targets || 0).toLocaleString()} within 15%
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {[
+            { label: 'Within 5%', value: stats.near_miss_5_targets || 0, detail: 'Almost exact threshold match' },
+            { label: 'Within 10%', value: stats.near_miss_10_targets || 0, detail: 'Moderate near-miss' },
+            { label: 'Within 15%', value: stats.near_miss_15_targets || 0, detail: 'Broader sensitivity window' },
+          ].map((metric) => {
+            const rejected = Math.max(1, (stats.targets_seen || 0) - (stats.targets_accepted || 0));
+            const pct = metric.value * 100 / rejected;
+            return (
+              <div key={metric.label} className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-5">
+                <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">{metric.label}</div>
+                <div className="mt-2 flex items-end gap-2">
+                  <div className="text-3xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value.toLocaleString()}</div>
+                  <div className="pb-1 text-[10px] font-black text-zinc-500 tabular-nums">{pct.toFixed(1)}% of rejects</div>
+                </div>
+                <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">{metric.detail}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {(stats.top_rejected_targets ?? []).length > 0 && (
         <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
