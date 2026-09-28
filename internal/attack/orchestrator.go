@@ -87,23 +87,11 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 	if runtime.GOOS == "windows" {
 		freeSpace := func(z RedZone) (string, int) {
-			if !z.Valid {
+			side, _, _, free, ok := windowsDeployCorridor(z, w, h, uiCutoff)
+			if !ok {
 				return "", 0
 			}
-			free := map[string]int{
-				"left":   z.BBox.Min.X,
-				"right":  w - z.BBox.Max.X,
-				"top":    z.BBox.Min.Y,
-				"bottom": uiCutoff - z.BBox.Max.Y,
-			}
-			side := "left"
-			best := free[side]
-			for _, s := range []string{"right", "top", "bottom"} {
-				if free[s] > best {
-					side, best = s, free[s]
-				}
-			}
-			return side, best
+			return side, free
 		}
 
 		refreshCamera := func(reason string) bool {
