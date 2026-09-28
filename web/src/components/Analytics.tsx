@@ -172,6 +172,46 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     };
   }, [history]);
 
+  const sessionStats = React.useMemo(() => {
+    const map = new Map<string, {
+      id: string;
+      attacks: number;
+      stars: number;
+      triples: number;
+      complete: number;
+      gold: number;
+      elixir: number;
+      dark: number;
+      cycleMs: number;
+      searchMs: number;
+      deployMs: number;
+      newestAt: number;
+    }>();
+    for (const rep of history ?? []) {
+      if (!rep.session_id) continue;
+      const row = map.get(rep.session_id) ?? {
+        id: rep.session_id, attacks: 0, stars: 0, triples: 0, complete: 0,
+        gold: 0, elixir: 0, dark: 0, cycleMs: 0, searchMs: 0, deployMs: 0, newestAt: 0,
+      };
+      row.attacks++;
+      row.stars += rep.stars || 0;
+      if ((rep.stars || 0) === 3) row.triples++;
+      if (rep.deploy_success) row.complete++;
+      row.gold += (rep.gold_stolen || 0) + (rep.bonus_gold || 0);
+      row.elixir += (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+      row.dark += (rep.dark_elixir_stolen || 0) + (rep.bonus_de || 0);
+      row.cycleMs += rep.cycle_duration_ms || 0;
+      row.searchMs += rep.search_duration_ms || 0;
+      row.deployMs += rep.deploy_duration_ms || 0;
+      const ts = Date.parse(rep.timestamp || '');
+      if (Number.isFinite(ts) && ts > row.newestAt) row.newestAt = ts;
+      map.set(rep.session_id, row);
+    }
+    return Array.from(map.values())
+      .sort((a, b) => b.newestAt - a.newestAt)
+      .slice(0, 8);
+  }, [history]);
+
   const sideStats = React.useMemo(() => {
     const map = new Map<string, {
       side: string;
@@ -664,6 +704,63 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Persistent sessions</div>
+            <h3 className="mt-1 text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Farm Session Comparison</h3>
+            <p className="text-sm text-zinc-500 mt-1">New sessions are grouped automatically from saved attack reports.</p>
+          </div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">{sessionStats.length} recent sessions</div>
+        </div>
+        {sessionStats.length === 0 ? (
+          <div className="py-10 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">
+            New attacks will start building session history
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                  <th className="pb-3 pr-4">Session</th>
+                  <th className="pb-3 px-3">Attacks</th>
+                  <th className="pb-3 px-3">Avg stars</th>
+                  <th className="pb-3 px-3">3★</th>
+                  <th className="pb-3 px-3">Full deploy</th>
+                  <th className="pb-3 px-3">G / h</th>
+                  <th className="pb-3 px-3">E / h</th>
+                  <th className="pb-3 px-3">DE / h</th>
+                  <th className="pb-3 px-3">Search</th>
+                  <th className="pb-3 pl-3">Deploy</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessionStats.map((row, index) => {
+                  const hours = row.cycleMs > 0 ? row.cycleMs / 3_600_000 : 0;
+                  return (
+                    <tr key={row.id} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                      <td className="py-4 pr-4">
+                        <div className="text-sm font-black text-zinc-950 dark:text-white">#{index + 1}</div>
+                        <div className="mt-1 text-[9px] font-bold text-zinc-400 font-mono">{row.id.slice(-12)}</div>
+                      </td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.stars / Math.max(1, row.attacks)).toFixed(2)}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{Math.round(row.triples / Math.max(1, row.attacks) * 100)}%</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{Math.round(row.complete / Math.max(1, row.attacks) * 100)}%</td>
+                      <td className="py-4 px-3 text-sm font-bold text-amber-500 tabular-nums">{hours > 0 ? compact(row.gold / hours) : '—'}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-fuchsia-500 tabular-nums">{hours > 0 ? compact(row.elixir / hours) : '—'}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{hours > 0 ? compact(row.dark / hours) : '—'}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.searchMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</td>
+                      <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.deployMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
