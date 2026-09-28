@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -83,6 +84,7 @@ type Bot struct {
 	connLostDismissInFlight atomic.Bool
 	lastArmyCampGuardLog    time.Time
 	startedAt             time.Time
+	watchdogMu           sync.RWMutex
 	lastAction            time.Time
 	lastSequenceStart     time.Time
 	lastNav               time.Time
@@ -576,7 +578,23 @@ func (b *Bot) captureLoop() {
 // Called after real forward progress (successful clicks/state transitions)
 // so the stuck-check distinguishes "spinning" from "working".
 func (b *Bot) recordActivity() {
-	b.lastAction = time.Now()
+	b.watchdogMu.Lock()
+	b.recordActivity()
+	b.watchdogMu.Unlock()
+}
+
+func (b *Bot) recordSequenceStart() {
+	b.watchdogMu.Lock()
+	b.recordSequenceStart()
+	b.watchdogMu.Unlock()
+}
+
+func (b *Bot) watchdogTimes() (lastAction, lastSequenceStart time.Time) {
+	b.watchdogMu.RLock()
+	lastAction = b.lastAction
+	lastSequenceStart = b.lastSequenceStart
+	b.watchdogMu.RUnlock()
+	return lastAction, lastSequenceStart
 }
 
 func (b *Bot) recordWatchdogIncident(kind string, state game.GameState, stuck time.Duration) {
@@ -596,6 +614,7 @@ func (b *Bot) recordWatchdogIncident(kind string, state game.GameState, stuck ti
 // one place doing nothing for too long, we cycle the game to recover from
 // hangs / dialogs / out-of-game screens without requiring user intervention.
 func (b *Bot) checkStuck(gc *game.GameContext) {
+	lastAction, lastSequenceStart := b.watchdogTimes()
 
 	if gc.ReadHealth().ConsecutiveFails >= 10 {
 		b.recordWatchdogIncident("capture_dead", gc.State, 0)
@@ -604,19 +623,19 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 			Str("state", gc.State.String()).
 			Msg("capture pipeline appears dead, beginning device recovery ladder...")
 		b.recoverEmulator()
-		b.lastSequenceStart = time.Now()
+		b.recordSequenceStart()
 		return
 	}
 
 	if b.seqRunning.Load() {
-		if time.Since(b.lastSequenceStart) > 15*time.Minute {
-			seqStuck := time.Since(b.lastSequenceStart)
+		if time.Since(lastSequenceStart) > 15*time.Minute {
+			seqStuck := time.Since(lastSequenceStart)
 			b.recordWatchdogIncident("sequence_timeout", gc.State, seqStuck)
 			b.logger.Warn().
-				Dur("seq_time", time.Since(b.lastSequenceStart)).
+				Dur("seq_time", time.Since(lastSequenceStart)).
 				Msg("attack sequence exceeded maximum duration, triggering emergency restart...")
 			b.restartGame()
-			b.lastSequenceStart = time.Now()
+			b.recordSequenceStart()
 		}
 		return
 	}
@@ -642,18 +661,18 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 	// boot-splash chain a generous window; the dismiss taps in processFrame
 	// advance through it.
 	if state == game.StateLogo || state == game.StateTapToContinue || state == game.StateNewsSplash {
-		bootStuck := time.Since(b.lastAction)
+		bootStuck := time.Since(lastAction)
 		const bootSplashTimeout = 5 * time.Minute
 		if bootStuck > bootSplashTimeout {
 			b.recordWatchdogIncident("boot_splash", state, bootStuck)
 			b.logger.Warn().
 				Str("state", state.String()).
-				Time("last_action", b.lastAction).
+				Time("last_action", lastAction).
 				Dur("stuck_time", bootStuck).
 				Dur("timeout", bootSplashTimeout).
 				Msg("boot splash stuck too long, triggering emergency restart...")
 			b.restartGame()
-			b.lastSequenceStart = time.Now()
+			b.recordSequenceStart()
 		}
 		return
 	}
@@ -661,36 +680,36 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 	if state == game.StateBattle ||
 		state == game.StateSearchMap ||
 		state == game.StateLoading {
-		attackPhaseStuck := time.Since(b.lastAction)
+		attackPhaseStuck := time.Since(lastAction)
 		const attackPhaseTimeout = 30 * time.Second
 		if attackPhaseStuck > attackPhaseTimeout {
 			b.recordWatchdogIncident("attack_phase", state, attackPhaseStuck)
 			b.logger.Warn().
 				Str("state", state.String()).
-				Time("last_action", b.lastAction).
+				Time("last_action", lastAction).
 				Dur("stuck_time", attackPhaseStuck).
 				Dur("timeout", attackPhaseTimeout).
 				Msg("attack-phase state without active sequence, triggering emergency restart...")
 			b.restartGame()
-			b.lastSequenceStart = time.Now()
+			b.recordSequenceStart()
 		}
 		return
 	}
 
 	timeout := b.stuckTimeout
 
-	stuckTime := time.Since(b.lastAction)
+	stuckTime := time.Since(lastAction)
 	if stuckTime > timeout {
 		b.recordWatchdogIncident("idle", state, stuckTime)
 		b.logger.Warn().
 			Str("state", state.String()).
-			Time("last_action", b.lastAction).
+			Time("last_action", lastAction).
 			Dur("stuck_time", stuckTime).
 			Dur("timeout", timeout).
 			Msg("bot appears stuck without meaningful action, triggering emergency restart...")
 
 		b.restartGame()
-		b.lastSequenceStart = time.Now()
+		b.recordSequenceStart()
 	}
 }
 
@@ -715,9 +734,9 @@ func (b *Bot) restartGame() {
 	b.client.JitteredSleep(15 * time.Second)
 	b.zoomedOut.Store(false)
 
-	b.lastAction = time.Now()
+	b.recordActivity()
 	b.lastNav = time.Now()
-	b.lastSequenceStart = time.Now()
+	b.recordSequenceStart()
 }
 
 // recoverEmulator is the mid-run escalation for a dead capture
@@ -1118,7 +1137,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 
 	if b.zoomedOut.Load() && (gc.State == game.StateMainVillage || gc.State == game.StateUnknown) && b.findAttackButton(screen, 0.30) {
 		b.logger.Info().Msg("attack button detected, starting sequence")
-		b.lastSequenceStart = time.Now()
+		b.recordSequenceStart()
 		go b.executeAttackSequence(gc)
 		return
 	}
