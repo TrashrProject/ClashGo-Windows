@@ -105,3 +105,29 @@ func TestPreferredScaleStatsReset(t *testing.T) {
 		t.Fatalf("reset stats=%+v want all zero", stats)
 	}
 }
+
+func TestPreferredScaleCircuitBreakerDisablesLowHitRate(t *testing.T) {
+	ResetPreferredScaleStats()
+	preferredScaleAttempts.Store(20)
+	preferredScaleHits.Store(2) // 10%
+	preferredScaleFallbacks.Store(18)
+	evaluatePreferredScaleCircuitBreaker()
+
+	stats := PreferredScaleRuntimeStats()
+	if stats.Enabled {
+		t.Fatalf("expected preferred-scale fast path disabled, stats=%+v", stats)
+	}
+}
+
+func TestPreferredScaleCircuitBreakerKeepsUsefulFastPath(t *testing.T) {
+	ResetPreferredScaleStats()
+	preferredScaleAttempts.Store(20)
+	preferredScaleHits.Store(8) // 40%
+	preferredScaleFallbacks.Store(12)
+	evaluatePreferredScaleCircuitBreaker()
+
+	stats := PreferredScaleRuntimeStats()
+	if !stats.Enabled {
+		t.Fatalf("useful preferred-scale fast path disabled unexpectedly, stats=%+v", stats)
+	}
+}
