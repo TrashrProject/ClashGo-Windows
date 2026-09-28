@@ -57,6 +57,12 @@ type Snapshot struct {
 	LastTargetScanMS   float64 `json:"last_target_scan_ms"`
 	AvgNextTransitionMS float64 `json:"avg_next_transition_ms"`
 	LastNextTransitionMS float64 `json:"last_next_transition_ms"`
+	AvgAcceptedGE       float64 `json:"avg_accepted_ge"`
+	AvgRejectedGE       float64 `json:"avg_rejected_ge"`
+	AvgAcceptedDE       float64 `json:"avg_accepted_de"`
+	AvgRejectedDE       float64 `json:"avg_rejected_de"`
+	AvgAcceptedScore    float64 `json:"avg_accepted_score"`
+	AvgRejectedScore    float64 `json:"avg_rejected_score"`
 }
 
 type Bus struct {
@@ -86,6 +92,13 @@ type Bus struct {
 	nextTransitionCount atomic.Int64
 	nextTransitionMicros atomic.Int64
 	lastNextTransitionUS atomic.Int64
+
+	acceptedGESum    atomic.Int64
+	rejectedGESum    atomic.Int64
+	acceptedDESum    atomic.Int64
+	rejectedDESum    atomic.Int64
+	acceptedScoreSum atomic.Int64
+	rejectedScoreSum atomic.Int64
 }
 
 func New(path string) *Bus {
@@ -170,8 +183,20 @@ func (b *Bus) record(ev Event) {
 		b.searches.Add(1)
 	case EventTargetFound:
 		b.targetsFound.Add(1)
-		if accepted, ok := ev.Fields["accept"].(bool); ok && accepted {
+		accepted, _ := ev.Fields["accept"].(bool)
+		gold, _ := telemetryInt64(ev.Fields["gold"])
+		elixir, _ := telemetryInt64(ev.Fields["elixir"])
+		de, _ := telemetryInt64(ev.Fields["de"])
+		score, _ := telemetryInt64(ev.Fields["score"])
+		if accepted {
 			b.targetsAccepted.Add(1)
+			b.acceptedGESum.Add(gold + elixir)
+			b.acceptedDESum.Add(de)
+			b.acceptedScoreSum.Add(score)
+		} else {
+			b.rejectedGESum.Add(gold + elixir)
+			b.rejectedDESum.Add(de)
+			b.rejectedScoreSum.Add(score)
 		}
 		if raw, ok := ev.Fields["scan_us"]; ok {
 			switch v := raw.(type) {
@@ -225,6 +250,21 @@ func (b *Bus) record(ev Event) {
 	}
 }
 
+func telemetryInt64(v any) (int64, bool) {
+	switch n := v.(type) {
+	case int:
+		return int64(n), true
+	case int32:
+		return int64(n), true
+	case int64:
+		return n, true
+	case float64:
+		return int64(n), true
+	default:
+		return 0, false
+	}
+}
+
 func (b *Bus) Snapshot() Snapshot {
 	if b == nil {
 		return Snapshot{}
@@ -244,6 +284,21 @@ func (b *Bus) Snapshot() Snapshot {
 	if nextCount > 0 {
 		avgNext = float64(b.nextTransitionMicros.Load()) / float64(nextCount) / 1000.0
 	}
+	acceptedCount := b.targetsAccepted.Load()
+	rejectedCount := b.targetsFound.Load() - acceptedCount
+	avgAcceptedGE, avgRejectedGE := 0.0, 0.0
+	avgAcceptedDE, avgRejectedDE := 0.0, 0.0
+	avgAcceptedScore, avgRejectedScore := 0.0, 0.0
+	if acceptedCount > 0 {
+		avgAcceptedGE = float64(b.acceptedGESum.Load()) / float64(acceptedCount)
+		avgAcceptedDE = float64(b.acceptedDESum.Load()) / float64(acceptedCount)
+		avgAcceptedScore = float64(b.acceptedScoreSum.Load()) / float64(acceptedCount)
+	}
+	if rejectedCount > 0 {
+		avgRejectedGE = float64(b.rejectedGESum.Load()) / float64(rejectedCount)
+		avgRejectedDE = float64(b.rejectedDESum.Load()) / float64(rejectedCount)
+		avgRejectedScore = float64(b.rejectedScoreSum.Load()) / float64(rejectedCount)
+	}
 	return Snapshot{
 		Events:          b.events.Load(),
 		Searches:        b.searches.Load(),
@@ -259,6 +314,12 @@ func (b *Bus) Snapshot() Snapshot {
 		LastTargetScanMS: float64(b.lastTargetScanUS.Load()) / 1000.0,
 		AvgNextTransitionMS: avgNext,
 		LastNextTransitionMS: float64(b.lastNextTransitionUS.Load()) / 1000.0,
+		AvgAcceptedGE: avgAcceptedGE,
+		AvgRejectedGE: avgRejectedGE,
+		AvgAcceptedDE: avgAcceptedDE,
+		AvgRejectedDE: avgRejectedDE,
+		AvgAcceptedScore: avgAcceptedScore,
+		AvgRejectedScore: avgRejectedScore,
 	}
 }
 
