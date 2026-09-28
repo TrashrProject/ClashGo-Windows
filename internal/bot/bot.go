@@ -42,10 +42,11 @@ type Bot struct {
 
 	attackExec *attack.Executor
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	done   chan struct{}
-	logger zerolog.Logger
+	ctx         context.Context
+	cancel      context.CancelFunc
+	done        chan struct{}
+	captureDone chan struct{}
+	logger      zerolog.Logger
 
 	attackCount atomic.Int32
 	skipsCount  atomic.Int32
@@ -266,6 +267,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		ctx:               ctx,
 		cancel:            cancel,
 		done:              make(chan struct{}),
+		captureDone:       make(chan struct{}),
 		logger:            log.With().Str("bot", "orchestrator").Logger(),
 		startedAt:         startedWall,
 		lastAction:        time.Now(),
@@ -361,7 +363,10 @@ func (b *Bot) Start() error {
 	b.client.Tap(focusX, focusY)
 	b.client.JitteredSleep(250 * time.Millisecond)
 
-	go b.captureLoop()
+	go func() {
+		defer close(b.captureDone)
+		b.captureLoop()
+	}()
 	return nil
 }
 
@@ -372,21 +377,49 @@ func (b *Bot) Stop() {
 	}
 
 	// Cut ADB first so no further taps/captures can leave the process after
-	// Cancel. Then allow the attack goroutine a short detached teardown window
-	// before releasing its native OpenCV templates.
+	// Cancel. Wait for the capture loop and active sequence to leave their
+	// OpenCV code before releasing native matrices.
 	b.client.Close()
+
+	select {
+	case <-b.captureDone:
+	case <-time.After(3 * time.Second):
+		b.logger.Warn().Msg("capture loop did not stop within teardown window; keeping shared templates alive")
+	}
+
 	deadline := time.Now().Add(3 * time.Second)
 	for b.seqRunning.Load() && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
-	if b.attackExec != nil && !b.seqRunning.Load() {
-		b.attackExec.Close()
+
+	captureStopped := false
+	select {
+	case <-b.captureDone:
+		captureStopped = true
+	default:
 	}
 
-	vision.CloseTemplateCache()
-	if b.resourceReader != nil {
-		b.resourceReader.Close()
+	if !b.seqRunning.Load() && captureStopped {
+		if b.attackExec != nil {
+			b.attackExec.Close()
+		}
+		if b.resourceReader != nil {
+			b.resourceReader.Close()
+		}
+		if b.templates != nil {
+			b.templates.Close()
+		}
+		vision.CloseTemplateCache()
+	} else {
+		// Safety wins over eager cleanup: if any goroutine may still be inside
+		// CGO/OpenCV, let the process/GC reclaim at final exit rather than close
+		// a Mat underneath active native code.
+		b.logger.Warn().
+			Bool("sequence_running", b.seqRunning.Load()).
+			Bool("capture_stopped", captureStopped).
+			Msg("native template cleanup deferred to process exit")
 	}
+
 	if b.dukePicksFile != nil {
 		_ = b.dukePicksFile.Close()
 	}
