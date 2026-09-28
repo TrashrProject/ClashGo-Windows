@@ -1793,9 +1793,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			if b.telemetry != nil {
 				b.telemetry.Emit(telemetry.EventTargetSkipped, map[string]any{"sequence_skips": sequenceSkips})
 			}
-			if b.OnStatsUpdate != nil {
-				b.OnStatsUpdate()
-			}
+			// Do not flush stats/history or emit Wails events for every skipped
+			// base. Stats are atomic and the UI polls them every 2s; keeping disk
+			// I/O and IPC off the matchmaking hot path makes repeated Next cycles
+			// materially cheaper without changing any farming decision.
 			b.logger.Debug().Msg("matchmaking transition confirmed")
 			searchPace = chooseSearchPacing(b.client.Health())
 			time.Sleep(searchPace.PostTransitionPause)
