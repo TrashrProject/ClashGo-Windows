@@ -3324,6 +3324,10 @@ func (b *Bot) Stats() BotStats {
 		LastReturnHomeMS:     float64(b.lastReturnHomeUS.Load()) / 1000.0,
 		AverageNextTransitionMS: tm.AvgNextTransitionMS,
 		LastNextTransitionMS:    tm.LastNextTransitionMS,
+		NextTransitions:         tm.NextTransitions,
+		NextRetries:             tm.NextRetries,
+		NextFirstPassRate:       tm.NextFirstPassRate,
+		AvgNextVerifyProbes:     tm.AvgNextVerifyProbes,
 		AvgAcceptedGE:           tm.AvgAcceptedGE,
 		AvgRejectedGE:           tm.AvgRejectedGE,
 		AvgAcceptedDE:           tm.AvgAcceptedDE,
@@ -3377,6 +3381,10 @@ type BotStats struct {
 	LastReturnHomeMS        float64 `json:"last_return_home_ms"`
 	AverageNextTransitionMS float64 `json:"average_next_transition_ms"`
 	LastNextTransitionMS    float64 `json:"last_next_transition_ms"`
+	NextTransitions         int64   `json:"next_transitions"`
+	NextRetries             int64   `json:"next_retries"`
+	NextFirstPassRate       float64 `json:"next_first_pass_rate"`
+	AvgNextVerifyProbes     float64 `json:"avg_next_verify_probes"`
 	AvgAcceptedGE           float64 `json:"avg_accepted_ge"`
 	AvgRejectedGE           float64 `json:"avg_rejected_ge"`
 	AvgAcceptedDE           float64 `json:"avg_accepted_de"`
