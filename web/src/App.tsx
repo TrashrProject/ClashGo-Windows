@@ -239,20 +239,34 @@ function App() {
     };
     init();
 
-    const fetchData = async () => {
+    const fetchFastData = async () => {
       try {
-        const [s, h, a, l] = await Promise.all([
+        const [s, a] = await Promise.all([
           GetStats(),
-          GetAttackHistory(),
           GetActivity(),
-          GetLogs(),
         ]);
         setStats(s);
-        setHistory(h);
         setActivity((a ?? []) as unknown as ActivityEvent[]);
-        setLogs(l);
       } catch (err) {
-        console.error('Data fetch failed:', err);
+        console.error('Fast data fetch failed:', err);
+      }
+    };
+
+    const fetchHistory = async () => {
+      try {
+        const h = await GetAttackHistory();
+        setHistory(h ?? []);
+      } catch (err) {
+        console.warn('Attack history refresh failed:', err);
+      }
+    };
+
+    const fetchLogs = async () => {
+      try {
+        const l = await GetLogs();
+        setLogs(l ?? []);
+      } catch (err) {
+        console.warn('Log refresh failed:', err);
       }
     };
 
@@ -274,12 +288,21 @@ function App() {
       }
     };
 
-    fetchData();
+    void fetchFastData();
+    void fetchHistory();
+    void fetchLogs();
     void fetchResourceHistory();
     void fetchReplay();
-    const interval = setInterval(fetchData, 2000);
+
+    // Keep the high-frequency poll tiny: only live counters + compact activity.
+    // History is event-driven at attack completion, logs do not need 2 Hz, and
+    // replay changes only after an attack. This removes avoidable Wails IPC and
+    // JSON work while the bot is farming.
+    const fastInterval = setInterval(fetchFastData, 2000);
+    const logInterval = setInterval(fetchLogs, 4000);
+    const historyInterval = setInterval(fetchHistory, 30000); // recovery fallback
     const resourceInterval = setInterval(fetchResourceHistory, 15000);
-    const replayInterval = setInterval(fetchReplay, 5000);
+    const replayInterval = setInterval(fetchReplay, 30000); // recovery fallback
 
     const fetchDiagnostics = async () => {
       try {
@@ -342,6 +365,9 @@ function App() {
       if (Array.isArray(payload)) {
         setHistory(payload);
       }
+      // Deployment traces are already flushed by the time the attack report is
+      // published. Refresh replay on the event instead of polling it every 5s.
+      void fetchReplay();
     });
     const unsubStatsUpdated = safeEventsOn("stats_updated", (payload: bot.BotStats) => {
       if (payload && typeof payload === 'object') {
@@ -350,7 +376,9 @@ function App() {
     });
 
     return () => {
-      clearInterval(interval);
+      clearInterval(fastInterval);
+      clearInterval(logInterval);
+      clearInterval(historyInterval);
       clearInterval(resourceInterval);
       clearInterval(replayInterval);
       clearInterval(diagnosticsInterval);
