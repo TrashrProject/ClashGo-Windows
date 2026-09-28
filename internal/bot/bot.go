@@ -918,17 +918,27 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 
 	state, score := b.classify(screen)
 
-	// Keep the console useful without flooding Wails/React at the faster
-	// capture cadence. Log immediately on state changes and at most roughly
-	// once per 750ms while a state remains stable.
-	if state != gc.State || time.Since(b.lastVisionLog) >= 750*time.Millisecond || time.Since(b.startedAt) < 3*time.Second {
+	// Keep normal output action-oriented. State changes are INFO; a stable
+	// classifier heartbeat is DEBUG-only and heavily throttled. The old 750ms
+	// INFO heartbeat flooded Wails/logBuffer even while nothing changed.
+	stateChanged := state != gc.State
+	bootVerbose := time.Since(b.startedAt) < 3*time.Second
+	if stateChanged || bootVerbose {
 		b.lastVisionLog = time.Now()
 		b.logger.Info().
 			Str("vision_state", state.String()).
 			Int("score", score).
 			Int("capture_w", screen.Cols()).
 			Int("capture_h", screen.Rows()).
-			Msg(fmt.Sprintf("vision frame classified: state=%s score=%d capture=%dx%d", state.String(), score, screen.Cols(), screen.Rows()))
+			Msg("vision state")
+	} else if time.Since(b.lastVisionLog) >= 5*time.Second {
+		b.lastVisionLog = time.Now()
+		b.logger.Debug().
+			Str("vision_state", state.String()).
+			Int("score", score).
+			Int("capture_w", screen.Cols()).
+			Int("capture_h", screen.Rows()).
+			Msg("vision heartbeat")
 	}
 
 	gc.UpdateScreen(screen, captureMs)
