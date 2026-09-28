@@ -1940,36 +1940,41 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 				return true
 			}
 
-			// Continuously sample the live Available Loot counters. Accept only
-			// two consecutive, mutually-consistent reads and never allow an
-			// accepted remaining amount to increase. This gives the history UI
-			// a stable loot source even when the themed result panel OCR fails.
+			// Continuously sample the live Available Loot counters. Read ONCE
+			// per battle tick and share that exact result with Loot Exit below:
+			// doing a second OCR pass over the same frame was pure hot-path
+			// work and could even disagree with the first read.
+			var liveLootTick game.Resources
+			var liveLootTickErr error
+			liveLootSampled := false
 			if e.initialLootGold > 0 || e.initialLootElixir > 0 || e.initialLootDE > 0 {
-				liveLoot, _ := lootRec.ReadAvailableLoot(screen)
-				plausible := liveLoot.Gold >= 0 && liveLoot.Gold <= e.initialLootGold &&
-					liveLoot.Elixir >= 0 && liveLoot.Elixir <= e.initialLootElixir &&
-					liveLoot.DarkElixir >= 0 && liveLoot.DarkElixir <= e.initialLootDE
+				liveLootTick, liveLootTickErr = lootRec.ReadAvailableLoot(screen)
+				liveLootSampled = true
+				plausible := liveLootTickErr == nil &&
+					liveLootTick.Gold >= 0 && liveLootTick.Gold <= e.initialLootGold &&
+					liveLootTick.Elixir >= 0 && liveLootTick.Elixir <= e.initialLootElixir &&
+					liveLootTick.DarkElixir >= 0 && liveLootTick.DarkElixir <= e.initialLootDE
 
 				if plausible {
 					if pendingLootHits > 0 &&
-						lootClose(liveLoot.Gold, pendingLoot.Gold, e.initialLootGold) &&
-						lootClose(liveLoot.Elixir, pendingLoot.Elixir, e.initialLootElixir) &&
-						lootClose(liveLoot.DarkElixir, pendingLoot.DarkElixir, e.initialLootDE) {
+						lootClose(liveLootTick.Gold, pendingLoot.Gold, e.initialLootGold) &&
+						lootClose(liveLootTick.Elixir, pendingLoot.Elixir, e.initialLootElixir) &&
+						lootClose(liveLootTick.DarkElixir, pendingLoot.DarkElixir, e.initialLootDE) {
 						pendingLootHits++
 					} else {
 						pendingLootHits = 1
 					}
-					pendingLoot = liveLoot
+					pendingLoot = liveLootTick
 
 					if pendingLootHits >= 2 {
-						if !e.remainingLootValid || liveLoot.Gold <= e.lastRemainingGold {
-							e.lastRemainingGold = liveLoot.Gold
+						if !e.remainingLootValid || liveLootTick.Gold <= e.lastRemainingGold {
+							e.lastRemainingGold = liveLootTick.Gold
 						}
-						if !e.remainingLootValid || liveLoot.Elixir <= e.lastRemainingElixir {
-							e.lastRemainingElixir = liveLoot.Elixir
+						if !e.remainingLootValid || liveLootTick.Elixir <= e.lastRemainingElixir {
+							e.lastRemainingElixir = liveLootTick.Elixir
 						}
-						if !e.remainingLootValid || liveLoot.DarkElixir <= e.lastRemainingDE {
-							e.lastRemainingDE = liveLoot.DarkElixir
+						if !e.remainingLootValid || liveLootTick.DarkElixir <= e.lastRemainingDE {
+							e.lastRemainingDE = liveLootTick.DarkElixir
 						}
 						e.remainingLootValid = true
 						e.logger.Debug().
@@ -1995,7 +2000,10 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 
 				initialTotal := e.initialLootGold + e.initialLootElixir + e.initialLootDE
 				if initialTotal > 0 {
-					remaining, lootErr := lootRec.ReadAvailableLoot(screen)
+					remaining, lootErr := liveLootTick, liveLootTickErr
+					if !liveLootSampled {
+						remaining, lootErr = lootRec.ReadAvailableLoot(screen)
+					}
 					if lootErr == nil {
 						remainingTotal := remaining.Gold + remaining.Elixir + remaining.DarkElixir
 						if remainingTotal < 0 { remainingTotal = 0 }
