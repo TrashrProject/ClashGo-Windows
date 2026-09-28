@@ -1202,7 +1202,7 @@ func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
 	// HUD ROI. This is robust across language and avoids assuming one fixed
 	// center coordinate.
 	if x, y, ok := b.locateAttackButtonColor(screen); ok {
-		b.logger.Info().Int("x", x).Int("y", y).Msg("attack button verified via localized orange region")
+		b.logger.Debug().Int("x", x).Int("y", y).Msg("attack button verified via localized orange region")
 		return true
 	}
 
