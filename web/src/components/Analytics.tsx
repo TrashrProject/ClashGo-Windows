@@ -360,6 +360,8 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       total,
       confidence,
       highRate: total > 0 ? confidence.high * 100 / total : 0,
+      mediumRate: total > 0 ? confidence.medium * 100 / total : 0,
+      lowRate: total > 0 ? (confidence.low + confidence.unknown) * 100 / total : 0,
       ocrStars: stars.get('result_ocr') || 0,
       outcomeStars: (stars.get('battle_outcome') || 0) + (stars.get('reconciled_outcome') || 0),
       liveLoot: loot.get('live_delta') || 0,
