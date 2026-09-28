@@ -395,6 +395,70 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     return Array.from(map.values()).sort((a, b) => b.attacks - a.attacks);
   }, [history]);
 
+  const battleExitIntelligence = React.useMemo(() => {
+    const rows = (history ?? []).filter((r) => (r.battle_end_wait_ms || 0) > 0);
+    if (rows.length === 0) {
+      return {
+        attacks: 0,
+        early: 0,
+        earlyRate: 0,
+        avgWaitMS: 0,
+        naturalWaitMS: 0,
+        earlyWaitMS: 0,
+        avgLootExitPct: 0,
+        groups: [] as Array<{ reason: string; attacks: number; avgWaitMS: number; avgStars: number; avgGE: number }>,
+      };
+    }
+
+    const earlyReasons = new Set(['loot_threshold', 'destruction_threshold', 'stall']);
+    let early = 0, waitAll = 0, waitNatural = 0, naturalCount = 0, waitEarly = 0, lootPct = 0, lootPctCount = 0;
+    const map = new Map<string, { reason: string; attacks: number; waitMS: number; stars: number; ge: number }>();
+
+    for (const rep of rows) {
+      const reason = rep.battle_end_reason || 'unknown';
+      const isEarly = earlyReasons.has(reason);
+      const wait = rep.battle_end_wait_ms || 0;
+      waitAll += wait;
+      if (isEarly) {
+        early++;
+        waitEarly += wait;
+      } else if (reason === 'natural_result') {
+        naturalCount++;
+        waitNatural += wait;
+      }
+      if ((rep.loot_exit_percent || 0) > 0) {
+        lootPct += rep.loot_exit_percent || 0;
+        lootPctCount++;
+      }
+
+      const row = map.get(reason) ?? { reason, attacks: 0, waitMS: 0, stars: 0, ge: 0 };
+      row.attacks++;
+      row.waitMS += wait;
+      row.stars += rep.stars || 0;
+      row.ge += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0);
+      map.set(reason, row);
+    }
+
+    return {
+      attacks: rows.length,
+      early,
+      earlyRate: early * 100 / rows.length,
+      avgWaitMS: waitAll / rows.length,
+      naturalWaitMS: naturalCount > 0 ? waitNatural / naturalCount : 0,
+      earlyWaitMS: early > 0 ? waitEarly / early : 0,
+      avgLootExitPct: lootPctCount > 0 ? lootPct / lootPctCount : 0,
+      groups: Array.from(map.values())
+        .map((row) => ({
+          reason: row.reason,
+          attacks: row.attacks,
+          avgWaitMS: row.waitMS / Math.max(1, row.attacks),
+          avgStars: row.stars / Math.max(1, row.attacks),
+          avgGE: row.ge / Math.max(1, row.attacks),
+        }))
+        .sort((a, b) => b.attacks - a.attacks),
+    };
+  }, [history]);
+
   const sideStats = React.useMemo(() => {
     const map = new Map<string, {
       side: string;
@@ -1533,6 +1597,62 @@ Best optimization target: {pipeline.dominantTunable.label}
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Battle Exit Intelligence</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">When ClashGO stops fighting</h3>
+            <p className="text-sm text-zinc-500 mt-1">Observation only. Early exits still obey full-deployment verification and End Battle button checks.</p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
+            {battleExitIntelligence.attacks} measured battles
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+          {[
+            { label: 'Early-exit rate', value: battleExitIntelligence.attacks ? `${battleExitIntelligence.earlyRate.toFixed(1)}%` : '—', detail: `${battleExitIntelligence.early} battles` },
+            { label: 'Avg end wait', value: battleExitIntelligence.attacks ? `${(battleExitIntelligence.avgWaitMS / 1000).toFixed(1)}s` : '—', detail: 'After deployment' },
+            { label: 'Natural wait', value: battleExitIntelligence.naturalWaitMS ? `${(battleExitIntelligence.naturalWaitMS / 1000).toFixed(1)}s` : '—', detail: 'Natural results only' },
+            { label: 'Early wait', value: battleExitIntelligence.earlyWaitMS ? `${(battleExitIntelligence.earlyWaitMS / 1000).toFixed(1)}s` : '—', detail: 'Threshold/stall exits' },
+            { label: 'Loot at exit', value: battleExitIntelligence.avgLootExitPct ? `${battleExitIntelligence.avgLootExitPct.toFixed(1)}%` : '—', detail: 'Loot-threshold exits' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+
+        {battleExitIntelligence.groups.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                  <th className="pb-3 pr-3">Reason</th>
+                  <th className="pb-3 px-3">Attacks</th>
+                  <th className="pb-3 px-3">End wait</th>
+                  <th className="pb-3 px-3">Avg stars</th>
+                  <th className="pb-3 pl-3">Avg G+E</th>
+                </tr>
+              </thead>
+              <tbody>
+                {battleExitIntelligence.groups.map((row) => (
+                  <tr key={row.reason} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                    <td className="py-4 pr-3 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-white">{row.reason.replaceAll('_', ' ')}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.avgWaitMS / 1000).toFixed(1)}s</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.avgStars.toFixed(2)}</td>
+                    <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{compact(row.avgGE)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
