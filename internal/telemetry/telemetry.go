@@ -48,6 +48,8 @@ type Snapshot struct {
 	Recoveries         int64   `json:"recoveries"`
 	AvgCaptureMS       float64 `json:"avg_capture_ms"`
 	LastCaptureMS      float64 `json:"last_capture_ms"`
+	AvgTargetScanMS    float64 `json:"avg_target_scan_ms"`
+	LastTargetScanMS   float64 `json:"last_target_scan_ms"`
 }
 
 type Bus struct {
@@ -66,9 +68,12 @@ type Bus struct {
 	targetsSkipped  atomic.Int64
 	attacksFinished atomic.Int64
 	recoveries      atomic.Int64
-	captureCount    atomic.Int64
-	captureMicros   atomic.Int64
-	lastCaptureUS   atomic.Int64
+	captureCount     atomic.Int64
+	captureMicros    atomic.Int64
+	lastCaptureUS    atomic.Int64
+	targetScanCount  atomic.Int64
+	targetScanMicros atomic.Int64
+	lastTargetScanUS atomic.Int64
 }
 
 func New(path string) *Bus {
@@ -146,6 +151,18 @@ func (b *Bus) record(ev Event) {
 		b.searches.Add(1)
 	case EventTargetFound:
 		b.targetsFound.Add(1)
+		if raw, ok := ev.Fields["scan_us"]; ok {
+			switch v := raw.(type) {
+			case int64:
+				b.targetScanCount.Add(1)
+				b.targetScanMicros.Add(v)
+				b.lastTargetScanUS.Store(v)
+			case int:
+				b.targetScanCount.Add(1)
+				b.targetScanMicros.Add(int64(v))
+				b.lastTargetScanUS.Store(int64(v))
+			}
+		}
 	case EventTargetSkipped:
 		b.targetsSkipped.Add(1)
 	case EventAttackFinished:
@@ -177,6 +194,11 @@ func (b *Bus) Snapshot() Snapshot {
 	if count > 0 {
 		avg = float64(b.captureMicros.Load()) / float64(count) / 1000.0
 	}
+	scanCount := b.targetScanCount.Load()
+	avgScan := 0.0
+	if scanCount > 0 {
+		avgScan = float64(b.targetScanMicros.Load()) / float64(scanCount) / 1000.0
+	}
 	return Snapshot{
 		Events:          b.events.Load(),
 		Searches:        b.searches.Load(),
@@ -184,8 +206,10 @@ func (b *Bus) Snapshot() Snapshot {
 		TargetsSkipped:  b.targetsSkipped.Load(),
 		AttacksFinished: b.attacksFinished.Load(),
 		Recoveries:      b.recoveries.Load(),
-		AvgCaptureMS:    avg,
-		LastCaptureMS:   float64(b.lastCaptureUS.Load()) / 1000.0,
+		AvgCaptureMS:     avg,
+		LastCaptureMS:    float64(b.lastCaptureUS.Load()) / 1000.0,
+		AvgTargetScanMS:  avgScan,
+		LastTargetScanMS: float64(b.lastTargetScanUS.Load()) / 1000.0,
 	}
 }
 
