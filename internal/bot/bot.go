@@ -555,6 +555,17 @@ func (b *Bot) captureLoop() {
 			default:
 			}
 
+			// During an active attack/search sequence, that goroutine is the
+			// exclusive screencap owner. Even a low-rate background observer
+			// adds unnecessary ADB framebuffer pressure on BlueStacks Pie64
+			// during matchmaking/clouds, where repeated screencaps have been
+			// observed to terminate the emulator. Keep the observer asleep
+			// until the sequence releases ownership.
+			if b.seqRunning.Load() {
+				lastCapture = time.Now()
+				continue
+			}
+
 			start := time.Now()
 			screen, err := b.client.CaptureToMat()
 			dur := time.Since(start)
@@ -3616,7 +3627,10 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 			return true
 		case state == game.StateSearchMap || state == game.StateLoading:
 			b.logger.Debug().Msg("in clouds/loading")
-			time.Sleep(300 * time.Millisecond)
+			// BlueStacks Pie64 is sensitive to sustained framebuffer capture
+			// bursts while Clash is matchmaking. We only need state polling
+			// here, not video-rate observation.
+			time.Sleep(900 * time.Millisecond)
 			continue
 		case state == game.StateArmySelection || state == game.StateArmyCamp:
 			b.logger.Debug().Msg("in army menu, retrying Battle Attack button")
@@ -3631,11 +3645,11 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 					b.findAndClick("btn_battle", "Battle Retry", 1)
 				}
 			}
-			time.Sleep(400 * time.Millisecond)
+			time.Sleep(800 * time.Millisecond)
 		default:
 			b.logger.Debug().Str("state", state.String()).Msg("waiting for battle state")
 			b.dismissInterruptionState(state)
-			time.Sleep(250 * time.Millisecond)
+			time.Sleep(650 * time.Millisecond)
 		}
 	}
 
