@@ -105,6 +105,57 @@ export interface AttackReplayView {
   events: AttackReplayEventView[];
 }
 
+export interface SessionBestAttackView {
+  timestamp?: string;
+  strategy?: string;
+  side?: string;
+  stars: number;
+  gold: number;
+  elixir: number;
+  dark_elixir: number;
+  gold_plus_elixir: number;
+  target_score: number;
+}
+
+export interface SessionReportView {
+  session_id: string;
+  generated_at?: string;
+  attacks: number;
+  total_gold: number;
+  total_elixir: number;
+  total_de: number;
+  gold_per_hour: number;
+  elixir_per_hour: number;
+  de_per_hour: number;
+  average_stars: number;
+  three_star_rate: number;
+  average_destruction: number;
+  average_target_score: number;
+  full_deploy_rate: number;
+  return_home_rate: number;
+  safe_corridor_rate: number;
+  zero_touch_rate: number;
+  current_zero_touch_streak: number;
+  best_zero_touch_streak: number;
+  average_preparation_ms: number;
+  average_search_ms: number;
+  average_deploy_ms: number;
+  average_combat_ms: number;
+  average_return_home_ms: number;
+  average_routine_ms: number;
+  bottleneck: string;
+  top_strategy?: string;
+  top_deploy_side?: string;
+  runtime_modes?: Record<string, number>;
+  end_reasons?: Record<string, number>;
+  best_attack: SessionBestAttackView;
+  health_score: number;
+  speed_profile: string;
+  anomalies: number;
+  preferred_scale_hit_rate: number;
+  preferred_scale_enabled: boolean;
+}
+
 export interface VillageResourceSnapshot {
   timestamp: string;
   gold: number;
