@@ -3736,6 +3736,7 @@ func (b *Bot) Stats() BotStats {
 		UIAnchorHits:            uiAnchorHits,
 		UIAnchorFallbacks:       b.uiAnchorFallbacks.Load(),
 		UIAnchorHitRate:         uiAnchorHitRate,
+		TopRejectedTargets:      tm.TopRejectedTargets,
 	}
 }
 
@@ -3801,7 +3802,8 @@ type BotStats struct {
 	UIAnchorAttempts        int64   `json:"ui_anchor_attempts"`
 	UIAnchorHits            int64   `json:"ui_anchor_hits"`
 	UIAnchorFallbacks       int64   `json:"ui_anchor_fallbacks"`
-	UIAnchorHitRate         float64 `json:"ui_anchor_hit_rate"`
+	UIAnchorHitRate         float64                          `json:"ui_anchor_hit_rate"`
+	TopRejectedTargets      []telemetry.RejectedTargetSample `json:"top_rejected_targets,omitempty"`
 }
 
 type AttackReport struct {
