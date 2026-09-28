@@ -1848,7 +1848,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		}
 
 		// Use the already-live frame first.
+		nextCycleStarted := time.Now()
 		nextClicked := false
+		nextRetryUsed := false
+		nextVerifyProbes := 0
 		transitionStarted := time.Time{}
 		if x, y, ok := b.locateNextButtonColor(screen); ok {
 			b.logger.Debug().Int("x", x).Int("y", y).Msg("Next button verified; precision clicking detected center")
@@ -1875,6 +1878,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			// was correlated with HD-Player.exe access-violation crashes.
 			time.Sleep(650 * time.Millisecond)
 			for verify := 0; verify < 3 && !transitioned; verify++ {
+				nextVerifyProbes++
 				probe, capErr := b.client.CaptureToMat()
 				if capErr == nil && !probe.Empty() {
 					st, _ := b.classify(probe)
@@ -1896,12 +1900,14 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		// This replaces the situation where the bot looked "lost" until the
 		// user manually clicked Next, while also preventing rapid tap spam.
 		if !transitioned {
+			nextRetryUsed = true
 			b.logger.Warn().Msg("Next tap did not start matchmaking; reacquiring button for one controlled retry")
 			time.Sleep(450 * time.Millisecond)
 			if clickNextFresh() {
 				transitionStarted = time.Now()
 				time.Sleep(700 * time.Millisecond)
 				for verify := 0; verify < 3 && !transitioned; verify++ {
+					nextVerifyProbes++
 					probe, capErr := b.client.CaptureToMat()
 					if capErr == nil && !probe.Empty() {
 						st, _ := b.classify(probe)
@@ -1927,12 +1933,17 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			sequenceSkips++
 			if b.telemetry != nil {
 				transitionUS := int64(0)
-				if !transitionStarted.IsZero() {
+				if !nextCycleStarted.IsZero() {
+					transitionUS = time.Since(nextCycleStarted).Microseconds()
+				} else if !transitionStarted.IsZero() {
 					transitionUS = time.Since(transitionStarted).Microseconds()
 				}
 				b.telemetry.Emit(telemetry.EventTargetSkipped, map[string]any{
 					"sequence_skips": sequenceSkips,
 					"transition_us": transitionUS,
+					"retry_used": nextRetryUsed,
+					"verify_probes": nextVerifyProbes,
+					"first_pass": !nextRetryUsed,
 				})
 				if transitionUS >= 3_000_000 {
 					b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
