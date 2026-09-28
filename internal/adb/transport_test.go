@@ -284,3 +284,23 @@ func TestNormalizeShellScreencapOwnsOutputBuffer(t *testing.T) {
 		t.Fatal("normalized screencap aliases source buffer")
 	}
 }
+
+
+func TestPreferBlueStacksShellCapture(t *testing.T) {
+	cases := []struct {
+		device string
+		want   bool
+	}{
+		{"127.0.0.1:5555", true},
+		{"localhost:5555", true},
+		{"LOCALHOST:5555", true},
+		{"emulator-5554", false},
+		{"192.168.1.50:5555", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := preferBlueStacksShellCapture(tc.device); got != tc.want {
+			t.Fatalf("preferBlueStacksShellCapture(%q)=%v want %v", tc.device, got, tc.want)
+		}
+	}
+}
