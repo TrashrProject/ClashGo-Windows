@@ -158,9 +158,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $ErrorActionPreference = "Continue"
           gh release view beta-latest --repo TrashrProject/ClashGo-Windows *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $exists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = "Stop"
+
+          if ($exists) {
             gh release delete beta-latest --repo TrashrProject/ClashGo-Windows --cleanup-tag -y
             if ($LASTEXITCODE -ne 0) { throw "Could not replace previous beta-latest release" }
           }
+
           gh release create beta-latest "${{ steps.manifest.outputs.zip }}" "${{ steps.manifest.outputs.setup }}" "dist\latest-beta.json" "dist\SHA256SUMS-beta.txt" --repo TrashrProject/ClashGo-Windows --title "ClashGO Windows Beta $env:BETA_VERSION" --notes "Automatic beta from feature/intelligence-v2 ($env:GITHUB_SHA)" --target "$env:GITHUB_SHA" --prerelease
+          if ($LASTEXITCODE -ne 0) { throw "Could not publish beta-latest release" }
