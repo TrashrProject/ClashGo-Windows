@@ -2521,6 +2521,8 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				CaptureMS: h.CaptureMS,
 				TargetScanMS: h.TargetScanMS,
 				DeploySuccess: h.DeploySuccess,
+				ReturnHomeOK: h.ReturnHomeSuccess,
+				SafeDeployment: h.RedZoneValid && h.CorridorVerified && h.HUDSafe,
 			})
 		}
 		assessment := intelligence.AnalyzePerformance(samples)
