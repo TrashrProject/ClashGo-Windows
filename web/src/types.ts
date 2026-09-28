@@ -164,6 +164,11 @@ export interface SessionReportView {
   average_combat_ms: number;
   average_return_home_ms: number;
   average_routine_ms: number;
+  average_battle_end_wait_ms: number;
+  natural_battle_end_wait_ms: number;
+  early_battle_end_wait_ms: number;
+  early_exit_rate: number;
+  average_loot_exit_percent: number;
   bottleneck: string;
   optimization_target: string;
   top_strategy?: string;
@@ -180,6 +185,7 @@ export interface SessionReportView {
   bluestacks_restarts: number;
   preferred_scale_hit_rate: number;
   preferred_scale_enabled: boolean;
+  recommendations?: string[];
 }
 
 export interface VillageResourceSnapshot {
