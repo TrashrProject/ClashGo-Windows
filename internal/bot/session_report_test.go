@@ -1,6 +1,9 @@
 package bot
 
 import (
+	"encoding/csv"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -92,5 +95,46 @@ func TestBuildSessionReportZeroTouchStreakStopsAtNewestFailure(t *testing.T) {
 	}
 	if report.BestZeroTouchStreak != 2 {
 		t.Fatalf("best streak=%d want 2", report.BestZeroTouchStreak)
+	}
+}
+
+func TestWriteSessionReportCSVWritesHeaderAndSingleRow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.csv")
+	report := SessionReport{
+		SessionID: "session-csv",
+		GeneratedAt: time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC),
+		Attacks: 3,
+		TotalGold: 3_000_000,
+		GoldPerHour: 7_500_000,
+		AverageStars: 2.5,
+		ZeroTouchRate: 100,
+		Bottleneck: "combat",
+		OptimizationTarget: "search",
+		HealthScore: 98,
+		SpeedProfile: "Fast",
+		PreferredScaleHitRate: 60,
+		PreferredScaleEnabled: true,
+	}
+	if err := writeSessionReportCSV(path, report); err != nil {
+		t.Fatalf("write CSV: %v", err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open CSV: %v", err)
+	}
+	defer f.Close()
+
+	rows, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		t.Fatalf("read CSV: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows=%d want header+1 data row", len(rows))
+	}
+	if rows[0][0] != "session_id" || rows[1][0] != "session-csv" {
+		t.Fatalf("unexpected CSV first column: header=%q value=%q", rows[0][0], rows[1][0])
+	}
+	if len(rows[0]) != len(rows[1]) {
+		t.Fatalf("CSV header/data column mismatch: %d vs %d", len(rows[0]), len(rows[1]))
 	}
 }
