@@ -46,9 +46,11 @@ type Executor struct {
 
 	// Windows live-bar observability. These counters measure slot-rescan and
 	// selected-card OCR cost without changing deployment decisions.
-	lastLiveBarRescans       int
-	lastLiveBarRescanMicros  int64
-	lastSelectedCardOCRCount int
+	lastLiveBarRescans        int
+	lastLiveBarRescanMicros   int64
+	lastSlotDetectMicros      int64
+	lastSlotClassifyMicros    int64
+	lastSelectedCardOCRCount  int
 	lastSelectedCardOCRMicros int64
 
 	// lastDestructionPct is the highest destruction percentage the battle
@@ -98,15 +100,18 @@ func (e *Executor) LastResolvedEdge() string { return e.lastResolvedEdge }
 // deployment engine (left/right/top/bottom when known).
 func (e *Executor) LastDeploySide() string { return e.lastDeploySide }
 
-func (e *Executor) LiveBarMetrics() (rescans int, avgRescanMS, avgSelectedOCRMS float64) {
+func (e *Executor) LiveBarMetrics() (rescans int, avgRescanMS, avgDetectMS, avgClassifyMS, avgSelectedOCRMS float64) {
 	rescans = e.lastLiveBarRescans
 	if e.lastLiveBarRescans > 0 {
-		avgRescanMS = float64(e.lastLiveBarRescanMicros) / float64(e.lastLiveBarRescans) / 1000.0
+		n := float64(e.lastLiveBarRescans)
+		avgRescanMS = float64(e.lastLiveBarRescanMicros) / n / 1000.0
+		avgDetectMS = float64(e.lastSlotDetectMicros) / n / 1000.0
+		avgClassifyMS = float64(e.lastSlotClassifyMicros) / n / 1000.0
 	}
 	if e.lastSelectedCardOCRCount > 0 {
 		avgSelectedOCRMS = float64(e.lastSelectedCardOCRMicros) / float64(e.lastSelectedCardOCRCount) / 1000.0
 	}
-	return rescans, avgRescanMS, avgSelectedOCRMS
+	return rescans, avgRescanMS, avgDetectMS, avgClassifyMS, avgSelectedOCRMS
 }
 
 // LastDestructionPercent returns the highest destruction percentage the
