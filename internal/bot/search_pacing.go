@@ -23,6 +23,28 @@ type searchPacing struct {
 	PrepPollPause       time.Duration
 }
 
+
+func chooseSearchPacingWithReliability(h adb.Health, nextTransitions int64, firstPassRate float64) searchPacing {
+	p := chooseSearchPacing(h)
+	// Do not react to tiny samples. Five confirmed transitions is enough to
+	// detect a bad streak without bouncing modes on one ignored tap.
+	if nextTransitions < 5 {
+		return p
+	}
+
+	if firstPassRate < 80 {
+		// Multiple ignored Next taps are a stronger instability signal than raw
+		// capture latency. Preserve the proven conservative timings.
+		return chooseSearchPacing(adb.Health{ConsecutiveFails: 1})
+	}
+	if firstPassRate < 92 && p.Mode == "Fast" {
+		// A healthy ADB pipe can still outrun Clash's UI. Step down one level
+		// instead of forcing Safe immediately.
+		return chooseSearchPacing(adb.Health{})
+	}
+	return p
+}
+
 func chooseSearchPacing(h adb.Health) searchPacing {
 	// Use the reactive EWMA when available so a sudden BlueStacks slowdown
 	// changes pacing within a few captures. Fall back to the stable average
