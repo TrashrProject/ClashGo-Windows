@@ -114,9 +114,10 @@ type Bot struct {
 
 	uiAnchorMu        sync.RWMutex
 	uiAnchors         map[string]image.Point
-	uiAnchorAttempts  atomic.Int64
-	uiAnchorHits      atomic.Int64
-	uiAnchorFallbacks atomic.Int64
+	uiAnchorAttempts        atomic.Int64
+	uiAnchorHits            atomic.Int64
+	uiAnchorFallbacks       atomic.Int64
+	uiAnchorDisabledUntilUS atomic.Int64
 
 	diagMu          sync.Mutex
 	lastDiagnostics map[string]time.Time
@@ -2752,17 +2753,39 @@ func (b *Bot) locateRememberedButton(name string, screen gocv.Mat) (int, int, bo
 	if !ok {
 		return 0, 0, false
 	}
+
+	// A poor local hit-rate means the current UI layout/animation no longer
+	// matches what was learned. Temporarily bypass the cache; the full locator
+	// remains authoritative and will keep updating anchors after verified hits.
+	if until := b.uiAnchorDisabledUntilUS.Load(); until > time.Now().UnixMicro() {
+		return 0, 0, false
+	}
+
 	pt, ok := b.rememberedUIAnchor(name)
 	if !ok {
 		return 0, 0, false
 	}
-	b.uiAnchorAttempts.Add(1)
+	attempts := b.uiAnchorAttempts.Add(1)
 	x, y, found := locateColoredButtonNear(screen, pt, spec)
 	if found {
 		b.uiAnchorHits.Add(1)
 		return x, y, true
 	}
-	b.uiAnchorFallbacks.Add(1)
+
+	fallbacks := b.uiAnchorFallbacks.Add(1)
+	hits := b.uiAnchorHits.Load()
+	if attempts >= 20 {
+		hitRate := float64(hits) * 100 / float64(attempts)
+		if hitRate < 50 {
+			b.uiAnchorDisabledUntilUS.Store(time.Now().Add(2 * time.Minute).UnixMicro())
+			b.logger.Debug().
+				Int64("attempts", attempts).
+				Int64("hits", hits).
+				Int64("fallbacks", fallbacks).
+				Float64("hit_rate", hitRate).
+				Msg("verified UI anchor cache temporarily disabled; full locator remains authoritative")
+		}
+	}
 	return 0, 0, false
 }
 
@@ -3661,6 +3684,7 @@ func (b *Bot) Stats() BotStats {
 	adbHealth := b.client.Health()
 	uiAnchorAttempts := b.uiAnchorAttempts.Load()
 	uiAnchorHits := b.uiAnchorHits.Load()
+	uiAnchorDisabled := b.uiAnchorDisabledUntilUS.Load() > time.Now().UnixMicro()
 	uiAnchorHitRate := 0.0
 	if uiAnchorAttempts > 0 {
 		uiAnchorHitRate = float64(uiAnchorHits) * 100 / float64(uiAnchorAttempts)
@@ -3736,6 +3760,7 @@ func (b *Bot) Stats() BotStats {
 		UIAnchorHits:            uiAnchorHits,
 		UIAnchorFallbacks:       b.uiAnchorFallbacks.Load(),
 		UIAnchorHitRate:         uiAnchorHitRate,
+		UIAnchorEnabled:         !uiAnchorDisabled,
 		TopRejectedTargets:      tm.TopRejectedTargets,
 	}
 }
@@ -3803,6 +3828,7 @@ type BotStats struct {
 	UIAnchorHits            int64   `json:"ui_anchor_hits"`
 	UIAnchorFallbacks       int64   `json:"ui_anchor_fallbacks"`
 	UIAnchorHitRate         float64                          `json:"ui_anchor_hit_rate"`
+	UIAnchorEnabled         bool                             `json:"ui_anchor_enabled"`
 	TopRejectedTargets      []telemetry.RejectedTargetSample `json:"top_rejected_targets,omitempty"`
 }
 
