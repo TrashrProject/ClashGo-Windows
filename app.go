@@ -326,6 +326,7 @@ func mergeStats(acc, current bot.BotStats) bot.BotStats {
 		UIAnchorHits:            current.UIAnchorHits,
 		UIAnchorFallbacks:       current.UIAnchorFallbacks,
 		UIAnchorHitRate:         current.UIAnchorHitRate,
+		UIAnchorEnabled:         current.UIAnchorEnabled,
 		TopRejectedTargets:      current.TopRejectedTargets,
 	}
 
