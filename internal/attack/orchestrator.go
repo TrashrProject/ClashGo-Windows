@@ -63,6 +63,8 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	e.lastDeploySide = cornerToSide(targetEdge)
 	e.lastLiveBarRescans = 0
 	e.lastLiveBarRescanMicros = 0
+	e.lastSlotDetectMicros = 0
+	e.lastSlotClassifyMicros = 0
 	e.lastSelectedCardOCRCount = 0
 	e.lastSelectedCardOCRMicros = 0
 
@@ -612,6 +614,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 			rescanStarted := time.Now()
 			liveMgr := NewSlotManager(fresh, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+			detectMS, classifyMS := liveMgr.Timing()
+			e.lastSlotDetectMicros += int64(detectMS * 1000)
+			e.lastSlotClassifyMicros += int64(classifyMS * 1000)
 			liveSlots := append([]*TrackedSlot(nil), liveMgr.GetAllSlots()...)
 			if len(liveSlots) == 0 {
 				fresh.Close()
