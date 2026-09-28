@@ -64,6 +64,10 @@ type SlotManager struct {
 	h         int
 	slotY     int
 	barY      int
+
+	detectDuration time.Duration
+	classifyDuration time.Duration
+
 	logger    zerolog.Logger
 }
 
@@ -111,14 +115,18 @@ func NewSlotManager(
 		}
 	}
 
+	detectStarted := time.Now()
 	activeXs := sm.detectActiveSlots(screen)
+	sm.detectDuration = time.Since(detectStarted)
 	if len(activeXs) == 0 {
 		sm.logger.Warn().Msg("no active slots detected")
 		return sm
 	}
 
 	barROI := image.Rect(0, sm.barY, w, h)
+	classifyStarted := time.Now()
 	sm.classifySlots(screen, activeXs, templates, barROI)
+	sm.classifyDuration = time.Since(classifyStarted)
 
 	// Windows must not inherit stale positional/manual classifications.
 	// A wrong "Spell" guess sends a perfectly valid troop into the middle
@@ -692,6 +700,14 @@ func (sm *SlotManager) GetSlot(unitName string) *TrackedSlot {
 // GetAllSlots returns all tracked slots.
 func (sm *SlotManager) GetAllSlots() []*TrackedSlot {
 	return sm.slots
+}
+
+func (sm *SlotManager) Timing() (detectMS, classifyMS float64) {
+	if sm == nil {
+		return 0, 0
+	}
+	return float64(sm.detectDuration.Microseconds()) / 1000.0,
+		float64(sm.classifyDuration.Microseconds()) / 1000.0
 }
 
 // GetSlotY returns the Y coordinate used for slot detection.
