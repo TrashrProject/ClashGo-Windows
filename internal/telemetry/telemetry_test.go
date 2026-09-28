@@ -346,12 +346,21 @@ func TestTargetThresholdGapPct(t *testing.T) {
 func TestRejectedNearMissCounter(t *testing.T) {
 	b := New(filepath.Join(t.TempDir(), "events.ndjson"))
 	defer b.Close()
+
+	// ~6.67% gap -> counts in 10% and 15%, not 5%.
 	b.RecordRejectedTarget(700000, 700000, 1900, 82, 1000, 750000, 750000, 2000)
+	// ~2.67% gap -> counts in all sensitivity buckets.
+	b.RecordRejectedTarget(730000, 730000, 1960, 86, 1000, 750000, 750000, 2000)
+	// Large miss -> none.
 	b.RecordRejectedTarget(300000, 300000, 500, 40, 1000, 750000, 750000, 2000)
 
 	s := b.Snapshot()
-	if s.NearMissTargets != 1 {
-		t.Fatalf("near misses=%d want 1", s.NearMissTargets)
+	if s.NearMissTargets != 2 {
+		t.Fatalf("near misses=%d want 2", s.NearMissTargets)
+	}
+	if s.NearMiss5Targets != 1 || s.NearMiss10Targets != 2 || s.NearMiss15Targets != 2 {
+		t.Fatalf("unexpected sensitivity buckets: 5=%d 10=%d 15=%d",
+			s.NearMiss5Targets, s.NearMiss10Targets, s.NearMiss15Targets)
 	}
 	if len(s.TopRejectedTargets) == 0 || !s.TopRejectedTargets[0].NearMiss {
 		t.Fatalf("expected best rejected target to expose near-miss metadata: %+v", s.TopRejectedTargets)
