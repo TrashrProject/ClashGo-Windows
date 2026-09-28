@@ -272,3 +272,25 @@ func TestRecordCaptureMicrosMatchesCaptureEventMetrics(t *testing.T) {
 		t.Fatal("direct capture samples must not enter activity feed")
 	}
 }
+
+func TestRecordRejectedTargetMatchesRejectedEventMetrics(t *testing.T) {
+	b := New(filepath.Join(t.TempDir(), "events.ndjson"))
+	defer b.Close()
+
+	b.RecordRejectedTarget(400000, 300000, 1200, 52, 12500)
+	b.RecordRejectedTarget(600000, 500000, 1800, 62, 17500)
+
+	s := b.Snapshot()
+	if s.TargetsFound != 2 || s.TargetsAccepted != 0 {
+		t.Fatalf("target counters mismatch: %+v", s)
+	}
+	if s.AvgRejectedGE != 900000 || s.AvgRejectedDE != 1500 || s.AvgRejectedScore != 57 {
+		t.Fatalf("rejected quality mismatch: %+v", s)
+	}
+	if s.AvgTargetScanMS != 15 || s.LastTargetScanMS != 17.5 {
+		t.Fatalf("scan metrics mismatch: %+v", s)
+	}
+	if len(b.Recent(10)) != 0 {
+		t.Fatal("rejected target must not enter activity feed")
+	}
+}
