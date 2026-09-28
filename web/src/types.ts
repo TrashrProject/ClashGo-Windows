@@ -19,6 +19,15 @@ export interface BotStats {
   recovery_attempts: number;
   recovery_successes: number;
   bluestacks_restarts: number;
+  gold_per_hour: number;
+  elixir_per_hour: number;
+  de_per_hour: number;
+  average_stars: number;
+  three_star_rate: number;
+  average_capture_ms: number;
+  last_capture_ms: number;
+  telemetry_events: number;
+  targets_skipped: number;
   adb_health: {
     avg_capture_ms: number;
     consecutive_fails: number;
@@ -55,6 +64,9 @@ export interface AttackReport {
   bonus_elixir: number;
   bonus_de: number;
   total_attacks_session: number;
+  search_skips: number;
+  search_duration_ms: number;
+  cycle_duration_ms: number;
 }
 
 export interface BotConfig {
