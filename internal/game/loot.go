@@ -19,10 +19,12 @@ import (
 type LootRecognizer struct {
 	cal            *Calibration
 	templates      *TemplateStore
-	digitTemplates []gocv.Mat
+	digitTemplates     []gocv.Mat
+	digitTemplateReady []bool
 	// scaledDigitCache holds per-(w,h) pre-scaled digit templates so
 	// matchDigit does not re-Resize every template for every blob.
 	scaledDigitCache map[string][]gocv.Mat
+	scaledDigitReady map[string][]bool
 	logger           zerolog.Logger
 	mu               sync.Mutex
 	closeOnce        sync.Once
@@ -55,8 +57,10 @@ func NewLootRecognizer(cal *Calibration, ts *TemplateStore, logger zerolog.Logge
 	lr := &LootRecognizer{
 		cal:              cal,
 		templates:        ts,
-		digitTemplates:   make([]gocv.Mat, 10),
-		scaledDigitCache: make(map[string][]gocv.Mat),
+		digitTemplates:     make([]gocv.Mat, 10),
+		digitTemplateReady: make([]bool, 10),
+		scaledDigitCache:   make(map[string][]gocv.Mat),
+		scaledDigitReady:   make(map[string][]bool),
 		logger:           logger.With().Str("component", "loot_recognizer").Logger(),
 	}
 	lr.prepareDigitTemplates()
@@ -65,6 +69,7 @@ func NewLootRecognizer(cal *Calibration, ts *TemplateStore, logger zerolog.Logge
 
 func (lr *LootRecognizer) prepareDigitTemplates() {
 	lr.digitTemplates = make([]gocv.Mat, 10)
+	lr.digitTemplateReady = make([]bool, 10)
 	for i := 0; i < 10; i++ {
 		name := fmt.Sprintf("digit_%d", i)
 		tpl, ok := lr.templates.Get(name)
@@ -87,6 +92,7 @@ func (lr *LootRecognizer) prepareDigitTemplates() {
 		} else {
 			lr.digitTemplates[i] = bin.Clone()
 		}
+		lr.digitTemplateReady[i] = true
 		bin.Close()
 		gray.Close()
 	}
@@ -98,18 +104,23 @@ func (lr *LootRecognizer) Close() {
 	}
 	lr.closeOnce.Do(func() {
 		for i := range lr.digitTemplates {
-			if !lr.digitTemplates[i].Empty() {
+			if i < len(lr.digitTemplateReady) && lr.digitTemplateReady[i] {
 				lr.digitTemplates[i].Close()
+				lr.digitTemplateReady[i] = false
 			}
 		}
 		lr.digitTemplates = nil
+		lr.digitTemplateReady = nil
 		for key, set := range lr.scaledDigitCache {
+			ready := lr.scaledDigitReady[key]
 			for i := range set {
-				if !set[i].Empty() {
+				if i < len(ready) && ready[i] {
 					set[i].Close()
+					ready[i] = false
 				}
 			}
 			delete(lr.scaledDigitCache, key)
+			delete(lr.scaledDigitReady, key)
 		}
 	})
 }
@@ -930,22 +941,26 @@ func (lr *LootRecognizer) matchDigit(bin gocv.Mat) detectedDigit {
 	key := strconv.Itoa(bw) + "x" + strconv.Itoa(bh)
 	lr.mu.Lock()
 	scaled, ok := lr.scaledDigitCache[key]
+	ready := lr.scaledDigitReady[key]
 	if !ok {
 		scaled = make([]gocv.Mat, len(lr.digitTemplates))
+		ready = make([]bool, len(lr.digitTemplates))
 		for i, tpl := range lr.digitTemplates {
-			if tpl.Empty() {
+			if i >= len(lr.digitTemplateReady) || !lr.digitTemplateReady[i] {
 				continue
 			}
 			s := gocv.NewMat()
 			gocv.Resize(tpl, &s, image.Point{X: bw, Y: bh}, 0, 0, gocv.InterpolationLinear)
 			scaled[i] = s
+			ready[i] = true
 		}
 		lr.scaledDigitCache[key] = scaled
+		lr.scaledDigitReady[key] = ready
 	}
 	lr.mu.Unlock()
 
 	for i, tpl := range scaled {
-		if tpl.Empty() {
+		if i >= len(ready) || !ready[i] {
 			continue
 		}
 		res := vision.GetMat(bin.Rows()-tpl.Rows()+1, bin.Cols()-tpl.Cols()+1, gocv.MatTypeCV32FC1)
