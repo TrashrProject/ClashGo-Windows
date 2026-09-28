@@ -129,12 +129,55 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   const avgDeploySeconds = history?.length
     ? history.reduce((sum, r) => sum + (r.deploy_duration_ms || 0), 0) / history.length / 1000
     : 0;
+  const avgBattleSeconds = history?.length
+    ? history.reduce((sum, r) => sum + (r.battle_duration_ms || 0), 0) / history.length / 1000
+    : 0;
+  const avgCombatSeconds = Math.max(0, avgBattleSeconds - avgDeploySeconds);
   const compact = (v: number) => {
     const abs = Math.abs(v);
     if (abs >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
     if (abs >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
     return Math.round(v).toLocaleString();
   };
+
+  const lootCapture = React.useMemo(() => {
+    let offeredGE = 0, stolenGE = 0, offeredDE = 0, stolenDE = 0, targetScore = 0, scored = 0;
+    for (const rep of history ?? []) {
+      const offered = (rep.target_gold || 0) + (rep.target_elixir || 0);
+      if (offered > 0) {
+        offeredGE += offered;
+        stolenGE += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0);
+      }
+      if ((rep.target_de || 0) > 0) {
+        offeredDE += rep.target_de || 0;
+        stolenDE += rep.dark_elixir_stolen || 0;
+      }
+      if ((rep.target_score || 0) > 0) {
+        targetScore += rep.target_score || 0;
+        scored++;
+      }
+    }
+    return {
+      geRate: offeredGE > 0 ? stolenGE * 100 / offeredGE : 0,
+      deRate: offeredDE > 0 ? stolenDE * 100 / offeredDE : 0,
+      avgTargetScore: scored > 0 ? targetScore / scored : 0,
+      offeredGE,
+      stolenGE,
+    };
+  }, [history]);
+
+  const pipeline = React.useMemo(() => {
+    const rows = [
+      { label: 'Search', seconds: avgSearchSeconds },
+      { label: 'Deployment', seconds: avgDeploySeconds },
+      { label: 'Combat', seconds: avgCombatSeconds },
+    ];
+    const total = rows.reduce((sum, row) => sum + row.seconds, 0);
+    return {
+      rows: rows.map((row) => ({ ...row, share: total > 0 ? row.seconds * 100 / total : 0 })),
+      dominant: rows.reduce((best, row) => row.seconds > best.seconds ? row : best, rows[0]),
+    };
+  }, [avgSearchSeconds, avgDeploySeconds, avgCombatSeconds]);
 
   const recentPerformance = React.useMemo(() => {
     const summarize = (rows: AttackReport[]) => {
@@ -250,6 +293,56 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
               <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
             </div>
           ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-4">
+        <div className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 p-6 shadow-premium dark:shadow-none">
+          <div className="flex items-end justify-between gap-4 mb-5">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Cycle anatomy</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Where farming time goes</h3>
+            </div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+              Largest: {pipeline.dominant.label}
+            </div>
+          </div>
+          <div className="space-y-4">
+            {pipeline.rows.map((row) => (
+              <div key={row.label}>
+                <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider">
+                  <span className="text-zinc-500">{row.label}</span>
+                  <span className="text-zinc-950 dark:text-white tabular-nums">{row.seconds.toFixed(1)}s · {row.share.toFixed(0)}%</span>
+                </div>
+                <div className="mt-2 h-2.5 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+                  <div className="h-full rounded-full bg-zinc-950 dark:bg-white transition-all duration-700" style={{ width: `${Math.max(2, row.share)}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 p-6 shadow-premium dark:shadow-none">
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Loot conversion</div>
+          <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Target → Collected</h3>
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">G+E capture</div>
+              <div className="mt-1 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{lootCapture.geRate.toFixed(1)}%</div>
+            </div>
+            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">DE capture</div>
+              <div className="mt-1 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{lootCapture.deRate.toFixed(1)}%</div>
+            </div>
+            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Avg target score</div>
+              <div className="mt-1 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{lootCapture.avgTargetScore.toFixed(0)}/100</div>
+            </div>
+            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Collected G+E</div>
+              <div className="mt-1 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{compact(lootCapture.stolenGE)}</div>
+            </div>
+          </div>
         </div>
       </div>
 
