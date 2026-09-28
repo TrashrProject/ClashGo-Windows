@@ -131,3 +131,14 @@ func TestPreferredScaleCircuitBreakerKeepsUsefulFastPath(t *testing.T) {
 		t.Fatalf("useful preferred-scale fast path disabled unexpectedly, stats=%+v", stats)
 	}
 }
+
+func TestPreferredScaleResetClearsLearnedHints(t *testing.T) {
+	RememberPreferredTemplateScale("session-reset", 0.2, 1.2, 20, 0.73)
+	if _, ok := preferredTemplateScale("session-reset", 0.2, 1.2, 20); !ok {
+		t.Fatal("expected learned hint before reset")
+	}
+	ResetPreferredScaleStats()
+	if _, ok := preferredTemplateScale("session-reset", 0.2, 1.2, 20); ok {
+		t.Fatal("preferred scale hint leaked across bot-session reset")
+	}
+}
