@@ -379,12 +379,14 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   const deployHotPath = React.useMemo(() => {
     const rows = (history ?? []).filter((r) => (r.live_bar_rescans || 0) > 0);
     if (rows.length === 0) {
-      return { attacks: 0, avgRescans: 0, avgRescanMs: 0, avgCardOCRMs: 0 };
+      return { attacks: 0, avgRescans: 0, avgRescanMs: 0, avgDetectMs: 0, avgClassifyMs: 0, avgCardOCRMs: 0 };
     }
     return {
       attacks: rows.length,
       avgRescans: rows.reduce((sum, r) => sum + (r.live_bar_rescans || 0), 0) / rows.length,
       avgRescanMs: rows.reduce((sum, r) => sum + (r.avg_live_bar_rescan_ms || 0), 0) / rows.length,
+      avgDetectMs: rows.reduce((sum, r) => sum + (r.avg_slot_detect_ms || 0), 0) / rows.length,
+      avgClassifyMs: rows.reduce((sum, r) => sum + (r.avg_slot_classify_ms || 0), 0) / rows.length,
       avgCardOCRMs: rows.reduce((sum, r) => sum + (r.avg_selected_card_ocr_ms || 0), 0) / rows.length,
     };
   }, [history]);
@@ -611,10 +613,12 @@ Best optimization target: {pipeline.dominantTunable.label}
           </div>
           <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{deployHotPath.attacks} measured attacks</div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           {[
             { label: 'Rescans / attack', value: deployHotPath.avgRescans.toFixed(1), detail: 'Safety re-indexing kept' },
-            { label: 'Rescan cost', value: `${deployHotPath.avgRescanMs.toFixed(1)}ms`, detail: 'Slot detection average' },
+            { label: 'Total rescan', value: `${deployHotPath.avgRescanMs.toFixed(1)}ms`, detail: 'Per live-bar refresh' },
+            { label: 'Position detect', value: `${deployHotPath.avgDetectMs.toFixed(1)}ms`, detail: 'Shared mask scan' },
+            { label: 'Classification', value: `${deployHotPath.avgClassifyMs.toFixed(1)}ms`, detail: 'Identity/category matching' },
             { label: 'Selected OCR', value: `${deployHotPath.avgCardOCRMs.toFixed(1)}ms`, detail: 'One chosen card only' },
             { label: 'Estimated scan work', value: `${(deployHotPath.avgRescans * (deployHotPath.avgRescanMs + deployHotPath.avgCardOCRMs)).toFixed(0)}ms`, detail: 'Measured hot-path work' },
           ].map((metric) => (
