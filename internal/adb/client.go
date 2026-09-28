@@ -127,7 +127,7 @@ func NewClient(opts ...Option) *Client {
 		jitterDelays:    true,
 		maxJitterPixels: 2.0,
 		jitterFraction:  0.15,
-		minCaptureGap:   120 * time.Millisecond,
+		minCaptureGap:   250 * time.Millisecond,
 	}
 	for _, o := range opts {
 		o(c)
