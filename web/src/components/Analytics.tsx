@@ -331,6 +331,12 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   const avgDeploySeconds = history?.length
     ? history.reduce((sum, r) => sum + (r.deploy_duration_ms || 0), 0) / history.length / 1000
     : 0;
+  const avgPreparationSeconds = history?.length
+    ? history.reduce((sum, r) => sum + (r.preparation_duration_ms || 0), 0) / history.length / 1000
+    : 0;
+  const avgCooldownSeconds = history?.length
+    ? history.reduce((sum, r) => sum + (r.cooldown_duration_ms || 0), 0) / history.length / 1000
+    : 0;
   const avgBattleSeconds = history?.length
     ? history.reduce((sum, r) => sum + (r.battle_duration_ms || 0), 0) / history.length / 1000
     : 0;
@@ -370,16 +376,20 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
 
   const pipeline = React.useMemo(() => {
     const rows = [
-      { label: 'Search', seconds: avgSearchSeconds },
-      { label: 'Deployment', seconds: avgDeploySeconds },
-      { label: 'Combat', seconds: avgCombatSeconds },
+      { label: 'Cooldown (intentional)', seconds: avgCooldownSeconds, tunable: false },
+      { label: 'Preparation', seconds: avgPreparationSeconds, tunable: true },
+      { label: 'Search', seconds: avgSearchSeconds, tunable: true },
+      { label: 'Deployment', seconds: avgDeploySeconds, tunable: false },
+      { label: 'Combat', seconds: avgCombatSeconds, tunable: true },
     ];
     const total = rows.reduce((sum, row) => sum + row.seconds, 0);
+    const tunable = rows.filter((row) => row.tunable);
     return {
       rows: rows.map((row) => ({ ...row, share: total > 0 ? row.seconds * 100 / total : 0 })),
       dominant: rows.reduce((best, row) => row.seconds > best.seconds ? row : best, rows[0]),
+      dominantTunable: tunable.reduce((best, row) => row.seconds > best.seconds ? row : best, tunable[0]),
     };
-  }, [avgSearchSeconds, avgDeploySeconds, avgCombatSeconds]);
+  }, [avgCooldownSeconds, avgPreparationSeconds, avgSearchSeconds, avgDeploySeconds, avgCombatSeconds]);
 
   const recentPerformance = React.useMemo(() => {
     const summarize = (rows: AttackReport[]) => {
@@ -508,7 +518,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
               <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Where farming time goes</h3>
             </div>
             <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-              Largest: {pipeline.dominant.label}
+Best optimization target: {pipeline.dominantTunable.label}
             </div>
           </div>
           <div className="space-y-4">
