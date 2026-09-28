@@ -1624,42 +1624,45 @@ func (a *App) InstallAndRestart() error {
 		return fmt.Errorf("updater not initialized")
 	}
 
-	// Step 1: stop the bot synchronously if running.
+	// Stop the bot first so ADB and session state are quiet before the updater
+	// replaces the executable and runtime DLLs.
 	if a.IsRunning() {
 		log.Info().Msg("InstallAndRestart: stopping bot to drain ADB before exit")
 		_ = a.StopBot()
 	}
-
-	// Step 2: flush persistent stats. saveStats is idempotent + safe
-	// even when no bot is running.
 	a.saveStats()
 
-	// Step 3: cover the Wails exit + helper wait window.
-	// We deliberately do NOT emit "updater_status" here — the 2s
-	// ticker in forwardUpdaterStatus emits within ~2s and we don't
-	// want React to receive two close-in-time events (the IPC emit
-	// + the ticker race). SetState alone is enough.
-	a.updater.SetState(updater.StateRestarting)
-
-	// Step 4: detach the helper script. Returns (started, error).
-	// If false, the helper is missing (e.g. dev build); fall back to
-	// Finder-open and don't exit.
+	// IMPORTANT: ApplyAuto requires StateReady. The old implementation set
+	// StateRestarting BEFORE calling ApplyAuto, which made ApplyAuto reject
+	// every install with "download not ready" and then made the manual
+	// fallback reject it for the same reason. Start the helper while the
+	// verified download is still Ready; only then expose Restarting to React.
 	started, err := a.updater.ApplyAuto()
 	if err != nil || !started {
-		log.Warn().Err(err).Msg("InstallAndRestart: helper unavailable, falling back to Finder")
-		_ = a.updater.Apply()
-		// Revert state so the UI comes back to "ready" instead of
-		// staying on the restart splash.
-		a.updater.SetState(updater.StateReady)
-		return err
+		log.Warn().Err(err).Msg("InstallAndRestart: auto helper unavailable, falling back to manual reveal")
+		if fallbackErr := a.updater.Apply(); fallbackErr != nil {
+			if err != nil {
+				return fmt.Errorf("automatic install failed: %v; manual fallback failed: %w", err, fallbackErr)
+			}
+			return fallbackErr
+		}
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("automatic install helper did not start")
 	}
 
-	// Step 5: exit cleanly so the helper script's PID wait resolves.
-	// 1s delay gives the Wails JS bridge time to flush our success
-	// response + the splash render before the process vanishes.
+	a.updater.SetState(updater.StateRestarting)
+	// Push the transition immediately. The normal updater event bridge ticks
+	// every two seconds, while this process exits after ~1.2s; relying on that
+	// ticker meant the restart splash often never rendered.
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "updater_status", a.updater.GetStatus())
+	}
+
 	go func() {
-		time.Sleep(1 * time.Second)
-		log.Info().Msg("InstallAndRestart: helper detached, exiting for bundle swap")
+		time.Sleep(1200 * time.Millisecond)
+		log.Info().Msg("InstallAndRestart: helper detached, exiting for Windows bundle swap")
 		os.Exit(0)
 	}()
 
