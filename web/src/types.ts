@@ -61,6 +61,7 @@ export interface BotStats {
   ui_anchor_hits: number;
   ui_anchor_fallbacks: number;
   ui_anchor_hit_rate: number;
+  top_rejected_targets?: RejectedTargetSample[];
   adb_health: {
     avg_capture_ms: number;
     fast_capture_ms: number;
@@ -74,6 +75,14 @@ export interface BotStats {
     errors_total: number;
     last_error?: string;
   };
+}
+
+export interface RejectedTargetSample {
+  at: string;
+  gold: number;
+  elixir: number;
+  dark_elixir: number;
+  score: number;
 }
 
 export interface ActivityEvent {
