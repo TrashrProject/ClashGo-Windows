@@ -379,7 +379,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   const deployHotPath = React.useMemo(() => {
     const rows = (history ?? []).filter((r) => (r.live_bar_rescans || 0) > 0);
     if (rows.length === 0) {
-      return { attacks: 0, avgRescans: 0, avgRescanMs: 0, avgDetectMs: 0, avgClassifyMs: 0, avgCardOCRMs: 0 };
+      return { attacks: 0, avgRescans: 0, avgRescanMs: 0, avgDetectMs: 0, avgClassifyMs: 0, avgTemplatesTried: 0, avgTemplatesMatched: 0, avgCardOCRMs: 0 };
     }
     return {
       attacks: rows.length,
@@ -387,6 +387,8 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       avgRescanMs: rows.reduce((sum, r) => sum + (r.avg_live_bar_rescan_ms || 0), 0) / rows.length,
       avgDetectMs: rows.reduce((sum, r) => sum + (r.avg_slot_detect_ms || 0), 0) / rows.length,
       avgClassifyMs: rows.reduce((sum, r) => sum + (r.avg_slot_classify_ms || 0), 0) / rows.length,
+      avgTemplatesTried: rows.reduce((sum, r) => sum + (r.templates_tried || 0), 0) / rows.length,
+      avgTemplatesMatched: rows.reduce((sum, r) => sum + (r.templates_matched || 0), 0) / rows.length,
       avgCardOCRMs: rows.reduce((sum, r) => sum + (r.avg_selected_card_ocr_ms || 0), 0) / rows.length,
     };
   }, [history]);
@@ -638,12 +640,14 @@ Best optimization target: {pipeline.dominantTunable.label}
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
           {[
             { label: 'Rescans / attack', value: deployHotPath.avgRescans.toFixed(1), detail: 'Safety re-indexing kept' },
             { label: 'Total rescan', value: `${deployHotPath.avgRescanMs.toFixed(1)}ms`, detail: 'Per live-bar refresh' },
             { label: 'Position detect', value: `${deployHotPath.avgDetectMs.toFixed(1)}ms`, detail: 'Shared mask scan' },
             { label: 'Classification', value: `${deployHotPath.avgClassifyMs.toFixed(1)}ms`, detail: 'Identity/category matching' },
+            { label: 'Templates tried', value: deployHotPath.avgTemplatesTried.toFixed(1), detail: 'Per attack average' },
+            { label: 'Templates matched', value: deployHotPath.avgTemplatesMatched.toFixed(1), detail: 'Semantic cards found' },
             { label: 'Selected OCR', value: `${deployHotPath.avgCardOCRMs.toFixed(1)}ms`, detail: 'One chosen card only' },
             { label: 'Estimated scan work', value: `${(deployHotPath.avgRescans * (deployHotPath.avgRescanMs + deployHotPath.avgCardOCRMs)).toFixed(0)}ms`, detail: 'Measured hot-path work' },
           ].map((metric) => (
