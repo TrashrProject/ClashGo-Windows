@@ -154,6 +154,10 @@ export interface SessionReportView {
   health_score: number;
   speed_profile: string;
   anomalies: number;
+  recovery_attempts: number;
+  recovery_successes: number;
+  recovery_success_rate: number;
+  bluestacks_restarts: number;
   preferred_scale_hit_rate: number;
   preferred_scale_enabled: boolean;
 }
