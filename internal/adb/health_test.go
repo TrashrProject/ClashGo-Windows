@@ -74,3 +74,35 @@ func TestHealthFastCaptureReactsFasterThanStableAverage(t *testing.T) {
 			h.FastCaptureMs-beforeFast, h.AvgCaptureMs-beforeAvg)
 	}
 }
+
+func TestHealthTapLatencyEWMA(t *testing.T) {
+	var h Health
+	h.RecordTap(200 * time.Millisecond)
+	h.RecordTap(100 * time.Millisecond)
+
+	if h.TapsTotal != 2 {
+		t.Fatalf("taps_total=%d want 2", h.TapsTotal)
+	}
+	if h.AvgTapMs <= 0 || h.FastTapMs <= 0 {
+		t.Fatalf("tap latency metrics must be >0: avg=%f fast=%f", h.AvgTapMs, h.FastTapMs)
+	}
+}
+
+func TestHealthFastTapReactsFasterThanStableAverage(t *testing.T) {
+	var h Health
+	for i := 0; i < 10; i++ {
+		h.RecordTap(80 * time.Millisecond)
+	}
+	beforeAvg := h.AvgTapMs
+	beforeFast := h.FastTapMs
+
+	h.RecordTap(400 * time.Millisecond)
+
+	if h.FastTapMs <= h.AvgTapMs {
+		t.Fatalf("fast tap EWMA=%f should react above stable avg=%f", h.FastTapMs, h.AvgTapMs)
+	}
+	if h.FastTapMs-beforeFast <= h.AvgTapMs-beforeAvg {
+		t.Fatalf("fast tap EWMA did not react more strongly: fast delta=%f avg delta=%f",
+			h.FastTapMs-beforeFast, h.AvgTapMs-beforeAvg)
+	}
+}
