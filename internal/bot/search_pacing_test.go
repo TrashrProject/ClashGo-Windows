@@ -98,3 +98,31 @@ func TestSafePacingActiveExpiresCleanly(t *testing.T) {
 		t.Fatal("expired safety window must be inactive")
 	}
 }
+
+func TestNextVerificationPacingStartsConservative(t *testing.T) {
+	p := chooseNextVerificationPacing(adb.Health{FastCaptureMs: 350}, 5, 100)
+	if p.InitialWait != 650*time.Millisecond || p.ProbeGap != 550*time.Millisecond || p.Mode != "Safe" {
+		t.Fatalf("small sample must keep proven timings: %+v", p)
+	}
+}
+
+func TestNextVerificationPacingUnlocksBalancedAfterReliableSample(t *testing.T) {
+	p := chooseNextVerificationPacing(adb.Health{FastCaptureMs: 600}, 12, 97)
+	if p.InitialWait != 615*time.Millisecond || p.ProbeGap != 515*time.Millisecond || p.Mode != "Balanced" {
+		t.Fatalf("unexpected balanced Next pacing: %+v", p)
+	}
+}
+
+func TestNextVerificationPacingUnlocksFastOnlyWithStrongEvidence(t *testing.T) {
+	p := chooseNextVerificationPacing(adb.Health{FastCaptureMs: 420}, 25, 99)
+	if p.InitialWait != 575*time.Millisecond || p.ProbeGap != 475*time.Millisecond || p.Mode != "Fast" {
+		t.Fatalf("unexpected fast Next pacing: %+v", p)
+	}
+}
+
+func TestNextVerificationPacingFailsClosedOnADBPressure(t *testing.T) {
+	p := chooseNextVerificationPacing(adb.Health{FastCaptureMs: 1100}, 100, 100)
+	if p.Mode != "Safe" || p.InitialWait != 650*time.Millisecond {
+		t.Fatalf("ADB pressure must restore proven Next timings: %+v", p)
+	}
+}
