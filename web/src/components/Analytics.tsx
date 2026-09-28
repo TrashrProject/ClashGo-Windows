@@ -417,6 +417,45 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     return Math.round(v).toLocaleString();
   };
 
+  const deploymentSafety = React.useMemo(() => {
+    const rows = (history ?? []).filter((r) => Boolean(r.safety_mode));
+    if (rows.length === 0) {
+      return {
+        attacks: 0,
+        liveCertified: 0,
+        hudSafeRate: 0,
+        corridorRate: 0,
+        fallbacks: 0,
+        modes: [] as Array<{ mode: string; count: number }>,
+      };
+    }
+
+    const modeCounts = new Map<string, number>();
+    let liveCertified = 0;
+    let hudSafe = 0;
+    let corridor = 0;
+    let fallbacks = 0;
+    for (const rep of rows) {
+      const mode = rep.safety_mode || 'unknown';
+      modeCounts.set(mode, (modeCounts.get(mode) || 0) + 1);
+      if (rep.red_zone_valid && rep.corridor_verified && rep.hud_safe) liveCertified++;
+      if (rep.hud_safe) hudSafe++;
+      if (rep.corridor_verified) corridor++;
+      if (mode !== 'live_red_zone') fallbacks++;
+    }
+
+    return {
+      attacks: rows.length,
+      liveCertified: liveCertified * 100 / rows.length,
+      hudSafeRate: hudSafe * 100 / rows.length,
+      corridorRate: corridor * 100 / rows.length,
+      fallbacks,
+      modes: Array.from(modeCounts.entries())
+        .map(([mode, count]) => ({ mode, count }))
+        .sort((a, b) => b.count - a.count),
+    };
+  }, [history]);
+
   const deployHotPath = React.useMemo(() => {
     const rows = (history ?? []).filter((r) => (r.live_bar_rescans || 0) > 0);
     if (rows.length === 0) {
@@ -926,6 +965,34 @@ Best optimization target: {pipeline.dominantTunable.label}
             { label: 'G+E / true min', value: compact(farmEfficiency.gePerTrueMinute), detail: 'Includes overhead' },
             { label: 'Overhead share', value: `${farmEfficiency.overheadShare.toFixed(1)}%`, detail: 'Outside active farming' },
             { label: 'Avg true loop', value: `${farmEfficiency.avgTrueLoopSeconds.toFixed(0)}s`, detail: 'Ready-to-ready' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Deployment Safety Contract</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Red-zone / HUD compliance</h3>
+            <p className="text-sm text-zinc-500 mt-1">Passive proof of the safety checks already used by the Windows deployment path.</p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
+            {deploymentSafety.attacks > 0 ? `${deploymentSafety.attacks} measured attacks` : 'Learning'}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: 'Live certified', value: deploymentSafety.attacks ? `${deploymentSafety.liveCertified.toFixed(1)}%` : '—', detail: 'Red zone + corridor + HUD' },
+            { label: 'Corridor verified', value: deploymentSafety.attacks ? `${deploymentSafety.corridorRate.toFixed(1)}%` : '—', detail: 'Strictly outside red bbox' },
+            { label: 'HUD safe', value: deploymentSafety.attacks ? `${deploymentSafety.hudSafeRate.toFixed(1)}%` : '—', detail: 'Endpoints above UI cutoff' },
+            { label: 'Fallback paths', value: deploymentSafety.fallbacks.toLocaleString(), detail: deploymentSafety.modes.slice(0, 2).map((m) => `${m.mode}: ${m.count}`).join(' · ') || 'No samples' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
