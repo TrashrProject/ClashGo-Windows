@@ -375,3 +375,25 @@ func TestLootVictory(t *testing.T) {
 		})
 	}
 }
+
+func TestLootRecognizerCloseIsIdempotent(t *testing.T) {
+	lr := &LootRecognizer{
+		digitTemplates:   make([]gocv.Mat, 2),
+		scaledDigitCache: make(map[string][]gocv.Mat),
+	}
+	lr.digitTemplates[0] = gocv.NewMatWithSize(4, 4, gocv.MatTypeCV8UC1)
+	lr.scaledDigitCache["4x4"] = []gocv.Mat{
+		gocv.NewMatWithSize(4, 4, gocv.MatTypeCV8UC1),
+	}
+
+	lr.Close()
+	// A second close must be a no-op, not a native double-free.
+	lr.Close()
+
+	if lr.digitTemplates != nil {
+		t.Fatalf("digitTemplates should be cleared after Close")
+	}
+	if len(lr.scaledDigitCache) != 0 {
+		t.Fatalf("scaledDigitCache should be empty after Close")
+	}
+}
