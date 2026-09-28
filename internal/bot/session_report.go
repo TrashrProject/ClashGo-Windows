@@ -293,6 +293,41 @@ func (b *Bot) CurrentSessionReport() SessionReport {
 	return BuildSessionReport(sessionID, b.HistorySnapshot(), b.Stats(), time.Now())
 }
 
+func writeSessionReportCSV(path string, report SessionReport) error {
+	f, err := os.Create(path)
+	if err != nil { return err }
+	defer f.Close()
+	w := csv.NewWriter(f)
+	defer w.Flush()
+
+	header := []string{
+		"session_id", "generated_at", "attacks",
+		"total_gold", "total_elixir", "total_de",
+		"gold_per_hour", "elixir_per_hour", "de_per_hour",
+		"average_stars", "three_star_rate", "average_destruction",
+		"full_deploy_rate", "return_home_rate", "safe_corridor_rate", "zero_touch_rate",
+		"best_zero_touch_streak", "average_routine_ms", "bottleneck", "optimization_target",
+		"top_strategy", "top_deploy_side", "health_score", "speed_profile",
+		"anomalies", "recovery_attempts", "recovery_success_rate", "bluestacks_restarts",
+		"preferred_scale_hit_rate", "preferred_scale_enabled",
+	}
+	row := []string{
+		report.SessionID, report.GeneratedAt.Format(time.RFC3339Nano), fmt.Sprint(report.Attacks),
+		fmt.Sprint(report.TotalGold), fmt.Sprint(report.TotalElixir), fmt.Sprint(report.TotalDE),
+		fmt.Sprintf("%.2f", report.GoldPerHour), fmt.Sprintf("%.2f", report.ElixirPerHour), fmt.Sprintf("%.2f", report.DEPerHour),
+		fmt.Sprintf("%.3f", report.AverageStars), fmt.Sprintf("%.2f", report.ThreeStarRate), fmt.Sprintf("%.2f", report.AverageDestruction),
+		fmt.Sprintf("%.2f", report.FullDeployRate), fmt.Sprintf("%.2f", report.ReturnHomeRate), fmt.Sprintf("%.2f", report.SafeCorridorRate), fmt.Sprintf("%.2f", report.ZeroTouchRate),
+		fmt.Sprint(report.BestZeroTouchStreak), fmt.Sprintf("%.0f", report.AverageRoutineMS), report.Bottleneck, report.OptimizationTarget,
+		report.TopStrategy, report.TopDeploySide, fmt.Sprint(report.HealthScore), report.SpeedProfile,
+		fmt.Sprint(report.Anomalies), fmt.Sprint(report.RecoveryAttempts), fmt.Sprintf("%.2f", report.RecoverySuccessRate), fmt.Sprint(report.BlueStacksRestarts),
+		fmt.Sprintf("%.2f", report.PreferredScaleHitRate), fmt.Sprint(report.PreferredScaleEnabled),
+	}
+	if err := w.Write(header); err != nil { return err }
+	if err := w.Write(row); err != nil { return err }
+	w.Flush()
+	return w.Error()
+}
+
 func saveSessionReport(report SessionReport) error {
 	if report.Attacks == 0 {
 		return nil
@@ -319,42 +354,8 @@ func saveSessionReport(report SessionReport) error {
 	// CSV companion for spreadsheet analysis. One row per session file keeps
 	// exports deterministic/idempotent and avoids duplicate append rows when a
 	// Stop path is invoked twice.
-	writeCSV := func(path string) error {
-		f, err := os.Create(path)
-		if err != nil { return err }
-		defer f.Close()
-		w := csv.NewWriter(f)
-		defer w.Flush()
-
-		header := []string{
-			"session_id", "generated_at", "attacks",
-			"total_gold", "total_elixir", "total_de",
-			"gold_per_hour", "elixir_per_hour", "de_per_hour",
-			"average_stars", "three_star_rate", "average_destruction",
-			"full_deploy_rate", "return_home_rate", "safe_corridor_rate", "zero_touch_rate",
-			"best_zero_touch_streak", "average_routine_ms", "bottleneck", "optimization_target",
-			"top_strategy", "top_deploy_side", "health_score", "speed_profile",
-			"anomalies", "recovery_attempts", "recovery_success_rate", "bluestacks_restarts",
-			"preferred_scale_hit_rate", "preferred_scale_enabled",
-		}
-		row := []string{
-			report.SessionID, report.GeneratedAt.Format(time.RFC3339Nano), fmt.Sprint(report.Attacks),
-			fmt.Sprint(report.TotalGold), fmt.Sprint(report.TotalElixir), fmt.Sprint(report.TotalDE),
-			fmt.Sprintf("%.2f", report.GoldPerHour), fmt.Sprintf("%.2f", report.ElixirPerHour), fmt.Sprintf("%.2f", report.DEPerHour),
-			fmt.Sprintf("%.3f", report.AverageStars), fmt.Sprintf("%.2f", report.ThreeStarRate), fmt.Sprintf("%.2f", report.AverageDestruction),
-			fmt.Sprintf("%.2f", report.FullDeployRate), fmt.Sprintf("%.2f", report.ReturnHomeRate), fmt.Sprintf("%.2f", report.SafeCorridorRate), fmt.Sprintf("%.2f", report.ZeroTouchRate),
-			fmt.Sprint(report.BestZeroTouchStreak), fmt.Sprintf("%.0f", report.AverageRoutineMS), report.Bottleneck, report.OptimizationTarget,
-			report.TopStrategy, report.TopDeploySide, fmt.Sprint(report.HealthScore), report.SpeedProfile,
-			fmt.Sprint(report.Anomalies), fmt.Sprint(report.RecoveryAttempts), fmt.Sprintf("%.2f", report.RecoverySuccessRate), fmt.Sprint(report.BlueStacksRestarts),
-			fmt.Sprintf("%.2f", report.PreferredScaleHitRate), fmt.Sprint(report.PreferredScaleEnabled),
-		}
-		if err := w.Write(header); err != nil { return err }
-		if err := w.Write(row); err != nil { return err }
-		w.Flush()
-		return w.Error()
-	}
-	if err := writeCSV(filepath.Join(dir, name+".csv")); err != nil {
+	if err := writeSessionReportCSV(filepath.Join(dir, name+".csv"), report); err != nil {
 		return err
 	}
-	return writeCSV(filepath.Join(dir, "latest.csv"))
+	return writeSessionReportCSV(filepath.Join(dir, "latest.csv"), report)
 }
