@@ -470,6 +470,9 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                             <span className="material-symbols-outlined text-sm">{rep.deploy_success ? 'check_circle' : 'warning'}</span>
                             {rep.deploy_success ? 'Complete' : `${rep.undeployed_slots} left`}
                           </div>
+                          <div className="text-[9px] text-zinc-400 font-black uppercase tracking-wider mt-1.5 tabular-nums">
+                            {((rep.deploy_duration_ms || 0) / 1000).toFixed(1)}s deploy
+                          </div>
                           {!rep.parsed_results && (
                             <div className="text-[9px] text-rose-500 font-black uppercase tracking-wider mt-1.5">Result OCR incomplete</div>
                           )}
