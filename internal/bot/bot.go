@@ -2312,11 +2312,20 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		RedZoneValid: deploySafety.RedZoneValid,
 		CorridorVerified: deploySafety.CorridorVerified,
 		HUDSafe: deploySafety.HUDSafe,
+		RedZoneX1: deploySafety.RedZoneX1,
+		RedZoneY1: deploySafety.RedZoneY1,
+		RedZoneX2: deploySafety.RedZoneX2,
+		RedZoneY2: deploySafety.RedZoneY2,
+		DeployLineX1: deploySafety.DeployX1,
+		DeployLineY1: deploySafety.DeployY1,
+		DeployLineX2: deploySafety.DeployX2,
+		DeployLineY2: deploySafety.DeployY2,
+		DeployFreeSpace: deploySafety.FreeSpace,
 		ReturnHomeSuccess: false,
 	}
 
 	if b.telemetry != nil {
-		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "cooldown_ms": rep.CooldownDurationMS, "prep_ms": rep.PreparationDurationMS, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore, "live_bar_rescans": rep.LiveBarRescans, "live_bar_rescan_ms": rep.AvgLiveBarRescanMS, "slot_detect_ms": rep.AvgSlotDetectMS, "slot_classify_ms": rep.AvgSlotClassifyMS, "templates_tried": rep.TemplatesTried, "templates_matched": rep.TemplatesMatched, "selected_card_ocr_ms": rep.AvgSelectedCardOCRMS, "stars_source": rep.StarsSource, "loot_source": rep.LootSource, "result_confidence": rep.ResultConfidence, "end_reason": rep.BattleEndReason, "destruction_pct": rep.DestructionPct, "town_hall_destroyed": rep.TownHallDestroyed, "safety_mode": rep.SafetyMode, "red_zone_valid": rep.RedZoneValid, "corridor_verified": rep.CorridorVerified, "hud_safe": rep.HUDSafe})
+		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "cooldown_ms": rep.CooldownDurationMS, "prep_ms": rep.PreparationDurationMS, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore, "live_bar_rescans": rep.LiveBarRescans, "live_bar_rescan_ms": rep.AvgLiveBarRescanMS, "slot_detect_ms": rep.AvgSlotDetectMS, "slot_classify_ms": rep.AvgSlotClassifyMS, "templates_tried": rep.TemplatesTried, "templates_matched": rep.TemplatesMatched, "selected_card_ocr_ms": rep.AvgSelectedCardOCRMS, "stars_source": rep.StarsSource, "loot_source": rep.LootSource, "result_confidence": rep.ResultConfidence, "end_reason": rep.BattleEndReason, "destruction_pct": rep.DestructionPct, "town_hall_destroyed": rep.TownHallDestroyed, "safety_mode": rep.SafetyMode, "red_zone_valid": rep.RedZoneValid, "corridor_verified": rep.CorridorVerified, "hud_safe": rep.HUDSafe, "red_zone_x1": rep.RedZoneX1, "red_zone_y1": rep.RedZoneY1, "red_zone_x2": rep.RedZoneX2, "red_zone_y2": rep.RedZoneY2, "deploy_line_x1": rep.DeployLineX1, "deploy_line_y1": rep.DeployLineY1, "deploy_line_x2": rep.DeployLineX2, "deploy_line_y2": rep.DeployLineY2, "deploy_free_space": rep.DeployFreeSpace})
 	}
 
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
@@ -3531,6 +3540,15 @@ type AttackReport struct {
 	RedZoneValid          bool   `json:"red_zone_valid"`
 	CorridorVerified      bool   `json:"corridor_verified"`
 	HUDSafe               bool   `json:"hud_safe"`
+	RedZoneX1             int    `json:"red_zone_x1"`
+	RedZoneY1             int    `json:"red_zone_y1"`
+	RedZoneX2             int    `json:"red_zone_x2"`
+	RedZoneY2             int    `json:"red_zone_y2"`
+	DeployLineX1          int    `json:"deploy_line_x1"`
+	DeployLineY1          int    `json:"deploy_line_y1"`
+	DeployLineX2          int    `json:"deploy_line_x2"`
+	DeployLineY2          int    `json:"deploy_line_y2"`
+	DeployFreeSpace       int    `json:"deploy_free_space"`
 	ReturnHomeDurationMS  int64 `json:"return_home_duration_ms"`
 	ReturnHomeSuccess     bool  `json:"return_home_success"`
 	FullRoutineDurationMS int64 `json:"full_routine_duration_ms"`
