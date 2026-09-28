@@ -42,7 +42,7 @@ func TestLocateColoredButtonNearRequiresRealBlob(t *testing.T) {
 
 func TestButtonColorSpecsExistOnlyForVerifiedFastPathButtons(t *testing.T) {
 	b := &Bot{}
-	for _, name := range []string{"Attack", "Find Match", "Battle Attack"} {
+	for _, name := range []string{"Attack", "Find Match", "Battle Attack", "Next"} {
 		if _, ok := b.buttonColorSpec(name); !ok {
 			t.Fatalf("missing color spec for %q", name)
 		}
