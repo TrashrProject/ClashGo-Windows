@@ -164,6 +164,7 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 		PreferredScaleHits:      15,
 		PreferredScaleFallbacks: 5,
 		PreferredScaleHitRate:   75,
+		PreferredScaleEnabled:   true,
 	}
 
 	got := mergeStats(acc, current)
@@ -184,7 +185,7 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 		t.Fatalf("search intelligence metrics lost: %+v", got)
 	}
 	if got.PreferredScaleAttempts != 20 || got.PreferredScaleHits != 15 ||
-		got.PreferredScaleFallbacks != 5 || got.PreferredScaleHitRate != 75 {
+		got.PreferredScaleFallbacks != 5 || got.PreferredScaleHitRate != 75 || !got.PreferredScaleEnabled {
 		t.Fatalf("preferred-scale metrics lost: %+v", got)
 	}
 	if got.GoldPerHour != 3_000_000 {
