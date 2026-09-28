@@ -59,6 +59,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		e.logger.Info().Str("edge", targetEdge).Msg("random edge selected")
 	}
 
+	e.lastResolvedEdge = targetEdge
+	e.lastDeploySide = cornerToSide(targetEdge)
+
 	// 1. Detect red zone (deployment boundary)
 	redDetector := NewRedLineDetector(e.logger)
 	uiCutoff := int(float64(h) * 0.85) // above troop bar
@@ -448,6 +451,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 		if side, rp1, rp2, freeSpace, ok := windowsDeployCorridor(redZone, w, h, uiCutoff); ok {
 			deploySide, p1, p2 = side, rp1, rp2
+			e.lastDeploySide = deploySide
 			e.logger.Info().
 				Str("side", deploySide).
 				Interface("red_bbox", redZone.BBox).
