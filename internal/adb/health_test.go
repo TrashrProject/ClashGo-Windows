@@ -106,3 +106,17 @@ func TestHealthFastTapReactsFasterThanStableAverage(t *testing.T) {
 			h.FastTapMs-beforeFast, h.AvgTapMs-beforeAvg)
 	}
 }
+
+func TestHealthTapRouteCounters(t *testing.T) {
+	var h Health
+	h.RecordTapRoute(true)
+	h.RecordTapRoute(false)
+	h.RecordTapRoute(false)
+
+	if h.PipeTapsTotal != 1 {
+		t.Fatalf("pipe_taps_total=%d want 1", h.PipeTapsTotal)
+	}
+	if h.LegacyTapsTotal != 2 {
+		t.Fatalf("legacy_taps_total=%d want 2", h.LegacyTapsTotal)
+	}
+}
