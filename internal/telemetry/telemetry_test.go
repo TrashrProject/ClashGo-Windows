@@ -107,3 +107,19 @@ func TestRecentExcludesRejectedTargetsAndSkips(t *testing.T) {
 		t.Fatalf("memory counters lost rejected/skip samples: %+v", s)
 	}
 }
+
+func TestTargetScanLatencyAggregatesInMemory(t *testing.T) {
+	b := New(filepath.Join(t.TempDir(), "events.ndjson"))
+	defer b.Close()
+
+	b.Emit(EventTargetFound, map[string]any{"accept": false, "scan_us": int64(12000)})
+	b.Emit(EventTargetFound, map[string]any{"accept": true, "scan_us": int64(18000)})
+
+	s := b.Snapshot()
+	if s.AvgTargetScanMS != 15 {
+		t.Fatalf("avg target scan=%vms, want 15ms", s.AvgTargetScanMS)
+	}
+	if s.LastTargetScanMS != 18 {
+		t.Fatalf("last target scan=%vms, want 18ms", s.LastTargetScanMS)
+	}
+}
