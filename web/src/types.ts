@@ -27,6 +27,7 @@ export interface BotStats {
   average_capture_ms: number;
   last_capture_ms: number;
   telemetry_events: number;
+  anomalies: number;
   targets_skipped: number;
   health_score: number;
   speed_profile: string;
