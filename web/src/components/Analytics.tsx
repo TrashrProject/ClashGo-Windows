@@ -706,6 +706,20 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     return { bestLoot, fastestClean };
   }, [history]);
 
+  const tapTransport = React.useMemo(() => {
+    const pipe = stats.adb_health?.pipe_taps_total || 0;
+    const legacy = stats.adb_health?.legacy_taps_total || 0;
+    const total = pipe + legacy;
+    return {
+      pipe,
+      legacy,
+      total,
+      pipeRate: total > 0 ? pipe * 100 / total : 0,
+      legacyRate: total > 0 ? legacy * 100 / total : 0,
+      label: total === 0 ? 'Learning' : legacy >= pipe ? 'Legacy' : 'Pipe',
+    };
+  }, [stats.adb_health?.pipe_taps_total, stats.adb_health?.legacy_taps_total]);
+
   const optimizationAdvisor = React.useMemo(() => {
     type Opportunity = {
       key: string;
@@ -725,7 +739,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       opportunities.push({
         key: 'tap',
         label: 'Windows tap transport',
-        evidence: `${reactiveTap.toFixed(0)}ms reactive tap latency`,
+        evidence: `${reactiveTap.toFixed(0)}ms reactive · ${tapTransport.total > 0 ? `${tapTransport.legacyRate.toFixed(0)}% legacy` : 'route learning'}`,
         next: reactiveTap >= 100
           ? 'High enough to justify a Windows-safe transport experiment with instant fallback.'
           : 'Tap transport is already relatively cheap; keep the proven deployment cadence.',
@@ -802,6 +816,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     preparationBreakdown,
     deployHotPath,
     deployBottleneck,
+    tapTransport,
   ]);
 
   // CSS-only donut (conic-gradient — no chart dependency). Each
@@ -837,7 +852,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             <span>{stats.telemetry_events?.toLocaleString?.() ?? 0} events</span>
           </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-13 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
           {[
             { label: 'Gold / h', value: compact(stats.gold_per_hour || 0) },
             { label: 'Elixir / h', value: compact(stats.elixir_per_hour || 0) },
@@ -850,6 +865,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             { label: 'Reactive capture', value: `${(stats.adb_health?.fast_capture_ms || stats.adb_health?.avg_capture_ms || 0).toFixed(0)}ms` },
             { label: 'Avg tap', value: `${(stats.adb_health?.avg_tap_ms || 0).toFixed(0)}ms` },
             { label: 'Reactive tap', value: `${(stats.adb_health?.fast_tap_ms || stats.adb_health?.avg_tap_ms || 0).toFixed(0)}ms` },
+            { label: 'Tap route', value: tapTransport.total > 0 ? `${tapTransport.legacyRate.toFixed(0)}% legacy` : '—' },
             { label: 'Return home', value: `${((stats.average_return_home_ms || 0) / 1000).toFixed(1)}s` },
             { label: 'Next transition', value: `${(stats.average_next_transition_ms || 0).toFixed(0)}ms` },
           ].map((metric) => (
