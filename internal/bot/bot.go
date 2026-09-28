@@ -1983,7 +1983,14 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			}
 			defer fresh.Close()
 
-			if x, y, ok := b.locateNextButtonColor(fresh); ok {
+			x, y, ok := b.locateRememberedButton("Next", fresh)
+			if !ok {
+				x, y, ok = b.locateNextButtonColor(fresh)
+				if ok {
+					b.rememberUIAnchor("Next", image.Pt(x, y))
+				}
+			}
+			if ok {
 				b.logger.Debug().Int("x", x).Int("y", y).Msg("Next button freshly verified; precision clicking")
 				if err := b.client.TapFast(x, y, 0.6); err == nil {
 					b.recordActivity()
@@ -1999,9 +2006,16 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		nextRetryUsed := false
 		nextVerifyProbes := 0
 		transitionStarted := time.Time{}
-		if x, y, ok := b.locateNextButtonColor(screen); ok {
-			b.logger.Debug().Int("x", x).Int("y", y).Msg("Next button verified; precision clicking detected center")
-			if err := b.client.TapFast(x, y, 0.6); err == nil {
+		nextX, nextY, nextOK := b.locateRememberedButton("Next", screen)
+		if !nextOK {
+			nextX, nextY, nextOK = b.locateNextButtonColor(screen)
+			if nextOK {
+				b.rememberUIAnchor("Next", image.Pt(nextX, nextY))
+			}
+		}
+		if nextOK {
+			b.logger.Debug().Int("x", nextX).Int("y", nextY).Msg("Next button verified; precision clicking detected center")
+			if err := b.client.TapFast(nextX, nextY, 0.6); err == nil {
 				b.recordActivity()
 				nextClicked = true
 				transitionStarted = time.Now()
@@ -2659,6 +2673,13 @@ func (b *Bot) buttonColorSpec(name string) (buttonColorSpec, bool) {
 			high: gocv.NewScalar(170, 255, 210, 0),
 			minW: 70, minH: 24, minArea: 1100,
 			halfW: 150, halfH: 90,
+		}, true
+	case "Next":
+		return buttonColorSpec{
+			low: gocv.NewScalar(0, 85, 145, 0),
+			high: gocv.NewScalar(190, 255, 255, 0),
+			minW: 45, minH: 22, minArea: 700,
+			halfW: 120, halfH: 95,
 		}, true
 	default:
 		return buttonColorSpec{}, false
