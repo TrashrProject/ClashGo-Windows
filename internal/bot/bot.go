@@ -2221,6 +2221,35 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	if b.OnStatsUpdate != nil {
 		b.OnStatsUpdate()
 	}
+
+	// Native regression guard: compare the newest attacks against the recent
+	// baseline after the true routine duration is known. Diagnostics only —
+	// it never changes strategy, target thresholds or deployment geometry.
+	if b.telemetry != nil {
+		limit := len(b.historyCache)
+		if limit > 20 { limit = 20 }
+		samples := make([]intelligence.PerformanceSample, 0, limit)
+		for i := 0; i < limit; i++ {
+			h := b.historyCache[i]
+			samples = append(samples, intelligence.PerformanceSample{
+				SearchMS: h.SearchDurationMS,
+				DeployMS: h.DeployDurationMS,
+				RoutineMS: h.FullRoutineDurationMS,
+				CaptureMS: h.CaptureMS,
+				TargetScanMS: h.TargetScanMS,
+				DeploySuccess: h.DeploySuccess,
+			})
+		}
+		assessment := intelligence.AnalyzePerformance(samples)
+		if assessment.Status == "watch" {
+			b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
+				"kind": "performance_regression",
+				"recent": assessment.RecentCount,
+				"baseline": assessment.BaseCount,
+				"regressions": assessment.Regressions,
+			})
+		}
+	}
 	if b.telemetry != nil {
 		b.telemetry.Emit(telemetry.EventReturnHome, map[string]any{
 			"success": returnedHome,
