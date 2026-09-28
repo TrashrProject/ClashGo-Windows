@@ -1564,6 +1564,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	searchStart := time.Now()
 	attackStartedAt := time.Time{}
 	sequenceSkips := 0
+	searchPace := chooseSearchPacing(b.client.Health())
 	consecutiveNextFailures := 0
 	skipsSinceRest := 0
 	for {
@@ -1678,10 +1679,14 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		// BlueStacks stability guard: changing opponents endlessly at full
 		// speed can put sustained pressure on HD-Player.exe. Rest briefly
 		// every few successful skips instead of hammering Next/capture forever.
-		if skipsSinceRest >= 8 {
-			b.logger.Info().Msg("matchmaking stability pause after 8 skips")
-			time.Sleep(1500 * time.Millisecond)
+		if skipsSinceRest >= searchPace.StabilityRestEvery {
+			b.logger.Debug().
+				Int("skips", skipsSinceRest).
+				Dur("rest", searchPace.StabilityRest).
+				Msg("matchmaking stability pause")
+			time.Sleep(searchPace.StabilityRest)
 			skipsSinceRest = 0
+			searchPace = chooseSearchPacing(b.client.Health())
 		}
 
 		// NEXT is handled as a state transition, not as a blind tap.
@@ -1697,7 +1702,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			defer fresh.Close()
 
 			if x, y, ok := b.locateNextButtonColor(fresh); ok {
-				b.logger.Info().Int("x", x).Int("y", y).Msg("Next button freshly verified; precision clicking")
+				b.logger.Debug().Int("x", x).Int("y", y).Msg("Next button freshly verified; precision clicking")
 				if err := b.client.TapFast(x, y, 0.6); err == nil {
 					b.recordActivity()
 					return true
@@ -1709,7 +1714,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		// Use the already-live frame first.
 		nextClicked := false
 		if x, y, ok := b.locateNextButtonColor(screen); ok {
-			b.logger.Info().Int("x", x).Int("y", y).Msg("Next button verified; precision clicking detected center")
+			b.logger.Debug().Int("x", x).Int("y", y).Msg("Next button verified; precision clicking detected center")
 			if err := b.client.TapFast(x, y, 0.6); err == nil {
 				b.recordActivity()
 				nextClicked = true
@@ -1785,7 +1790,8 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				b.OnStatsUpdate()
 			}
 			b.logger.Debug().Msg("matchmaking transition confirmed")
-			time.Sleep(1100 * time.Millisecond)
+			searchPace = chooseSearchPacing(b.client.Health())
+			time.Sleep(searchPace.PostTransitionPause)
 			continue
 		}
 
