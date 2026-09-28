@@ -1525,6 +1525,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		return
 	}
 
+	var cooldownDurationMS int64
+	var preparationDurationMS int64
+
 	// Inter-attack cooldown. Armies need real time to retrain; without a
 	// gate the bot re-attacked ~8s after every Return Home with whatever
 	// the camps held (observed live: three near-identical defeats in <4
@@ -1534,25 +1537,31 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	gap := time.Duration(b.cfg.Attack.MinSecondsBetweenAttacks) * time.Second
 	if gap > 0 && !b.lastAttackEnd.IsZero() {
 		if wait := gap - time.Since(b.lastAttackEnd); wait > 0 {
+			cooldownStarted := time.Now()
 			b.logger.Info().
 				Dur("wait", wait).
 				Int("min_gap_s", b.cfg.Attack.MinSecondsBetweenAttacks).
 				Msg("waiting out inter-attack cooldown before next search")
 			select {
 			case <-time.After(wait):
+				cooldownDurationMS = time.Since(cooldownStarted).Milliseconds()
 			case <-b.ctx.Done():
 				return
 			}
 		}
 	}
 
+	preparationStarted := time.Now()
 	if !b.clickSequence() {
 		b.logger.Warn().Msg("attack click sequence failed, restarting game to recover...")
 		b.restartGame()
 		return
 	}
+	preparationDurationMS = time.Since(preparationStarted).Milliseconds()
 
-	b.logger.Info().Msg("search started")
+	b.logger.Info().
+		Int64("prep_ms", preparationDurationMS).
+		Msg("search started")
 	if b.telemetry != nil {
 		b.telemetry.Emit(telemetry.EventSearchStarted, nil)
 	}
@@ -2117,13 +2126,15 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		RuntimeMode:      attackMode,
 		CaptureMS:        attackHealth.AvgCaptureMs,
 		TargetScanMS:     attackTelemetry.AvgTargetScanMS,
+		PreparationDurationMS: preparationDurationMS,
+		CooldownDurationMS:    cooldownDurationMS,
 		BattleEndReason:  b.attackExec.LastBattleEndReason(),
 		DestructionPct:   b.attackExec.LastDestructionPercent(),
 		TownHallDestroyed: b.attackExec.ThDestroyed(),
 	}
 
 	if b.telemetry != nil {
-		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore, "end_reason": rep.BattleEndReason, "destruction_pct": rep.DestructionPct, "town_hall_destroyed": rep.TownHallDestroyed})
+		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "cooldown_ms": rep.CooldownDurationMS, "prep_ms": rep.PreparationDurationMS, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore, "end_reason": rep.BattleEndReason, "destruction_pct": rep.DestructionPct, "town_hall_destroyed": rep.TownHallDestroyed})
 	}
 
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
@@ -3187,7 +3198,9 @@ type AttackReport struct {
 	TargetScore      int     `json:"target_score"`
 	RuntimeMode      string  `json:"runtime_mode"`
 	CaptureMS        float64 `json:"capture_ms"`
-	TargetScanMS      float64 `json:"target_scan_ms"`
+	TargetScanMS          float64 `json:"target_scan_ms"`
+	PreparationDurationMS int64  `json:"preparation_duration_ms"`
+	CooldownDurationMS    int64  `json:"cooldown_duration_ms"`
 	BattleEndReason   string  `json:"battle_end_reason"`
 	DestructionPct    int     `json:"destruction_pct"`
 	TownHallDestroyed bool    `json:"town_hall_destroyed"`
