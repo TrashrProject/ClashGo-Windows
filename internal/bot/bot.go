@@ -1761,7 +1761,11 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			SearchEnabled: b.cfg.Search.Enabled,
 		})
 		if b.telemetry != nil {
-			b.telemetry.Emit(telemetry.EventTargetFound, map[string]any{"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir, "score": decision.Score, "accept": decision.Accept, "reason": decision.Reason, "scan_us": targetScanUS})
+			if decision.Accept {
+				b.telemetry.Emit(telemetry.EventTargetFound, map[string]any{"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir, "score": decision.Score, "accept": true, "reason": decision.Reason, "scan_us": targetScanUS})
+			} else {
+				b.telemetry.RecordRejectedTarget(loot.Gold, loot.Elixir, loot.DarkElixir, decision.Score, targetScanUS)
+			}
 		}
 
 		if decision.Accept {
