@@ -3093,7 +3093,7 @@ func (b *Bot) Stats() BotStats {
 	}
 	var targetAcceptanceRate, avgSkipsPerAttack, recoverySuccessRate float64
 	if tm.TargetsFound > 0 {
-		targetAcceptanceRate = float64(attacks) * 100 / float64(tm.TargetsFound)
+		targetAcceptanceRate = float64(tm.TargetsAccepted) * 100 / float64(tm.TargetsFound)
 	}
 	if attacks > 0 {
 		avgSkipsPerAttack = float64(tm.TargetsSkipped) / float64(attacks)
@@ -3140,6 +3140,7 @@ func (b *Bot) Stats() BotStats {
 		HealthScore:          healthScore,
 		SpeedProfile:         chooseSearchPacing(adbHealth).Mode,
 		TargetsSeen:          tm.TargetsFound,
+		TargetsAccepted:      tm.TargetsAccepted,
 		TargetAcceptanceRate: targetAcceptanceRate,
 		AvgSkipsPerAttack:    avgSkipsPerAttack,
 		RecoverySuccessRate:  recoverySuccessRate,
@@ -3186,6 +3187,7 @@ type BotStats struct {
 	HealthScore          int     `json:"health_score"`
 	SpeedProfile         string  `json:"speed_profile"`
 	TargetsSeen          int64   `json:"targets_seen"`
+	TargetsAccepted      int64   `json:"targets_accepted"`
 	TargetAcceptanceRate float64 `json:"target_acceptance_rate"`
 	AvgSkipsPerAttack    float64 `json:"avg_skips_per_attack"`
 	RecoverySuccessRate  float64 `json:"recovery_success_rate"`
