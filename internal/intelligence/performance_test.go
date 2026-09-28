@@ -5,7 +5,7 @@ import "testing"
 func stableSample() PerformanceSample {
 	return PerformanceSample{
 		SearchMS: 10_000, DeployMS: 20_000, RoutineMS: 120_000,
-		CaptureMS: 300, TargetScanMS: 90, DeploySuccess: true,
+		CaptureMS: 300, TargetScanMS: 90, DeploySuccess: true, ReturnHomeOK: true, SafeDeployment: true,
 	}
 }
 
@@ -90,5 +90,41 @@ func TestAnalyzePerformanceIgnoresUnavailableLegacyRoutineMetrics(t *testing.T) 
 		if regression.Metric == "routine_ms" || regression.Metric == "capture_ms" || regression.Metric == "target_scan_ms" {
 			t.Fatalf("legacy missing metric created false regression: %+v", regression)
 		}
+	}
+}
+
+func TestAnalyzePerformanceDetectsReturnHomeRegression(t *testing.T) {
+	samples := make([]PerformanceSample, 20)
+	for i := range samples { samples[i] = stableSample() }
+	for i := 0; i < 5; i++ {
+		samples[i].ReturnHomeOK = i == 0
+	}
+	got := AnalyzePerformance(samples)
+	found := false
+	for _, r := range got.Regressions {
+		if r.Metric == "return_home_rate" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("return-home reliability regression missing: %+v", got)
+	}
+}
+
+func TestAnalyzePerformanceDetectsSafeDeploymentRegression(t *testing.T) {
+	samples := make([]PerformanceSample, 20)
+	for i := range samples { samples[i] = stableSample() }
+	for i := 0; i < 5; i++ {
+		samples[i].SafeDeployment = i < 2
+	}
+	got := AnalyzePerformance(samples)
+	found := false
+	for _, r := range got.Regressions {
+		if r.Metric == "safe_deployment_rate" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("safe-deployment reliability regression missing: %+v", got)
 	}
 }
