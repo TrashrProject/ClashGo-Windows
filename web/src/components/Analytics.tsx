@@ -1834,7 +1834,7 @@ Best optimization target: {pipeline.dominantTunable.label}
               <tbody>
                 {endReasonStats.map((row) => (
                   <tr key={row.reason} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
-                    <td className="py-4 pr-4 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-white">{row.reason.replaceAll('_', ' ')}</td>
+                    <td className="py-4 pr-4 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-white">{row.reason.split('_').join(' ')}</td>
                     <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
                     <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.stars / row.attacks).toFixed(2)}</td>
                     <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.destruction / row.attacks).toFixed(0)}%</td>
