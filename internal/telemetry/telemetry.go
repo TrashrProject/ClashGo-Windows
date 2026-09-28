@@ -77,6 +77,12 @@ func (b *Bus) Emit(t EventType, fields map[string]any) {
 	}
 	ev := Event{Type: t, At: time.Now().UTC(), SessionID: b.sessionID, Fields: fields}
 	b.record(ev)
+	// High-frequency capture samples feed in-memory health metrics only.
+	// Persisting every screenshot timing would create needless disk traffic
+	// on the hottest loop and grow the event journal by thousands of rows.
+	if t == EventCaptureSample {
+		return
+	}
 	select {
 	case b.ch <- ev:
 	default:
