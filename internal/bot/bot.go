@@ -62,6 +62,9 @@ type Bot struct {
 	recoveryAttempts  atomic.Int32
 	recoverySuccesses atomic.Int32
 	blueStacksRestarts atomic.Int32
+	returnHomeCount     atomic.Int64
+	returnHomeMicros    atomic.Int64
+	lastReturnHomeUS    atomic.Int64
 
 	chestDismissInFlight  atomic.Bool
 	rewardDismissInFlight atomic.Bool
@@ -2137,6 +2140,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		b.OnStatsUpdate()
 	}
 
+	returnHomeStarted := time.Now()
 	returnedHome := false
 	if err := b.attackExec.ReturnHome(); err == nil {
 		returnedHome = true
@@ -2149,6 +2153,16 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			}
 			time.Sleep(1 * time.Second)
 		}
+	}
+	returnHomeDur := time.Since(returnHomeStarted)
+	b.returnHomeCount.Add(1)
+	b.returnHomeMicros.Add(returnHomeDur.Microseconds())
+	b.lastReturnHomeUS.Store(returnHomeDur.Microseconds())
+	if b.telemetry != nil {
+		b.telemetry.Emit(telemetry.EventReturnHome, map[string]any{
+			"success": returnedHome,
+			"duration_ms": returnHomeDur.Milliseconds(),
+		})
 	}
 
 	if !returnedHome {
@@ -3013,6 +3027,10 @@ func (b *Bot) Stats() BotStats {
 	}
 	tm := telemetry.Snapshot{}
 	if b.telemetry != nil { tm = b.telemetry.Snapshot() }
+	avgReturnHomeMS := 0.0
+	if count := b.returnHomeCount.Load(); count > 0 {
+		avgReturnHomeMS = float64(b.returnHomeMicros.Load()) / float64(count) / 1000.0
+	}
 	var targetAcceptanceRate, avgSkipsPerAttack, recoverySuccessRate float64
 	if tm.TargetsFound > 0 {
 		targetAcceptanceRate = float64(attacks) * 100 / float64(tm.TargetsFound)
@@ -3066,6 +3084,8 @@ func (b *Bot) Stats() BotStats {
 		RecoverySuccessRate:  recoverySuccessRate,
 		AverageTargetScanMS:  tm.AvgTargetScanMS,
 		LastTargetScanMS:     tm.LastTargetScanMS,
+		AverageReturnHomeMS:  avgReturnHomeMS,
+		LastReturnHomeMS:     float64(b.lastReturnHomeUS.Load()) / 1000.0,
 	}
 }
 
@@ -3107,6 +3127,8 @@ type BotStats struct {
 	RecoverySuccessRate  float64 `json:"recovery_success_rate"`
 	AverageTargetScanMS  float64 `json:"average_target_scan_ms"`
 	LastTargetScanMS     float64 `json:"last_target_scan_ms"`
+	AverageReturnHomeMS  float64 `json:"average_return_home_ms"`
+	LastReturnHomeMS     float64 `json:"last_return_home_ms"`
 }
 
 type AttackReport struct {
