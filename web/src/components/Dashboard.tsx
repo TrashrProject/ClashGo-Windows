@@ -450,6 +450,15 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                       {latestAttack.full_routine_duration_ms > 0 ? `${(latestAttack.full_routine_duration_ms / 1000).toFixed(0)}s true loop` : `${(latestAttack.cycle_duration_ms / 1000).toFixed(0)}s cycle`}
                       {latestAttack.return_home_duration_ms > 0 ? ` · ${(latestAttack.return_home_duration_ms / 1000).toFixed(1)}s home` : ''}
                     </span>
+                    {latestAttack.safety_mode && (
+                      <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider ${
+                        latestAttack.corridor_verified && latestAttack.hud_safe
+                          ? 'bg-emerald-500/15 text-emerald-300'
+                          : 'bg-amber-500/15 text-amber-300'
+                      }`}>
+                        safety {latestAttack.safety_mode.replaceAll('_', ' ')}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
