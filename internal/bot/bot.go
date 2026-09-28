@@ -2062,6 +2062,13 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		depErrStr = deployErr.Error()
 	}
 
+	attackHealth := b.client.Health()
+	attackMode := chooseSearchPacing(attackHealth).Mode
+	attackTelemetry := telemetry.Snapshot{}
+	if b.telemetry != nil {
+		attackTelemetry = b.telemetry.Snapshot()
+	}
+
 	rep := AttackReport{
 		Timestamp:        time.Now().Format(time.RFC3339),
 		Strategy:         stratName,
@@ -2088,6 +2095,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		TargetElixir:     acceptedTargetElixir,
 		TargetDE:         acceptedTargetDE,
 		TargetScore:      acceptedTargetScore,
+		RuntimeMode:      attackMode,
+		CaptureMS:        attackHealth.AvgCaptureMs,
+		TargetScanMS:     attackTelemetry.AvgTargetScanMS,
 	}
 
 	if b.telemetry != nil {
@@ -3121,7 +3131,10 @@ type AttackReport struct {
 	TargetGold       int    `json:"target_gold"`
 	TargetElixir     int    `json:"target_elixir"`
 	TargetDE         int    `json:"target_de"`
-	TargetScore      int    `json:"target_score"`
+	TargetScore      int     `json:"target_score"`
+	RuntimeMode      string  `json:"runtime_mode"`
+	CaptureMS        float64 `json:"capture_ms"`
+	TargetScanMS     float64 `json:"target_scan_ms"`
 }
 
 type adbLogAdapter struct {
