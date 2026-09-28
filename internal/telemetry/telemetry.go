@@ -58,6 +58,10 @@ type Snapshot struct {
 	LastTargetScanMS   float64 `json:"last_target_scan_ms"`
 	AvgNextTransitionMS float64 `json:"avg_next_transition_ms"`
 	LastNextTransitionMS float64 `json:"last_next_transition_ms"`
+	NextTransitions      int64   `json:"next_transitions"`
+	NextRetries          int64   `json:"next_retries"`
+	NextFirstPassRate    float64 `json:"next_first_pass_rate"`
+	AvgNextVerifyProbes  float64 `json:"avg_next_verify_probes"`
 	AvgAcceptedGE       float64 `json:"avg_accepted_ge"`
 	AvgRejectedGE       float64 `json:"avg_rejected_ge"`
 	AvgAcceptedDE       float64 `json:"avg_accepted_de"`
@@ -93,6 +97,8 @@ type Bus struct {
 	nextTransitionCount atomic.Int64
 	nextTransitionMicros atomic.Int64
 	lastNextTransitionUS atomic.Int64
+	nextRetries          atomic.Int64
+	nextVerifyProbes     atomic.Int64
 
 	acceptedGESum    atomic.Int64
 	rejectedGESum    atomic.Int64
@@ -252,6 +258,12 @@ func (b *Bus) record(ev Event) {
 		}
 	case EventTargetSkipped:
 		b.targetsSkipped.Add(1)
+		if retry, ok := ev.Fields["retry_used"].(bool); ok && retry {
+			b.nextRetries.Add(1)
+		}
+		if probes, ok := telemetryInt64(ev.Fields["verify_probes"]); ok {
+			b.nextVerifyProbes.Add(probes)
+		}
 		if raw, ok := ev.Fields["transition_us"]; ok {
 			switch v := raw.(type) {
 			case int64:
@@ -321,8 +333,12 @@ func (b *Bus) Snapshot() Snapshot {
 	}
 	nextCount := b.nextTransitionCount.Load()
 	avgNext := 0.0
+	nextFirstPassRate := 0.0
+	avgNextVerifyProbes := 0.0
 	if nextCount > 0 {
 		avgNext = float64(b.nextTransitionMicros.Load()) / float64(nextCount) / 1000.0
+		nextFirstPassRate = float64(nextCount-b.nextRetries.Load()) * 100 / float64(nextCount)
+		avgNextVerifyProbes = float64(b.nextVerifyProbes.Load()) / float64(nextCount)
 	}
 	acceptedCount := b.targetsAccepted.Load()
 	rejectedCount := b.targetsFound.Load() - acceptedCount
@@ -354,6 +370,10 @@ func (b *Bus) Snapshot() Snapshot {
 		LastTargetScanMS: float64(b.lastTargetScanUS.Load()) / 1000.0,
 		AvgNextTransitionMS: avgNext,
 		LastNextTransitionMS: float64(b.lastNextTransitionUS.Load()) / 1000.0,
+		NextTransitions: nextCount,
+		NextRetries: b.nextRetries.Load(),
+		NextFirstPassRate: nextFirstPassRate,
+		AvgNextVerifyProbes: avgNextVerifyProbes,
 		AvgAcceptedGE: avgAcceptedGE,
 		AvgRejectedGE: avgRejectedGE,
 		AvgAcceptedDE: avgAcceptedDE,
