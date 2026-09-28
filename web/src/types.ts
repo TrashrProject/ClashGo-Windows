@@ -58,6 +58,8 @@ export interface BotStats {
     avg_tap_ms: number;
     fast_tap_ms: number;
     taps_total: number;
+    pipe_taps_total: number;
+    legacy_taps_total: number;
     consecutive_fails: number;
     captures_total: number;
     errors_total: number;
