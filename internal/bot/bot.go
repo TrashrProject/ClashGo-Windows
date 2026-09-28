@@ -3634,6 +3634,12 @@ func (b *Bot) Stats() BotStats {
 		recoverySuccessRate = float64(b.recoverySuccesses.Load()) * 100 / float64(attempts)
 	}
 	adbHealth := b.client.Health()
+	uiAnchorAttempts := b.uiAnchorAttempts.Load()
+	uiAnchorHits := b.uiAnchorHits.Load()
+	uiAnchorHitRate := 0.0
+	if uiAnchorAttempts > 0 {
+		uiAnchorHitRate = float64(uiAnchorHits) * 100 / float64(uiAnchorAttempts)
+	}
 	healthScore := 100
 	healthScore -= adbHealth.ConsecutiveFails * 8
 	failedRecoveries := int(b.recoveryAttempts.Load() - b.recoverySuccesses.Load())
@@ -3701,6 +3707,10 @@ func (b *Bot) Stats() BotStats {
 		PreferredScaleFallbacks: scaleStats.Fallbacks,
 		PreferredScaleHitRate:   scaleHitRate,
 		PreferredScaleEnabled:   scaleStats.Enabled,
+		UIAnchorAttempts:        uiAnchorAttempts,
+		UIAnchorHits:            uiAnchorHits,
+		UIAnchorFallbacks:       b.uiAnchorFallbacks.Load(),
+		UIAnchorHitRate:         uiAnchorHitRate,
 	}
 }
 
@@ -3763,6 +3773,10 @@ type BotStats struct {
 	PreferredScaleFallbacks int64   `json:"preferred_scale_fallbacks"`
 	PreferredScaleHitRate   float64 `json:"preferred_scale_hit_rate"`
 	PreferredScaleEnabled   bool    `json:"preferred_scale_enabled"`
+	UIAnchorAttempts        int64   `json:"ui_anchor_attempts"`
+	UIAnchorHits            int64   `json:"ui_anchor_hits"`
+	UIAnchorFallbacks       int64   `json:"ui_anchor_fallbacks"`
+	UIAnchorHitRate         float64 `json:"ui_anchor_hit_rate"`
 }
 
 type AttackReport struct {
