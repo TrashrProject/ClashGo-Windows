@@ -2653,6 +2653,7 @@ func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int
 func (b *Bot) clickSequence() bool {
 
 	b.lastPrepTimings = PreparationTimings{}
+	prepPace := chooseSearchPacing(b.client.Health())
 	stepStarted := time.Now()
 	attackClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
@@ -2678,7 +2679,7 @@ func (b *Bot) clickSequence() bool {
 				screen.Close()
 			}
 		}
-		b.client.JitteredSleep(650 * time.Millisecond)
+		b.client.JitteredSleep(prepPace.PrepRetryPause)
 	}
 	if !attackClicked {
 		b.logger.Warn().Msg("could not find or click Attack button")
@@ -2740,7 +2741,7 @@ func (b *Bot) clickSequence() bool {
 			break
 		}
 
-		b.client.JitteredSleep(650 * time.Millisecond)
+		b.client.JitteredSleep(prepPace.PrepRetryPause)
 	}
 	if !findMatchClicked {
 		b.logger.Warn().Msg("could not find or click Find Match button")
@@ -2778,7 +2779,7 @@ func (b *Bot) clickSequence() bool {
 			armyArrowClicked = true
 			break
 		}
-		b.client.JitteredSleep(650 * time.Millisecond)
+		b.client.JitteredSleep(prepPace.PrepRetryPause)
 	}
 	if !armyArrowClicked {
 		b.logger.Warn().Msg("could not find or click Army Arrow button")
@@ -2790,7 +2791,9 @@ func (b *Bot) clickSequence() bool {
 	}
 	b.lastPrepTimings.ArmyMenuMS = time.Since(stepStarted).Milliseconds()
 	stepStarted = time.Now()
-	b.client.JitteredSleep(650 * time.Millisecond)
+	// This is the one intentional post-click settle in the army picker.
+	// Fast/Balanced can shorten it, while Safe preserves the proven 650ms.
+	b.client.JitteredSleep(prepPace.PrepSettlePause)
 
 	armyClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
@@ -2798,7 +2801,7 @@ func (b *Bot) clickSequence() bool {
 			armyClicked = true
 			break
 		}
-		b.client.JitteredSleep(650 * time.Millisecond)
+		b.client.JitteredSleep(prepPace.PrepRetryPause)
 	}
 	if !armyClicked {
 		b.logger.Warn().Int("army_slot", b.armySlot).Msg("army recipe card did not appear, continuing anyway")
@@ -2833,7 +2836,7 @@ func (b *Bot) clickSequence() bool {
 			battleClicked = true
 			break
 		}
-		b.client.JitteredSleep(650 * time.Millisecond)
+		b.client.JitteredSleep(prepPace.PrepRetryPause)
 	}
 	if !battleClicked {
 		b.logger.Warn().Msg("could not find or click Battle button")
@@ -2877,10 +2880,9 @@ func (b *Bot) selectArmySlot() bool {
 		b.logger.Warn().Err(err).Msg("army recipe card tap failed")
 		return false
 	}
-	// Do not sleep here: clickSequence already provides a 650ms menu settle
-	// after every army selection and then requires Battle to be stable on two
-	// fresh frames before clicking it. The old extra 1s made slots 2+ slower
-	// than slot 1 without adding any additional verification.
+	// Do not sleep here: clickSequence immediately waits for Battle to become
+	// stable on two fresh frames before clicking it. An extra fixed delay here
+	// would only slow slots 2+ without adding another verification boundary.
 	b.recordActivity()
 	return true
 }
