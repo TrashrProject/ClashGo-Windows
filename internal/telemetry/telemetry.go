@@ -176,6 +176,22 @@ func (b *Bus) RecordCaptureMicros(us int64) {
 	b.lastCaptureUS.Store(us)
 }
 
+func (b *Bus) RecordRejectedTarget(gold, elixir, darkElixir, score int, scanUS int64) {
+	if b == nil {
+		return
+	}
+	b.events.Add(1)
+	b.targetsFound.Add(1)
+	b.rejectedGESum.Add(int64(gold + elixir))
+	b.rejectedDESum.Add(int64(darkElixir))
+	b.rejectedScoreSum.Add(int64(score))
+	if scanUS >= 0 {
+		b.targetScanCount.Add(1)
+		b.targetScanMicros.Add(scanUS)
+		b.lastTargetScanUS.Store(scanUS)
+	}
+}
+
 func (b *Bus) Emit(t EventType, fields map[string]any) {
 	if b == nil {
 		return
