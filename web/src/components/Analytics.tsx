@@ -269,6 +269,32 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     return buckets.filter((b) => b.attacks > 0);
   }, [history]);
 
+  const endReasonStats = React.useMemo(() => {
+    const map = new Map<string, {
+      reason: string;
+      attacks: number;
+      stars: number;
+      cycleMs: number;
+      destruction: number;
+      loot: number;
+      full: number;
+    }>();
+    for (const rep of history ?? []) {
+      const reason = rep.battle_end_reason || 'unknown';
+      const row = map.get(reason) ?? {
+        reason, attacks: 0, stars: 0, cycleMs: 0, destruction: 0, loot: 0, full: 0,
+      };
+      row.attacks++;
+      row.stars += rep.stars || 0;
+      row.cycleMs += rep.cycle_duration_ms || 0;
+      row.destruction += rep.destruction_pct || 0;
+      row.loot += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0) + (rep.dark_elixir_stolen || 0);
+      if (rep.deploy_success) row.full++;
+      map.set(reason, row);
+    }
+    return Array.from(map.values()).sort((a, b) => b.attacks - a.attacks);
+  }, [history]);
+
   const sideStats = React.useMemo(() => {
     const map = new Map<string, {
       side: string;
@@ -955,6 +981,49 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             </div>
           )}
         </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Battle termination</div>
+            <h3 className="mt-1 text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Why Battles End</h3>
+            <p className="text-sm text-zinc-500 mt-1">Natural result, thresholds, stalls and timeouts measured separately.</p>
+          </div>
+          <span className="material-symbols-outlined text-zinc-400">flag</span>
+        </div>
+        {endReasonStats.length === 0 ? (
+          <div className="py-10 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">Waiting for completed attacks</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                  <th className="pb-3 pr-4">Reason</th>
+                  <th className="pb-3 px-3">Attacks</th>
+                  <th className="pb-3 px-3">Avg stars</th>
+                  <th className="pb-3 px-3">Avg destruction</th>
+                  <th className="pb-3 px-3">Full deploy</th>
+                  <th className="pb-3 px-3">Avg loot</th>
+                  <th className="pb-3 pl-3">Avg cycle</th>
+                </tr>
+              </thead>
+              <tbody>
+                {endReasonStats.map((row) => (
+                  <tr key={row.reason} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                    <td className="py-4 pr-4 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-white">{row.reason.replaceAll('_', ' ')}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.stars / row.attacks).toFixed(2)}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.destruction / row.attacks).toFixed(0)}%</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{Math.round(row.full / row.attacks * 100)}%</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{compact(row.loot / row.attacks)}</td>
+                    <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.cycleMs / row.attacks / 1000).toFixed(0)}s</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
