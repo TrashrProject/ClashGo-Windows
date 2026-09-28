@@ -495,6 +495,8 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			Interface("furthest", safeLines[len(safeLines)-1]).
 			Msg("Windows safe deploy corridor locked behind red boundary")
 
+		var armyState *ArmyStateManager
+
 		// One helper for initial deploy + reconciliation. Every troop-like card
 		// uses this verified outside corridor. Retries only move farther OUT.
 		// Spells intentionally target inside.
@@ -517,6 +519,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 						(redZone.BBox.Min.Y+redZone.BBox.Max.Y)/2,
 					)
 				}
+				if armyState != nil {
+					armyState.RecordDeploy(slot.UnitName, slot.Category, n, slot.X, slot.Y, deploySide, spellPoint, spellPoint)
+				}
 				tapExec.TapDeployPoint(spellPoint, n, 2)
 			} else {
 				// Keep the whole army on one coherent deployment line. The old
@@ -533,8 +538,15 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 					Msg("Windows deploy: using outer-edge line")
 
 				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
-					tapExec.TapDeployPoint(image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2), 1, 2)
+					pt := image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2)
+					if armyState != nil {
+						armyState.RecordDeploy(slot.UnitName, slot.Category, 1, slot.X, slot.Y, deploySide, pt, pt)
+					}
+					tapExec.TapDeployPoint(pt, 1, 2)
 				} else {
+					if armyState != nil {
+						armyState.RecordDeploy(slot.UnitName, slot.Category, n, slot.X, slot.Y, deploySide, line[0], line[1])
+					}
 					// Windows/BlueStacks can drop rapid tap triples under load.
 					// Use paced one-by-one line deployment so a 9-count EDrag
 					// card does not end with 1-2 troops still sitting in the bar.
@@ -548,7 +560,6 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// the initial X positions therefore makes every later tap drift onto the
 		// next card (and eventually onto hero ability buttons). This is exactly
 		// the observed "select ED -> jump to siege -> hammer last hero" failure.
-		var armyState *ArmyStateManager
 		if farmControlled {
 			armyState = NewArmyStateManager(farmProfile)
 			defer writeAttackTrace(s.Name, armyState)
@@ -696,6 +707,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			if chosen.Category == "Hero" || chosen.Category == "Siege" || chosen.Category == "CC" {
 				line := safeLines[len(safeLines)-1]
 				pt := image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2)
+				if armyState != nil {
+					armyState.RecordDeploy(chosen.UnitName, chosen.Category, 1, chosen.X, chosen.Y, deploySide, pt, pt)
+				}
 				tapExec.TapSlot(chosen, 1)
 				tapExec.HumanSleep(130, 15)
 				tapExec.TapDeployPoint(pt, 1, 1)
@@ -767,6 +781,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			// Do not trust old coordinates after this point. On the next loop
 			// the whole bar is captured and re-indexed from scratch.
 			if cardAttempts[key] >= 8 && chosen.UnitName != "" && chosenCount <= 0 {
+				if armyState != nil {
+					armyState.RecordReplayEvent("failed", chosen.UnitName, chosen.Category)
+				}
 				e.logger.Warn().
 					Str("unit", chosen.UnitName).
 					Str("category", chosen.Category).
