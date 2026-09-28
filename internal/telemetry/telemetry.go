@@ -166,6 +166,16 @@ func (b *Bus) SessionID() string {
 	return b.sessionID
 }
 
+func (b *Bus) RecordCaptureMicros(us int64) {
+	if b == nil || us < 0 {
+		return
+	}
+	b.events.Add(1)
+	b.captureCount.Add(1)
+	b.captureMicros.Add(us)
+	b.lastCaptureUS.Store(us)
+}
+
 func (b *Bus) Emit(t EventType, fields map[string]any) {
 	if b == nil {
 		return
