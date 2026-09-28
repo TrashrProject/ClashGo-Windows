@@ -14,7 +14,7 @@ func TestBuildSessionReportUsesTrueRoutineTimeAndReliability(t *testing.T) {
 			DeploySuccess: true, ReturnHomeSuccess: true, RedZoneValid: true,
 			CorridorVerified: true, HUDSafe: true, Stars: 3, DestructionPct: 100,
 			GoldStolen: 1_000_000, ElixirStolen: 900_000, DarkElixirStolen: 8_000,
-			PreparationDurationMS: 5_000, SearchDurationMS: 10_000,
+			CooldownDurationMS: 30_000, PreparationDurationMS: 5_000, SearchDurationMS: 10_000,
 			DeployDurationMS: 20_000, BattleDurationMS: 120_000,
 			ReturnHomeDurationMS: 1_000, FullRoutineDurationMS: 150_000,
 			TargetScore: 90, BattleEndReason: "natural",
@@ -25,7 +25,7 @@ func TestBuildSessionReportUsesTrueRoutineTimeAndReliability(t *testing.T) {
 			DeploySuccess: true, ReturnHomeSuccess: true, RedZoneValid: true,
 			CorridorVerified: true, HUDSafe: true, Stars: 2, DestructionPct: 80,
 			GoldStolen: 800_000, ElixirStolen: 700_000, DarkElixirStolen: 5_000,
-			PreparationDurationMS: 6_000, SearchDurationMS: 12_000,
+			CooldownDurationMS: 20_000, PreparationDurationMS: 6_000, SearchDurationMS: 12_000,
 			DeployDurationMS: 18_000, BattleDurationMS: 110_000,
 			ReturnHomeDurationMS: 1_200, FullRoutineDurationMS: 140_000,
 			TargetScore: 80, BattleEndReason: "natural",
@@ -58,6 +58,12 @@ func TestBuildSessionReportUsesTrueRoutineTimeAndReliability(t *testing.T) {
 	}
 	if report.AverageRoutineMS != 145_000 {
 		t.Fatalf("avg routine=%v want 145000", report.AverageRoutineMS)
+	}
+	if report.AverageCooldownMS != 25_000 {
+		t.Fatalf("avg cooldown=%v want 25000", report.AverageCooldownMS)
+	}
+	if report.OptimizationTarget == "deployment_protected" || report.OptimizationTarget == "cooldown_intentional" {
+		t.Fatalf("protected/intentional stage chosen as optimization target: %q", report.OptimizationTarget)
 	}
 	wantGoldPerHour := 1_800_000.0 / (290_000.0 / 3_600_000.0)
 	if diff := report.GoldPerHour - wantGoldPerHour; diff < -0.01 || diff > 0.01 {
