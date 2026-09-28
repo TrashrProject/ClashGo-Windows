@@ -210,40 +210,40 @@ func newWindowsSlotActivityProfile(screen gocv.Mat, slotY, screenW int) *windows
 	sub := screen.Region(image.Rect(0, y1, screen.Cols(), y2))
 	defer sub.Close()
 
-	hsv := gocv.NewMat()
-	defer hsv.Close()
+	hsv := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC3)
+	defer vision.PutMat(hsv)
 	gocv.CvtColor(sub, &hsv, gocv.ColorBGRToHSV)
 
-	maskMap1 := gocv.NewMat()
-	defer maskMap1.Close()
+	maskMap1 := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(maskMap1)
 	gocv.InRangeWithScalar(hsv, gocv.NewScalar(35, 31, 0, 0), gocv.NewScalar(90, 255, 255, 0), &maskMap1)
 
-	maskMap2 := gocv.NewMat()
-	defer maskMap2.Close()
+	maskMap2 := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(maskMap2)
 	gocv.InRangeWithScalar(hsv, gocv.NewScalar(0, 0, 0, 0), gocv.NewScalar(29, 49, 79, 0), &maskMap2)
 
-	isMapMask := gocv.NewMat()
-	defer isMapMask.Close()
+	isMapMask := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(isMapMask)
 	gocv.BitwiseOr(maskMap1, maskMap2, &isMapMask)
 
-	notMapMask := gocv.NewMat()
-	defer notMapMask.Close()
+	notMapMask := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(notMapMask)
 	gocv.BitwiseNot(isMapMask, &notMapMask)
 
-	maskActA := gocv.NewMat()
-	defer maskActA.Close()
+	maskActA := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(maskActA)
 	gocv.InRangeWithScalar(hsv, gocv.NewScalar(0, 56, 91, 0), gocv.NewScalar(180, 255, 255, 0), &maskActA)
 
-	maskActB := gocv.NewMat()
-	defer maskActB.Close()
+	maskActB := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(maskActB)
 	gocv.InRangeWithScalar(hsv, gocv.NewScalar(0, 0, 221, 0), gocv.NewScalar(180, 29, 255, 0), &maskActB)
 
-	activeContentMask := gocv.NewMat()
-	defer activeContentMask.Close()
+	activeContentMask := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(activeContentMask)
 	gocv.BitwiseOr(maskActA, maskActB, &activeContentMask)
 
-	finalMask := gocv.NewMat()
-	defer finalMask.Close()
+	finalMask := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(finalMask)
 	gocv.BitwiseAnd(activeContentMask, notMapMask, &finalMask)
 
 	// Build a per-column prefix sum once. The previous ActivityAt created a
