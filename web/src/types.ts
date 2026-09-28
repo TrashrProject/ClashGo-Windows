@@ -52,6 +52,32 @@ export interface ActivityEvent {
   fields?: Record<string, unknown>;
 }
 
+export interface AttackReplayPoint {
+  x: number;
+  y: number;
+}
+
+export interface AttackReplayEventView {
+  offset_ms: number;
+  kind: string;
+  name?: string;
+  category?: string;
+  count?: number;
+  slot_x?: number;
+  slot_y?: number;
+  deploy_side?: string;
+  p1: AttackReplayPoint;
+  p2: AttackReplayPoint;
+}
+
+export interface AttackReplayView {
+  available: boolean;
+  timestamp?: string;
+  strategy?: string;
+  complete: boolean;
+  events: AttackReplayEventView[];
+}
+
 export interface VillageResourceSnapshot {
   timestamp: string;
   gold: number;
