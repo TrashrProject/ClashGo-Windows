@@ -120,7 +120,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			deployScreen = cameraFrame
 			redZone = redDetector.Detect(deployScreen, uiCutoff)
 			side, free := freeSpace(redZone)
-			e.logger.Info().
+			e.logger.Debug().
 				Str("reason", reason).
 				Bool("red_zone_valid", redZone.Valid).
 				Str("best_side", side).
@@ -138,7 +138,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		}
 
 		side, free := freeSpace(redZone)
-		e.logger.Info().
+		e.logger.Debug().
 			Bool("red_zone_valid", redZone.Valid).
 			Str("best_side", side).
 			Int("free_space", free).
@@ -156,7 +156,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// are handled by Android's normal input swipe path and are much more
 		// stable on BlueStacks.
 		if !redZone.Valid || free < minSafeFree {
-			e.logger.Info().
+			e.logger.Debug().
 				Int("free_space", free).
 				Int("required_free_space", minSafeFree).
 				Msg("adaptive camera: native pinch zoom disabled on Windows-safe path; using map pan only")
@@ -210,7 +210,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		}
 
 		side, free = freeSpace(redZone)
-		e.logger.Info().
+		e.logger.Debug().
 			Bool("red_zone_valid", redZone.Valid).
 			Str("selected_side", side).
 			Int("free_space", free).
@@ -527,7 +527,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				// waste taps near the red boundary. Use the furthest verified
 				// safe line consistently for normal troops.
 				line := safeLines[len(safeLines)-1]
-				e.logger.Info().
+				e.logger.Debug().
 					Str("unit", slot.UnitName).
 					Str("category", slot.Category).
 					Interface("p1", line[0]).
@@ -686,16 +686,24 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 			key := oneShotKey(chosen)
 			cardAttempts[key]++
-			e.logger.Info().
-				Int("round", liveRound).
-				Str("unit", chosen.UnitName).
-				Str("category", chosen.Category).
-				Int("slot_x", chosen.X).
-				Int("slot_y", chosen.Y).
-				Int("ocr_count", chosenCount).
-				Float64("activity", chosenActivity).
-				Int("attempt", cardAttempts[key]).
-				Msg("Windows live deployment: freshly reacquired current card")
+			if cardAttempts[key] == 1 {
+				e.logger.Info().
+					Str("unit", chosen.UnitName).
+					Str("category", chosen.Category).
+					Int("count", chosenCount).
+					Msg("deploying card")
+			} else {
+				e.logger.Debug().
+					Int("round", liveRound).
+					Str("unit", chosen.UnitName).
+					Str("category", chosen.Category).
+					Int("slot_x", chosen.X).
+					Int("slot_y", chosen.Y).
+					Int("ocr_count", chosenCount).
+					Float64("activity", chosenActivity).
+					Int("attempt", cardAttempts[key]).
+					Msg("reacquired card for deployment reconciliation")
+			}
 
 			// Use the current fresh coordinates only. Close the frame before
 			// sending ADB input; the card will be reacquired again afterwards.
@@ -710,14 +718,14 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				oneShotDone[key] = true
 				if chosen.Category == "Hero" && strings.TrimSpace(chosen.UnitName) == "" {
 					unknownHeroesDeployed++
-					e.logger.Info().
+					e.logger.Debug().
 						Int("anonymous_heroes_deployed", unknownHeroesDeployed).
 						Msg("Windows anonymous hero deployed once; advancing structural hero cursor")
 				}
 				if armyState != nil && strings.TrimSpace(chosen.UnitName) != "" {
 					armyState.CompleteOneShot(chosen.UnitName)
 				}
-				e.logger.Info().
+				e.logger.Debug().
 					Str("unit", chosen.UnitName).
 					Str("category", chosen.Category).
 					Interface("deploy_point", pt).
