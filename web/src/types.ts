@@ -137,6 +137,7 @@ export interface SessionReportView {
   zero_touch_rate: number;
   current_zero_touch_streak: number;
   best_zero_touch_streak: number;
+  average_cooldown_ms: number;
   average_preparation_ms: number;
   average_search_ms: number;
   average_deploy_ms: number;
@@ -144,6 +145,7 @@ export interface SessionReportView {
   average_return_home_ms: number;
   average_routine_ms: number;
   bottleneck: string;
+  optimization_target: string;
   top_strategy?: string;
   top_deploy_side?: string;
   runtime_modes?: Record<string, number>;
