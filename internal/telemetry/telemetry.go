@@ -24,6 +24,7 @@ const (
 	EventRecovery        EventType = "recovery"
 	EventCaptureSample   EventType = "capture_sample"
 	EventSpeedProfile    EventType = "speed_profile"
+	EventReturnHome      EventType = "return_home"
 )
 
 type Event struct {
