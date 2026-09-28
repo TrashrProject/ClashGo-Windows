@@ -20,6 +20,7 @@ type searchPacing struct {
 	// It never changes battle deployment timing.
 	PrepSettlePause     time.Duration
 	PrepRetryPause      time.Duration
+	PrepPollPause       time.Duration
 }
 
 func chooseSearchPacing(h adb.Health) searchPacing {
@@ -41,6 +42,7 @@ func chooseSearchPacing(h adb.Health) searchPacing {
 			StabilityRest:       1500 * time.Millisecond,
 			PrepSettlePause:     650 * time.Millisecond,
 			PrepRetryPause:      650 * time.Millisecond,
+			PrepPollPause:       120 * time.Millisecond,
 		}
 	}
 
@@ -55,6 +57,7 @@ func chooseSearchPacing(h adb.Health) searchPacing {
 			StabilityRest:       850 * time.Millisecond,
 			PrepSettlePause:     350 * time.Millisecond,
 			PrepRetryPause:      400 * time.Millisecond,
+			PrepPollPause:       80 * time.Millisecond,
 		}
 	}
 
@@ -66,5 +69,6 @@ func chooseSearchPacing(h adb.Health) searchPacing {
 		StabilityRest:       1100 * time.Millisecond,
 		PrepSettlePause:     500 * time.Millisecond,
 		PrepRetryPause:      500 * time.Millisecond,
+		PrepPollPause:       100 * time.Millisecond,
 	}
 }
