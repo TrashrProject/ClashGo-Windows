@@ -550,20 +550,6 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// the initial X positions therefore makes every later tap drift onto the
 		// next card (and eventually onto hero ability buttons). This is exactly
 		// the observed "select ED -> jump to siege -> hammer last hero" failure.
-		categoryPriority := func(cat string) int {
-			switch cat {
-			case "Troop":
-				return 0
-			case "Hero":
-				return 1
-			case "Siege", "CC":
-				return 2
-			case "Spell":
-				return 3
-			default:
-				return 0
-			}
-		}
 		var armyState *ArmyStateManager
 		if farmControlled {
 			armyState = NewArmyStateManager(farmProfile)
@@ -612,8 +598,8 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			}
 
 			sort.SliceStable(liveSlots, func(i, j int) bool {
-				pi := categoryPriority(liveSlots[i].Category)
-				pj := categoryPriority(liveSlots[j].Category)
+				pi := windowsCategoryPriority(liveSlots[i].Category)
+				pj := windowsCategoryPriority(liveSlots[j].Category)
 				if pi != pj { return pi < pj }
 				return liveSlots[i].X < liveSlots[j].X
 			})
