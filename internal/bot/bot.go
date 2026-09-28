@@ -2115,35 +2115,27 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			bonusDE = parsedResult.Bonus.DarkElixir
 			parsedResults = true
 
-			// Reconcile stars against the measured destruction. The result
-			// screen remains useful for distinguishing 1 vs 2 stars, but it
-			// may never claim an impossible outcome (e.g. 3 stars below 100%
-			// or 0 stars at >=50%). This removes the "random" history stars
-			// while still preserving a genuine TH star under 50%.
-			battleStars = visualStars
+			// Reconcile stars against live battle facts. Visual OCR can still
+			// reveal a TH star when the optional TH banner detector missed it,
+			// but it may never fall BELOW a confirmed live minimum (e.g. TH
+			// destroyed => at least 1★; >=50% + TH => at least 2★) or claim an
+			// impossible 3★ below 100%.
+			var overridden bool
+			battleStars, overridden = intelligence.ReconcileBattleStars(
+				visualStars,
+				finalPct,
+				b.attackExec.ThDestroyed(),
+			)
 			if finalPct >= 100 {
-				battleStars = 3
 				starsSource = "battle_outcome"
-			} else if finalPct > 0 {
-				ruleStars := game.StarsFromOutcome(finalPct, b.attackExec.ThDestroyed())
-				if finalPct >= 50 {
-					if visualStars < 1 || visualStars > 2 {
-						battleStars = ruleStars
-					}
-				} else {
-					if visualStars < 0 || visualStars > 1 {
-						battleStars = ruleStars
-					}
-				}
-				if battleStars != visualStars {
-					starsSource = "reconciled_outcome"
-					b.logger.Warn().
-						Int("visual_stars", visualStars).
-						Int("reconciled_stars", battleStars).
-						Int("destruction_pct", finalPct).
-						Bool("th_destroyed", b.attackExec.ThDestroyed()).
-						Msg("result-screen stars rejected as inconsistent with battle outcome")
-				}
+			} else if overridden {
+				starsSource = "reconciled_outcome"
+				b.logger.Warn().
+					Int("visual_stars", visualStars).
+					Int("reconciled_stars", battleStars).
+					Int("destruction_pct", finalPct).
+					Bool("th_destroyed", b.attackExec.ThDestroyed()).
+					Msg("result-screen stars rejected as inconsistent with battle outcome")
 			}
 
 			// Prefer the battle's live Available-Loot delta over themed
