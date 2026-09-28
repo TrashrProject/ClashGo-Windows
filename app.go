@@ -41,9 +41,10 @@ type App struct {
 	// so React's 2 s poll for GetAttackHistory doesn't hit the
 	// filesystem on every tick. Refreshed lazily on first call
 	// (cold start) and eagerly on each bot.statsUpdate callback
-	// (end of every attack — bounded to ~once per attack, plus the
-	// per-search-skip refresh, both far below the 0.5 Hz React
-	// poll). RWMutex because read dominates on the hot IPC path.
+	// (end of every attack only). Matchmaking skips intentionally never
+	// refresh history: their counters are atomic and React already polls live
+	// stats, so disk I/O stays off the search hot path. RWMutex because read
+	// dominates on the hot IPC path.
 	// Every eager refresh is a FORCED disk re-read (see
 	// refreshHistory) — a warm cache must never be treated as
 	// authoritative, or the latest attack would never surface.
