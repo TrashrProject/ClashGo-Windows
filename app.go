@@ -43,11 +43,10 @@ type App struct {
 	logMu     sync.RWMutex
 	logBuffer []string
 
-	// cachedHistory is the in-memory mirror of attack_history.json
-	// so React's 2 s poll for GetAttackHistory doesn't hit the
-	// filesystem on every tick. Refreshed lazily on first call
-	// (cold start) and eagerly on each bot.statsUpdate callback
-	// (end of every attack only). Matchmaking skips intentionally never
+	// cachedHistory is the in-memory mirror of attack history so React never
+	// needs filesystem I/O on its normal poll/event path. It is loaded lazily
+	// from disk on cold start and, while the bot runs, replaced directly from
+	// Bot.HistorySnapshot() at attack boundaries. Matchmaking skips intentionally never
 	// refresh history: their counters are atomic and React already polls live
 	// stats, so disk I/O stays off the search hot path. RWMutex because read
 	// dominates on the hot IPC path.
@@ -598,15 +597,19 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 		// without burning the bridge. See App.GetLiveScreenshot.
 
 		b.OnStatsUpdate = func() {
-			// Refresh persisted history/stats, then push the fresh history to
-			// React immediately. The dashboard still keeps its low-frequency
-			// polling as a recovery path, but attack rows no longer wait up to
-			// two seconds (or a tab remount) to appear.
-			a.refreshHistory()
+			// The bot's in-memory history is authoritative while a session is
+			// running. Mirror it directly into the App cache instead of forcing
+			// attack_history.json to be written and re-read before React can see
+			// the new row.
+			history := b.HistorySnapshot()
+			a.cachedHistoryMu.Lock()
+			a.cachedHistory = make([]bot.AttackReport, len(history))
+			copy(a.cachedHistory, history)
+			a.cachedHistoryMu.Unlock()
+
 			a.saveStats()
 
 			if a.ctx != nil {
-				history := a.GetAttackHistory()
 				runtime.EventsEmit(a.ctx, "attack_history_updated", history)
 				runtime.EventsEmit(a.ctx, "stats_updated", a.GetStats())
 			}
