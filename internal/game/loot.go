@@ -678,7 +678,8 @@ func (lr *LootRecognizer) ReadLootDetailed(screen gocv.Mat) (LootReport, error) 
 		int(190*lr.cal.ScaleY),
 	))
 	var hud gocv.Mat
-	if !searchROI.Empty() {
+	hudValid := !searchROI.Empty()
+	if hudValid {
 		hud = screen.Region(searchROI)
 		defer hud.Close()
 	}
@@ -686,7 +687,7 @@ func (lr *LootRecognizer) ReadLootDetailed(screen gocv.Mat) (LootReport, error) 
 	var results [3]int
 	for i, ic := range icons {
 		tpl, ok := lr.templates.Get(ic.tpl)
-		if ok && !tpl.Empty() && !hud.Empty() && hud.Cols() >= tpl.Cols() && hud.Rows() >= tpl.Rows() {
+		if ok && !tpl.Empty() && hudValid && hud.Cols() >= tpl.Cols() && hud.Rows() >= tpl.Rows() {
 			// Enemy-loot icons live in the upper-left HUD. Restricting these
 			// matches avoids scanning the entire battlefield three times per base.
 			res := vision.GetMat(hud.Rows()-tpl.Rows()+1, hud.Cols()-tpl.Cols()+1, gocv.MatTypeCV32FC1)
