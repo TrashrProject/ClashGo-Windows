@@ -720,6 +720,76 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     };
   }, [stats.adb_health?.pipe_taps_total, stats.adb_health?.legacy_taps_total]);
 
+  const reliabilityScorecard = React.useMemo(() => {
+    const rows = history ?? [];
+    const count = rows.length;
+    const pct = (n: number, d: number) => d > 0 ? n * 100 / d : 0;
+
+    const fullDeploy = count > 0 ? pct(rows.filter((r) => r.deploy_success).length, count) : 0;
+    const returnRows = rows.filter((r) => (r.return_home_duration_ms || 0) > 0 || r.return_home_success);
+    const returnHome = returnRows.length > 0 ? pct(returnRows.filter((r) => r.return_home_success).length, returnRows.length) : 0;
+    const parsed = count > 0 ? pct(rows.filter((r) => r.parsed_results).length, count) : 0;
+
+    const safetyRows = rows.filter((r) => Boolean(r.safety_mode));
+    const certifiedSafety = safetyRows.length > 0
+      ? pct(safetyRows.filter((r) => r.red_zone_valid && r.corridor_verified && r.hud_safe).length, safetyRows.length)
+      : 0;
+
+    const recovery = stats.recovery_attempts > 0 ? stats.recovery_success_rate || 0 : 0;
+    const nextFirstPass = stats.next_transitions > 0 ? stats.next_first_pass_rate || 0 : 0;
+
+    return [
+      {
+        label: 'Full deployment',
+        value: fullDeploy,
+        display: count > 0 ? `${fullDeploy.toFixed(1)}%` : '—',
+        threshold: 98,
+        sampled: count > 0,
+        detail: `${rows.filter((r) => r.deploy_success).length}/${count} attacks`,
+      },
+      {
+        label: 'Return Home',
+        value: returnHome,
+        display: returnRows.length > 0 ? `${returnHome.toFixed(1)}%` : '—',
+        threshold: 98,
+        sampled: returnRows.length > 0,
+        detail: `${returnRows.filter((r) => r.return_home_success).length}/${returnRows.length} measured`,
+      },
+      {
+        label: 'Result parsed',
+        value: parsed,
+        display: count > 0 ? `${parsed.toFixed(1)}%` : '—',
+        threshold: 95,
+        sampled: count > 0,
+        detail: 'Battle result OCR',
+      },
+      {
+        label: 'Next first-pass',
+        value: nextFirstPass,
+        display: stats.next_transitions > 0 ? `${nextFirstPass.toFixed(1)}%` : '—',
+        threshold: 90,
+        sampled: stats.next_transitions >= 3,
+        detail: `${stats.next_transitions || 0} transitions`,
+      },
+      {
+        label: 'Safety certified',
+        value: certifiedSafety,
+        display: safetyRows.length > 0 ? `${certifiedSafety.toFixed(1)}%` : '—',
+        threshold: 95,
+        sampled: safetyRows.length > 0,
+        detail: 'Live red zone + corridor + HUD',
+      },
+      {
+        label: 'Recovery success',
+        value: recovery,
+        display: stats.recovery_attempts > 0 ? `${recovery.toFixed(1)}%` : '—',
+        threshold: 90,
+        sampled: stats.recovery_attempts > 0,
+        detail: stats.recovery_attempts > 0 ? `${stats.recovery_successes}/${stats.recovery_attempts}` : 'No recovery needed',
+      },
+    ];
+  }, [history, stats]);
+
   const optimizationAdvisor = React.useMemo(() => {
     type Opportunity = {
       key: string;
@@ -874,6 +944,35 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
               <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
             </div>
           ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Reliability Scorecard</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Fast is useless if it is not repeatable</h3>
+            <p className="text-sm text-zinc-500 mt-1">Explicit technical gates. “Watch” means the measured rate is below the shown reliability target — no automatic behavior changes.</p>
+          </div>
+          <span className="material-symbols-outlined text-zinc-400">verified_user</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {reliabilityScorecard.map((metric) => {
+            const pass = metric.sampled && metric.value >= metric.threshold;
+            return (
+              <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+                  <div className={`text-[8px] font-black uppercase tracking-wider ${!metric.sampled ? 'text-zinc-400' : pass ? 'text-emerald-500' : 'text-amber-500'}`}>
+                    {!metric.sampled ? 'Learning' : pass ? 'Pass' : 'Watch'}
+                  </div>
+                </div>
+                <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.display}</div>
+                <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+                <div className="mt-2 text-[8px] font-bold uppercase tracking-wider text-zinc-400">Target ≥ {metric.threshold}%</div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
