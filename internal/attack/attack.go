@@ -1735,6 +1735,26 @@ func (e *Executor) EndBattle() error {
 	return nil
 }
 
+type returnHomePacing struct {
+	InitialWait time.Duration
+	PollWait    time.Duration
+	Window      time.Duration
+}
+
+func chooseReturnHomePacing(h adb.Health) returnHomePacing {
+	captureMs := h.FastCaptureMs
+	if captureMs <= 0 {
+		captureMs = h.AvgCaptureMs
+	}
+	if h.ConsecutiveFails > 0 || captureMs >= 900 {
+		return returnHomePacing{InitialWait: 450 * time.Millisecond, PollWait: 240 * time.Millisecond, Window: 1700 * time.Millisecond}
+	}
+	if captureMs > 0 && captureMs <= 500 {
+		return returnHomePacing{InitialWait: 250 * time.Millisecond, PollWait: 150 * time.Millisecond, Window: 1300 * time.Millisecond}
+	}
+	return returnHomePacing{InitialWait: 350 * time.Millisecond, PollWait: 200 * time.Millisecond, Window: 1500 * time.Millisecond}
+}
+
 func (e *Executor) ReturnHome() error {
 	hx, hy := e.cal.ScaleRef(430, 566)
 	// This button is deterministic on the verified result overlay. Avoid the
@@ -1744,12 +1764,12 @@ func (e *Executor) ReturnHome() error {
 		return err
 	}
 
-	// Do not burn a fixed 900ms when the village is already ready, and do
-	// not fail merely because one exact 900ms frame caught a transition.
-	// Poll a short bounded window instead. This is both faster on healthy
-	// BlueStacks sessions and more tolerant of a slightly slow return.
-	time.Sleep(380 * time.Millisecond)
-	deadline := time.Now().Add(1400 * time.Millisecond)
+	// Poll a bounded verification window, but adapt the first probe and
+	// cadence to live ADB health. Healthy sessions verify earlier; degraded
+	// sessions keep a more conservative settle without changing the tap.
+	pacing := chooseReturnHomePacing(e.client.Health())
+	time.Sleep(pacing.InitialWait)
+	deadline := time.Now().Add(pacing.Window)
 	lastState := game.StateUnknown
 	for {
 		screen, err := e.client.CaptureToMat()
@@ -1765,7 +1785,7 @@ func (e *Executor) ReturnHome() error {
 		if time.Now().After(deadline) {
 			break
 		}
-		time.Sleep(220 * time.Millisecond)
+		time.Sleep(pacing.PollWait)
 	}
 	return fmt.Errorf("did not return home within adaptive verification window (last state: %s)", lastState.String())
 }
@@ -2045,7 +2065,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 						if lootedPct < 0 { lootedPct = 0 }
 						if lootedPct > 100 { lootedPct = 100 }
 
-						e.logger.Info().
+						e.logger.Debug().
 							Int("loot_percent", lootedPct).
 							Int("threshold", threshold).
 							Int("remaining_gold", remaining.Gold).
