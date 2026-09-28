@@ -71,7 +71,8 @@ type SlotManager struct {
 	logger    zerolog.Logger
 }
 
-// NewSlotManager detects active slots, resolves identities via template matching + manual labels.
+// NewSlotManager performs the full identity pass. It is used for the first
+// battle-bar scan where troop names are useful for army/profile diagnostics.
 func NewSlotManager(
 	screen gocv.Mat,
 	pCfg PrecisionConfig,
@@ -79,6 +80,34 @@ func NewSlotManager(
 	templates map[string]gocv.Mat,
 	classify func(gocv.Mat) (game.GameState, int),
 	logger zerolog.Logger,
+) *SlotManager {
+	return newSlotManager(screen, pCfg, w, h, mBarY, templates, classify, logger, false)
+}
+
+// NewSlotManagerLiveRescan preserves full live slot-position detection but on
+// Windows limits expensive portrait matching to categories that affect deploy
+// ordering/semantics: heroes, siege, spells and CC. Normal troops can remain
+// generic Troop cards because the live deployer uses their current OCR count
+// and safe-edge geometry, not their portrait name.
+func NewSlotManagerLiveRescan(
+	screen gocv.Mat,
+	pCfg PrecisionConfig,
+	w, h, mBarY int,
+	templates map[string]gocv.Mat,
+	classify func(gocv.Mat) (game.GameState, int),
+	logger zerolog.Logger,
+) *SlotManager {
+	return newSlotManager(screen, pCfg, w, h, mBarY, templates, classify, logger, runtime.GOOS == "windows")
+}
+
+func newSlotManager(
+	screen gocv.Mat,
+	pCfg PrecisionConfig,
+	w, h, mBarY int,
+	templates map[string]gocv.Mat,
+	classify func(gocv.Mat) (game.GameState, int),
+	logger zerolog.Logger,
+	specialsOnly bool,
 ) *SlotManager {
 	sm := &SlotManager{
 		unitIndex: make(map[string]*TrackedSlot),
@@ -125,7 +154,7 @@ func NewSlotManager(
 
 	barROI := image.Rect(0, sm.barY, w, h)
 	classifyStarted := time.Now()
-	sm.classifySlots(screen, activeXs, templates, barROI)
+	sm.classifySlots(screen, activeXs, templates, barROI, specialsOnly)
 	sm.classifyDuration = time.Since(classifyStarted)
 
 	// Windows must not inherit stale positional/manual classifications.
@@ -342,8 +371,17 @@ func (sm *SlotManager) detectActiveSlots(screen gocv.Mat) []int {
 	return activeXs
 }
 
+func windowsLiveRescanTemplate(templateName string) bool {
+	cleanName := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(templateName)), "_", " ")
+	return isHeroStatic(cleanName) ||
+		isSiegeStatic(cleanName) ||
+		isSpellStatic(cleanName) ||
+		strings.Contains(cleanName, "cc") ||
+		strings.Contains(cleanName, "castle")
+}
+
 // classifySlots runs template matching to identify units and assign categories.
-func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates map[string]gocv.Mat, barROI image.Rectangle) {
+func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates map[string]gocv.Mat, barROI image.Rectangle, specialsOnly bool) {
 
 	for _, x := range activeXs {
 		sm.slots = append(sm.slots, &TrackedSlot{
@@ -360,6 +398,9 @@ func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates 
 
 	for tplName, tpl := range templates {
 		if tpl.Empty() {
+			continue
+		}
+		if specialsOnly && !windowsLiveRescanTemplate(tplName) {
 			continue
 		}
 		matches, _ := vision.MatchMultiScaleROICached(screen, tpl, tplName, 0.2, 1.2, 20, 0.55, barROI)
