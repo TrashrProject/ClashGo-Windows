@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -157,5 +158,61 @@ func TestTargetQualitySeparatesAcceptedAndRejected(t *testing.T) {
 	}
 	if s.AvgAcceptedScore != 90 || s.AvgRejectedScore != 56 {
 		t.Fatalf("unexpected score averages: accepted=%v rejected=%v", s.AvgAcceptedScore, s.AvgRejectedScore)
+	}
+}
+
+func TestRotateJournalIfOversizeKeepsSingleBackup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.ndjson")
+	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), 2048), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rotateJournalIfOversize(path, 1024)
+
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Fatalf("expected rotated backup: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected original path moved away, err=%v", err)
+	}
+
+	if err := os.WriteFile(path, bytes.Repeat([]byte("y"), 3072), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rotateJournalIfOversize(path, 1024)
+	data, err := os.ReadFile(path + ".1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 3072 {
+		t.Fatalf("backup size=%d want newest 3072", len(data))
+	}
+}
+
+func TestPruneIncidentDirKeepsNewestFiles(t *testing.T) {
+	dir := t.TempDir()
+	names := []string{
+		"20260101T000000.000000001Z_a.json",
+		"20260101T000000.000000002Z_b.json",
+		"20260101T000000.000000003Z_c.json",
+		"20260101T000000.000000004Z_d.json",
+	}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pruneIncidentDir(dir, 2)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("remaining=%d want 2", len(entries))
+	}
+	if entries[0].Name() != names[2] || entries[1].Name() != names[3] {
+		t.Fatalf("kept wrong incidents: %q %q", entries[0].Name(), entries[1].Name())
 	}
 }
