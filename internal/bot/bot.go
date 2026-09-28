@@ -1630,6 +1630,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 
 	lootRec := game.NewLootRecognizer(b.cal, b.templates, b.logger)
+	defer lootRec.Close()
 
 	var remainingUndeployed int
 	var deployErr error
