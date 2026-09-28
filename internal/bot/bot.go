@@ -2065,12 +2065,15 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	attackHealth := b.client.Health()
 	attackMode := chooseSearchPacing(attackHealth).Mode
 	attackTelemetry := telemetry.Snapshot{}
+	sessionID := ""
 	if b.telemetry != nil {
 		attackTelemetry = b.telemetry.Snapshot()
+		sessionID = b.telemetry.SessionID()
 	}
 
 	rep := AttackReport{
 		Timestamp:        time.Now().Format(time.RFC3339),
+		SessionID:        sessionID,
 		Strategy:         stratName,
 		TargetEdge:       targetEdge,
 		DeploySide:       deploySide,
@@ -3108,6 +3111,7 @@ type BotStats struct {
 
 type AttackReport struct {
 	Timestamp        string `json:"timestamp"`
+	SessionID        string `json:"session_id,omitempty"`
 	Strategy         string `json:"strategy"`
 	TargetEdge       string `json:"target_edge"`
 	DeploySide       string `json:"deploy_side"`
