@@ -451,7 +451,7 @@ func (a *App) GetLatestAttackReplay() AttackReplayView {
 		Available: true,
 		Timestamp: trace.Timestamp.Format(time.RFC3339Nano),
 		Strategy: trace.Strategy,
-		Complete: trace.Army.Complete,
+		Complete: trace.DeployComplete,
 		Events: make([]AttackReplayEventView, 0, len(trace.Events)),
 	}
 	for _, ev := range trace.Events {
