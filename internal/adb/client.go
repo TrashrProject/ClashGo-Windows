@@ -486,7 +486,14 @@ func (c *Client) TapAsync(x, y int) error {
 
 // routeTap is the shared router for Tap/TapAsync/TapFast through either
 // the persistent pipe (when alive) or the legacy transport.Exec fallback.
-func (c *Client) routeTap(cmd string, x, y int, async bool) error {
+func (c *Client) routeTap(cmd string, x, y int, async bool) (err error) {
+	started := time.Now()
+	defer func() {
+		c.healthMu.Lock()
+		c.health.RecordTap(time.Since(started))
+		c.healthMu.Unlock()
+	}()
+
 	if p := c.currentPipe(); p != nil {
 		full := fmt.Sprintf("%s %d %d", cmd, x, y)
 		if async {
