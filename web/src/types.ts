@@ -60,6 +60,7 @@ export interface AttackReport {
   timestamp: string;
   strategy: string;
   target_edge: string;
+  deploy_side: string;
   deploy_success: boolean;
   undeployed_slots: number;
   deploy_error?: string;
