@@ -479,7 +479,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             <span>{stats.telemetry_events?.toLocaleString?.() ?? 0} events</span>
           </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-5 xl:grid-cols-9 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 xl:grid-cols-10 gap-3">
           {[
             { label: 'Gold / h', value: compact(stats.gold_per_hour || 0) },
             { label: 'Elixir / h', value: compact(stats.elixir_per_hour || 0) },
@@ -490,6 +490,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             { label: 'Avg cycle', value: `${avgCycleSeconds.toFixed(1)}s` },
             { label: 'Capture', value: `${(stats.average_capture_ms || 0).toFixed(0)}ms` },
             { label: 'Return home', value: `${((stats.average_return_home_ms || 0) / 1000).toFixed(1)}s` },
+            { label: 'Next transition', value: `${(stats.average_next_transition_ms || 0).toFixed(0)}ms` },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">{metric.label}</div>
