@@ -50,6 +50,8 @@ type Executor struct {
 	lastLiveBarRescanMicros   int64
 	lastSlotDetectMicros      int64
 	lastSlotClassifyMicros    int64
+	lastTemplatesTried        int
+	lastTemplatesMatched      int
 	lastSelectedCardOCRCount  int
 	lastSelectedCardOCRMicros int64
 
@@ -100,7 +102,7 @@ func (e *Executor) LastResolvedEdge() string { return e.lastResolvedEdge }
 // deployment engine (left/right/top/bottom when known).
 func (e *Executor) LastDeploySide() string { return e.lastDeploySide }
 
-func (e *Executor) LiveBarMetrics() (rescans int, avgRescanMS, avgDetectMS, avgClassifyMS, avgSelectedOCRMS float64) {
+func (e *Executor) LiveBarMetrics() (rescans int, avgRescanMS, avgDetectMS, avgClassifyMS float64, templatesTried, templatesMatched int, avgSelectedOCRMS float64) {
 	rescans = e.lastLiveBarRescans
 	if e.lastLiveBarRescans > 0 {
 		n := float64(e.lastLiveBarRescans)
@@ -108,10 +110,12 @@ func (e *Executor) LiveBarMetrics() (rescans int, avgRescanMS, avgDetectMS, avgC
 		avgDetectMS = float64(e.lastSlotDetectMicros) / n / 1000.0
 		avgClassifyMS = float64(e.lastSlotClassifyMicros) / n / 1000.0
 	}
+	templatesTried = e.lastTemplatesTried
+	templatesMatched = e.lastTemplatesMatched
 	if e.lastSelectedCardOCRCount > 0 {
 		avgSelectedOCRMS = float64(e.lastSelectedCardOCRMicros) / float64(e.lastSelectedCardOCRCount) / 1000.0
 	}
-	return rescans, avgRescanMS, avgDetectMS, avgClassifyMS, avgSelectedOCRMS
+	return rescans, avgRescanMS, avgDetectMS, avgClassifyMS, templatesTried, templatesMatched, avgSelectedOCRMS
 }
 
 // LastDestructionPercent returns the highest destruction percentage the
