@@ -638,6 +638,104 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     return { bestLoot, fastestClean };
   }, [history]);
 
+  const optimizationAdvisor = React.useMemo(() => {
+    type Opportunity = {
+      key: string;
+      label: string;
+      evidence: string;
+      next: string;
+      score: number;
+    };
+
+    const opportunities: Opportunity[] = [];
+    const reactiveTap = stats.adb_health?.fast_tap_ms || stats.adb_health?.avg_tap_ms || 0;
+    const reactiveCapture = stats.adb_health?.fast_capture_ms || stats.adb_health?.avg_capture_ms || 0;
+    const nextRate = stats.next_first_pass_rate || 0;
+    const nextTransitions = stats.next_transitions || 0;
+
+    if (reactiveTap > 0) {
+      opportunities.push({
+        key: 'tap',
+        label: 'Windows tap transport',
+        evidence: `${reactiveTap.toFixed(0)}ms reactive tap latency`,
+        next: reactiveTap >= 100
+          ? 'High enough to justify a Windows-safe transport experiment with instant fallback.'
+          : 'Tap transport is already relatively cheap; keep the proven deployment cadence.',
+        score: reactiveTap >= 100 ? reactiveTap * 5 : reactiveTap,
+      });
+    }
+
+    if (preparationBreakdown.attacks > 0 && preparationBreakdown.dominant.ms > 0) {
+      opportunities.push({
+        key: 'prep',
+        label: `Preparation · ${preparationBreakdown.dominant.label}`,
+        evidence: `${(preparationBreakdown.dominant.ms / 1000).toFixed(2)}s average · ${preparationBreakdown.totalMS > 0 ? (preparationBreakdown.dominant.ms * 100 / preparationBreakdown.totalMS).toFixed(0) : '0'}% of prep`,
+        next: 'Optimize the verified UI transition only; do not replace state confirmation with blind coordinates.',
+        score: preparationBreakdown.dominant.ms,
+      });
+    }
+
+    if (nextTransitions >= 3 && nextRate > 0) {
+      const retryShare = Math.max(0, 100 - nextRate);
+      opportunities.push({
+        key: 'next',
+        label: 'Next transition verification',
+        evidence: `${nextRate.toFixed(1)}% first-pass · ${(stats.avg_next_verify_probes || 0).toFixed(2)} probes`,
+        next: retryShare >= 10
+          ? 'Investigate why Clash ignores first taps before shortening any settle delay.'
+          : 'First-pass reliability is strong; do not trade it for a more aggressive tap loop.',
+        score: (stats.average_next_transition_ms || 0) * (retryShare / 100),
+      });
+    }
+
+    if (deployHotPath.attacks > 0 && deployBottleneck.ms > 0) {
+      opportunities.push({
+        key: 'livebar',
+        label: `Live bar · ${deployBottleneck.label}`,
+        evidence: `${deployBottleneck.ms.toFixed(1)}ms · ${deployBottleneck.share.toFixed(0)}% of measured scan stages`,
+        next: 'Optimize this detector in isolation while keeping live card re-indexing after every disappearance.',
+        score: deployBottleneck.ms * Math.max(1, deployHotPath.avgRescans),
+      });
+    }
+
+    if ((stats.average_target_scan_ms || 0) > 0) {
+      opportunities.push({
+        key: 'loot',
+        label: 'Loot OCR',
+        evidence: `${(stats.average_target_scan_ms || 0).toFixed(0)}ms average target scan`,
+        next: 'Only optimize if it materially exceeds capture latency; target thresholds remain authoritative.',
+        score: stats.average_target_scan_ms || 0,
+      });
+    }
+
+    if (reactiveCapture > 0) {
+      opportunities.push({
+        key: 'capture',
+        label: 'ADB capture',
+        evidence: `${reactiveCapture.toFixed(0)}ms reactive capture latency`,
+        next: reactiveCapture >= 700
+          ? 'BlueStacks/ADB is under pressure; preserve capture gating and investigate transport health.'
+          : 'Capture path is healthy enough; avoid removing the 120ms global capture budget.',
+        score: reactiveCapture >= 700 ? reactiveCapture * 2 : reactiveCapture,
+      });
+    }
+
+    const ranked = opportunities
+      .filter((x) => Number.isFinite(x.score) && x.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    return {
+      top: ranked[0] ?? null,
+      items: ranked.slice(0, 4),
+      learning: ranked.length === 0,
+    };
+  }, [
+    stats,
+    preparationBreakdown,
+    deployHotPath,
+    deployBottleneck,
+  ]);
+
   // CSS-only donut (conic-gradient — no chart dependency). Each
   // segment's sweep is the star-rate percentage mapped to degrees;
   // zero-count segments collapse to a 0deg stop and stay invisible.
@@ -693,6 +791,43 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Optimization Advisor</div>
+            <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">
+              {optimizationAdvisor.top ? optimizationAdvisor.top.label : 'Learning the runtime'}
+            </h3>
+            <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">
+              Measured technical bottlenecks only. Never changes red-zone geometry, troop order, strategy or tap cadence automatically.
+            </p>
+          </div>
+          <span className="material-symbols-outlined text-zinc-500 text-3xl">query_stats</span>
+        </div>
+
+        {optimizationAdvisor.learning ? (
+          <div className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-5 text-sm font-bold text-zinc-400 dark:text-zinc-500">
+            Run a few attacks to build enough latency and transition evidence.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+            {optimizationAdvisor.items.map((item, index) => (
+              <div key={item.key} className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                    {index === 0 ? 'Top measured opportunity' : `Measured #${index + 1}`}
+                  </div>
+                  <div className="text-[9px] font-black tabular-nums text-zinc-500">#{index + 1}</div>
+                </div>
+                <div className="mt-3 text-base font-black text-white dark:text-zinc-950">{item.label}</div>
+                <div className="mt-1 text-[10px] font-black uppercase tracking-wider text-zinc-500">{item.evidence}</div>
+                <div className="mt-4 text-xs font-medium leading-relaxed text-zinc-400 dark:text-zinc-600">{item.next}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="xl:col-span-2 grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-4">
