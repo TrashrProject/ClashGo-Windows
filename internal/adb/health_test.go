@@ -28,6 +28,9 @@ func TestHealthCounters(t *testing.T) {
 	if h.AvgCaptureMs <= 0 {
 		t.Fatalf("avg_capture_ms=%f want >0", h.AvgCaptureMs)
 	}
+	if h.FastCaptureMs <= 0 {
+		t.Fatalf("fast_capture_ms=%f want >0", h.FastCaptureMs)
+	}
 }
 
 func TestClientHealthConcurrentSnapshots(t *testing.T) {
@@ -50,5 +53,24 @@ func TestClientHealthConcurrentSnapshots(t *testing.T) {
 	got := c.Health()
 	if got.CapturesTotal+got.ErrorsTotal != 20 {
 		t.Fatalf("total events=%d want 20", got.CapturesTotal+got.ErrorsTotal)
+	}
+}
+
+func TestHealthFastCaptureReactsFasterThanStableAverage(t *testing.T) {
+	var h Health
+	for i := 0; i < 10; i++ {
+		h.RecordSuccess(300 * time.Millisecond)
+	}
+	beforeAvg := h.AvgCaptureMs
+	beforeFast := h.FastCaptureMs
+
+	h.RecordSuccess(1500 * time.Millisecond)
+
+	if h.FastCaptureMs <= h.AvgCaptureMs {
+		t.Fatalf("fast EWMA=%f should react above stable average=%f", h.FastCaptureMs, h.AvgCaptureMs)
+	}
+	if h.FastCaptureMs-beforeFast <= h.AvgCaptureMs-beforeAvg {
+		t.Fatalf("fast EWMA did not react more strongly: fast delta=%f avg delta=%f",
+			h.FastCaptureMs-beforeFast, h.AvgCaptureMs-beforeAvg)
 	}
 }
