@@ -121,11 +121,21 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       } else if (ev.type === 'anomaly') {
         const kind = textField(ev, 'kind') || 'performance_anomaly';
         const duration = numberField(ev, 'duration_ms');
+        const rawRegressions = ev.fields?.regressions;
+        let regressionDetail = '';
+        if (Array.isArray(rawRegressions) && rawRegressions.length > 0) {
+          const first = rawRegressions[0] as { metric?: unknown; delta_pct?: unknown };
+          const metric = typeof first.metric === 'string' ? first.metric.replaceAll('_', ' ') : 'metric';
+          const delta = typeof first.delta_pct === 'number' && Number.isFinite(first.delta_pct)
+            ? ` · +${first.delta_pct.toFixed(0)}%`
+            : '';
+          regressionDetail = `${metric}${delta}`;
+        }
         rows.push({
           at: ev.at,
           icon: 'monitor_heart',
-          title: 'Performance anomaly',
-          detail: `${kind.replaceAll('_', ' ')}${duration > 0 ? ` · ${(duration / 1000).toFixed(1)}s` : ''}`,
+          title: kind === 'performance_regression' ? 'Performance regression' : 'Performance anomaly',
+          detail: regressionDetail || `${kind.replaceAll('_', ' ')}${duration > 0 ? ` · ${(duration / 1000).toFixed(1)}s` : ''}`,
         });
       }
     }
