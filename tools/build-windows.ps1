@@ -1,5 +1,6 @@
 param(
     [string]$Version = "0.6.7-windows-beta",
+    [ValidateSet("stable","beta")][string]$Channel = "stable",
     [string]$AccountServiceURL = $env:CLASHGO_ACCOUNT_API_URL,
     [switch]$SkipSync,
     [switch]$SkipTests
@@ -82,7 +83,7 @@ $env:CGO_LDFLAGS = "-LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -l
     }
 
     $commit = (git rev-parse HEAD).Trim()
-    $ldflags = "-X main.version=$Version -X main.commit=$commit"
+    $ldflags = "-X main.version=$Version -X main.commit=$commit -X main.updateChannel=$Channel"
     if ($AccountServiceURL) {
         $service = $AccountServiceURL.Trim().TrimEnd("/")
         if ($service -notmatch '^https?://') {
@@ -132,7 +133,7 @@ $env:CGO_LDFLAGS = "-LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -l
         }
     }
 
-    $versionText = "ClashGO Windows`r`nVersion: $Version`r`nCommit: $commit`r`nBuilt: $(Get-Date -Format o)`r`n"
+    $versionText = "ClashGO Windows`r`nVersion: $Version`r`nChannel: $Channel`r`nCommit: $commit`r`nBuilt: $(Get-Date -Format o)`r`n"
     Set-Content -Path (Join-Path $bundle "VERSION.txt") -Value $versionText -Encoding UTF8
 
     if (-not (Test-Path $distRoot)) { New-Item -ItemType Directory -Force -Path $distRoot | Out-Null }
