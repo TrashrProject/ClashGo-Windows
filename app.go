@@ -89,7 +89,7 @@ func (w *WailsLogWriter) Write(p []byte) (n int, err error) {
 func NewApp() *App {
 	return &App{
 		logBuffer: make([]string, 0, 100),
-		updater:   updater.New(updater.DefaultConfig(version)),
+		updater:   updater.New(updater.DefaultConfigWithChannel(version, updateChannel)),
 	}
 }
 
@@ -106,7 +106,7 @@ func (a *App) startup(ctx context.Context) {
 	// Bring up the updater service. If NewApp wasn't used (rare
 	// test scaffold), construct lazily.
 	if a.updater == nil {
-		a.updater = updater.New(updater.DefaultConfig(version))
+		a.updater = updater.New(updater.DefaultConfigWithChannel(version, updateChannel))
 	}
 	a.updater.CleanupOrphanDownloads()
 	bgCtx, bgCancel := context.WithCancel(context.Background())
