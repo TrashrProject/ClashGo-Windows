@@ -1,6 +1,7 @@
 package attack
 
 import (
+	"image"
 	"testing"
 
 	"github.com/Ducky705/ClashGO/internal/config"
@@ -64,5 +65,39 @@ func TestArmyStateManagerDoesNotFailOnUnseenProfileUnit(t *testing.T) {
 	// incomplete deployment. The live bar remains authoritative.
 	if got := m.IncompleteCount(); got != 0 {
 		t.Fatalf("unseen profile unit created %d incomplete state(s)", got)
+	}
+}
+
+func TestArmyStateManagerRecordsReplayGeometry(t *testing.T) {
+	profile := config.FarmProfile{
+		TownHall: 18,
+		Troops: []config.FarmUnit{{Name: "Electro Dragon", Count: 9, Housing: 30}},
+	}
+	m := NewArmyStateManager(profile)
+
+	p1 := image.Pt(120, 220)
+	p2 := image.Pt(120, 420)
+	m.RecordDeploy("Electro Dragon", "Troop", 9, 350, 676, "left", p1, p2)
+
+	events := m.ReplayEvents()
+	if len(events) != 1 {
+		t.Fatalf("events=%d want 1", len(events))
+	}
+	ev := events[0]
+	if ev.Kind != "deploy" || ev.Name != "Electro Dragon" || ev.Category != "Troop" {
+		t.Fatalf("unexpected replay event: %+v", ev)
+	}
+	if ev.Count != 9 || ev.SlotX != 350 || ev.SlotY != 676 || ev.DeploySide != "left" {
+		t.Fatalf("unexpected replay metadata: %+v", ev)
+	}
+	if ev.P1 != p1 || ev.P2 != p2 || ev.OffsetMS < 0 {
+		t.Fatalf("unexpected replay geometry/timing: %+v", ev)
+	}
+
+	// ReplayEvents must return a copy so UI/trace consumers cannot mutate the
+	// live attack-state timeline.
+	events[0].Name = "mutated"
+	if got := m.ReplayEvents()[0].Name; got != "Electro Dragon" {
+		t.Fatalf("ReplayEvents leaked mutable backing storage: %q", got)
 	}
 }
