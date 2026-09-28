@@ -294,3 +294,39 @@ func TestRecordRejectedTargetMatchesRejectedEventMetrics(t *testing.T) {
 		t.Fatal("rejected target must not enter activity feed")
 	}
 }
+
+func TestTopRejectedTargetsKeepsBestFiveInMemory(t *testing.T) {
+	b := New(filepath.Join(t.TempDir(), "events.ndjson"))
+	defer b.Close()
+
+	cases := []struct{
+		g, e, de, score int
+	}{
+		{300000, 300000, 1000, 50},
+		{700000, 700000, 3000, 75},
+		{900000, 800000, 4000, 88},
+		{1000000, 900000, 5000, 92},
+		{600000, 600000, 2500, 70},
+		{1200000, 1100000, 6000, 95},
+		{950000, 950000, 4500, 92},
+	}
+	for _, tc := range cases {
+		b.RecordRejectedTarget(tc.g, tc.e, tc.de, tc.score, 1000)
+	}
+
+	s := b.Snapshot()
+	if len(s.TopRejectedTargets) != 5 {
+		t.Fatalf("top rejected len=%d want 5: %+v", len(s.TopRejectedTargets), s.TopRejectedTargets)
+	}
+	if s.TopRejectedTargets[0].Score != 95 {
+		t.Fatalf("best rejected target not first: %+v", s.TopRejectedTargets)
+	}
+	if s.TopRejectedTargets[1].Score != 92 || s.TopRejectedTargets[2].Score != 92 {
+		t.Fatalf("score ordering wrong: %+v", s.TopRejectedTargets)
+	}
+	ge1 := s.TopRejectedTargets[1].Gold + s.TopRejectedTargets[1].Elixir
+	ge2 := s.TopRejectedTargets[2].Gold + s.TopRejectedTargets[2].Elixir
+	if ge1 < ge2 {
+		t.Fatalf("same-score targets must prefer higher G+E: %+v", s.TopRejectedTargets)
+	}
+}
