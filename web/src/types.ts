@@ -62,6 +62,7 @@ export interface BotStats {
   ui_anchor_fallbacks: number;
   ui_anchor_hit_rate: number;
   ui_anchor_enabled: boolean;
+  near_miss_targets: number;
   top_rejected_targets?: RejectedTargetSample[];
   adb_health: {
     avg_capture_ms: number;
@@ -84,6 +85,8 @@ export interface RejectedTargetSample {
   elixir: number;
   dark_elixir: number;
   score: number;
+  threshold_gap_pct: number;
+  near_miss: boolean;
 }
 
 export interface ActivityEvent {
