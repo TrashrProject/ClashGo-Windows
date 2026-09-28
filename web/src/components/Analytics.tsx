@@ -977,6 +977,48 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     };
   }, [history]);
 
+  const autonomyIndex = React.useMemo(() => {
+    const sampledReliability = reliabilityScorecard.filter((row) => row.sampled);
+    const reliability = sampledReliability.length > 0
+      ? sampledReliability.reduce((sum, row) => sum + Math.max(0, Math.min(100, row.value)), 0) / sampledReliability.length
+      : 0;
+
+    const cleanRoutine = autonomyReliability.total > 0 ? autonomyReliability.cleanRate : 0;
+    const safety = deploymentSafety.attacks > 0 ? deploymentSafety.liveCertified : 0;
+    const resultTrustScore = resultTrust.total > 0
+      ? Math.min(100, resultTrust.highRate + resultTrust.mediumRate * 0.6)
+      : 0;
+    const health = Math.max(0, Math.min(100, stats.health_score ?? 0));
+
+    const samples = [
+      { key: 'reliability', label: 'Reliability', value: reliability, weight: 0.30, sampled: sampledReliability.length >= 3 },
+      { key: 'safety', label: 'Red-zone safety', value: safety, weight: 0.25, sampled: deploymentSafety.attacks >= 3 },
+      { key: 'clean', label: 'Zero-touch routines', value: cleanRoutine, weight: 0.20, sampled: autonomyReliability.total >= 3 },
+      { key: 'health', label: 'Runtime health', value: health, weight: 0.15, sampled: (stats.telemetry_events || 0) > 0 },
+      { key: 'results', label: 'Result confidence', value: resultTrustScore, weight: 0.10, sampled: resultTrust.total >= 3 },
+    ];
+
+    const usable = samples.filter((row) => row.sampled);
+    const weight = usable.reduce((sum, row) => sum + row.weight, 0);
+    const score = weight > 0
+      ? usable.reduce((sum, row) => sum + row.value * row.weight, 0) / weight
+      : 0;
+
+    const grade = score >= 98 ? 'Elite'
+      : score >= 95 ? 'Excellent'
+      : score >= 90 ? 'Strong'
+      : score >= 80 ? 'Watch'
+      : 'Learning';
+
+    return {
+      score,
+      grade,
+      ready: usable.length >= 3,
+      components: samples,
+      sampledComponents: usable.length,
+    };
+  }, [reliabilityScorecard, autonomyReliability, deploymentSafety, resultTrust, stats.health_score, stats.telemetry_events]);
+
   const optimizationAdvisor = React.useMemo(() => {
     type Opportunity = {
       key: string;
@@ -1186,6 +1228,45 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
               <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
               <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="flex items-center gap-5">
+            <div className="size-24 rounded-[2rem] border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 flex flex-col items-center justify-center shrink-0">
+              <div className="text-3xl font-black text-white dark:text-zinc-950 tabular-nums">
+                {autonomyIndex.ready ? autonomyIndex.score.toFixed(0) : '—'}
+              </div>
+              <div className="text-[8px] font-black uppercase tracking-[0.2em] text-zinc-500">/100</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Autonomy Index</div>
+              <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">
+                {autonomyIndex.ready ? autonomyIndex.grade : 'Building confidence'}
+              </h3>
+              <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500 max-w-2xl">
+                Weighted from measured reliability, safe deployment, zero-touch routines, runtime health and result confidence. No hidden “AI score”.
+              </p>
+            </div>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-wider text-zinc-500">
+            {autonomyIndex.sampledComponents}/5 components sampled
+          </div>
+        </div>
+
+        <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-3">
+          {autonomyIndex.components.map((row) => (
+            <div key={row.key} className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{row.label}</div>
+                <div className="text-[8px] font-black uppercase tracking-wider text-zinc-500">{Math.round(row.weight * 100)}%</div>
+              </div>
+              <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">
+                {row.sampled ? `${row.value.toFixed(1)}%` : 'Learning'}
+              </div>
             </div>
           ))}
         </div>
