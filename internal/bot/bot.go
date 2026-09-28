@@ -271,6 +271,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 
 	resourceReader := game.NewVillageResourceReader(cal, templates, log.Logger)
 	searchLootRec := game.NewLootRecognizer(cal, templates, log.Logger)
+	attackExec.SetLootRecognizer(searchLootRec)
 
 	b = &Bot{
 		client:            client,
