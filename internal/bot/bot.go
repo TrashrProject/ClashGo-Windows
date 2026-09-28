@@ -2327,7 +2327,7 @@ func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, 
 // waitForStableLocator waits until a target is visible at a stable center.
 // This is intentionally used BETWEEN critical menu clicks so the bot never
 // chains taps into an animation that has not finished opening yet.
-func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int, bool), timeout time.Duration) bool {
+func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int, bool), timeout time.Duration) (int, int, bool) {
 	deadline := time.Now().Add(timeout)
 	var lastX, lastY int
 	stable := 0
@@ -2361,13 +2361,13 @@ func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int
 		lastX, lastY = x, y
 
 		if stable >= 2 {
-			b.logger.Info().Str("target", name).Int("x", x).Int("y", y).Msg("next UI target is stable and ready")
-			return true
+			b.logger.Debug().Str("target", name).Int("x", x).Int("y", y).Msg("next UI target is stable and ready")
+			return x, y, true
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	b.logger.Warn().Str("target", name).Dur("timeout", timeout).Msg("next UI target did not become stable in time")
-	return false
+	return 0, 0, false
 }
 
 func (b *Bot) clickSequence() bool {
@@ -2408,12 +2408,20 @@ func (b *Bot) clickSequence() bool {
 	}
 	// Do not chain directly into the next tap. Wait for the attack menu to
 	// finish opening and for Find Match to be stable in two consecutive frames.
-	if !b.waitForStableLocator("Find Match", b.locateFindMatchButtonColor, 3*time.Second) {
+	// When it is stable, reuse that already-verified center immediately instead
+	// of paying for a second two-frame focusedButtonClick verification.
+	findMatchClicked := false
+	if x, y, ok := b.waitForStableLocator("Find Match", b.locateFindMatchButtonColor, 3*time.Second); ok {
+		if err := b.client.TapFast(x, y, 0.6); err == nil {
+			b.recordActivity()
+			findMatchClicked = true
+			b.logger.Info().Int("x", x).Int("y", y).Msg("Find Match stable — clicked")
+		}
+	} else {
 		b.logger.Warn().Msg("attack menu did not settle on Find Match after Attack click")
 	}
 
-	findMatchClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; !findMatchClicked && attempt < 3; attempt++ {
 		if b.focusedButtonClick("Find Match", b.locateFindMatchButtonColor, 2) {
 			findMatchClicked = true
 			break
