@@ -459,6 +459,66 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     };
   }, [history]);
 
+  const battleExitAdvisor = React.useMemo(() => {
+    const natural = (history ?? []).filter((r) =>
+      r.battle_end_reason === 'natural_result' &&
+      (r.battle_end_wait_ms || 0) > 0 &&
+      (r.full_routine_duration_ms || r.cycle_duration_ms || 0) > 0
+    );
+    const early = (history ?? []).filter((r) =>
+      ['loot_threshold', 'destruction_threshold', 'stall'].includes(r.battle_end_reason || '') &&
+      (r.battle_end_wait_ms || 0) > 0
+    );
+
+    const summarize = (rows: AttackReport[]) => {
+      let ge = 0, routine = 0, wait = 0, stars = 0, complete = 0;
+      for (const rep of rows) {
+        ge += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0);
+        routine += rep.full_routine_duration_ms || rep.cycle_duration_ms || 0;
+        wait += rep.battle_end_wait_ms || 0;
+        stars += rep.stars || 0;
+        if (rep.deploy_success) complete++;
+      }
+      const n = rows.length;
+      const hours = routine > 0 ? routine / 3_600_000 : 0;
+      return {
+        n,
+        gePerHour: hours > 0 ? ge / hours : 0,
+        avgWaitMS: n > 0 ? wait / n : 0,
+        avgStars: n > 0 ? stars / n : 0,
+        fullDeployRate: n > 0 ? complete * 100 / n : 0,
+      };
+    };
+
+    const n = summarize(natural);
+    const e = summarize(early);
+    if (n.n < 5 || e.n < 3) {
+      return {
+        status: 'learning',
+        message: 'Need 5 natural results and 3 early exits before comparing safely.',
+        natural: n,
+        early: e,
+        deltaYieldPct: 0,
+      };
+    }
+
+    const deltaYieldPct = n.gePerHour > 0 ? (e.gePerHour - n.gePerHour) * 100 / n.gePerHour : 0;
+    const reliabilityDrop = n.fullDeployRate - e.fullDeployRate;
+    const starDrop = n.avgStars - e.avgStars;
+
+    let status = 'neutral';
+    let message = 'Early exits are not clearly better or worse yet.';
+    if (deltaYieldPct >= 8 && reliabilityDrop <= 5 && starDrop <= 0.25) {
+      status = 'promising';
+      message = 'Observed early exits improve G+E/hour without a meaningful reliability drop.';
+    } else if (deltaYieldPct <= -8 || reliabilityDrop >= 15 || starDrop >= 0.5) {
+      status = 'caution';
+      message = 'Observed early exits currently trade away too much yield, stars, or reliability.';
+    }
+
+    return { status, message, natural: n, early: e, deltaYieldPct };
+  }, [history]);
+
   const sideStats = React.useMemo(() => {
     const map = new Map<string, {
       side: string;
@@ -1653,6 +1713,39 @@ Best optimization target: {pipeline.dominantTunable.label}
             </table>
           </div>
         )}
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+          <div className="max-w-3xl">
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Early Exit Advisor</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">
+              {battleExitAdvisor.status === 'promising' ? 'Promising for faster farm' :
+               battleExitAdvisor.status === 'caution' ? 'Caution: current exits hurt results' :
+               battleExitAdvisor.status === 'learning' ? 'Learning your battle profile' : 'No clear advantage yet'}
+            </h3>
+            <p className="text-sm text-zinc-500 mt-1">{battleExitAdvisor.message}</p>
+            <p className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 mt-3">
+              Advisor only — never changes LootExitPercent or strategy automatically.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 min-w-[320px]">
+            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+              <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Yield delta</div>
+              <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white tabular-nums">
+                {battleExitAdvisor.status === 'learning' ? '—' : `${battleExitAdvisor.deltaYieldPct >= 0 ? '+' : ''}${battleExitAdvisor.deltaYieldPct.toFixed(1)}%`}
+              </div>
+            </div>
+            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+              <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Natural wait</div>
+              <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{battleExitAdvisor.natural.n ? `${(battleExitAdvisor.natural.avgWaitMS / 1000).toFixed(1)}s` : '—'}</div>
+            </div>
+            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+              <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Early wait</div>
+              <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{battleExitAdvisor.early.n ? `${(battleExitAdvisor.early.avgWaitMS / 1000).toFixed(1)}s` : '—'}</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
