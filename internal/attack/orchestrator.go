@@ -560,9 +560,12 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// the initial X positions therefore makes every later tap drift onto the
 		// next card (and eventually onto hero ability buttons). This is exactly
 		// the observed "select ED -> jump to siege -> hammer last hero" failure.
+		// Always create a replay recorder. When no farm profile is active the
+		// manager simply has no expected-unit inventory, but RecordDeploy still
+		// captures the real live-bar actions and geometry for Attack Replay.
+		armyState = NewArmyStateManager(farmProfile)
+		defer writeAttackTrace(s.Name, armyState)
 		if farmControlled {
-			armyState = NewArmyStateManager(farmProfile)
-			defer writeAttackTrace(s.Name, armyState)
 			e.logger.Debug().
 				Int("town_hall", farmProfile.TownHall).
 				Str("profile", farmProfile.Label).
