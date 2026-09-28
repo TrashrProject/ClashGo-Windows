@@ -634,7 +634,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 					continue
 				}
 				if strings.TrimSpace(slot.UnitName) == "" &&
-					(slot.Category == "Siege" || slot.Category == "CC") &&
+					windowsAnonymousOneShotCategory(slot.Category) &&
 					anonymousOneShotDone[slot.Category] {
 					continue
 				}
@@ -728,7 +728,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				tapExec.TapDeployPoint(pt, 1, 1)
 				oneShotDone[key] = true
 				if strings.TrimSpace(chosen.UnitName) == "" &&
-					(chosen.Category == "Siege" || chosen.Category == "CC") {
+					windowsAnonymousOneShotCategory(chosen.Category) {
 					anonymousOneShotDone[chosen.Category] = true
 				}
 				if chosen.Category == "Hero" && strings.TrimSpace(chosen.UnitName) == "" {
