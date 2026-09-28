@@ -3285,6 +3285,12 @@ func (b *Bot) Stats() BotStats {
 		LastReturnHomeMS:     float64(b.lastReturnHomeUS.Load()) / 1000.0,
 		AverageNextTransitionMS: tm.AvgNextTransitionMS,
 		LastNextTransitionMS:    tm.LastNextTransitionMS,
+		AvgAcceptedGE:           tm.AvgAcceptedGE,
+		AvgRejectedGE:           tm.AvgRejectedGE,
+		AvgAcceptedDE:           tm.AvgAcceptedDE,
+		AvgRejectedDE:           tm.AvgRejectedDE,
+		AvgAcceptedScore:        tm.AvgAcceptedScore,
+		AvgRejectedScore:        tm.AvgRejectedScore,
 	}
 }
 
@@ -3332,6 +3338,12 @@ type BotStats struct {
 	LastReturnHomeMS        float64 `json:"last_return_home_ms"`
 	AverageNextTransitionMS float64 `json:"average_next_transition_ms"`
 	LastNextTransitionMS    float64 `json:"last_next_transition_ms"`
+	AvgAcceptedGE           float64 `json:"avg_accepted_ge"`
+	AvgRejectedGE           float64 `json:"avg_rejected_ge"`
+	AvgAcceptedDE           float64 `json:"avg_accepted_de"`
+	AvgRejectedDE           float64 `json:"avg_rejected_de"`
+	AvgAcceptedScore        float64 `json:"avg_accepted_score"`
+	AvgRejectedScore        float64 `json:"avg_rejected_score"`
 }
 
 type AttackReport struct {
