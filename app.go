@@ -275,6 +275,7 @@ func mergeStats(acc, current bot.BotStats) bot.BotStats {
 		AverageCaptureMS:        current.AverageCaptureMS,
 		LastCaptureMS:           current.LastCaptureMS,
 		TelemetryEvents:         current.TelemetryEvents,
+		Anomalies:               current.Anomalies,
 		TargetsSkipped:          current.TargetsSkipped,
 		HealthScore:             current.HealthScore,
 		SpeedProfile:            current.SpeedProfile,
