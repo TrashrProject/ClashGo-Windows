@@ -534,6 +534,45 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     };
   }, [avgCooldownSeconds, avgPreparationSeconds, avgSearchSeconds, avgDeploySeconds, avgCombatSeconds]);
 
+  const preparationBreakdown = React.useMemo(() => {
+    const rows = (history ?? []).filter((r) => (r.preparation_duration_ms || 0) > 0);
+    const definitions = [
+      { key: 'attack', label: 'Attack button', read: (r: AttackReport) => r.prep_attack_button_ms || 0 },
+      { key: 'find', label: 'Find Match', read: (r: AttackReport) => r.prep_find_match_ms || 0 },
+      { key: 'armyMenu', label: 'Army menu', read: (r: AttackReport) => r.prep_army_menu_ms || 0 },
+      { key: 'armySlot', label: 'Army slot', read: (r: AttackReport) => r.prep_army_slot_ms || 0 },
+      { key: 'battle', label: 'Battle button', read: (r: AttackReport) => r.prep_battle_button_ms || 0 },
+      { key: 'ready', label: 'Matchmaking ready', read: (r: AttackReport) => r.prep_matchmaking_ready_ms || 0 },
+    ];
+
+    const measured = definitions.map((d) => ({
+      key: d.key,
+      label: d.label,
+      ms: rows.length > 0 ? rows.reduce((sum, row) => sum + d.read(row), 0) / rows.length : 0,
+    }));
+    const measuredTotal = measured.reduce((sum, row) => sum + row.ms, 0);
+    const avgTotal = rows.length > 0
+      ? rows.reduce((sum, row) => sum + (row.preparation_duration_ms || 0), 0) / rows.length
+      : 0;
+    const residual = Math.max(0, avgTotal - measuredTotal);
+    const all = residual > 1
+      ? [...measured, { key: 'other', label: 'Other overhead', ms: residual }]
+      : measured;
+    const dominant = all.reduce(
+      (best, row) => row.ms > best.ms ? row : best,
+      all[0] ?? { key: 'none', label: 'Learning', ms: 0 },
+    );
+    return {
+      attacks: rows.length,
+      rows: all.map((row) => ({
+        ...row,
+        share: avgTotal > 0 ? row.ms * 100 / avgTotal : 0,
+      })),
+      totalMS: avgTotal,
+      dominant,
+    };
+  }, [history]);
+
   const recentPerformance = React.useMemo(() => {
     const summarize = (rows: AttackReport[]) => {
       const n = rows.length;
@@ -702,6 +741,36 @@ Best optimization target: {pipeline.dominantTunable.label}
               <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Collected G+E</div>
               <div className="mt-1 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{compact(lootCapture.stolenGE)}</div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Preparation Breakdown</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Before matchmaking</h3>
+            <p className="text-sm text-zinc-500 mt-1">Measures verified UI steps before search. No delay is shortened until live data proves where time is actually lost.</p>
+          </div>
+          <div className="text-right">
+            <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{preparationBreakdown.attacks} measured attacks</div>
+            <div className="mt-1 text-[9px] font-black uppercase tracking-wider text-zinc-500">
+              Bottleneck: {preparationBreakdown.dominant.label}{preparationBreakdown.dominant.ms > 0 ? ` · ${(preparationBreakdown.dominant.ms / 1000).toFixed(2)}s` : ''}
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+          {preparationBreakdown.rows.map((row) => (
+            <div key={row.key} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{row.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{(row.ms / 1000).toFixed(2)}s</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{row.share.toFixed(0)}% of prep</div>
+            </div>
+          ))}
+          <div className="rounded-2xl bg-zinc-950 dark:bg-white p-4">
+            <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">Total prep</div>
+            <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{(preparationBreakdown.totalMS / 1000).toFixed(2)}s</div>
+            <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">Verified path</div>
           </div>
         </div>
       </div>
