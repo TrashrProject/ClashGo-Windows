@@ -235,6 +235,8 @@ export interface AttackReport {
   avg_selected_card_ocr_ms: number;
   battle_loot_ocr_samples: number;
   avg_battle_loot_ocr_ms: number;
+  battle_end_wait_ms: number;
+  loot_exit_percent: number;
   preparation_duration_ms: number;
   prep_attack_button_ms: number;
   prep_find_match_ms: number;
