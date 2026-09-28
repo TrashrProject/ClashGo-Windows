@@ -2333,7 +2333,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
-		_ = AsyncWriteFile(paths.ResolveConfig("last_attack_report.json"), repBytes, 0644)
+		_ = AsyncWriteFileSoon(paths.ResolveConfig("last_attack_report.json"), repBytes, 0644)
 	}
 
 	history := b.HistorySnapshot()
@@ -2350,16 +2350,12 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	b.historyCache = append([]AttackReport(nil), history...)
 	b.historyMu.Unlock()
 	if histBytes, err := json.MarshalIndent(history, "", "  "); err == nil {
-		_ = AsyncWriteFile(paths.ResolveConfig("attack_history.json"), histBytes, 0644)
+		_ = AsyncWriteFileSoon(paths.ResolveConfig("attack_history.json"), histBytes, 0644)
 	}
 
-	// Notify the UI AFTER the report is in historyCache and
-	// attack_history.json is flushed to disk. Firing this earlier
-	// (right after ReadBattleResult) raced the App's refreshHistory
-	// cache re-read with the report write, so the UI stayed a full
-	// attack behind even though the loot totals (live atomics) moved
-	// instantly. AsyncWriteFile blocks until the worker flushes, so
-	// by the time we get here the file on disk contains this report.
+	// Notify the UI after historyCache is updated. Wails mirrors this cache
+	// directly, so persistence can flush independently without delaying
+	// ReturnHome or making the dashboard wait on filesystem I/O.
 	if b.OnStatsUpdate != nil {
 		b.OnStatsUpdate()
 	}
@@ -2398,10 +2394,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	copy(postReturnHistory, b.historyCache)
 	b.historyMu.Unlock()
 	if histBytes, err := json.MarshalIndent(postReturnHistory, "", "  "); err == nil {
-		_ = AsyncWriteFile(paths.ResolveConfig("attack_history.json"), histBytes, 0644)
+		_ = AsyncWriteFileSoon(paths.ResolveConfig("attack_history.json"), histBytes, 0644)
 	}
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
-		_ = AsyncWriteFile(paths.ResolveConfig("last_attack_report.json"), repBytes, 0644)
+		_ = AsyncWriteFileSoon(paths.ResolveConfig("last_attack_report.json"), repBytes, 0644)
 	}
 	if b.OnStatsUpdate != nil {
 		b.OnStatsUpdate()
