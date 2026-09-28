@@ -370,7 +370,19 @@ func (b *Bot) Stop() {
 	if b.telemetry != nil {
 		b.telemetry.Close()
 	}
+
+	// Cut ADB first so no further taps/captures can leave the process after
+	// Cancel. Then allow the attack goroutine a short detached teardown window
+	// before releasing its native OpenCV templates.
 	b.client.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for b.seqRunning.Load() && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if b.attackExec != nil && !b.seqRunning.Load() {
+		b.attackExec.Close()
+	}
+
 	globalAsyncWriter.Close()
 	vision.CloseTemplateCache()
 	if b.resourceReader != nil {
