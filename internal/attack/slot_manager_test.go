@@ -205,3 +205,24 @@ func TestWindowsSlotActivityProfilePreservesActiveThreshold(t *testing.T) {
 		t.Fatalf("active threshold changed: legacy=%f fast=%f", legacy, fast)
 	}
 }
+
+func TestWindowsLiveRescanTemplateFiltersNormalTroops(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"electro_dragon", false},
+		{"balloon", false},
+		{"barbarian_king", true},
+		{"archer_queen", true},
+		{"rage_spell", true},
+		{"stone_slammer", true},
+		{"clan_castle", true},
+		{"cc", true},
+	}
+	for _, tc := range cases {
+		if got := windowsLiveRescanTemplate(tc.name); got != tc.want {
+			t.Fatalf("windowsLiveRescanTemplate(%q)=%v want %v", tc.name, got, tc.want)
+		}
+	}
+}
