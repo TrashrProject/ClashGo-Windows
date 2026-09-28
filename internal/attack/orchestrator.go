@@ -400,7 +400,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	} else {
 		writeArmyInspection(slotMgr.GetAllSlots(), troopCounts, nil)
 	}
-	e.logger.Info().Interface("counts", countMap).Msg("detected troop counts")
+	e.logger.Debug().Interface("counts", countMap).Msg("detected troop counts")
 
 	// Windows-safe deployment path.
 	//
@@ -482,7 +482,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// One stable line only on Windows. Repeatedly nudging farther outward
 		// eventually pushed taps into screen chrome / HUD. The base line is
 		// already outside the detected red boundary by outsidePad.
-		e.logger.Info().
+		e.logger.Debug().
 			Str("side", deploySide).
 			Int("safe_lines", len(safeLines)).
 			Interface("closest", safeLines[0]).
@@ -546,7 +546,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		if farmControlled {
 			armyState = NewArmyStateManager(farmProfile)
 			defer writeAttackTrace(s.Name, armyState)
-			e.logger.Info().
+			e.logger.Debug().
 				Int("town_hall", farmProfile.TownHall).
 				Str("profile", farmProfile.Label).
 				Int("troop_capacity", farmProfile.TroopCapacity).
@@ -585,7 +585,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			if len(liveSlots) == 0 {
 				fresh.Close()
 				liveRemaining = 0
-				e.logger.Info().Int("round", liveRound).Msg("Windows live deployment: no active cards remain")
+				e.logger.Debug().Int("round", liveRound).Msg("Windows live deployment: no active cards remain")
 				break
 			}
 
@@ -658,7 +658,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			if chosen == nil {
 				fresh.Close()
 				liveRemaining = 0
-				e.logger.Info().Int("round", liveRound).Msg("Windows live deployment: only spent/ability cards remain")
+				e.logger.Debug().Int("round", liveRound).Msg("Windows live deployment: only spent/ability cards remain")
 				break
 			}
 
@@ -727,7 +727,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 					profileFirstDeploy[key] = true
 					if chosenCount <= 0 {
 						count = desired
-						e.logger.Info().
+						e.logger.Debug().
 							Str("unit", chosen.UnitName).
 							Int("profile_count", desired).
 							Msg("farm profile: OCR unavailable; using configured count as guarded fallback")
