@@ -311,7 +311,7 @@ func TestTopRejectedTargetsKeepsBestFiveInMemory(t *testing.T) {
 		{950000, 950000, 4500, 92},
 	}
 	for _, tc := range cases {
-		b.RecordRejectedTarget(tc.g, tc.e, tc.de, tc.score, 1000)
+		b.RecordRejectedTarget(tc.g, tc.e, tc.de, tc.score, 1000, 750000, 750000, 2000)
 	}
 
 	s := b.Snapshot()
@@ -328,5 +328,32 @@ func TestTopRejectedTargetsKeepsBestFiveInMemory(t *testing.T) {
 	ge2 := s.TopRejectedTargets[2].Gold + s.TopRejectedTargets[2].Elixir
 	if ge1 < ge2 {
 		t.Fatalf("same-score targets must prefer higher G+E: %+v", s.TopRejectedTargets)
+	}
+}
+
+func TestTargetThresholdGapPct(t *testing.T) {
+	if got := targetThresholdGapPct(700000, 700000, 1900, 750000, 750000, 2000); got < 6.6 || got > 6.7 {
+		t.Fatalf("near-miss gap=%v want ~6.67", got)
+	}
+	if got := targetThresholdGapPct(750000, 750000, 2000, 750000, 750000, 2000); got != 0 {
+		t.Fatalf("met thresholds gap=%v want 0", got)
+	}
+	if got := targetThresholdGapPct(100000, 750000, 2000, 750000, 750000, 2000); got < 86 {
+		t.Fatalf("large miss gap=%v want >86", got)
+	}
+}
+
+func TestRejectedNearMissCounter(t *testing.T) {
+	b := New(filepath.Join(t.TempDir(), "events.ndjson"))
+	defer b.Close()
+	b.RecordRejectedTarget(700000, 700000, 1900, 82, 1000, 750000, 750000, 2000)
+	b.RecordRejectedTarget(300000, 300000, 500, 40, 1000, 750000, 750000, 2000)
+
+	s := b.Snapshot()
+	if s.NearMissTargets != 1 {
+		t.Fatalf("near misses=%d want 1", s.NearMissTargets)
+	}
+	if len(s.TopRejectedTargets) == 0 || !s.TopRejectedTargets[0].NearMiss {
+		t.Fatalf("expected best rejected target to expose near-miss metadata: %+v", s.TopRejectedTargets)
 	}
 }
