@@ -1609,8 +1609,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			continue
 		}
 
-		b.logger.Info().Msg("base found, reading loot...")
+		b.logger.Debug().Msg("base found, reading loot")
+		scanStarted := time.Now()
 		loot, err := lootRec.ReadAvailableLoot(screen)
+		targetScanUS := time.Since(scanStarted).Microseconds()
 		if err != nil {
 			b.logger.Warn().Err(err).Msg("failed to read loot")
 			b.DumpDiagnostics("loot_read_failed", screen, map[string]interface{}{
@@ -1628,7 +1630,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			SearchEnabled: b.cfg.Search.Enabled,
 		})
 		if b.telemetry != nil {
-			b.telemetry.Emit(telemetry.EventTargetFound, map[string]any{"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir, "score": decision.Score, "accept": decision.Accept, "reason": decision.Reason})
+			b.telemetry.Emit(telemetry.EventTargetFound, map[string]any{"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir, "score": decision.Score, "accept": decision.Accept, "reason": decision.Reason, "scan_us": targetScanUS})
 		}
 
 		if decision.Accept {
@@ -3028,6 +3030,8 @@ func (b *Bot) Stats() BotStats {
 		TargetAcceptanceRate: targetAcceptanceRate,
 		AvgSkipsPerAttack:    avgSkipsPerAttack,
 		RecoverySuccessRate:  recoverySuccessRate,
+		AverageTargetScanMS:  tm.AvgTargetScanMS,
+		LastTargetScanMS:     tm.LastTargetScanMS,
 	}
 }
 
@@ -3067,6 +3071,8 @@ type BotStats struct {
 	TargetAcceptanceRate float64 `json:"target_acceptance_rate"`
 	AvgSkipsPerAttack    float64 `json:"avg_skips_per_attack"`
 	RecoverySuccessRate  float64 `json:"recovery_success_rate"`
+	AverageTargetScanMS  float64 `json:"average_target_scan_ms"`
+	LastTargetScanMS     float64 `json:"last_target_scan_ms"`
 }
 
 type AttackReport struct {
