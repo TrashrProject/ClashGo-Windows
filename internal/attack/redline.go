@@ -87,7 +87,7 @@ func (r *RedLineDetector) Detect(screen gocv.Mat, uiCutoff int) RedZone {
 			continue
 		}
 
-		r.logger.Info().
+		r.logger.Debug().
 			Int("x", rect.Min.X).
 			Int("y", rect.Min.Y).
 			Int("w", rect.Dx()).
@@ -121,7 +121,7 @@ func (r *RedLineDetector) Detect(screen gocv.Mat, uiCutoff int) RedZone {
 
 	combined := image.Rect(xMin, yMin, xMax, yMax)
 	if combined.Dx() >= minW && combined.Dy() >= minH {
-		r.logger.Info().
+		r.logger.Debug().
 			Int("x", xMin).Int("y", yMin).
 			Int("w", combined.Dx()).Int("h", combined.Dy()).
 			Msg("red zone detected (combined contours)")
