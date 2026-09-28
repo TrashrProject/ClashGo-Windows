@@ -249,6 +249,44 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       .slice(0, 8);
   }, [history]);
 
+  const sessionComparison = React.useMemo(() => {
+    const summarizeSession = (row: (typeof sessionStats)[number] | undefined) => {
+      if (!row) return null;
+      const fallbackWallMs = row.attacks <= 1
+        ? row.cycleMs
+        : Math.max(row.firstCycleMs, row.newestAt - row.oldestAt + row.firstCycleMs);
+      const effectiveMs = row.routineMs > 0 ? row.routineMs : fallbackWallMs;
+      const hours = effectiveMs > 0 ? effectiveMs / 3_600_000 : 0;
+      return {
+        attacks: row.attacks,
+        gePerHour: hours > 0 ? (row.gold + row.elixir) / hours : 0,
+        attacksPerHour: hours > 0 ? row.attacks / hours : 0,
+        avgStars: row.stars / Math.max(1, row.attacks),
+        fullDeployRate: row.complete * 100 / Math.max(1, row.attacks),
+        avgLoopSeconds: effectiveMs / Math.max(1, row.attacks) / 1000,
+      };
+    };
+
+    const current = summarizeSession(sessionStats[0]);
+    const previous = summarizeSession(sessionStats[1]);
+    const delta = (a: number, b: number, lowerIsBetter = false) => {
+      if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
+      const raw = (a - b) * 100 / Math.abs(b);
+      return lowerIsBetter ? -raw : raw;
+    };
+    return {
+      current,
+      previous,
+      metrics: current ? [
+        { label: 'G+E / h', value: compact(current.gePerHour), delta: previous ? delta(current.gePerHour, previous.gePerHour) : null },
+        { label: 'Attacks / h', value: current.attacksPerHour.toFixed(2), delta: previous ? delta(current.attacksPerHour, previous.attacksPerHour) : null },
+        { label: 'Avg stars', value: current.avgStars.toFixed(2), delta: previous ? delta(current.avgStars, previous.avgStars) : null },
+        { label: 'Full deploy', value: `${current.fullDeployRate.toFixed(0)}%`, delta: previous ? delta(current.fullDeployRate, previous.fullDeployRate) : null },
+        { label: 'True loop', value: `${current.avgLoopSeconds.toFixed(0)}s`, delta: previous ? delta(current.avgLoopSeconds, previous.avgLoopSeconds, true) : null },
+      ] : [],
+    };
+  }, [sessionStats]);
+
   const latencyPercentiles = React.useMemo(() => {
     const percentile = (values: number[], q: number) => {
       const sorted = values.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
@@ -1040,7 +1078,19 @@ Best optimization target: {pipeline.dominantTunable.label}
             New attacks will start building session history
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+              {sessionComparison.metrics.map((metric) => (
+                <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+                  <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+                  <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+                  <div className={`mt-1 text-[9px] font-black uppercase tracking-wider ${metric.delta == null ? 'text-zinc-400' : metric.delta >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                    {metric.delta == null ? 'No previous session' : `${metric.delta >= 0 ? '+' : ''}${metric.delta.toFixed(0)}% vs previous`}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="overflow-x-auto">
             <table className="w-full min-w-[980px] text-left">
               <thead>
                 <tr className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
@@ -1089,6 +1139,7 @@ Best optimization target: {pipeline.dominantTunable.label}
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 
