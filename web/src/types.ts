@@ -157,6 +157,10 @@ export interface AttackReport {
   battle_end_reason: string;
   destruction_pct: number;
   town_hall_destroyed: boolean;
+  safety_mode: string;
+  red_zone_valid: boolean;
+  corridor_verified: boolean;
+  hud_safe: boolean;
   return_home_duration_ms: number;
   return_home_success: boolean;
   full_routine_duration_ms: number;
