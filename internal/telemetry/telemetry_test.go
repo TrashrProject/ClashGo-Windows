@@ -253,3 +253,22 @@ func TestNextEfficiencyAggregatesRetriesAndProbes(t *testing.T) {
 		t.Fatalf("avg transition=%v", s.AvgNextTransitionMS)
 	}
 }
+
+func TestRecordCaptureMicrosMatchesCaptureEventMetrics(t *testing.T) {
+	b := New(filepath.Join(t.TempDir(), "events.ndjson"))
+	defer b.Close()
+
+	b.RecordCaptureMicros(1500)
+	b.RecordCaptureMicros(2500)
+
+	s := b.Snapshot()
+	if s.AvgCaptureMS != 2.0 || s.LastCaptureMS != 2.5 {
+		t.Fatalf("direct capture metrics mismatch: %+v", s)
+	}
+	if s.Events != 2 {
+		t.Fatalf("events=%d want 2", s.Events)
+	}
+	if len(b.Recent(10)) != 0 {
+		t.Fatal("direct capture samples must not enter activity feed")
+	}
+}
