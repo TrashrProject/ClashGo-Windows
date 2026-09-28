@@ -16,11 +16,12 @@ func TestSnapshotCounters(t *testing.T) {
 	b.Emit(EventTargetSkipped, nil)
 	b.Emit(EventAttackFinished, nil)
 	b.Emit(EventRecovery, nil)
+	b.Emit(EventAnomaly, map[string]any{"kind": "slow_next_transition"})
 	b.Emit(EventCaptureSample, map[string]any{"duration_us": int64(1500)})
 	b.Emit(EventCaptureSample, map[string]any{"duration_us": int64(2500)})
 
 	s := b.Snapshot()
-	if s.Searches != 1 || s.TargetsFound != 1 || s.TargetsSkipped != 1 || s.AttacksFinished != 1 || s.Recoveries != 1 {
+	if s.Searches != 1 || s.TargetsFound != 1 || s.TargetsSkipped != 1 || s.AttacksFinished != 1 || s.Recoveries != 1 || s.Anomalies != 1 {
 		t.Fatalf("unexpected counters: %+v", s)
 	}
 	if s.AvgCaptureMS != 2.0 {
