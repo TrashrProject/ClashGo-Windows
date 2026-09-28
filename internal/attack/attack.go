@@ -1737,7 +1737,10 @@ func (e *Executor) EndBattle() error {
 
 func (e *Executor) ReturnHome() error {
 	hx, hy := e.cal.ScaleRef(430, 566)
-	if err := e.client.TapHuman(hx, hy, 5.0); err != nil {
+	// This button is deterministic on the verified result overlay. Avoid the
+	// 250ms human-reaction delay used for uncertain dialog interactions; the
+	// adaptive state verification below still proves the tap actually worked.
+	if err := e.client.TapFast(hx, hy, 0.8); err != nil {
 		return err
 	}
 
