@@ -28,6 +28,7 @@ export interface BotStats {
   last_capture_ms: number;
   telemetry_events: number;
   targets_skipped: number;
+  health_score: number;
   adb_health: {
     avg_capture_ms: number;
     consecutive_fails: number;
