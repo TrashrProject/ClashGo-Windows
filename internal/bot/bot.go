@@ -27,6 +27,15 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+type PreparationTimings struct {
+	AttackButtonMS      int64
+	FindMatchMS         int64
+	ArmyMenuMS          int64
+	ArmySlotMS          int64
+	BattleButtonMS      int64
+	MatchmakingReadyMS  int64
+}
+
 type Bot struct {
 	client     *adb.Client
 	cal        *game.Calibration
@@ -97,6 +106,7 @@ type Bot struct {
 
 	historyCache []AttackReport
 	telemetry    *telemetry.Bus
+	lastPrepTimings PreparationTimings
 
 	OnStatsUpdate func()
 }
@@ -1621,6 +1631,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 
 	preparationStarted := time.Now()
+	b.lastPrepTimings = PreparationTimings{}
 	if !b.clickSequence() {
 		b.logger.Warn().Msg("attack click sequence failed, restarting game to recover...")
 		b.restartGame()
@@ -2226,6 +2237,12 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		TemplatesMatched: templatesMatched,
 		AvgSelectedCardOCRMS: avgSelectedCardOCRMS,
 		PreparationDurationMS: preparationDurationMS,
+		PrepAttackButtonMS:    b.lastPrepTimings.AttackButtonMS,
+		PrepFindMatchMS:       b.lastPrepTimings.FindMatchMS,
+		PrepArmyMenuMS:        b.lastPrepTimings.ArmyMenuMS,
+		PrepArmySlotMS:        b.lastPrepTimings.ArmySlotMS,
+		PrepBattleButtonMS:    b.lastPrepTimings.BattleButtonMS,
+		PrepMatchmakingReadyMS: b.lastPrepTimings.MatchmakingReadyMS,
 		CooldownDurationMS:    cooldownDurationMS,
 		BattleEndReason:  b.attackExec.LastBattleEndReason(),
 		DestructionPct:   b.attackExec.LastDestructionPercent(),
@@ -2544,6 +2561,8 @@ func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int
 
 func (b *Bot) clickSequence() bool {
 
+	b.lastPrepTimings = PreparationTimings{}
+	stepStarted := time.Now()
 	attackClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
 		// findAttackButton already has the Windows-safe localized/color checks.
@@ -2578,6 +2597,8 @@ func (b *Bot) clickSequence() bool {
 		}
 		return false
 	}
+	b.lastPrepTimings.AttackButtonMS = time.Since(stepStarted).Milliseconds()
+	stepStarted = time.Now()
 	// Do not chain directly into the next tap. Wait for the attack menu to
 	// finish opening and for Find Match to be stable in two consecutive frames.
 	// When it is stable, reuse that already-verified center immediately instead
@@ -2642,6 +2663,8 @@ func (b *Bot) clickSequence() bool {
 		}
 		return false
 	}
+	b.lastPrepTimings.FindMatchMS = time.Since(stepStarted).Milliseconds()
+	stepStarted = time.Now()
 	// Find Match opens a transition/menu. Give it a real state transition
 	// window instead of firing Army Arrow at a stale frame.
 	armyReadyDeadline := time.Now().Add(4 * time.Second)
@@ -2674,6 +2697,8 @@ func (b *Bot) clickSequence() bool {
 		}
 		return false
 	}
+	b.lastPrepTimings.ArmyMenuMS = time.Since(stepStarted).Milliseconds()
+	stepStarted = time.Now()
 	b.client.JitteredSleep(650 * time.Millisecond)
 
 	armyClicked := false
@@ -2691,6 +2716,8 @@ func (b *Bot) clickSequence() bool {
 			screen.Close()
 		}
 	}
+	b.lastPrepTimings.ArmySlotMS = time.Since(stepStarted).Milliseconds()
+	stepStarted = time.Now()
 	b.client.JitteredSleep(650 * time.Millisecond)
 
 	battleClicked := false
@@ -2709,9 +2736,13 @@ func (b *Bot) clickSequence() bool {
 		b.logger.Warn().Msg("could not find or click Battle button")
 		return false
 	}
+	b.lastPrepTimings.BattleButtonMS = time.Since(stepStarted).Milliseconds()
+	stepStarted = time.Now()
 
 	b.logger.Info().Msg("waiting for battle state (searching)...")
-	return b.waitForBattleState(60 * time.Second)
+	ready := b.waitForBattleState(60 * time.Second)
+	b.lastPrepTimings.MatchmakingReadyMS = time.Since(stepStarted).Milliseconds()
+	return ready
 }
 
 // selectArmySlot clicks the saved-recipe card for b.armySlot in the
@@ -3383,8 +3414,14 @@ type AttackReport struct {
 	TemplatesTried        int     `json:"templates_tried"`
 	TemplatesMatched      int     `json:"templates_matched"`
 	AvgSelectedCardOCRMS float64 `json:"avg_selected_card_ocr_ms"`
-	PreparationDurationMS int64  `json:"preparation_duration_ms"`
-	CooldownDurationMS    int64  `json:"cooldown_duration_ms"`
+	PreparationDurationMS  int64 `json:"preparation_duration_ms"`
+	PrepAttackButtonMS     int64 `json:"prep_attack_button_ms"`
+	PrepFindMatchMS        int64 `json:"prep_find_match_ms"`
+	PrepArmyMenuMS         int64 `json:"prep_army_menu_ms"`
+	PrepArmySlotMS         int64 `json:"prep_army_slot_ms"`
+	PrepBattleButtonMS     int64 `json:"prep_battle_button_ms"`
+	PrepMatchmakingReadyMS int64 `json:"prep_matchmaking_ready_ms"`
+	CooldownDurationMS     int64 `json:"cooldown_duration_ms"`
 	BattleEndReason   string  `json:"battle_end_reason"`
 	DestructionPct    int     `json:"destruction_pct"`
 	TownHallDestroyed     bool  `json:"town_hall_destroyed"`
