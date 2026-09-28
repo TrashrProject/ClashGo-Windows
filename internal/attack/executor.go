@@ -149,28 +149,30 @@ func (t *TapExecutor) sanitizeDeployPoint(pt image.Point) image.Point {
 	if w <= 0 { w = 860 }
 	if h <= 0 { h = 732 }
 
+	safe := sanitizeWindowsDeployPoint(pt, w, h)
+	if safe != pt {
+		t.logger.Warn().
+			Int("old_x", pt.X).
+			Int("old_y", pt.Y).
+			Int("safe_x", safe.X).
+			Int("safe_y", safe.Y).
+			Msg("blocked unsafe deploy tap in lower battle HUD")
+	}
+	return safe
+}
+
+func sanitizeWindowsDeployPoint(pt image.Point, w, h int) image.Point {
+	if w <= 0 { w = 860 }
+	if h <= 0 { h = 732 }
+
 	maxBattleY := int(float64(h) * 0.70)
 	if pt.Y > maxBattleY {
-		old := pt
 		pt.Y = maxBattleY
-		t.logger.Warn().
-			Int("old_x", old.X).
-			Int("old_y", old.Y).
-			Int("safe_x", pt.X).
-			Int("safe_y", pt.Y).
-			Msg("blocked deploy tap in lower HUD; moved above Surrender/damage controls")
 	}
 
 	// Extra hard rail for the exact Surrender/End-Battle region on the left.
 	if pt.X < int(float64(w)*0.22) && pt.Y > int(float64(h)*0.64) {
-		old := pt
 		pt.Y = int(float64(h) * 0.62)
-		t.logger.Warn().
-			Int("old_x", old.X).
-			Int("old_y", old.Y).
-			Int("safe_x", pt.X).
-			Int("safe_y", pt.Y).
-			Msg("blocked deploy tap over Surrender button region")
 	}
 	return pt
 }
@@ -225,14 +227,9 @@ func (t *TapExecutor) TapDeployLineReliable(p1, p2 image.Point, count int, jitte
 	// are the first ones to fall outside the legal deployment contour; this
 	// produced the repeatable 7/9 EDrag symptom (two endpoint taps rejected).
 	// Spread troops over the inner 12%-88% of the verified line instead.
-	points := make([]image.Point, 0, count)
-	for i := 0; i < count; i++ {
-		pct := 0.50
-		if count > 1 {
-			pct = 0.12 + 0.76*(float64(i)/float64(count-1))
-		}
-		x, y := intLerp(p1, p2, pct)
-		points = append(points, t.sanitizeDeployPoint(image.Pt(x, y)))
+	points := reliableLinePoints(p1, p2, count)
+	for i := range points {
+		points[i] = t.sanitizeDeployPoint(points[i])
 	}
 	t.lineForward = !t.lineForward
 	if !t.lineForward {
@@ -247,6 +244,22 @@ func (t *TapExecutor) TapDeployLineReliable(p1, p2 image.Point, count int, jitte
 		// sluggish 95ms cadence on 8-10 heavy troops.
 		t.client.HumanSleep(65, 10)
 	}
+}
+
+func reliableLinePoints(p1, p2 image.Point, count int) []image.Point {
+	if count <= 0 {
+		return []image.Point{}
+	}
+	points := make([]image.Point, 0, count)
+	for i := 0; i < count; i++ {
+		pct := 0.50
+		if count > 1 {
+			pct = 0.12 + 0.76*(float64(i)/float64(count-1))
+		}
+		x, y := intLerp(p1, p2, pct)
+		points = append(points, image.Pt(x, y))
+	}
+	return points
 }
 
 // TapDeployPoint clusters taps around a single point.
