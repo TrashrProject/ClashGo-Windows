@@ -99,6 +99,15 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
           title: textField(ev, 'stage') === 'success' ? 'Recovery complete' : 'Recovery started',
           detail: textField(ev, 'bluestacks_restart') ? 'BlueStacks restarted' : 'Automatic recovery',
         });
+      } else if (ev.type === 'speed_profile') {
+        const mode = textField(ev, 'mode') || 'Balanced';
+        const from = textField(ev, 'from');
+        rows.push({
+          at: ev.at,
+          icon: mode === 'Fast' ? 'speed' : mode === 'Safe' ? 'shield' : 'tune',
+          title: `${mode} farming mode`,
+          detail: from ? `${from} → ${mode} · adapted to ADB health` : 'Selected from current ADB health',
+        });
       }
     }
     return rows;
