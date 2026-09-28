@@ -47,6 +47,7 @@ type Bus struct {
 	path      string
 	ch        chan Event
 	done      chan struct{}
+	closed    chan struct{}
 	once      sync.Once
 	recentMu   sync.RWMutex
 	recent     []Event
@@ -68,6 +69,7 @@ func New(path string) *Bus {
 		path:      path,
 		ch:        make(chan Event, 256),
 		done:      make(chan struct{}),
+		closed:    make(chan struct{}),
 	}
 	go b.writer()
 	return b
@@ -180,9 +182,14 @@ func (b *Bus) Close() {
 	b.once.Do(func() {
 		close(b.done)
 	})
+	// Wait until the writer flushed and released the file handle. This keeps
+	// shutdown deterministic and prevents tests / app restarts from racing a
+	// still-open telemetry journal.
+	<-b.closed
 }
 
 func (b *Bus) writer() {
+	defer close(b.closed)
 	if b.path == "" {
 		for {
 			select {
