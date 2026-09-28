@@ -154,16 +154,16 @@ func (tc *TroopCounter) detectSlotCount(screen gocv.Mat, slotX, slotY, barY int,
 	roi := screen.Region(image.Rect(roiX1, roiY1, roiX2, roiY2))
 	defer roi.Close()
 
-	gray := gocv.NewMat()
-	defer gray.Close()
+	gray := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(gray)
 	if roi.Channels() == 3 {
 		gocv.CvtColor(roi, &gray, gocv.ColorBGRToGray)
 	} else {
 		roi.CopyTo(&gray)
 	}
 
-	bin := gocv.NewMat()
-	defer bin.Close()
+	bin := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(bin)
 	gocv.Threshold(gray, &bin, 160, 255, gocv.ThresholdBinary)
 
 	digits := tc.extractDigits(bin, digitWidth, digitHeight)
@@ -253,9 +253,10 @@ func (tc *TroopCounter) extractDigits(bin gocv.Mat, digitWidth, digitHeight int)
 	sortRectsLeftToRight(rects)
 
 	for _, rect := range rects {
-		sub := bin.Region(rect)
-		digits = append(digits, sub.Clone())
-		sub.Close()
+		// Keep a lightweight ROI header instead of cloning each digit. The
+		// parent binary Mat stays alive until detectSlotCount finishes, and the
+		// caller closes every ROI immediately after matching.
+		digits = append(digits, bin.Region(rect))
 	}
 
 	return digits
