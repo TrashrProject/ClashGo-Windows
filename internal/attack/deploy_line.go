@@ -42,7 +42,7 @@ func (d *DeployLineCalculator) Calculate(
 	preferSide string,
 	count int,
 ) DeployLine {
-	if count <= 0 {
+	if count < 2 {
 		count = linePoints
 	}
 
