@@ -67,6 +67,8 @@ type SlotManager struct {
 
 	detectDuration time.Duration
 	classifyDuration time.Duration
+	templatesTried int
+	templatesMatched int
 
 	logger    zerolog.Logger
 }
@@ -431,8 +433,10 @@ func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates 
 		if specialsOnly && !windowsLiveRescanTemplate(tplName) {
 			continue
 		}
+		sm.templatesTried++
 		matches, _ := vision.MatchMultiScaleROICached(screen, tpl, tplName, 0.2, 1.2, 20, 0.55, barROI)
 		if len(matches) > 0 {
+			sm.templatesMatched++
 			sort.Slice(matches, func(i, j int) bool { return matches[i].Confidence > matches[j].Confidence })
 			results = append(results, templateResult{name: tplName, match: matches[0]})
 		}
@@ -777,6 +781,13 @@ func (sm *SlotManager) Timing() (detectMS, classifyMS float64) {
 	}
 	return float64(sm.detectDuration.Microseconds()) / 1000.0,
 		float64(sm.classifyDuration.Microseconds()) / 1000.0
+}
+
+func (sm *SlotManager) TemplateWork() (tried, matched int) {
+	if sm == nil {
+		return 0, 0
+	}
+	return sm.templatesTried, sm.templatesMatched
 }
 
 // GetSlotY returns the Y coordinate used for slot detection.
