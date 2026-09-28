@@ -1706,6 +1706,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 	consecutiveNextFailures := 0
 	skipsSinceRest := 0
+	searchLoopDelay := 500 * time.Millisecond
 	for {
 		// Stop check: a user Stop must abort the search loop even
 		// though CaptureToMat below would silently reconnect a closed
@@ -1723,7 +1724,13 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			return
 		}
 
-		time.Sleep(500 * time.Millisecond)
+		if searchLoopDelay > 0 {
+			time.Sleep(searchLoopDelay)
+		}
+		// Normal polling remains conservative. A confirmed Next transition
+		// already paid PostTransitionPause below, so that one following capture
+		// can run immediately without stacking another redundant 500ms wait.
+		searchLoopDelay = 500 * time.Millisecond
 
 		screen, err := b.client.CaptureToMat()
 		if err != nil {
@@ -1987,6 +1994,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			b.logger.Debug().Msg("matchmaking transition confirmed")
 			updateSearchPace()
 			time.Sleep(searchPace.PostTransitionPause)
+			searchLoopDelay = 0
 			continue
 		}
 
