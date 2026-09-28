@@ -421,6 +421,25 @@ func (b *Bot) Stop() {
 	default:
 	}
 
+	// Persist a compact human-readable session summary only after the active
+	// sequence has had a chance to finish updating its final attack report.
+	// This is off the farming hot path and never delays taps/captures.
+	if !b.seqRunning.Load() {
+		report := b.CurrentSessionReport()
+		if report.Attacks > 0 {
+			if err := saveSessionReport(report); err != nil {
+				b.logger.Warn().Err(err).Msg("failed to persist session report")
+			} else {
+				b.logger.Info().
+					Int("attacks", report.Attacks).
+					Float64("gold_per_hour", report.GoldPerHour).
+					Float64("zero_touch_rate", report.ZeroTouchRate).
+					Str("bottleneck", report.Bottleneck).
+					Msg("session report saved")
+			}
+		}
+	}
+
 	if !b.seqRunning.Load() && captureStopped {
 		if b.attackExec != nil {
 			b.attackExec.Close()
