@@ -485,6 +485,14 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     };
   }, [history]);
 
+  const battleOCR = React.useMemo(() => {
+    const rows = (history ?? []).filter((rep) => (rep.battle_loot_ocr_samples || 0) > 0);
+    if (rows.length === 0) return { avgSamples: 0, avgMS: 0 };
+    return {
+      avgSamples: rows.reduce((sum, rep) => sum + (rep.battle_loot_ocr_samples || 0), 0) / rows.length,
+      avgMS: rows.reduce((sum, rep) => sum + (rep.avg_battle_loot_ocr_ms || 0), 0) / rows.length,
+    };
+  }, [history]);
   const deployHotPath = React.useMemo(() => {
     const rows = (history ?? []).filter((r) => (r.live_bar_rescans || 0) > 0);
     if (rows.length === 0) {
@@ -1076,7 +1084,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             <span>{stats.telemetry_events?.toLocaleString?.() ?? 0} events</span>
           </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
           {[
             { label: 'Gold / h', value: compact(stats.gold_per_hour || 0) },
             { label: 'Elixir / h', value: compact(stats.elixir_per_hour || 0) },
@@ -1089,6 +1097,8 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             { label: 'Reactive capture', value: `${(stats.adb_health?.fast_capture_ms || stats.adb_health?.avg_capture_ms || 0).toFixed(0)}ms` },
             { label: 'Avg tap', value: `${(stats.adb_health?.avg_tap_ms || 0).toFixed(0)}ms` },
             { label: 'Reactive tap', value: `${(stats.adb_health?.fast_tap_ms || stats.adb_health?.avg_tap_ms || 0).toFixed(0)}ms` },
+            { label: 'Battle OCR', value: battleOCR.avgSamples.toFixed(1) + 'x' },
+            { label: 'Battle OCR cost', value: battleOCR.avgMS.toFixed(0) + 'ms' },
             { label: 'Tap route', value: tapTransport.total > 0 ? `${tapTransport.legacyRate.toFixed(0)}% legacy` : '—' },
             { label: 'Return home', value: `${((stats.average_return_home_ms || 0) / 1000).toFixed(1)}s` },
             { label: 'Next transition', value: `${(stats.average_next_transition_ms || 0).toFixed(0)}ms` },
