@@ -2571,7 +2571,10 @@ func (b *Bot) selectArmySlot() bool {
 		b.logger.Warn().Err(err).Msg("army recipe card tap failed")
 		return false
 	}
-	time.Sleep(1000 * time.Millisecond)
+	// Do not sleep here: clickSequence already provides a 650ms menu settle
+	// after every army selection and then requires Battle to be stable on two
+	// fresh frames before clicking it. The old extra 1s made slots 2+ slower
+	// than slot 1 without adding any additional verification.
 	b.recordActivity()
 	return true
 }
