@@ -384,3 +384,28 @@ func TestBattleEndContextCancellationWithZeroStrategy(t *testing.T) {
 		t.Fatal("cancelled wait did not return promptly")
 	}
 }
+
+func TestBattleExitMetricsResetWithOutcome(t *testing.T) {
+	e := &Executor{
+		lastBattleWaitMS:   12_345,
+		lastLootExitPercent: 87,
+		logger:              zerolog.Nop(),
+	}
+	e.ResetBattleOutcome()
+	waitMS, lootPct := e.BattleExitMetrics()
+	if waitMS != 0 || lootPct != 0 {
+		t.Fatalf("battle exit metrics survived reset: wait=%d loot=%d", waitMS, lootPct)
+	}
+}
+
+func TestBattleExitMetricsExposeLatchedValues(t *testing.T) {
+	e := &Executor{
+		lastBattleWaitMS:    4_200,
+		lastLootExitPercent: 92,
+		logger:              zerolog.Nop(),
+	}
+	waitMS, lootPct := e.BattleExitMetrics()
+	if waitMS != 4_200 || lootPct != 92 {
+		t.Fatalf("battle exit metrics = %d/%d want 4200/92", waitMS, lootPct)
+	}
+}
