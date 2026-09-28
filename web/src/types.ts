@@ -143,6 +143,12 @@ export interface AttackReport {
   templates_matched: number;
   avg_selected_card_ocr_ms: number;
   preparation_duration_ms: number;
+  prep_attack_button_ms: number;
+  prep_find_match_ms: number;
+  prep_army_menu_ms: number;
+  prep_army_slot_ms: number;
+  prep_battle_button_ms: number;
+  prep_matchmaking_ready_ms: number;
   cooldown_duration_ms: number;
   battle_end_reason: string;
   destruction_pct: number;
