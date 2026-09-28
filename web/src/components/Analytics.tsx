@@ -1440,7 +1440,7 @@ Best optimization target: {pipeline.dominantTunable.label}
             { label: 'Classification', value: `${deployHotPath.avgClassifyMs.toFixed(1)}ms`, detail: 'Identity/category matching' },
             { label: 'Templates tried', value: deployHotPath.avgTemplatesTried.toFixed(1), detail: 'Per attack average' },
             { label: 'Templates matched', value: deployHotPath.avgTemplatesMatched.toFixed(1), detail: 'Semantic cards found' },
-            { label: 'Scale fast-path', value: `${(stats.preferred_scale_hit_rate || 0).toFixed(1)}%`, detail: `${stats.preferred_scale_hits || 0}/${stats.preferred_scale_attempts || 0} hits` },
+            { label: 'Scale fast-path', value: stats.preferred_scale_enabled === false ? 'DISABLED' : `${(stats.preferred_scale_hit_rate || 0).toFixed(1)}%`, detail: stats.preferred_scale_enabled === false ? 'Circuit breaker → full scan' : `${stats.preferred_scale_hits || 0}/${stats.preferred_scale_attempts || 0} hits` },
             { label: 'Scale fallbacks', value: (stats.preferred_scale_fallbacks || 0).toLocaleString(), detail: 'Full 20-scale scan kept' },
             { label: 'Selected OCR', value: `${deployHotPath.avgCardOCRMs.toFixed(1)}ms`, detail: 'One chosen card only' },
             { label: 'Estimated scan work', value: `${(deployHotPath.avgRescans * (deployHotPath.avgRescanMs + deployHotPath.avgCardOCRMs)).toFixed(0)}ms`, detail: 'Measured hot-path work' },
