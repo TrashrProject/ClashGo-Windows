@@ -57,6 +57,10 @@ export interface BotStats {
   preferred_scale_fallbacks: number;
   preferred_scale_hit_rate: number;
   preferred_scale_enabled: boolean;
+  ui_anchor_attempts: number;
+  ui_anchor_hits: number;
+  ui_anchor_fallbacks: number;
+  ui_anchor_hit_rate: number;
   adb_health: {
     avg_capture_ms: number;
     fast_capture_ms: number;
