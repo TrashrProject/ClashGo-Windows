@@ -2389,6 +2389,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	attackMode := chooseSearchPacing(attackHealth).Mode
 	liveBarRescans, avgLiveBarRescanMS, avgSlotDetectMS, avgSlotClassifyMS, templatesTried, templatesMatched, avgSelectedCardOCRMS := b.attackExec.LiveBarMetrics()
 	battleLootOCRSamples, avgBattleLootOCRMS := b.attackExec.BattleLootOCRMetrics()
+	battleEndWaitMS, lootExitPercent := b.attackExec.BattleExitMetrics()
 	deploySafety := b.attackExec.DeploymentSafety()
 	attackTelemetry := telemetry.Snapshot{}
 	sessionID := ""
@@ -2439,6 +2440,8 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		AvgSelectedCardOCRMS: avgSelectedCardOCRMS,
 		BattleLootOCRSamples: battleLootOCRSamples,
 		AvgBattleLootOCRMS: avgBattleLootOCRMS,
+		BattleEndWaitMS: battleEndWaitMS,
+		LootExitPercent: lootExitPercent,
 		PreparationDurationMS: preparationDurationMS,
 		PrepAttackButtonMS:    b.lastPrepTimings.AttackButtonMS,
 		PrepFindMatchMS:       b.lastPrepTimings.FindMatchMS,
@@ -2467,7 +2470,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 
 	if b.telemetry != nil {
-		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "cooldown_ms": rep.CooldownDurationMS, "prep_ms": rep.PreparationDurationMS, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore, "live_bar_rescans": rep.LiveBarRescans, "live_bar_rescan_ms": rep.AvgLiveBarRescanMS, "slot_detect_ms": rep.AvgSlotDetectMS, "slot_classify_ms": rep.AvgSlotClassifyMS, "templates_tried": rep.TemplatesTried, "templates_matched": rep.TemplatesMatched, "selected_card_ocr_ms": rep.AvgSelectedCardOCRMS, "battle_loot_ocr_samples": rep.BattleLootOCRSamples, "battle_loot_ocr_ms": rep.AvgBattleLootOCRMS, "stars_source": rep.StarsSource, "loot_source": rep.LootSource, "result_confidence": rep.ResultConfidence, "end_reason": rep.BattleEndReason, "destruction_pct": rep.DestructionPct, "town_hall_destroyed": rep.TownHallDestroyed, "safety_mode": rep.SafetyMode, "red_zone_valid": rep.RedZoneValid, "corridor_verified": rep.CorridorVerified, "hud_safe": rep.HUDSafe, "red_zone_x1": rep.RedZoneX1, "red_zone_y1": rep.RedZoneY1, "red_zone_x2": rep.RedZoneX2, "red_zone_y2": rep.RedZoneY2, "deploy_line_x1": rep.DeployLineX1, "deploy_line_y1": rep.DeployLineY1, "deploy_line_x2": rep.DeployLineX2, "deploy_line_y2": rep.DeployLineY2, "deploy_free_space": rep.DeployFreeSpace})
+		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "cooldown_ms": rep.CooldownDurationMS, "prep_ms": rep.PreparationDurationMS, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore, "live_bar_rescans": rep.LiveBarRescans, "live_bar_rescan_ms": rep.AvgLiveBarRescanMS, "slot_detect_ms": rep.AvgSlotDetectMS, "slot_classify_ms": rep.AvgSlotClassifyMS, "templates_tried": rep.TemplatesTried, "templates_matched": rep.TemplatesMatched, "selected_card_ocr_ms": rep.AvgSelectedCardOCRMS, "battle_loot_ocr_samples": rep.BattleLootOCRSamples, "battle_loot_ocr_ms": rep.AvgBattleLootOCRMS, "battle_end_wait_ms": rep.BattleEndWaitMS, "loot_exit_percent": rep.LootExitPercent, "stars_source": rep.StarsSource, "loot_source": rep.LootSource, "result_confidence": rep.ResultConfidence, "end_reason": rep.BattleEndReason, "destruction_pct": rep.DestructionPct, "town_hall_destroyed": rep.TownHallDestroyed, "safety_mode": rep.SafetyMode, "red_zone_valid": rep.RedZoneValid, "corridor_verified": rep.CorridorVerified, "hud_safe": rep.HUDSafe, "red_zone_x1": rep.RedZoneX1, "red_zone_y1": rep.RedZoneY1, "red_zone_x2": rep.RedZoneX2, "red_zone_y2": rep.RedZoneY2, "deploy_line_x1": rep.DeployLineX1, "deploy_line_y1": rep.DeployLineY1, "deploy_line_x2": rep.DeployLineX2, "deploy_line_y2": rep.DeployLineY2, "deploy_free_space": rep.DeployFreeSpace})
 	}
 
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
@@ -3893,6 +3896,8 @@ type AttackReport struct {
 	AvgSelectedCardOCRMS float64 `json:"avg_selected_card_ocr_ms"`
 	BattleLootOCRSamples int     `json:"battle_loot_ocr_samples"`
 	AvgBattleLootOCRMS   float64 `json:"avg_battle_loot_ocr_ms"`
+	BattleEndWaitMS      int64   `json:"battle_end_wait_ms"`
+	LootExitPercent      int     `json:"loot_exit_percent"`
 	PreparationDurationMS  int64 `json:"preparation_duration_ms"`
 	PrepAttackButtonMS     int64 `json:"prep_attack_button_ms"`
 	PrepFindMatchMS        int64 `json:"prep_find_match_ms"`
