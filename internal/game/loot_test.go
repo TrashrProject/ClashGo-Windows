@@ -376,15 +376,32 @@ func TestLootVictory(t *testing.T) {
 	}
 }
 
+func TestLootRecognizerCloseSkipsZeroValueMatsOnWindows(t *testing.T) {
+	lr := &LootRecognizer{
+		digitTemplates:     make([]gocv.Mat, 3),
+		digitTemplateReady: make([]bool, 3),
+		scaledDigitCache:   make(map[string][]gocv.Mat),
+		scaledDigitReady:   make(map[string][]bool),
+	}
+	lr.digitTemplates[1] = gocv.NewMatWithSize(2, 2, gocv.MatTypeCV8UC1)
+	lr.digitTemplateReady[1] = true
+	lr.Close()
+	lr.Close()
+}
+
 func TestLootRecognizerCloseIsIdempotent(t *testing.T) {
 	lr := &LootRecognizer{
-		digitTemplates:   make([]gocv.Mat, 2),
-		scaledDigitCache: make(map[string][]gocv.Mat),
+		digitTemplates:     make([]gocv.Mat, 2),
+		digitTemplateReady: make([]bool, 2),
+		scaledDigitCache:   make(map[string][]gocv.Mat),
+		scaledDigitReady:   make(map[string][]bool),
 	}
 	lr.digitTemplates[0] = gocv.NewMatWithSize(4, 4, gocv.MatTypeCV8UC1)
+	lr.digitTemplateReady[0] = true
 	lr.scaledDigitCache["4x4"] = []gocv.Mat{
 		gocv.NewMatWithSize(4, 4, gocv.MatTypeCV8UC1),
 	}
+	lr.scaledDigitReady["4x4"] = []bool{true}
 
 	lr.Close()
 	// A second close must be a no-op, not a native double-free.
