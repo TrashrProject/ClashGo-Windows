@@ -645,6 +645,49 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     };
   }, [history, stats.avg_skips_per_attack, stats.average_target_scan_ms, stats.average_next_transition_ms, stats.avg_accepted_ge, stats.avg_rejected_ge]);
 
+  const autonomyReliability = React.useMemo(() => {
+    const rows = history ?? [];
+    const qualifies = (rep: AttackReport) =>
+      Boolean(rep.deploy_success) &&
+      Boolean(rep.return_home_success) &&
+      Boolean(rep.hud_safe) &&
+      Boolean(rep.corridor_verified);
+
+    let current = 0;
+    for (const rep of rows) {
+      if (!qualifies(rep)) break;
+      current++;
+    }
+
+    let best = 0;
+    let run = 0;
+    let total = 0;
+    let clean = 0;
+    let redZoneCertified = 0;
+    for (const rep of rows) {
+      total++;
+      if (qualifies(rep)) {
+        clean++;
+        run++;
+        if (run > best) best = run;
+      } else {
+        run = 0;
+      }
+      if (rep.red_zone_valid && rep.corridor_verified && rep.hud_safe) {
+        redZoneCertified++;
+      }
+    }
+
+    return {
+      current,
+      best,
+      cleanRate: total > 0 ? clean * 100 / total : 0,
+      redZoneRate: total > 0 ? redZoneCertified * 100 / total : 0,
+      clean,
+      total,
+    };
+  }, [history]);
+
   const preparationBreakdown = React.useMemo(() => {
     const rows = (history ?? []).filter((r) => (r.preparation_duration_ms || 0) > 0);
     const definitions = [
@@ -1261,6 +1304,33 @@ Best optimization target: {pipeline.dominantTunable.label}
               <div className="mt-1 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{compact(lootCapture.stolenGE)}</div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Autonomy Reliability</div>
+            <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Zero-touch farming streak</h3>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Counts only full deployment + verified safe corridor/HUD + successful return home.</p>
+          </div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+            {autonomyReliability.clean}/{autonomyReliability.total} clean routines
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: 'Current streak', value: autonomyReliability.current.toLocaleString(), detail: 'Consecutive clean routines' },
+            { label: 'Best streak', value: autonomyReliability.best.toLocaleString(), detail: 'History record' },
+            { label: 'Clean routine rate', value: `${autonomyReliability.cleanRate.toFixed(1)}%`, detail: 'Full autonomous success' },
+            { label: 'Safe corridor rate', value: `${autonomyReliability.redZoneRate.toFixed(1)}%`, detail: 'Red-zone + HUD certified' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
+              <div className="mt-2 text-2xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">{metric.detail}</div>
+            </div>
+          ))}
         </div>
       </div>
 
