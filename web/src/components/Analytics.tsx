@@ -602,6 +602,40 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     };
   }, [avgCooldownSeconds, avgPreparationSeconds, avgSearchSeconds, avgDeploySeconds, avgCombatSeconds]);
 
+  const searchEfficiency = React.useMemo(() => {
+    const rows = history ?? [];
+    const measured = rows.filter((r) => (r.search_duration_ms || 0) > 0);
+    const avgLootGE = measured.length > 0
+      ? measured.reduce((sum, r) => sum +
+          (r.gold_stolen || 0) + (r.bonus_gold || 0) +
+          (r.elixir_stolen || 0) + (r.bonus_elixir || 0), 0) / measured.length
+      : 0;
+    const avgSearchMS = measured.length > 0
+      ? measured.reduce((sum, r) => sum + (r.search_duration_ms || 0), 0) / measured.length
+      : 0;
+    const avgTrueLoopMS = measured.length > 0
+      ? measured.reduce((sum, r) => sum + (r.full_routine_duration_ms || r.cycle_duration_ms || 0), 0) / measured.length
+      : 0;
+
+    const skips = stats.avg_skips_per_attack || 0;
+    const targetsPerAccept = skips + 1;
+    const scanMS = stats.average_target_scan_ms || 0;
+    const nextMS = stats.average_next_transition_ms || 0;
+    const estimatedScoutOverheadMS = targetsPerAccept * scanMS + skips * nextMS;
+    const acceptedGE = stats.avg_accepted_ge || 0;
+    const rejectedGE = stats.avg_rejected_ge || 0;
+
+    return {
+      targetsPerAccept,
+      estimatedScoutOverheadMS,
+      gePerSearchSecond: avgSearchMS > 0 ? avgLootGE / (avgSearchMS / 1000) : 0,
+      searchShare: avgTrueLoopMS > 0 ? avgSearchMS * 100 / avgTrueLoopMS : 0,
+      qualityPremium: rejectedGE > 0 ? (acceptedGE - rejectedGE) * 100 / rejectedGE : 0,
+      avgAcceptedGE: acceptedGE,
+      avgRejectedGE: rejectedGE,
+    };
+  }, [history, stats.avg_skips_per_attack, stats.average_target_scan_ms, stats.average_next_transition_ms, stats.avg_accepted_ge, stats.avg_rejected_ge]);
+
   const preparationBreakdown = React.useMemo(() => {
     const rows = (history ?? []).filter((r) => (r.preparation_duration_ms || 0) > 0);
     const definitions = [
@@ -1336,6 +1370,33 @@ Best optimization target: {pipeline.dominantTunable.label}
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
               <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
               <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-6 rounded-[2.5rem] shadow-premium-lg">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Search Efficiency</div>
+            <h3 className="mt-1 text-xl font-black text-white dark:text-zinc-950 tracking-tight">How expensive is a good target?</h3>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Derived from live session counters and attack history; no extra captures, OCR or logging.</p>
+          </div>
+          <span className="material-symbols-outlined text-zinc-500">speed</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {[
+            { label: 'Bases / accept', value: searchEfficiency.targetsPerAccept.toFixed(1), detail: 'Includes accepted base' },
+            { label: 'Scout overhead', value: `${(searchEfficiency.estimatedScoutOverheadMS / 1000).toFixed(2)}s`, detail: 'Scan + Next only' },
+            { label: 'G+E / search sec', value: compact(searchEfficiency.gePerSearchSecond), detail: 'Loot yield vs search time' },
+            { label: 'Search share', value: `${searchEfficiency.searchShare.toFixed(1)}%`, detail: 'Of true ready-to-ready loop' },
+            { label: 'Accepted G+E', value: compact(searchEfficiency.avgAcceptedGE), detail: 'Average selected target' },
+            { label: 'Quality premium', value: searchEfficiency.avgRejectedGE > 0 ? `+${searchEfficiency.qualityPremium.toFixed(0)}%` : '—', detail: 'Accepted vs rejected G+E' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">{metric.detail}</div>
             </div>
           ))}
         </div>
