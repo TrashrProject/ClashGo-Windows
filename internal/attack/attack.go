@@ -1917,6 +1917,16 @@ func (e *Executor) endButtonVisible(screen gocv.Mat, sCfg StallConfig) bool {
 	return false
 }
 
+func battleLootSampleDue(lootExitEnabled bool, tick int) bool {
+	if lootExitEnabled {
+		return true
+	}
+	if tick <= 0 {
+		return false
+	}
+	return tick%3 == 1
+}
+
 func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(1000 * time.Millisecond)
@@ -2031,7 +2041,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			var liveLootTick game.Resources
 			var liveLootTickErr error
 			liveLootSampled := false
-			lootSampleDue := e.cfg.LootExitEnabled || battleTick%3 == 1
+			lootSampleDue := battleLootSampleDue(e.cfg.LootExitEnabled, battleTick)
 			if (e.initialLootGold > 0 || e.initialLootElixir > 0 || e.initialLootDE > 0) && lootSampleDue {
 				lootOCRStarted := time.Now()
 				liveLootTick, liveLootTickErr = lootRec.ReadAvailableLoot(screen)
