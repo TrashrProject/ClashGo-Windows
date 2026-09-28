@@ -153,13 +153,17 @@ func TestWindowsSlotActivityProfileMatchesLegacyWindowMath(t *testing.T) {
 	// Dark/map-like background.
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			screen.SetVecbAt(y, x, gocv.Vecb{20, 45, 20})
+			screen.SetUCharAt(y, x*3+0, 20)
+			screen.SetUCharAt(y, x*3+1, 45)
+			screen.SetUCharAt(y, x*3+2, 20)
 		}
 	}
 	// Add a vivid card-like patch around x=120.
 	for y := 72; y < 118; y++ {
 		for x := 98; x < 142; x++ {
-			screen.SetVecbAt(y, x, gocv.Vecb{40, 70, 220})
+			screen.SetUCharAt(y, x*3+0, 40)
+			screen.SetUCharAt(y, x*3+1, 70)
+			screen.SetUCharAt(y, x*3+2, 220)
 		}
 	}
 
@@ -186,12 +190,16 @@ func TestWindowsSlotActivityProfilePreservesActiveThreshold(t *testing.T) {
 
 	for y := 0; y < 140; y++ {
 		for x := 0; x < 240; x++ {
-			screen.SetVecbAt(y, x, gocv.Vecb{20, 45, 20})
+			screen.SetUCharAt(y, x*3+0, 20)
+			screen.SetUCharAt(y, x*3+1, 45)
+			screen.SetUCharAt(y, x*3+2, 20)
 		}
 	}
 	for y := 76; y < 114; y++ {
 		for x := 104; x < 136; x++ {
-			screen.SetVecbAt(y, x, gocv.Vecb{30, 50, 230})
+			screen.SetUCharAt(y, x*3+0, 30)
+			screen.SetUCharAt(y, x*3+1, 50)
+			screen.SetUCharAt(y, x*3+2, 230)
 		}
 	}
 
