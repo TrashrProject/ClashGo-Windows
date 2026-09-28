@@ -1192,6 +1192,28 @@ func (a *App) GetActivity() []telemetry.Event {
 	return b.RecentActivity(24)
 }
 
+// GetSessionReport returns the live session summary while the bot is
+// running, or the most recently persisted report after Stop. This keeps the
+// dashboard useful even when no Bot instance is active.
+func (a *App) GetSessionReport() bot.SessionReport {
+	a.mu.Lock()
+	b := a.bot
+	a.mu.Unlock()
+	if b != nil {
+		return b.CurrentSessionReport()
+	}
+
+	var report bot.SessionReport
+	data, err := os.ReadFile(paths.ResolveConfig("output/session_reports/latest.json"))
+	if err != nil {
+		return report
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		return bot.SessionReport{}
+	}
+	return report
+}
+
 // GetStats returns the bot's live runtime statistics
 func (a *App) GetStats() bot.BotStats {
 	a.mu.Lock()
