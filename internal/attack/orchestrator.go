@@ -160,21 +160,38 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			Int("required_free_space", minSafeFree).
 			Msg("adaptive camera evaluating battlefield")
 
-		// IMPORTANT (Windows / BlueStacks):
-		// Do NOT use Client.ZoomOut()/ZoomIn() here. Those methods inject
-		// low-level multi-touch sendevent batches. BlueStacks 5 on the user's
-		// Pie64 instance can terminate the emulator process under repeated
-		// synthetic multi-touch. Startup already had a Windows-safe path that
-		// deliberately skipped native zoom for this reason.
-		//
-		// Keep adaptive camera movement to single-pointer map pans only. They
-		// are handled by Android's normal input swipe path and are much more
-		// stable on BlueStacks.
+		// Windows-safe zoom recovery. Native ADB multi-touch pinch is disabled
+		// because it can terminate BlueStacks Pie64. Instead, drive the
+		// BlueStacks host zoom-out key (configured by zoom_out_key, default i),
+		// then re-capture and re-measure the red boundary. Stop as soon as the
+		// deployment corridor is sufficiently exposed.
 		if !redZone.Valid || free < minSafeFree {
-			e.logger.Debug().
-				Int("free_space", free).
-				Int("required_free_space", minSafeFree).
-				Msg("adaptive camera: native pinch zoom disabled on Windows-safe path; using map pan only")
+			for zoomTry := 1; zoomTry <= 3; zoomTry++ {
+				e.logger.Info().
+					Int("attempt", zoomTry).
+					Bool("red_zone_valid", redZone.Valid).
+					Int("free_space", free).
+					Int("required_free_space", minSafeFree).
+					Msg("adaptive camera: battlefield too zoomed; requesting safe BlueStacks zoom out")
+
+				if err := e.client.ZoomOutSafe(); err != nil {
+					e.logger.Warn().Err(err).Msg("adaptive camera: safe BlueStacks zoom out failed")
+					break
+				}
+				time.Sleep(450 * time.Millisecond)
+				if !refreshCamera("safe_zoom_out") {
+					break
+				}
+				side, free = freeSpace(redZone)
+				if redZone.Valid && free >= minSafeFree {
+					e.logger.Info().
+						Int("attempts", zoomTry).
+						Str("safe_side", side).
+						Int("free_space", free).
+						Msg("adaptive camera: zoom level now suitable for deployment")
+					break
+				}
+			}
 		}
 
 		// Drag the MAP toward the opposite
@@ -217,11 +234,17 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			side, free = freeSpace(redZone)
 		}
 
-		// No native pinch-zoom recovery on Windows. If panning lost the red
-		// boundary, keep the failure visible to the caller rather than sending
-		// an unsafe multi-touch gesture that can crash BlueStacks.
+		// If a pan loses the red boundary, make one final host-key zoom-out
+		// attempt. This remains safe because it never injects Android
+		// multi-touch; failure is left visible rather than guessed through.
 		if !redZone.Valid && cameraFrameOwned {
-			e.logger.Warn().Msg("adaptive camera lost red boundary after pan; refusing unsafe Windows pinch-zoom recovery")
+			e.logger.Warn().Msg("adaptive camera lost red boundary after pan; retrying one safe BlueStacks zoom out")
+			if err := e.client.ZoomOutSafe(); err == nil {
+				time.Sleep(450 * time.Millisecond)
+				_ = refreshCamera("post_pan_safe_zoom_out")
+			} else {
+				e.logger.Warn().Err(err).Msg("adaptive camera post-pan safe zoom out failed")
+			}
 		}
 
 		side, free = freeSpace(redZone)
