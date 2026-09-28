@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -102,6 +103,9 @@ type Bus struct {
 }
 
 func New(path string) *Bus {
+	if path != "" {
+		rotateJournalIfOversize(path, 8*1024*1024)
+	}
 	b := &Bus{
 		sessionID: time.Now().UTC().Format("20060102T150405.000000000Z"),
 		path:      path,
@@ -111,6 +115,42 @@ func New(path string) *Bus {
 	}
 	go b.writer()
 	return b
+}
+
+func rotateJournalIfOversize(path string, maxBytes int64) {
+	if path == "" || maxBytes <= 0 {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Size() <= maxBytes {
+		return
+	}
+	_ = os.Remove(path + ".1")
+	_ = os.Rename(path, path+".1")
+}
+
+func pruneIncidentDir(dir string, keep int) {
+	if dir == "" || keep < 1 {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	files := make([]os.DirEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".json") {
+			continue
+		}
+		files = append(files, entry)
+	}
+	if len(files) <= keep {
+		return
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Name() > files[j].Name() })
+	for _, entry := range files[keep:] {
+		_ = os.Remove(filepath.Join(dir, entry.Name()))
+	}
 }
 
 func (b *Bus) SessionID() string {
@@ -355,6 +395,9 @@ func (b *Bus) WriteIncident(reason string) string {
 	if err := os.WriteFile(out, data, 0o644); err != nil {
 		return ""
 	}
+	// Incident writes are exceptional/non-hot-path, so pruning here has zero
+	// cost during normal farming. Keep the newest 24 black-box snapshots.
+	pruneIncidentDir(dir, 24)
 	return out
 }
 
