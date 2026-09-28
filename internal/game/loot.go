@@ -25,6 +25,7 @@ type LootRecognizer struct {
 	scaledDigitCache map[string][]gocv.Mat
 	logger           zerolog.Logger
 	mu               sync.Mutex
+	closeOnce        sync.Once
 	Debug            bool
 }
 
@@ -92,19 +93,25 @@ func (lr *LootRecognizer) prepareDigitTemplates() {
 }
 
 func (lr *LootRecognizer) Close() {
-	for _, tpl := range lr.digitTemplates {
-		if !tpl.Empty() {
-			tpl.Close()
-		}
+	if lr == nil {
+		return
 	}
-	for key, set := range lr.scaledDigitCache {
-		for _, m := range set {
-			if !m.Empty() {
-				m.Close()
+	lr.closeOnce.Do(func() {
+		for i := range lr.digitTemplates {
+			if !lr.digitTemplates[i].Empty() {
+				lr.digitTemplates[i].Close()
 			}
 		}
-		delete(lr.scaledDigitCache, key)
-	}
+		lr.digitTemplates = nil
+		for key, set := range lr.scaledDigitCache {
+			for i := range set {
+				if !set[i].Empty() {
+					set[i].Close()
+				}
+			}
+			delete(lr.scaledDigitCache, key)
+		}
+	})
 }
 
 type LootReport struct{ Resources Resources }
