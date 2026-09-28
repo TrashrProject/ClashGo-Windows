@@ -376,6 +376,20 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     return Math.round(v).toLocaleString();
   };
 
+  const deployHotPath = React.useMemo(() => {
+    const rows = (history ?? []).filter((r) => (r.live_bar_rescans || 0) > 0);
+    if (rows.length === 0) {
+      return { attacks: 0, avgRescans: 0, avgRescanMs: 0, avgCardOCRMs: 0 };
+    }
+    return {
+      attacks: rows.length,
+      avgRescans: rows.reduce((sum, r) => sum + (r.live_bar_rescans || 0), 0) / rows.length,
+      avgRescanMs: rows.reduce((sum, r) => sum + (r.avg_live_bar_rescan_ms || 0), 0) / rows.length,
+      avgCardOCRMs: rows.reduce((sum, r) => sum + (r.avg_selected_card_ocr_ms || 0), 0) / rows.length,
+    };
+  }, [history]);
+
+
   const lootCapture = React.useMemo(() => {
     let offeredGE = 0, stolenGE = 0, offeredDE = 0, stolenDE = 0, targetScore = 0, scored = 0;
     for (const rep of history ?? []) {
@@ -585,6 +599,31 @@ Best optimization target: {pipeline.dominantTunable.label}
               <div className="mt-1 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{compact(lootCapture.stolenGE)}</div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Deployment Hot Path</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Live-bar cost per attack</h3>
+            <p className="text-sm text-zinc-500 mt-1">Positions are still rescanned after every card; OCR is now limited to the selected card.</p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{deployHotPath.attacks} measured attacks</div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: 'Rescans / attack', value: deployHotPath.avgRescans.toFixed(1), detail: 'Safety re-indexing kept' },
+            { label: 'Rescan cost', value: `${deployHotPath.avgRescanMs.toFixed(1)}ms`, detail: 'Slot detection average' },
+            { label: 'Selected OCR', value: `${deployHotPath.avgCardOCRMs.toFixed(1)}ms`, detail: 'One chosen card only' },
+            { label: 'Estimated scan work', value: `${(deployHotPath.avgRescans * (deployHotPath.avgRescanMs + deployHotPath.avgCardOCRMs)).toFixed(0)}ms`, detail: 'Measured hot-path work' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
         </div>
       </div>
 
