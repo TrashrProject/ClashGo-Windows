@@ -3680,7 +3680,7 @@ func (b *Bot) deployParsedStrategy(screen gocv.Mat, strat *strategy.DynamicStrat
 
 	remaining, err := b.attackExec.DeployDynamicV2(strat, screen, b.cfg.Attack.StrategyFile)
 	if err != nil {
-		b.logger.Error().Err(err).Msg("dynamic deploy failed")
+		b.logger.Error().Err(err).Msg("dynamic deploy failed: " + err.Error())
 		return remaining, err
 	}
 	return remaining, nil
