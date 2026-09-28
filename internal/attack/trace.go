@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,5 +37,32 @@ func writeAttackTrace(strategy string, army *ArmyStateManager) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(dir, name), data, 0o600)
+	if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+		return
+	}
+	pruneAttackTraces(dir, 200)
+}
+
+func pruneAttackTraces(dir string, keep int) {
+	if keep <= 0 {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".json") {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	if len(names) <= keep {
+		return
+	}
+	sort.Strings(names) // timestamp filenames sort oldest -> newest
+	for _, name := range names[:len(names)-keep] {
+		_ = os.Remove(filepath.Join(dir, name))
+	}
 }
