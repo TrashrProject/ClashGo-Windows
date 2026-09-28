@@ -2180,7 +2180,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 	attackHealth := b.client.Health()
 	attackMode := chooseSearchPacing(attackHealth).Mode
-	liveBarRescans, avgLiveBarRescanMS, avgSlotDetectMS, avgSlotClassifyMS, avgSelectedCardOCRMS := b.attackExec.LiveBarMetrics()
+	liveBarRescans, avgLiveBarRescanMS, avgSlotDetectMS, avgSlotClassifyMS, templatesTried, templatesMatched, avgSelectedCardOCRMS := b.attackExec.LiveBarMetrics()
 	attackTelemetry := telemetry.Snapshot{}
 	sessionID := ""
 	if b.telemetry != nil {
@@ -2222,6 +2222,8 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		AvgLiveBarRescanMS: avgLiveBarRescanMS,
 		AvgSlotDetectMS: avgSlotDetectMS,
 		AvgSlotClassifyMS: avgSlotClassifyMS,
+		TemplatesTried: templatesTried,
+		TemplatesMatched: templatesMatched,
 		AvgSelectedCardOCRMS: avgSelectedCardOCRMS,
 		PreparationDurationMS: preparationDurationMS,
 		CooldownDurationMS:    cooldownDurationMS,
@@ -2232,7 +2234,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 
 	if b.telemetry != nil {
-		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "cooldown_ms": rep.CooldownDurationMS, "prep_ms": rep.PreparationDurationMS, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore, "live_bar_rescans": rep.LiveBarRescans, "live_bar_rescan_ms": rep.AvgLiveBarRescanMS, "slot_detect_ms": rep.AvgSlotDetectMS, "slot_classify_ms": rep.AvgSlotClassifyMS, "selected_card_ocr_ms": rep.AvgSelectedCardOCRMS, "end_reason": rep.BattleEndReason, "destruction_pct": rep.DestructionPct, "town_hall_destroyed": rep.TownHallDestroyed})
+		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "cooldown_ms": rep.CooldownDurationMS, "prep_ms": rep.PreparationDurationMS, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore, "live_bar_rescans": rep.LiveBarRescans, "live_bar_rescan_ms": rep.AvgLiveBarRescanMS, "slot_detect_ms": rep.AvgSlotDetectMS, "slot_classify_ms": rep.AvgSlotClassifyMS, "templates_tried": rep.TemplatesTried, "templates_matched": rep.TemplatesMatched, "selected_card_ocr_ms": rep.AvgSelectedCardOCRMS, "end_reason": rep.BattleEndReason, "destruction_pct": rep.DestructionPct, "town_hall_destroyed": rep.TownHallDestroyed})
 	}
 
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
@@ -3366,6 +3368,8 @@ type AttackReport struct {
 	AvgLiveBarRescanMS   float64 `json:"avg_live_bar_rescan_ms"`
 	AvgSlotDetectMS       float64 `json:"avg_slot_detect_ms"`
 	AvgSlotClassifyMS     float64 `json:"avg_slot_classify_ms"`
+	TemplatesTried        int     `json:"templates_tried"`
+	TemplatesMatched      int     `json:"templates_matched"`
 	AvgSelectedCardOCRMS float64 `json:"avg_selected_card_ocr_ms"`
 	PreparationDurationMS int64  `json:"preparation_duration_ms"`
 	CooldownDurationMS    int64  `json:"cooldown_duration_ms"`
