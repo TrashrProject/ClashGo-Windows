@@ -44,6 +44,13 @@ type Executor struct {
 	lastResolvedEdge string
 	lastDeploySide   string
 
+	// Windows live-bar observability. These counters measure slot-rescan and
+	// selected-card OCR cost without changing deployment decisions.
+	lastLiveBarRescans       int
+	lastLiveBarRescanMicros  int64
+	lastSelectedCardOCRCount int
+	lastSelectedCardOCRMicros int64
+
 	// lastDestructionPct is the highest destruction percentage the battle
 	// wait measured from the stall ROI (monotonic in practice). It is the
 	// authoritative "final damage" for star computation per game rules
@@ -90,6 +97,17 @@ func (e *Executor) LastResolvedEdge() string { return e.lastResolvedEdge }
 // LastDeploySide returns the physical battlefield side actually used by the
 // deployment engine (left/right/top/bottom when known).
 func (e *Executor) LastDeploySide() string { return e.lastDeploySide }
+
+func (e *Executor) LiveBarMetrics() (rescans int, avgRescanMS, avgSelectedOCRMS float64) {
+	rescans = e.lastLiveBarRescans
+	if e.lastLiveBarRescans > 0 {
+		avgRescanMS = float64(e.lastLiveBarRescanMicros) / float64(e.lastLiveBarRescans) / 1000.0
+	}
+	if e.lastSelectedCardOCRCount > 0 {
+		avgSelectedOCRMS = float64(e.lastSelectedCardOCRMicros) / float64(e.lastSelectedCardOCRCount) / 1000.0
+	}
+	return rescans, avgRescanMS, avgSelectedOCRMS
+}
 
 // LastDestructionPercent returns the highest destruction percentage the
 // battle-end wait measured from the stall ROI (0 when nothing was read).
