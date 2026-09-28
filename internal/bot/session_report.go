@@ -48,6 +48,7 @@ type SessionReport struct {
 	CurrentZeroTouchStreak int `json:"current_zero_touch_streak"`
 	BestZeroTouchStreak int `json:"best_zero_touch_streak"`
 
+	AverageCooldownMS float64 `json:"average_cooldown_ms"`
 	AveragePreparationMS float64 `json:"average_preparation_ms"`
 	AverageSearchMS float64 `json:"average_search_ms"`
 	AverageDeployMS float64 `json:"average_deploy_ms"`
@@ -55,6 +56,7 @@ type SessionReport struct {
 	AverageReturnHomeMS float64 `json:"average_return_home_ms"`
 	AverageRoutineMS float64 `json:"average_routine_ms"`
 	Bottleneck string `json:"bottleneck"`
+	OptimizationTarget string `json:"optimization_target"`
 
 	TopStrategy string `json:"top_strategy,omitempty"`
 	TopDeploySide string `json:"top_deploy_side,omitempty"`
@@ -100,7 +102,7 @@ func BuildSessionReport(sessionID string, history []AttackReport, stats BotStats
 
 	var stars, destruction, targetScore float64
 	var triples, fullDeploy, returned, safe, zeroTouch int
-	var prepMS, searchMS, deployMS, combatMS, homeMS, routineMS float64
+	var cooldownMS, prepMS, searchMS, deployMS, combatMS, homeMS, routineMS float64
 	var measuredTargetScore int
 	var currentStreak, bestStreak, runningStreak int
 
@@ -148,6 +150,7 @@ func BuildSessionReport(sessionID string, history []AttackReport, stats BotStats
 			runningStreak = 0
 		}
 
+		cooldownMS += float64(rep.CooldownDurationMS)
 		prepMS += float64(rep.PreparationDurationMS)
 		searchMS += float64(rep.SearchDurationMS)
 		deployMS += float64(rep.DeployDurationMS)
@@ -209,6 +212,7 @@ func BuildSessionReport(sessionID string, history []AttackReport, stats BotStats
 	report.CurrentZeroTouchStreak = currentStreak
 	report.BestZeroTouchStreak = bestStreak
 
+	report.AverageCooldownMS = cooldownMS / n
 	report.AveragePreparationMS = prepMS / n
 	report.AverageSearchMS = searchMS / n
 	report.AverageDeployMS = deployMS / n
@@ -219,17 +223,27 @@ func BuildSessionReport(sessionID string, history []AttackReport, stats BotStats
 	type stage struct {
 		name string
 		ms float64
+		tunable bool
 	}
 	stages := []stage{
-		{"preparation", report.AveragePreparationMS},
-		{"search", report.AverageSearchMS},
-		{"deployment", report.AverageDeployMS},
-		{"combat", report.AverageCombatMS},
-		{"return_home", report.AverageReturnHomeMS},
+		{"cooldown_intentional", report.AverageCooldownMS, false},
+		{"preparation", report.AveragePreparationMS, true},
+		{"search", report.AverageSearchMS, true},
+		// Deployment is deliberately protected: red-zone safety, live card
+		// re-indexing and reliable tap cadence take priority over shaving time.
+		{"deployment_protected", report.AverageDeployMS, false},
+		{"combat", report.AverageCombatMS, true},
+		{"return_home", report.AverageReturnHomeMS, true},
 	}
 	sort.Slice(stages, func(i, j int) bool { return stages[i].ms > stages[j].ms })
 	if len(stages) > 0 {
 		report.Bottleneck = stages[0].name
+	}
+	for _, s := range stages {
+		if s.tunable {
+			report.OptimizationTarget = s.name
+			break
+		}
 	}
 
 	if routineMS > 0 {
