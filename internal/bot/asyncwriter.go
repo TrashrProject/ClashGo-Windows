@@ -123,3 +123,10 @@ var globalAsyncWriter = NewAsyncWriter()
 func AsyncWriteFile(path string, data []byte, perms os.FileMode) error {
 	return globalAsyncWriter.Write(path, data, perms)
 }
+
+// CloseAsyncWriter shuts down the process-global persistence worker.
+// Bot Stop/Start cycles intentionally do NOT call this; otherwise every later
+// session falls back to synchronous os.WriteFile and loses the async path.
+func CloseAsyncWriter() {
+	globalAsyncWriter.Close()
+}
