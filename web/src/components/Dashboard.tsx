@@ -157,6 +157,26 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
     return rows;
   }, [activity]);
 
+  const replayMap = React.useMemo(() => {
+    const events = (replay?.events ?? []).filter((ev) => ev.kind === 'deploy');
+    let maxX = 860;
+    let maxY = 732;
+    for (const ev of events) {
+      maxX = Math.max(maxX, ev.p1?.x || 0, ev.p2?.x || 0, ev.slot_x || 0);
+      maxY = Math.max(maxY, ev.p1?.y || 0, ev.p2?.y || 0, ev.slot_y || 0);
+    }
+    const categoryClass = (category?: string) => {
+      switch ((category || '').toLowerCase()) {
+        case 'hero': return 'text-amber-500';
+        case 'siege':
+        case 'cc': return 'text-rose-500';
+        case 'spell': return 'text-violet-500';
+        default: return 'text-sky-500';
+      }
+    };
+    return { events, width: maxX, height: maxY, categoryClass };
+  }, [replay]);
+
   React.useEffect(() => {
     try {
       localStorage.setItem('terminalAutoScroll', String(terminalAutoScroll));
@@ -375,7 +395,77 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
           {(replay.events ?? []).length === 0 ? (
             <div className="px-6 py-8 text-sm font-medium text-zinc-400">No deployment actions recorded in the latest trace.</div>
           ) : (
-            <div className="px-6 py-5 overflow-x-auto">
+            <>
+              <div className="px-6 pt-5">
+                <div className="grid grid-cols-1 xl:grid-cols-[1.5fr_auto] gap-4 items-start">
+                  <div className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-zinc-950 overflow-hidden relative">
+                    <div className="absolute top-4 left-4 z-10">
+                      <div className="text-[9px] font-black uppercase tracking-[0.22em] text-zinc-500">Deploy Map</div>
+                      <div className="mt-1 text-xs font-bold text-zinc-300">{replayMap.events.length} recorded deploy actions</div>
+                    </div>
+                    <svg
+                      viewBox={`0 0 ${replayMap.width} ${replayMap.height}`}
+                      className="w-full aspect-[860/732] min-h-[280px]"
+                      role="img"
+                      aria-label="Latest deployment map"
+                    >
+                      <defs>
+                        <pattern id="deploy-grid" width="60" height="60" patternUnits="userSpaceOnUse">
+                          <path d="M 60 0 L 0 0 0 60" fill="none" stroke="currentColor" strokeWidth="1" className="text-zinc-800" />
+                        </pattern>
+                      </defs>
+                      <rect x="0" y="0" width={replayMap.width} height={replayMap.height} fill="url(#deploy-grid)" />
+                      <line x1={replayMap.width / 2} y1="0" x2={replayMap.width / 2} y2={replayMap.height} stroke="currentColor" strokeDasharray="10 10" className="text-zinc-800" />
+                      <line x1="0" y1={replayMap.height / 2} x2={replayMap.width} y2={replayMap.height / 2} stroke="currentColor" strokeDasharray="10 10" className="text-zinc-800" />
+                      {replayMap.events.slice(-28).map((ev, index) => {
+                        const x1 = ev.p1?.x || 0;
+                        const y1 = ev.p1?.y || 0;
+                        const x2 = ev.p2?.x || x1;
+                        const y2 = ev.p2?.y || y1;
+                        const pointMode = x1 === x2 && y1 === y2;
+                        const cls = replayMap.categoryClass(ev.category);
+                        const labelX = pointMode ? x1 : (x1 + x2) / 2;
+                        const labelY = pointMode ? y1 : (y1 + y2) / 2;
+                        return (
+                          <g key={`map-${ev.offset_ms}-${index}`} className={cls}>
+                            {!pointMode && (
+                              <line
+                                x1={x1}
+                                y1={y1}
+                                x2={x2}
+                                y2={y2}
+                                stroke="currentColor"
+                                strokeWidth="7"
+                                strokeLinecap="round"
+                                opacity="0.75"
+                              />
+                            )}
+                            <circle cx={labelX} cy={labelY} r="13" fill="currentColor" opacity="0.92" />
+                            <text x={labelX} y={labelY + 4} textAnchor="middle" fontSize="11" fontWeight="900" fill="white">
+                              {index + 1}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+                  </div>
+                  <div className="grid grid-cols-2 xl:grid-cols-1 gap-2 min-w-[160px]">
+                    {[
+                      ['Troop', 'bg-sky-500'],
+                      ['Hero', 'bg-amber-500'],
+                      ['Siege / CC', 'bg-rose-500'],
+                      ['Spell', 'bg-violet-500'],
+                    ].map(([label, cls]) => (
+                      <div key={label} className="rounded-xl border border-zinc-100 dark:border-zinc-800 px-3 py-2 flex items-center gap-2">
+                        <span className={`size-2.5 rounded-full ${cls}`} />
+                        <span className="text-[9px] font-black uppercase tracking-wider text-zinc-500">{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-6 py-5 overflow-x-auto">
               <div className="flex gap-3 min-w-max">
                 {(replay.events ?? []).slice(-14).map((ev, index) => {
                   const pointMode = ev.p1?.x === ev.p2?.x && ev.p1?.y === ev.p2?.y;
@@ -404,6 +494,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                 })}
               </div>
             </div>
+            </>
           )}
         </section>
       )}
