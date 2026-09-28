@@ -1681,6 +1681,38 @@ Best optimization target: {pipeline.dominantTunable.label}
         </div>
       </div>
 
+      {(stats.top_rejected_targets ?? []).length > 0 && (
+        <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Best Skipped Targets</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">What the thresholds refused</h3>
+              <p className="text-sm text-zinc-500 mt-1">Top 5 rejected bases kept in memory only. Useful for tuning thresholds without writing every skip to disk.</p>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">visibility_off</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            {(stats.top_rejected_targets ?? []).map((target, index) => (
+              <div key={`${target.at}-${index}`} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">Skipped #{index + 1}</div>
+                  <div className="text-[9px] font-black text-zinc-500 tabular-nums">{target.score}/100</div>
+                </div>
+                <div className="mt-3 text-lg font-black text-zinc-950 dark:text-white tabular-nums">
+                  {compact((target.gold || 0) + (target.elixir || 0))} G+E
+                </div>
+                <div className="mt-1 text-[10px] font-bold text-zinc-500 tabular-nums">
+                  {compact(target.gold || 0)} G · {compact(target.elixir || 0)} E
+                </div>
+                <div className="mt-1 text-[10px] font-bold text-zinc-500 tabular-nums">
+                  {compact(target.dark_elixir || 0)} DE
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-6 rounded-[2.5rem] shadow-premium-lg">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
