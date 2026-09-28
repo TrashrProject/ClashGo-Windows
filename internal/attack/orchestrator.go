@@ -446,79 +446,15 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			deploySide = "right"
 		}
 
-		if redZone.Valid {
-			const outsidePad = 34
-			free := map[string]int{
-				"left":   redZone.BBox.Min.X,
-				"right":  w - redZone.BBox.Max.X,
-				"top":    redZone.BBox.Min.Y,
-				"bottom": uiCutoff - redZone.BBox.Max.Y,
-			}
-
-			// Reliability first on Windows: use the side with the most real
-			// free space outside the detected red box, regardless of the
-			// strategy's preferred corner. The old preference could pick a
-			// very narrow strip and force taps back toward the village.
-			// Never choose the bottom side on Windows. The lower battle HUD
-			// contains Surrender/End Battle, Overall Damage and the troop bar.
-			// A geometrically "free" strip there is not a safe tap region.
-			deploySide = "left"
-			best := free["left"]
-			for _, side := range []string{"right", "top"} {
-				if free[side] > best {
-					deploySide = side
-					best = free[side]
-				}
-			}
-
-			switch deploySide {
-			case "right":
-				x := redZone.BBox.Max.X + outsidePad
-				if x > w-edgeMargin { x = w-edgeMargin }
-				fieldTop := int(float64(h) * 0.22)
-				fieldBottom := int(float64(h) * 0.58)
-				y1 := clamp(redZone.BBox.Min.Y+45, fieldTop, fieldBottom)
-				y2 := clamp(redZone.BBox.Max.Y-45, fieldTop, fieldBottom)
-				if y2-y1 < int(float64(h)*0.12) {
-					mid := (fieldTop + fieldBottom) / 2
-					half := int(float64(h) * 0.10)
-					y1, y2 = mid-half, mid+half
-				}
-				p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
-			case "top":
-				y := redZone.BBox.Min.Y - outsidePad
-				if y < edgeMargin { y = edgeMargin }
-				x1 := clamp(redZone.BBox.Min.X+35, edgeMargin, w-edgeMargin)
-				x2 := clamp(redZone.BBox.Max.X-35, edgeMargin, w-edgeMargin)
-				p1, p2 = image.Pt(x1, y), image.Pt(x2, y)
-			case "bottom":
-				y := redZone.BBox.Max.Y + outsidePad
-				if y > uiCutoff-edgeMargin { y = uiCutoff-edgeMargin }
-				x1 := clamp(redZone.BBox.Min.X+35, edgeMargin, w-edgeMargin)
-				x2 := clamp(redZone.BBox.Max.X-35, edgeMargin, w-edgeMargin)
-				p1, p2 = image.Pt(x1, y), image.Pt(x2, y)
-			default: // left
-				x := redZone.BBox.Min.X - outsidePad
-				if x < edgeMargin { x = edgeMargin }
-				fieldTop := int(float64(h) * 0.22)
-				fieldBottom := int(float64(h) * 0.58)
-				y1 := clamp(redZone.BBox.Min.Y+45, fieldTop, fieldBottom)
-				y2 := clamp(redZone.BBox.Max.Y-45, fieldTop, fieldBottom)
-				if y2-y1 < int(float64(h)*0.12) {
-					mid := (fieldTop + fieldBottom) / 2
-					half := int(float64(h) * 0.10)
-					y1, y2 = mid-half, mid+half
-				}
-				p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
-			}
-
+		if side, rp1, rp2, freeSpace, ok := windowsDeployCorridor(redZone, w, h, uiCutoff); ok {
+			deploySide, p1, p2 = side, rp1, rp2
 			e.logger.Info().
 				Str("side", deploySide).
 				Interface("red_bbox", redZone.BBox).
 				Interface("p1", p1).
 				Interface("p2", p2).
-				Int("free_space", free[deploySide]).
-				Msg("Windows deploy line locked to widest free side outside live red zone")
+				Int("free_space", freeSpace).
+				Msg("Windows deploy corridor locked outside live red zone")
 		} else if len(deployLine.Points) >= 2 {
 			// Existing calculator already keeps these points near the outer
 			// edge; use them if red-line detection itself was unavailable.
@@ -551,29 +487,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		baseLine := [2]image.Point{p1, p2}
 		safeLines = append(safeLines, baseLine)
 
-		nudgeOutside := func(line [2]image.Point, pixels int) [2]image.Point {
-			out := line
-			switch deploySide {
-			case "right":
-				out[0].X = clamp(out[0].X+pixels, edgeMargin, w-edgeMargin)
-				out[1].X = clamp(out[1].X+pixels, edgeMargin, w-edgeMargin)
-			case "top":
-				out[0].Y = clamp(out[0].Y-pixels, edgeMargin, uiCutoff-edgeMargin)
-				out[1].Y = clamp(out[1].Y-pixels, edgeMargin, uiCutoff-edgeMargin)
-			case "bottom":
-				out[0].Y = clamp(out[0].Y+pixels, edgeMargin, uiCutoff-edgeMargin)
-				out[1].Y = clamp(out[1].Y+pixels, edgeMargin, uiCutoff-edgeMargin)
-			default: // left
-				out[0].X = clamp(out[0].X-pixels, edgeMargin, w-edgeMargin)
-				out[1].X = clamp(out[1].X-pixels, edgeMargin, w-edgeMargin)
-			}
-			return out
-		}
-
 		// One stable line only on Windows. Repeatedly nudging farther outward
 		// eventually pushed taps into screen chrome / HUD. The base line is
 		// already outside the detected red boundary by outsidePad.
-		_ = nudgeOutside
 		e.logger.Info().
 			Str("side", deploySide).
 			Int("safe_lines", len(safeLines)).
