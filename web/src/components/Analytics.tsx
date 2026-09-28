@@ -729,6 +729,9 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const returnRows = rows.filter((r) => (r.return_home_duration_ms || 0) > 0 || r.return_home_success);
     const returnHome = returnRows.length > 0 ? pct(returnRows.filter((r) => r.return_home_success).length, returnRows.length) : 0;
     const parsed = count > 0 ? pct(rows.filter((r) => r.parsed_results).length, count) : 0;
+    const trusted = count > 0
+      ? pct(rows.filter((r) => r.result_confidence === 'high' || r.result_confidence === 'medium' || r.parsed_results).length, count)
+      : 0;
 
     const safetyRows = rows.filter((r) => Boolean(r.safety_mode));
     const certifiedSafety = safetyRows.length > 0
@@ -756,12 +759,12 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         detail: `${returnRows.filter((r) => r.return_home_success).length}/${returnRows.length} measured`,
       },
       {
-        label: 'Result parsed',
-        value: parsed,
-        display: count > 0 ? `${parsed.toFixed(1)}%` : '—',
+        label: 'Result trusted',
+        value: trusted,
+        display: count > 0 ? `${trusted.toFixed(1)}%` : '—',
         threshold: 95,
         sampled: count > 0,
-        detail: 'Battle result OCR',
+        detail: count > 0 ? `OCR parse ${parsed.toFixed(1)}%` : 'OCR / live outcome',
       },
       {
         label: 'Next first-pass',
