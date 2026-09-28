@@ -124,3 +124,38 @@ func TestTargetScanLatencyAggregatesInMemory(t *testing.T) {
 		t.Fatalf("last target scan=%vms, want 18ms", s.LastTargetScanMS)
 	}
 }
+
+func TestTargetQualitySeparatesAcceptedAndRejected(t *testing.T) {
+	b := New(filepath.Join(t.TempDir(), "events.ndjson"))
+	defer b.Close()
+
+	b.Emit(EventTargetFound, map[string]any{
+		"accept": true, "gold": 900000, "elixir": 800000, "de": 4000, "score": 88,
+	})
+	b.Emit(EventTargetFound, map[string]any{
+		"accept": true, "gold": 1100000, "elixir": 1000000, "de": 6000, "score": 92,
+	})
+	b.Emit(EventTargetFound, map[string]any{
+		"accept": false, "gold": 400000, "elixir": 300000, "de": 1000, "score": 51,
+	})
+	b.Emit(EventTargetFound, map[string]any{
+		"accept": false, "gold": 600000, "elixir": 500000, "de": 2000, "score": 61,
+	})
+
+	s := b.Snapshot()
+	if s.TargetsFound != 4 || s.TargetsAccepted != 2 {
+		t.Fatalf("unexpected target counters: %+v", s)
+	}
+	if s.AvgAcceptedGE != 1_900_000 {
+		t.Fatalf("avg accepted G+E=%v want 1900000", s.AvgAcceptedGE)
+	}
+	if s.AvgRejectedGE != 900_000 {
+		t.Fatalf("avg rejected G+E=%v want 900000", s.AvgRejectedGE)
+	}
+	if s.AvgAcceptedDE != 5000 || s.AvgRejectedDE != 1500 {
+		t.Fatalf("unexpected DE averages: accepted=%v rejected=%v", s.AvgAcceptedDE, s.AvgRejectedDE)
+	}
+	if s.AvgAcceptedScore != 90 || s.AvgRejectedScore != 56 {
+		t.Fatalf("unexpected score averages: accepted=%v rejected=%v", s.AvgAcceptedScore, s.AvgRejectedScore)
+	}
+}
