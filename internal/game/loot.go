@@ -668,42 +668,44 @@ func (lr *LootRecognizer) ReadLootDetailed(screen gocv.Mat) (LootReport, error) 
 		{"de", "icon_de", 124, 157},
 	}
 
+	// One shared HUD view for all three icon matches. Region() is cheap, but
+	// keeping a single native Mat header avoids needless cgo churn on the
+	// matchmaking hot path.
+	searchROI := lr.safeRect(screen, image.Rect(
+		0,
+		int(35*lr.cal.ScaleY),
+		int(500*lr.cal.ScaleX),
+		int(190*lr.cal.ScaleY),
+	))
+	var hud gocv.Mat
+	if !searchROI.Empty() {
+		hud = screen.Region(searchROI)
+		defer hud.Close()
+	}
+
 	var results [3]int
 	for i, ic := range icons {
 		tpl, ok := lr.templates.Get(ic.tpl)
-		if ok && !tpl.Empty() {
-			// Enemy-loot icons live in the upper-left HUD. Matching each icon
-			// over the entire 860x732 frame was one of the most expensive parts
-			// of every matchmaking candidate scan. Restrict template matching to
-			// a generous HUD band while keeping the exact same confidence gate
-			// and fixed-ROI fallback below.
-			searchROI := lr.safeRect(screen, image.Rect(
-				0,
-				int(35*lr.cal.ScaleY),
-				int(500*lr.cal.ScaleX),
-				int(190*lr.cal.ScaleY),
-			))
-			if searchROI.Dx() >= tpl.Cols() && searchROI.Dy() >= tpl.Rows() {
-				hud := screen.Region(searchROI)
-				res := vision.GetMat(hud.Rows()-tpl.Rows()+1, hud.Cols()-tpl.Cols()+1, gocv.MatTypeCV32FC1)
-				gocv.MatchTemplate(hud, tpl, &res, gocv.TmCcoeffNormed, vision.EmptyMask())
-				_, maxConf, _, localMax := gocv.MinMaxLoc(res)
-				vision.PutMat(res)
-				hud.Close()
+		if ok && !tpl.Empty() && !hud.Empty() && hud.Cols() >= tpl.Cols() && hud.Rows() >= tpl.Rows() {
+			// Enemy-loot icons live in the upper-left HUD. Restricting these
+			// matches avoids scanning the entire battlefield three times per base.
+			res := vision.GetMat(hud.Rows()-tpl.Rows()+1, hud.Cols()-tpl.Cols()+1, gocv.MatTypeCV32FC1)
+			gocv.MatchTemplate(hud, tpl, &res, gocv.TmCcoeffNormed, vision.EmptyMask())
+			_, maxConf, _, localMax := gocv.MinMaxLoc(res)
+			vision.PutMat(res)
 
-				if maxConf > 0.8 {
-					maxLoc := localMax.Add(searchROI.Min)
-					// Anchor to icon. Starting ROI directly inside the icon area
-					// because readRow uses Color/Saturation to skip the actual icon bits.
-					rect := image.Rect(
-						maxLoc.X+int(4*lr.cal.ScaleX),
-						maxLoc.Y-int(5*lr.cal.ScaleY),
-						maxLoc.X+int(450*lr.cal.ScaleX),
-						maxLoc.Y+tpl.Rows()+int(5*lr.cal.ScaleY),
-					)
-					results[i] = lr.readRow(screen, rect)
-					continue
-				}
+			if maxConf > 0.8 {
+				maxLoc := localMax.Add(searchROI.Min)
+				// Anchor to icon. Starting ROI directly inside the icon area
+				// because readRow uses Color/Saturation to skip the actual icon bits.
+				rect := image.Rect(
+					maxLoc.X+int(4*lr.cal.ScaleX),
+					maxLoc.Y-int(5*lr.cal.ScaleY),
+					maxLoc.X+int(450*lr.cal.ScaleX),
+					maxLoc.Y+tpl.Rows()+int(5*lr.cal.ScaleY),
+				)
+				results[i] = lr.readRow(screen, rect)
+				continue
 			}
 		}
 		// Fallback ROIs: Inclusive X1=40 to catch the very first digit
