@@ -1642,17 +1642,31 @@ func (e *Executor) ReturnHome() error {
 	if err := e.client.TapHuman(hx, hy, 5.0); err != nil {
 		return err
 	}
-	time.Sleep(900 * time.Millisecond)
-	screen, err := e.client.CaptureToMat()
-	if err != nil {
-		return err
+
+	// Do not burn a fixed 900ms when the village is already ready, and do
+	// not fail merely because one exact 900ms frame caught a transition.
+	// Poll a short bounded window instead. This is both faster on healthy
+	// BlueStacks sessions and more tolerant of a slightly slow return.
+	time.Sleep(380 * time.Millisecond)
+	deadline := time.Now().Add(1400 * time.Millisecond)
+	lastState := game.StateUnknown
+	for {
+		screen, err := e.client.CaptureToMat()
+		if err != nil {
+			return err
+		}
+		state, _ := e.classify(screen)
+		screen.Close()
+		lastState = state
+		if state == game.StateMainVillage {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(220 * time.Millisecond)
 	}
-	defer screen.Close()
-	state, _ := e.classify(screen)
-	if state != game.StateMainVillage {
-		return fmt.Errorf("did not return home")
-	}
-	return nil
+	return fmt.Errorf("did not return home within adaptive verification window (last state: %s)", lastState.String())
 }
 
 // WaitForBattleEnd is the context-free variant of
