@@ -130,6 +130,9 @@ export interface AttackReport {
   battle_end_reason: string;
   destruction_pct: number;
   town_hall_destroyed: boolean;
+  return_home_duration_ms: number;
+  return_home_success: boolean;
+  full_routine_duration_ms: number;
 }
 
 export interface BotConfig {
