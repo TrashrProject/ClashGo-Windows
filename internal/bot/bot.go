@@ -1909,15 +1909,34 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			})
 		}
 
-		decision := intelligence.EvaluateTarget(intelligence.Target{
-			Gold: loot.Gold, Elixir: loot.Elixir, DarkElixir: loot.DarkElixir,
-		}, intelligence.TargetRules{
+		baseRules := intelligence.TargetRules{
 			MinGold: b.cfg.Search.MinLootGold,
 			MinElixir: b.cfg.Search.MinLootElixir,
 			MinDarkElixir: b.cfg.Search.MinLootDarkElixir,
 			DarkOverride: b.cfg.Search.AttackIfDarkElixirGT,
 			SearchEnabled: b.cfg.Search.Enabled,
+		}
+		effectiveRules, adaptivePercent := intelligence.AdaptTargetRules(baseRules, sequenceSkips, intelligence.AdaptiveSearchPolicy{
+			Enabled: b.cfg.Search.AdaptiveSearch,
+			StartAfterSkips: b.cfg.Search.AdaptiveStartAfterSkips,
+			StepEverySkips: b.cfg.Search.AdaptiveStepEverySkips,
+			StepPercent: b.cfg.Search.AdaptiveStepPercent,
+			FloorPercent: b.cfg.Search.AdaptiveFloorPercent,
 		})
+		decision := intelligence.EvaluateTarget(intelligence.Target{
+			Gold: loot.Gold, Elixir: loot.Elixir, DarkElixir: loot.DarkElixir,
+		}, effectiveRules)
+		if adaptivePercent < 100 && b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
+				"mode": "AdaptiveSearch",
+				"reason": "long_skip_streak",
+				"skips": sequenceSkips,
+				"threshold_percent": adaptivePercent,
+				"min_gold": effectiveRules.MinGold,
+				"min_elixir": effectiveRules.MinElixir,
+				"min_de": effectiveRules.MinDarkElixir,
+			})
+		}
 		if b.telemetry != nil {
 			if decision.Accept {
 				b.telemetry.Emit(telemetry.EventTargetFound, map[string]any{"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir, "score": decision.Score, "accept": true, "reason": decision.Reason, "scan_us": targetScanUS})
