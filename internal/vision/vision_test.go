@@ -69,3 +69,31 @@ func TestMatPoolLifecycleBalance(t *testing.T) {
 		p.Put(m)
 	}
 }
+
+func TestPreferredTemplateScaleIsScopedByTemplateAndScaleGrid(t *testing.T) {
+	RememberPreferredTemplateScale("queen", 0.2, 1.2, 20, 0.73)
+	if got, ok := preferredTemplateScale("queen", 0.2, 1.2, 20); !ok || got != 0.73 {
+		t.Fatalf("preferred scale=%v ok=%v want 0.73/true", got, ok)
+	}
+	if _, ok := preferredTemplateScale("warden", 0.2, 1.2, 20); ok {
+		t.Fatal("preferred scale leaked across template names")
+	}
+	if _, ok := preferredTemplateScale("queen", 0.2, 1.2, 12); ok {
+		t.Fatal("preferred scale leaked across step-count grids")
+	}
+	if _, ok := preferredTemplateScale("queen", 0.3, 1.1, 20); ok {
+		t.Fatal("preferred scale leaked across scale ranges")
+	}
+}
+
+func TestRememberPreferredTemplateScaleRejectsInvalidHints(t *testing.T) {
+	RememberPreferredTemplateScale("", 0.2, 1.2, 20, 0.8)
+	if _, ok := preferredTemplateScale("", 0.2, 1.2, 20); ok {
+		t.Fatal("empty template name must not create preferred-scale hint")
+	}
+
+	RememberPreferredTemplateScale("invalid-scale", 0.2, 1.2, 20, 0)
+	if _, ok := preferredTemplateScale("invalid-scale", 0.2, 1.2, 20); ok {
+		t.Fatal("non-positive preferred scale must be ignored")
+	}
+}
