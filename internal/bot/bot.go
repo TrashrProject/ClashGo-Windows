@@ -1747,7 +1747,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			}
 			b.logger.Debug().Str("state", state.String()).Msg("searching area")
 
-			b.dismissInterruptions()
+			b.dismissInterruptionState(state)
 			screen.Close()
 			continue
 		}
@@ -3111,7 +3111,10 @@ func (b *Bot) dismissInterruptions() {
 	}
 	state, _ := b.classify(screen)
 	screen.Close()
+	b.dismissInterruptionState(state)
+}
 
+func (b *Bot) dismissInterruptionState(state game.GameState) {
 	switch state {
 	case game.StateObstacleDialog:
 		b.client.TapRandomized(400, 300)
@@ -3191,7 +3194,7 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 			time.Sleep(400 * time.Millisecond)
 		default:
 			b.logger.Debug().Str("state", state.String()).Msg("waiting for battle state")
-			b.dismissInterruptions()
+			b.dismissInterruptionState(state)
 			time.Sleep(250 * time.Millisecond)
 		}
 	}
