@@ -49,7 +49,7 @@ func (g *Governor) Gate(now time.Time, attacksCompleted, recoveryAttempts int32)
 
 	if g.cfg.MaxAttacksPerHour > 0 && len(g.attackTimes) >= g.cfg.MaxAttacksPerHour {
 		oldest := g.attackTimes[0]
-		wait := time.Until(oldest.Add(time.Hour))
+		wait := oldest.Add(time.Hour).Sub(now)
 		if wait < 0 {
 			wait = 0
 		}
