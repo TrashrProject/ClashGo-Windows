@@ -167,7 +167,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const summarize = (rows: AttackReport[]) => {
       let search = 0, deploy = 0, complete = 0, capture = 0, scan = 0;
       let searchN = 0, deployN = 0, captureN = 0, scanN = 0;
-      for (const rep of rows) {
+      for (const rep of measured) {
         if ((rep.search_duration_ms || 0) > 0) { search += rep.search_duration_ms; searchN++; }
         if ((rep.deploy_duration_ms || 0) > 0) { deploy += rep.deploy_duration_ms; deployN++; }
         if ((rep.capture_ms || 0) > 0) { capture += rep.capture_ms; captureN++; }
@@ -343,7 +343,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const confidence = { high: 0, medium: 0, low: 0, unknown: 0 };
     const stars = new Map<string, number>();
     const loot = new Map<string, number>();
-    for (const rep of rows) {
+    for (const rep of measured) {
       const level = rep.result_confidence || 'unknown';
       if (level === 'high' || level === 'medium' || level === 'low') {
         confidence[level]++;
@@ -414,7 +414,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     let early = 0, waitAll = 0, waitNatural = 0, naturalCount = 0, waitEarly = 0, lootPct = 0, lootPctCount = 0;
     const map = new Map<string, { reason: string; attacks: number; waitMS: number; stars: number; ge: number }>();
 
-    for (const rep of rows) {
+    for (const rep of measured) {
       const reason = rep.battle_end_reason || 'unknown';
       const isEarly = earlyReasons.has(reason);
       const wait = rep.battle_end_wait_ms || 0;
@@ -472,7 +472,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
 
     const summarize = (rows: AttackReport[]) => {
       let ge = 0, routine = 0, wait = 0, stars = 0, complete = 0;
-      for (const rep of rows) {
+      for (const rep of measured) {
         ge += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0);
         routine += rep.full_routine_duration_ms || rep.cycle_duration_ms || 0;
         wait += rep.battle_end_wait_ms || 0;
@@ -519,39 +519,6 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     return { status, message, natural: n, early: e, deltaYieldPct };
   }, [history]);
 
-  const farmForecast = React.useMemo(() => {
-    const attacks = history?.length ?? 0;
-    const goldPerHour = stats.gold_per_hour || 0;
-    const elixirPerHour = stats.elixir_per_hour || 0;
-    const dePerHour = stats.de_per_hour || 0;
-
-    const recentRows = (history ?? []).slice(0, 10);
-    const recentRoutines = recentRows
-      .map((r) => r.full_routine_duration_ms || r.cycle_duration_ms || 0)
-      .filter((v) => v > 0);
-    const mean = recentRoutines.length
-      ? recentRoutines.reduce((sum, v) => sum + v, 0) / recentRoutines.length
-      : 0;
-    const variance = recentRoutines.length
-      ? recentRoutines.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / recentRoutines.length
-      : 0;
-    const cv = mean > 0 ? Math.sqrt(variance) / mean : 1;
-
-    let confidence = 'Learning';
-    if (attacks >= 30 && cv <= 0.25 && (stats.health_score ?? 0) >= 90) confidence = 'High';
-    else if (attacks >= 10 && cv <= 0.45 && (stats.health_score ?? 0) >= 75) confidence = 'Medium';
-
-    return {
-      confidence,
-      cv,
-      rows: [1, 8, 24].map((hours) => ({
-        hours,
-        gold: goldPerHour * hours,
-        elixir: elixirPerHour * hours,
-        de: dePerHour * hours,
-      })),
-    };
-  }, [history, stats.gold_per_hour, stats.elixir_per_hour, stats.de_per_hour, stats.health_score]);
 
   const sideStats = React.useMemo(() => {
     const map = new Map<string, {
@@ -624,7 +591,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     let hudSafe = 0;
     let corridor = 0;
     let fallbacks = 0;
-    for (const rep of rows) {
+    for (const rep of measured) {
       const mode = rep.safety_mode || 'unknown';
       modeCounts.set(mode, (modeCounts.get(mode) || 0) + 1);
       if (rep.red_zone_valid && rep.corridor_verified && rep.hud_safe) liveCertified++;
@@ -706,7 +673,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     let trueMS = 0;
     let overheadMS = 0;
     let ge = 0;
-    for (const rep of rows) {
+    for (const rep of measured) {
       const active = (rep.search_duration_ms || 0) + (rep.deploy_duration_ms || 0) + Math.max(0, (rep.battle_duration_ms || 0) - (rep.deploy_duration_ms || 0));
       const truth = rep.full_routine_duration_ms || rep.cycle_duration_ms || active;
       activeMS += active;
@@ -814,7 +781,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       Boolean(rep.corridor_verified);
 
     let current = 0;
-    for (const rep of rows) {
+    for (const rep of measured) {
       if (!qualifies(rep)) break;
       current++;
     }
@@ -824,7 +791,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     let total = 0;
     let clean = 0;
     let redZoneCertified = 0;
-    for (const rep of rows) {
+    for (const rep of measured) {
       total++;
       if (qualifies(rep)) {
         clean++;
@@ -920,7 +887,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     return bands.map((band) => {
       const rows = (history ?? []).filter((rep) => (rep.target_score || 0) >= band.min && (rep.target_score || 0) <= band.max);
       let stars = 0, complete = 0, ge = 0, routine = 0;
-      for (const rep of rows) {
+      for (const rep of measured) {
         stars += rep.stars || 0;
         if (rep.deploy_success) complete++;
         ge += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0);
@@ -978,21 +945,40 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   }, [history]);
 
   const farmForecast = React.useMemo(() => {
-    const rows = (history ?? []).slice(0, 20).filter((rep) =>
+    const measured = (history ?? []).slice(0, 20).filter((rep) =>
       (rep.full_routine_duration_ms || rep.cycle_duration_ms || 0) > 0
     );
-    if (rows.length < 3) {
+
+    const recentDurations = measured.slice(0, 10).map((rep) =>
+      rep.full_routine_duration_ms || rep.cycle_duration_ms || 0
+    );
+    const durationMean = recentDurations.length
+      ? recentDurations.reduce((sum, value) => sum + value, 0) / recentDurations.length
+      : 0;
+    const durationVariance = recentDurations.length
+      ? recentDurations.reduce((sum, value) => sum + Math.pow(value - durationMean, 2), 0) / recentDurations.length
+      : 0;
+    const cv = durationMean > 0 ? Math.sqrt(durationVariance) / durationMean : 1;
+
+    if (measured.length < 3) {
+      const gph = stats.gold_per_hour || 0;
+      const eph = stats.elixir_per_hour || 0;
+      const dph = stats.de_per_hour || 0;
       return {
-        ready: false, samples: rows.length, attacksPerHour: 0,
+        ready: false, samples: measured.length, attacksPerHour: 0,
         gold30: 0, elixir30: 0, de30: 0,
         gold60: 0, elixir60: 0, de60: 0,
         lowGE60: 0, highGE60: 0,
+        confidence: 'Learning', cv,
+        rows: [1, 8, 24].map((hours) => ({
+          hours, gold: gph * hours, elixir: eph * hours, de: dph * hours,
+        })),
       };
     }
 
     let totalMs = 0, gold = 0, elixir = 0, de = 0;
     const geRates: number[] = [];
-    for (const rep of rows) {
+    for (const rep of measured) {
       const ms = rep.full_routine_duration_ms || rep.cycle_duration_ms || 0;
       if (ms <= 0) continue;
       const hours = ms / 3_600_000;
@@ -1010,7 +996,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const goldPerHour = hours > 0 ? gold / hours : 0;
     const elixirPerHour = hours > 0 ? elixir / hours : 0;
     const dePerHour = hours > 0 ? de / hours : 0;
-    const attacksPerHour = hours > 0 ? rows.length / hours : 0;
+    const attacksPerHour = hours > 0 ? measured.length / hours : 0;
 
     const percentile = (values: number[], q: number) => {
       if (values.length === 0) return 0;
@@ -1023,9 +1009,13 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       return sorted[lo] * (1 - weight) + sorted[hi] * weight;
     };
 
+    let confidence = 'Learning';
+    if (measured.length >= 20 && cv <= 0.25 && (stats.health_score ?? 0) >= 90) confidence = 'High';
+    else if (measured.length >= 10 && cv <= 0.45 && (stats.health_score ?? 0) >= 75) confidence = 'Medium';
+
     return {
       ready: true,
-      samples: rows.length,
+      samples: measured.length,
       attacksPerHour,
       gold30: goldPerHour * 0.5,
       elixir30: elixirPerHour * 0.5,
@@ -1035,8 +1025,16 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       de60: dePerHour,
       lowGE60: percentile(geRates, 0.25),
       highGE60: percentile(geRates, 0.75),
+      confidence,
+      cv,
+      rows: [1, 8, 24].map((forecastHours) => ({
+        hours: forecastHours,
+        gold: goldPerHour * forecastHours,
+        elixir: elixirPerHour * forecastHours,
+        de: dePerHour * forecastHours,
+      })),
     };
-  }, [history]);
+  }, [history, stats.gold_per_hour, stats.elixir_per_hour, stats.de_per_hour, stats.health_score]);
 
   const recentPerformance = React.useMemo(() => {
     const summarize = (rows: AttackReport[]) => {
@@ -1051,7 +1049,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       let stars = 0, triples = 0, complete = 0;
       let searchMs = 0, deployMs = 0, cycleMs = 0;
       let gold = 0, elixir = 0, de = 0;
-      for (const rep of rows) {
+      for (const rep of measured) {
         stars += rep.stars || 0;
         if ((rep.stars || 0) === 3) triples++;
         if (rep.deploy_success) complete++;
@@ -1771,7 +1769,7 @@ Best optimization target: {pipeline.dominantTunable.label}
               <tbody>
                 {battleExitIntelligence.groups.map((row) => (
                   <tr key={row.reason} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
-                    <td className="py-4 pr-3 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-white">{row.reason.replaceAll('_', ' ')}</td>
+                    <td className="py-4 pr-3 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-white">{row.reason.split('_').join(' ')}</td>
                     <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
                     <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.avgWaitMS / 1000).toFixed(1)}s</td>
                     <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.avgStars.toFixed(2)}</td>
