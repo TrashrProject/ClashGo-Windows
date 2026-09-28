@@ -11,9 +11,10 @@ import (
 )
 
 type AttackTrace struct {
-	Timestamp time.Time         `json:"timestamp"`
-	Strategy  string            `json:"strategy"`
-	Army      ArmyStateSnapshot `json:"army"`
+	Timestamp time.Time          `json:"timestamp"`
+	Strategy  string             `json:"strategy"`
+	Army      ArmyStateSnapshot  `json:"army"`
+	Events    []ArmyReplayEvent  `json:"events"`
 }
 
 func writeAttackTrace(strategy string, army *ArmyStateManager) {
@@ -29,6 +30,7 @@ func writeAttackTrace(strategy string, army *ArmyStateManager) {
 		Timestamp: time.Now(),
 		Strategy: strings.TrimSpace(strategy),
 		Army: army.Snapshot(),
+		Events: army.ReplayEvents(),
 	}
 	data, err := json.MarshalIndent(trace, "", "  ")
 	if err != nil {
