@@ -458,7 +458,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			e.lastSafetyMode = "live_red_zone"
 			e.lastRedZoneValid = true
 			e.lastCorridorVerified = true
-			e.lastHUDSafe = p1.Y < uiCutoff && p2.Y < uiCutoff
+			e.lastHUDSafe = sanitizeWindowsDeployPoint(p1, w, h) == p1 && sanitizeWindowsDeployPoint(p2, w, h) == p2
 			e.logger.Info().
 				Str("side", deploySide).
 				Interface("red_bbox", redZone.BBox).
@@ -480,7 +480,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			e.lastSafetyMode = "pinned_or_calculated"
 			e.lastRedZoneValid = false
 			e.lastCorridorVerified = false
-			e.lastHUDSafe = p1.Y < uiCutoff && p2.Y < uiCutoff
+			e.lastHUDSafe = sanitizeWindowsDeployPoint(p1, w, h) == p1 && sanitizeWindowsDeployPoint(p2, w, h) == p2
 			e.logger.Warn().
 				Interface("p1", p1).
 				Interface("p2", p2).
@@ -492,7 +492,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			e.lastSafetyMode = "fallback_outer_edge"
 			e.lastRedZoneValid = false
 			e.lastCorridorVerified = false
-			e.lastHUDSafe = p1.Y < uiCutoff && p2.Y < uiCutoff
+			e.lastHUDSafe = sanitizeWindowsDeployPoint(p1, w, h) == p1 && sanitizeWindowsDeployPoint(p2, w, h) == p2
 			e.logger.Warn().Msg("Windows deploy line fallback: hugging outer left border")
 		}
 
