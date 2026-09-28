@@ -1935,13 +1935,33 @@ func battleLootSampleDue(lootExitEnabled bool, tick int) bool {
 	return tick%3 == 1
 }
 
+func chooseBattleEndPoll(h adb.Health, lootExitEnabled bool) time.Duration {
+	captureMs := h.FastCaptureMs
+	if captureMs <= 0 {
+		captureMs = h.AvgCaptureMs
+	}
+	if h.ConsecutiveFails > 0 || captureMs >= 900 {
+		return 1200 * time.Millisecond
+	}
+	if captureMs > 0 && captureMs <= 500 {
+		// Loot-exit performs OCR on every poll, so keep a slightly more
+		// conservative cadence than state-only natural-result detection.
+		if lootExitEnabled {
+			return 900 * time.Millisecond
+		}
+		return 800 * time.Millisecond
+	}
+	return 1000 * time.Millisecond
+}
+
 func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duration) bool {
 	waitStarted := time.Now()
 	defer func() {
 		e.lastBattleWaitMS = time.Since(waitStarted).Milliseconds()
 	}()
 	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(1000 * time.Millisecond)
+	pollEvery := chooseBattleEndPoll(e.client.Health(), e.cfg.LootExitEnabled)
+	ticker := time.NewTicker(pollEvery)
 	defer ticker.Stop()
 
 	// Per-battle outcome reset. lastDestructionPct / thDestroyed are
