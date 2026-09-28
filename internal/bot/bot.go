@@ -3013,6 +3013,7 @@ func (b *Bot) Stats() BotStats {
 		TelemetryEvents:    tm.Events,
 		TargetsSkipped:     tm.TargetsSkipped,
 		HealthScore:        healthScore,
+		SpeedProfile:       chooseSearchPacing(adbHealth).Mode,
 	}
 }
 
@@ -3047,6 +3048,7 @@ type BotStats struct {
 	TelemetryEvents  int64   `json:"telemetry_events"`
 	TargetsSkipped   int64   `json:"targets_skipped"`
 	HealthScore      int     `json:"health_score"`
+	SpeedProfile     string  `json:"speed_profile"`
 }
 
 type AttackReport struct {
