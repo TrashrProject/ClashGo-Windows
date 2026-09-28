@@ -85,3 +85,16 @@ func TestSearchReliabilityIgnoresTinySample(t *testing.T) {
 		t.Fatalf("tiny sample should not override ADB pacing, got %+v", p)
 	}
 }
+
+func TestSafePacingActiveExpiresCleanly(t *testing.T) {
+	const now = int64(1_000_000)
+	if !safePacingActive(now+1, now) {
+		t.Fatal("future safety window should be active")
+	}
+	if safePacingActive(now, now) {
+		t.Fatal("safety window must expire exactly at deadline")
+	}
+	if safePacingActive(now-1, now) {
+		t.Fatal("expired safety window must be inactive")
+	}
+}
