@@ -2787,10 +2787,22 @@ func (b *Bot) clickSequence() bool {
 	}
 	b.lastPrepTimings.ArmySlotMS = time.Since(stepStarted).Milliseconds()
 	stepStarted = time.Now()
-	b.client.JitteredSleep(650 * time.Millisecond)
 
 	battleClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
+	// Selecting the saved army already triggers the menu transition. Instead
+	// of sleeping 650ms blindly and THEN doing another two-frame verifier,
+	// wait directly for the Battle button to become stable and reuse that
+	// verified center. This shortens the happy path while preserving the same
+	// visual safety requirement.
+	if x, y, ok := b.waitForStableLocator("Battle Attack", b.locateBattleButtonColor, 3*time.Second); ok {
+		if err := b.client.TapFast(x, y, 0.6); err == nil {
+			b.recordActivity()
+			battleClicked = true
+			b.logger.Info().Int("x", x).Int("y", y).Msg("Battle Attack stable — clicked")
+		}
+	}
+
+	for attempt := 0; !battleClicked && attempt < 3; attempt++ {
 		if b.focusedButtonClick("Battle Attack", b.locateBattleButtonColor, 2) {
 			battleClicked = true
 			break
