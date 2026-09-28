@@ -166,6 +166,15 @@ export interface AttackReport {
   red_zone_valid: boolean;
   corridor_verified: boolean;
   hud_safe: boolean;
+  red_zone_x1: number;
+  red_zone_y1: number;
+  red_zone_x2: number;
+  red_zone_y2: number;
+  deploy_line_x1: number;
+  deploy_line_y1: number;
+  deploy_line_x2: number;
+  deploy_line_y2: number;
+  deploy_free_space: number;
   return_home_duration_ms: number;
   return_home_success: boolean;
   full_routine_duration_ms: number;
