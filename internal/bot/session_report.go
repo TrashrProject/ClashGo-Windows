@@ -57,6 +57,11 @@ type SessionReport struct {
 	AverageCombatMS float64 `json:"average_combat_ms"`
 	AverageReturnHomeMS float64 `json:"average_return_home_ms"`
 	AverageRoutineMS float64 `json:"average_routine_ms"`
+	AverageBattleEndWaitMS float64 `json:"average_battle_end_wait_ms"`
+	NaturalBattleEndWaitMS float64 `json:"natural_battle_end_wait_ms"`
+	EarlyBattleEndWaitMS float64 `json:"early_battle_end_wait_ms"`
+	EarlyExitRate float64 `json:"early_exit_rate"`
+	AverageLootExitPercent float64 `json:"average_loot_exit_percent"`
 	Bottleneck string `json:"bottleneck"`
 	OptimizationTarget string `json:"optimization_target"`
 
@@ -76,6 +81,7 @@ type SessionReport struct {
 	BlueStacksRestarts int32 `json:"bluestacks_restarts"`
 	PreferredScaleHitRate float64 `json:"preferred_scale_hit_rate"`
 	PreferredScaleEnabled bool `json:"preferred_scale_enabled"`
+	Recommendations []string `json:"recommendations,omitempty"`
 }
 
 func BuildSessionReport(sessionID string, history []AttackReport, stats BotStats, now time.Time) SessionReport {
@@ -113,6 +119,8 @@ func BuildSessionReport(sessionID string, history []AttackReport, stats BotStats
 	var stars, destruction, targetScore float64
 	var triples, fullDeploy, returned, safe, zeroTouch int
 	var cooldownMS, prepMS, searchMS, deployMS, combatMS, homeMS, routineMS float64
+	var battleEndWaitMS, naturalBattleEndWaitMS, earlyBattleEndWaitMS, lootExitPct float64
+	var naturalBattleEnds, earlyBattleEnds, lootExitCount int
 	var measuredTargetScore int
 	var currentStreak, bestStreak, runningStreak int
 
@@ -191,6 +199,22 @@ func BuildSessionReport(sessionID string, history []AttackReport, stats BotStats
 		if reason := strings.TrimSpace(rep.BattleEndReason); reason != "" {
 			report.EndReasons[reason]++
 		}
+		waitMS := float64(rep.BattleEndWaitMS)
+		if waitMS > 0 {
+			battleEndWaitMS += waitMS
+			switch rep.BattleEndReason {
+			case "loot_threshold", "destruction_threshold", "stall":
+				earlyBattleEnds++
+				earlyBattleEndWaitMS += waitMS
+			case "natural_result":
+				naturalBattleEnds++
+				naturalBattleEndWaitMS += waitMS
+			}
+		}
+		if rep.LootExitPercent > 0 {
+			lootExitPct += float64(rep.LootExitPercent)
+			lootExitCount++
+		}
 
 		if ge > bestValue {
 			bestValue = ge
@@ -229,6 +253,17 @@ func BuildSessionReport(sessionID string, history []AttackReport, stats BotStats
 	report.AverageCombatMS = combatMS / n
 	report.AverageReturnHomeMS = homeMS / n
 	report.AverageRoutineMS = routineMS / n
+	report.AverageBattleEndWaitMS = battleEndWaitMS / n
+	if naturalBattleEnds > 0 {
+		report.NaturalBattleEndWaitMS = naturalBattleEndWaitMS / float64(naturalBattleEnds)
+	}
+	if earlyBattleEnds > 0 {
+		report.EarlyBattleEndWaitMS = earlyBattleEndWaitMS / float64(earlyBattleEnds)
+	}
+	report.EarlyExitRate = float64(earlyBattleEnds) * 100 / n
+	if lootExitCount > 0 {
+		report.AverageLootExitPercent = lootExitPct / float64(lootExitCount)
+	}
 
 	type stage struct {
 		name string
@@ -265,6 +300,32 @@ func BuildSessionReport(sessionID string, history []AttackReport, stats BotStats
 
 	report.TopStrategy = mostCommonKey(strategyCounts)
 	report.TopDeploySide = mostCommonKey(sideCounts)
+
+	// Recommendations are descriptive and based only on measured session
+	// behavior. They never change config automatically.
+	if report.FullDeployRate < 95 {
+		report.Recommendations = append(report.Recommendations,
+			"Deployment reliability is below 95%; keep deployment safety/timing protected before attempting faster tap cadence.")
+	}
+	if report.SafeCorridorRate < 98 {
+		report.Recommendations = append(report.Recommendations,
+			"Safe corridor certification is below 98%; inspect red-zone/HUD diagnostics before changing deploy geometry.")
+	}
+	if report.OptimizationTarget != "" {
+		report.Recommendations = append(report.Recommendations,
+			fmt.Sprintf("Largest tunable stage this session: %s.", strings.ReplaceAll(report.OptimizationTarget, "_", " ")))
+	}
+	if report.EarlyExitRate > 0 && report.EarlyBattleEndWaitMS > 0 && report.NaturalBattleEndWaitMS > 0 {
+		delta := report.NaturalBattleEndWaitMS - report.EarlyBattleEndWaitMS
+		if delta > 5000 {
+			report.Recommendations = append(report.Recommendations,
+				fmt.Sprintf("Observed early exits shortened battle-end wait by %.1fs on average; validate loot/stars tradeoff before lowering thresholds.", delta/1000))
+		}
+	}
+	if report.ZeroTouchRate >= 98 && report.Attacks >= 10 {
+		report.Recommendations = append(report.Recommendations,
+			"Autonomy is stable at ≥98% zero-touch; session is suitable for longer unattended endurance testing.")
+	}
 	return report
 }
 
@@ -306,7 +367,7 @@ func writeSessionReportCSV(path string, report SessionReport) error {
 		"gold_per_hour", "elixir_per_hour", "de_per_hour",
 		"average_stars", "three_star_rate", "average_destruction",
 		"full_deploy_rate", "return_home_rate", "safe_corridor_rate", "zero_touch_rate",
-		"best_zero_touch_streak", "average_routine_ms", "bottleneck", "optimization_target",
+		"best_zero_touch_streak", "average_routine_ms", "average_battle_end_wait_ms", "early_exit_rate", "average_loot_exit_percent", "bottleneck", "optimization_target",
 		"top_strategy", "top_deploy_side", "health_score", "speed_profile",
 		"anomalies", "recovery_attempts", "recovery_success_rate", "bluestacks_restarts",
 		"preferred_scale_hit_rate", "preferred_scale_enabled",
@@ -317,7 +378,7 @@ func writeSessionReportCSV(path string, report SessionReport) error {
 		fmt.Sprintf("%.2f", report.GoldPerHour), fmt.Sprintf("%.2f", report.ElixirPerHour), fmt.Sprintf("%.2f", report.DEPerHour),
 		fmt.Sprintf("%.3f", report.AverageStars), fmt.Sprintf("%.2f", report.ThreeStarRate), fmt.Sprintf("%.2f", report.AverageDestruction),
 		fmt.Sprintf("%.2f", report.FullDeployRate), fmt.Sprintf("%.2f", report.ReturnHomeRate), fmt.Sprintf("%.2f", report.SafeCorridorRate), fmt.Sprintf("%.2f", report.ZeroTouchRate),
-		fmt.Sprint(report.BestZeroTouchStreak), fmt.Sprintf("%.0f", report.AverageRoutineMS), report.Bottleneck, report.OptimizationTarget,
+		fmt.Sprint(report.BestZeroTouchStreak), fmt.Sprintf("%.0f", report.AverageRoutineMS), fmt.Sprintf("%.0f", report.AverageBattleEndWaitMS), fmt.Sprintf("%.2f", report.EarlyExitRate), fmt.Sprintf("%.2f", report.AverageLootExitPercent), report.Bottleneck, report.OptimizationTarget,
 		report.TopStrategy, report.TopDeploySide, fmt.Sprint(report.HealthScore), report.SpeedProfile,
 		fmt.Sprint(report.Anomalies), fmt.Sprint(report.RecoveryAttempts), fmt.Sprintf("%.2f", report.RecoverySuccessRate), fmt.Sprint(report.BlueStacksRestarts),
 		fmt.Sprintf("%.2f", report.PreferredScaleHitRate), fmt.Sprint(report.PreferredScaleEnabled),
