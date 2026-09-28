@@ -61,6 +61,10 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 	e.lastResolvedEdge = targetEdge
 	e.lastDeploySide = cornerToSide(targetEdge)
+	e.lastLiveBarRescans = 0
+	e.lastLiveBarRescanMicros = 0
+	e.lastSelectedCardOCRCount = 0
+	e.lastSelectedCardOCRMicros = 0
 
 	// 1. Detect red zone (deployment boundary)
 	redDetector := NewRedLineDetector(e.logger)
@@ -605,6 +609,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				continue
 			}
 
+			rescanStarted := time.Now()
 			liveMgr := NewSlotManager(fresh, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
 			liveSlots := append([]*TrackedSlot(nil), liveMgr.GetAllSlots()...)
 			if len(liveSlots) == 0 {
@@ -680,6 +685,8 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				chosenActivity = activity
 				break
 			}
+			e.lastLiveBarRescans++
+			e.lastLiveBarRescanMicros += time.Since(rescanStarted).Microseconds()
 
 			if chosen == nil {
 				fresh.Close()
@@ -688,7 +695,10 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				break
 			}
 
+			ocrStarted := time.Now()
 			chosenCount = troopCounter.DetectCount(fresh, chosen, liveMgr.GetBarY())
+			e.lastSelectedCardOCRCount++
+			e.lastSelectedCardOCRMicros += time.Since(ocrStarted).Microseconds()
 			if chosenCount > 50 { chosenCount = 0 }
 			if armyState != nil && chosenCount > 0 && strings.TrimSpace(chosen.UnitName) != "" {
 				armyState.ObserveRemaining(chosen.UnitName, chosenCount)
