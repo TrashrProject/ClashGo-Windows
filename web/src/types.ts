@@ -119,6 +119,9 @@ export interface AttackReport {
   undeployed_slots: number;
   deploy_error?: string;
   parsed_results: boolean;
+  stars_source: string;
+  loot_source: string;
+  result_confidence: string;
   stars: number;
   gold_stolen: number;
   elixir_stolen: number;
