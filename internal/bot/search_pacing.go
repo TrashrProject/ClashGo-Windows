@@ -11,6 +11,7 @@ import (
 // cadence. The profile automatically falls back to conservative timings when
 // BlueStacks/ADB shows pressure.
 type searchPacing struct {
+	Mode                string
 	PostTransitionPause time.Duration
 	StabilityRestEvery  int
 	StabilityRest       time.Duration
@@ -21,6 +22,7 @@ func chooseSearchPacing(h adb.Health) searchPacing {
 	// behavior.
 	if h.ConsecutiveFails > 0 || h.AvgCaptureMs >= 900 {
 		return searchPacing{
+			Mode:                "Safe",
 			PostTransitionPause: 1100 * time.Millisecond,
 			StabilityRestEvery:  8,
 			StabilityRest:       1500 * time.Millisecond,
@@ -32,6 +34,7 @@ func chooseSearchPacing(h adb.Health) searchPacing {
 	// only the redundant pause after a confirmed transition is shortened.
 	if h.AvgCaptureMs > 0 && h.AvgCaptureMs <= 500 {
 		return searchPacing{
+			Mode:                "Fast",
 			PostTransitionPause: 750 * time.Millisecond,
 			StabilityRestEvery:  10,
 			StabilityRest:       850 * time.Millisecond,
@@ -40,6 +43,7 @@ func chooseSearchPacing(h adb.Health) searchPacing {
 
 	// Unknown/normal health uses a modest improvement, not an aggressive one.
 	return searchPacing{
+		Mode:                "Balanced",
 		PostTransitionPause: 900 * time.Millisecond,
 		StabilityRestEvery:  9,
 		StabilityRest:       1100 * time.Millisecond,
