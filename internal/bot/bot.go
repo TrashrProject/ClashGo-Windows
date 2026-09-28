@@ -110,6 +110,9 @@ type Bot struct {
 	telemetry    *telemetry.Bus
 	lastPrepTimings PreparationTimings
 
+	diagMu          sync.Mutex
+	lastDiagnostics map[string]time.Time
+
 	OnStatsUpdate func()
 }
 
@@ -292,6 +295,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		cpuSampler:        newCPUSampler(),
 		dukePicksFile:     dukePicksFile,
 		telemetry:          telemetry.New(paths.ResolveConfig("telemetry/events.ndjson")),
+		lastDiagnostics:    make(map[string]time.Time),
 	}
 
 	// Resolve the strategy's declared army slot once at boot so the
