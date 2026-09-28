@@ -570,7 +570,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 		}
 	}
 
-	e.logger.Info().Msg("🤖 Pinpointing slot identities dynamically via template matching...")
+	e.logger.Debug().Msg("🤖 Pinpointing slot identities dynamically via template matching...")
 	for tplName, tpl := range e.templates {
 		if tpl.Empty() {
 			continue
@@ -580,7 +580,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 			sort.Slice(matches, func(i, j int) bool { return matches[i].Confidence > matches[j].Confidence })
 			bestMatch := matches[0]
 			cleanName := strings.ReplaceAll(tplName, "_", " ")
-			e.logger.Info().Str("unit", cleanName).Int("x", bestMatch.Point.X).Float64("conf", bestMatch.Confidence).Msg("pinpointed unit via template match")
+			e.logger.Debug().Str("unit", cleanName).Int("x", bestMatch.Point.X).Float64("conf", bestMatch.Confidence).Msg("pinpointed unit via template match")
 
 			unitCache[cleanName] = &bestMatch
 		}
@@ -676,7 +676,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 		gocv.PutText(&debugImg, slot.Category, image.Pt(slot.X-15, slot.Y-25), gocv.FontHersheySimplex, 0.4, c, 1)
 	}
 	gocv.IMWrite(paths.ResolveConfig("attack_deploy_debug.png"), debugImg)
-	e.logger.Info().Msg("saved visual diagnostics to attack_deploy_debug.png")
+	e.logger.Debug().Msg("saved visual diagnostics to attack_deploy_debug.png")
 
 	for name, match := range unitCache {
 		category := "Troop"
@@ -699,7 +699,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 	}
 
 	for _, phase := range s.Phases {
-		e.logger.Info().Str("phase", phase.Name).Msg("attack phase")
+		e.logger.Debug().Str("phase", phase.Name).Msg("attack phase")
 		if e.OnPhaseStart != nil {
 			e.OnPhaseStart(phase.Name, targetEdge)
 		}
@@ -772,11 +772,11 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 			if match == nil && isSiege {
 				if m, ok := unitCache["siege machine"]; ok {
 					match = m
-					e.logger.Info().Str("unit", unit.Name).Interface("pos", m.Point).Msg("mapped to manual 'siege machine' slot")
+					e.logger.Debug().Str("unit", unit.Name).Interface("pos", m.Point).Msg("mapped to manual 'siege machine' slot")
 				}
 			}
 			if match != nil {
-				e.logger.Info().Str("unit", unit.Name).Interface("pos", match.Point).Msg("using manual label coordinates from cache")
+				e.logger.Debug().Str("unit", unit.Name).Interface("pos", match.Point).Msg("using manual label coordinates from cache")
 			}
 
 			if match == nil {
@@ -831,7 +831,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 								shiftY := int(-16.0 * e.cal.ScaleY)
 								match.Point.X += shiftX
 								match.Point.Y += shiftY
-								e.logger.Info().Int("orig_x", match.Point.X-shiftX).Int("orig_y", match.Point.Y-shiftY).
+								e.logger.Debug().Int("orig_x", match.Point.X-shiftX).Int("orig_y", match.Point.Y-shiftY).
 									Int("new_x", match.Point.X).Int("new_y", match.Point.Y).Msg("shifted grand warden click target upward/leftward")
 							}
 							break
@@ -860,7 +860,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 						Point:      targetPt,
 						Confidence: 1.0,
 					}
-					e.logger.Info().Str("unit", unit.Name).Str("category", category).Interface("pos", targetPt).Msg("layout parser fallback mapping")
+					e.logger.Debug().Str("unit", unit.Name).Str("category", category).Interface("pos", targetPt).Msg("layout parser fallback mapping")
 				}
 			} else if match != nil {
 
@@ -959,10 +959,10 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 			}
 
 			if len(deployedHeroSlots) > 0 {
-				e.logger.Info().Int("count", len(deployedHeroSlots)).Msg("bulk activating hero abilities...")
+				e.logger.Debug().Int("count", len(deployedHeroSlots)).Msg("bulk activating hero abilities...")
 				time.Sleep(80 * time.Millisecond)
 				for _, pt := range deployedHeroSlots {
-					e.logger.Info().Int("x", pt.X).Int("y", pt.Y).Msg("tapping hero icon for ability (bulk)")
+					e.logger.Debug().Int("x", pt.X).Int("y", pt.Y).Msg("tapping hero icon for ability (bulk)")
 					e.client.TapFast(pt.X, pt.Y, 2.0)
 					time.Sleep(80 * time.Millisecond)
 				}
@@ -987,9 +987,9 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 		sweepScreen.Close()
 	}
 
-	e.logger.Info().Msg("waiting for deployment to settle before verification...")
+	e.logger.Debug().Msg("waiting for deployment to settle before verification...")
 
-	e.logger.Info().Msg("verifying deployment success...")
+	e.logger.Debug().Msg("verifying deployment success...")
 	var remainingCount int
 	for attempt := 1; attempt <= 2; attempt++ {
 		verifyScreen, err := e.client.CaptureToMat()
@@ -1060,7 +1060,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 				continue
 			}
 
-			e.logger.Info().Int("x", slot.X).Str("category", slot.Category).Msg("re-deploying remaining slot")
+			e.logger.Debug().Int("x", slot.X).Str("category", slot.Category).Msg("re-deploying remaining slot")
 
 			e.client.TapFast(slot.X, slot.Y, 2.0)
 			e.client.HumanSleep(35, 10)
@@ -1214,13 +1214,13 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 		return false
 	}
 
-	e.logger.Info().Str("unit", unit.Name).Bool("ability", isAbility).Int("x", uPt.X).Int("y", uPt.Y).Float64("conf", match.Confidence).Msg("selecting unit")
+	e.logger.Debug().Str("unit", unit.Name).Bool("ability", isAbility).Int("x", uPt.X).Int("y", uPt.Y).Float64("conf", match.Confidence).Msg("selecting unit")
 
 	if isAbility {
 
 		if !currentScreen.Empty() {
 			if e.isSlotEmpty(currentScreen, uPt.X, uPt.Y) {
-				e.logger.Info().Str("unit", unit.Name).Msg("hero dead or ability used, skipping")
+				e.logger.Debug().Str("unit", unit.Name).Msg("hero dead or ability used, skipping")
 				return false
 			}
 		} else {
@@ -1228,7 +1228,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 			if err == nil {
 				defer verify.Close()
 				if e.isSlotEmpty(verify, uPt.X, uPt.Y) {
-					e.logger.Info().Str("unit", unit.Name).Msg("hero dead or ability used, skipping")
+					e.logger.Debug().Str("unit", unit.Name).Msg("hero dead or ability used, skipping")
 					return false
 				}
 			}
@@ -1243,7 +1243,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 
 	if !currentScreen.Empty() {
 		if e.isSlotEmpty(currentScreen, uPt.X, uPt.Y) {
-			e.logger.Info().Str("unit", unit.Name).Msg("slot is empty/already deployed, skipping")
+			e.logger.Debug().Str("unit", unit.Name).Msg("slot is empty/already deployed, skipping")
 			return false
 		}
 	} else {
@@ -1251,14 +1251,14 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 		if err == nil {
 			defer verify.Close()
 			if e.isSlotEmpty(verify, uPt.X, uPt.Y) {
-				e.logger.Info().Str("unit", unit.Name).Msg("slot is empty/already deployed, skipping")
+				e.logger.Debug().Str("unit", unit.Name).Msg("slot is empty/already deployed, skipping")
 				return false
 			}
 		}
 	}
 
 	if isSiege && e.isSiegeTapped(uPt.X, w) {
-		e.logger.Info().Str("unit", unit.Name).Msg("siege slot already tapped, skipping to avoid destruction")
+		e.logger.Debug().Str("unit", unit.Name).Msg("siege slot already tapped, skipping to avoid destruction")
 		return false
 	}
 
@@ -1291,7 +1291,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 
 			for i := 0; i < 4; i++ {
 				currentEdge := edges[i]
-				e.logger.Info().Str("unit", unit.Name).Str("edge", currentEdge).Msg("FourSides spell deployment")
+				e.logger.Debug().Str("unit", unit.Name).Str("edge", currentEdge).Msg("FourSides spell deployment")
 
 				if targetPt, okT := pCfg.SpellTargets[currentEdge]; okT {
 
@@ -1361,7 +1361,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 				}
 			}
 
-			e.logger.Info().Str("unit", unit.Name).Interface("point", spellTarget).Int("count", maxSpells).Msg("Deploying spells clustered around point target")
+			e.logger.Debug().Str("unit", unit.Name).Interface("point", spellTarget).Int("count", maxSpells).Msg("Deploying spells clustered around point target")
 
 			points := make([]image.Point, 0, maxSpells)
 			for i := 0; i < maxSpells; i++ {
@@ -1407,7 +1407,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 			}
 		}
 
-		e.logger.Info().
+		e.logger.Debug().
 			Str("unit", unit.Name).
 			Str("line", selectedLine).
 			Bool("found", ok).
@@ -1426,7 +1426,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 				edgeA, okA := pCfg.SpellEdgesA[targetEdge]
 				edgeB, okB := pCfg.SpellEdgesB[targetEdge]
 				if okA && okB {
-					e.logger.Info().Msg("Deploying Rage Spells: 3 on Line A (even), 2 on Line B (far)")
+					e.logger.Debug().Msg("Deploying Rage Spells: 3 on Line A (even), 2 on Line B (far)")
 
 					p1A, p2A := edgeA.P1, edgeA.P2
 
@@ -1485,7 +1485,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 			}
 
 			for idx, pt := range points {
-				e.logger.Info().Str("unit", unit.Name).Int("idx", idx).Interface("pt", pt).Msg("tapping spell target line")
+				e.logger.Debug().Str("unit", unit.Name).Int("idx", idx).Interface("pt", pt).Msg("tapping spell target line")
 				e.client.TapFast(pt.X, pt.Y, 8.0)
 
 				if idx < len(points)-1 {
@@ -1557,7 +1557,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 				chosen = adj[rand.Intn(len(adj))]
 			}
 			deploymentEdge = chosen
-			e.logger.Info().Str("target", targetEdge).Str("duke_edge", deploymentEdge).Msg("Dragon Duke adjacent-edge placement")
+			e.logger.Debug().Str("target", targetEdge).Str("duke_edge", deploymentEdge).Msg("Dragon Duke adjacent-edge placement")
 			if e.OnDukePick != nil {
 				e.OnDukePick(targetEdge, chosen)
 			}
@@ -1565,7 +1565,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 			if edge, ok := pCfg.Edges[deploymentEdge]; ok {
 				scaled := ScaleEdge(edge, pCfg.Width, pCfg.Height, w, h)
 				p1, p2 = scaled.P1, scaled.P2
-				e.logger.Info().Str("edge", deploymentEdge).Interface("p1", p1).Interface("p2", p2).Msg("placing Dragon Duke along adjacent edge line")
+				e.logger.Debug().Str("edge", deploymentEdge).Interface("p1", p1).Interface("p2", p2).Msg("placing Dragon Duke along adjacent edge line")
 			}
 		}
 
@@ -1585,7 +1585,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 
 		if isHero {
 			jPt := e.addJitter(p1, 10)
-			e.logger.Info().Str("unit", unit.Name).Int("x", jPt.X).Int("y", jPt.Y).Msg("deploying hero")
+			e.logger.Debug().Str("unit", unit.Name).Int("x", jPt.X).Int("y", jPt.Y).Msg("deploying hero")
 
 			j2 := e.addJitter(p1, 10)
 			j3 := e.addJitter(p1, 10)
@@ -1607,7 +1607,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 			}
 
 			if p1 == p2 {
-				e.logger.Info().Str("unit", unit.Name).Int("count", maxTaps).Msg("deploying troop point batch")
+				e.logger.Debug().Str("unit", unit.Name).Int("count", maxTaps).Msg("deploying troop point batch")
 				for i := 0; i < maxTaps; {
 					rem := maxTaps - i
 					if rem >= 3 {
@@ -1629,7 +1629,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 					e.client.HumanSleep(200, 40)
 				}
 			} else {
-				e.logger.Info().Str("unit", unit.Name).Int("count", maxTaps).Msg("deploying troop line precisely")
+				e.logger.Debug().Str("unit", unit.Name).Int("count", maxTaps).Msg("deploying troop line precisely")
 				points := make([]image.Point, 0, maxTaps)
 				for i := 0; i < maxTaps; i++ {
 					pct := 0.5
@@ -1675,7 +1675,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 							empty := e.isSlotEmpty(verify, match.Point.X, slotY)
 							verify.Close()
 							if empty {
-								e.logger.Info().Str("unit", unit.Name).Msg("slot emptied mid-deploy, stopping batch")
+								e.logger.Debug().Str("unit", unit.Name).Msg("slot emptied mid-deploy, stopping batch")
 								break
 							}
 						}
@@ -2288,7 +2288,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 }
 
 func (e *Executor) SweepRemainingSlots(screen gocv.Mat, pCfg PrecisionConfig, targetEdge string, w, h int, mBarY int, usedSlots map[int]bool, siegeXs []int, allSlots []TroopSlot, slotY int) {
-	e.logger.Info().Msg("starting sweep of remaining/event slots...")
+	e.logger.Debug().Msg("starting sweep of remaining/event slots...")
 
 	for _, slot := range allSlots {
 		x := slot.X
@@ -2309,7 +2309,7 @@ func (e *Executor) SweepRemainingSlots(screen gocv.Mat, pCfg PrecisionConfig, ta
 		}
 
 		if !e.isSlotEmpty(screen, x, slotY) {
-			e.logger.Info().Int("x", x).Str("category", slot.Category).Msg("found undeployed troop slot during sweep, deploying...")
+			e.logger.Debug().Int("x", x).Str("category", slot.Category).Msg("found undeployed troop slot during sweep, deploying...")
 
 			e.client.TapFast(x, slotY, 2.0)
 			e.client.HumanSleep(35, 10)
@@ -2355,7 +2355,7 @@ func (e *Executor) SweepRemainingSlots(screen gocv.Mat, pCfg PrecisionConfig, ta
 				checkMat.Close()
 
 				if isEmpty {
-					e.logger.Info().Int("x", x).Msg("swept slot empty, finished deploying")
+					e.logger.Debug().Int("x", x).Msg("swept slot empty, finished deploying")
 					break
 				}
 				e.client.TapFast(x, slotY, 2.0)
@@ -2386,7 +2386,7 @@ func (e *Executor) ParseLayout(screen gocv.Mat, pCfg PrecisionConfig, w, h, mBar
 			SlotY      int   `json:"slot_y"`
 		}
 		if json.Unmarshal(data, &mConf) == nil {
-			e.logger.Info().Int("slots", len(mConf.SlotXs)).Msg("using 100% precise manual slot mapping")
+			e.logger.Debug().Int("slots", len(mConf.SlotXs)).Msg("using 100% precise manual slot mapping")
 			if mConf.SlotY > 0 {
 				slotY = mConf.SlotY
 			} else if mConf.CardHeight > 0 {
@@ -2402,7 +2402,7 @@ func (e *Executor) ParseLayout(screen gocv.Mat, pCfg PrecisionConfig, w, h, mBar
 	}
 
 	if len(activeXs) == 0 {
-		e.logger.Info().Msg("manual calibration missing/empty, falling back to grid detection")
+		e.logger.Debug().Msg("manual calibration missing/empty, falling back to grid detection")
 		step := int(75.0 * e.cal.ScaleX)
 		startX := int(40.0 * e.cal.ScaleX)
 		for x := startX; x < w-20; x += step {
@@ -2411,7 +2411,7 @@ func (e *Executor) ParseLayout(screen gocv.Mat, pCfg PrecisionConfig, w, h, mBar
 			}
 		}
 	}
-	e.logger.Info().Ints("active_xs", activeXs).Msg("detected active slots in bar")
+	e.logger.Debug().Ints("active_xs", activeXs).Msg("detected active slots in bar")
 
 	if len(activeXs) == 0 {
 		return nil
@@ -2527,14 +2527,14 @@ func (e *Executor) ParseLayout(screen gocv.Mat, pCfg PrecisionConfig, w, h, mBar
 			Y:        slotY,
 			Category: cat,
 		})
-		e.logger.Info().Int("x", x).Str("category", cat).Msg("classified slot")
+		e.logger.Debug().Int("x", x).Str("category", cat).Msg("classified slot")
 	}
 
 	if len(slots) > 0 {
 		lastIdx := len(slots) - 1
 		if slots[lastIdx].Category == "Spell" && slots[lastIdx].X > w-int(100.0*e.cal.ScaleX) {
 			slots[lastIdx].Category = "CC"
-			e.logger.Info().Int("x", slots[lastIdx].X).Msg("classified last slot as CC")
+			e.logger.Debug().Int("x", slots[lastIdx].X).Msg("classified last slot as CC")
 		}
 	}
 
