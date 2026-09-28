@@ -1101,6 +1101,18 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       });
     }
 
+    if ((stats.ui_anchor_attempts || 0) >= 3) {
+      opportunities.push({
+        key: 'anchors',
+        label: 'Verified UI anchors',
+        evidence: `${(stats.ui_anchor_hit_rate || 0).toFixed(1)}% local hit-rate · ${stats.ui_anchor_fallbacks || 0} fallbacks`,
+        next: (stats.ui_anchor_hit_rate || 0) >= 85
+          ? 'Anchor cache is healthy; keep local verification ahead of full-screen button scans.'
+          : 'Fallback rate is high; keep the full locator authoritative and avoid widening cached click assumptions.',
+        score: (stats.ui_anchor_hit_rate || 0) >= 85 ? 40 : 120,
+      });
+    }
+
     const ranked = opportunities
       .filter((x) => Number.isFinite(x.score) && x.score > 0)
       .sort((a, b) => b.score - a.score);
@@ -1298,6 +1310,31 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
               </div>
             );
           })}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Verified UI Anchors</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Local vision first, full scan on doubt</h3>
+            <p className="text-sm text-zinc-500 mt-1">Attack / Find Match / Battle centers are learned only after two stable detections. Cached locations never bypass color verification.</p>
+          </div>
+          <span className="material-symbols-outlined text-zinc-400">my_location</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: 'Anchor attempts', value: (stats.ui_anchor_attempts || 0).toLocaleString(), detail: 'Verified local probes' },
+            { label: 'Anchor hits', value: (stats.ui_anchor_hits || 0).toLocaleString(), detail: 'Local verification success' },
+            { label: 'Fallback scans', value: (stats.ui_anchor_fallbacks || 0).toLocaleString(), detail: 'Full locator preserved' },
+            { label: 'Hit rate', value: (stats.ui_anchor_attempts || 0) > 0 ? `${(stats.ui_anchor_hit_rate || 0).toFixed(1)}%` : 'Learning', detail: 'Higher = less vision work' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
         </div>
       </div>
 
