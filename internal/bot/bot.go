@@ -563,6 +563,18 @@ func (b *Bot) recordActivity() {
 	b.lastAction = time.Now()
 }
 
+func (b *Bot) recordWatchdogIncident(kind string, state game.GameState, stuck time.Duration) {
+	if b.telemetry == nil {
+		return
+	}
+	b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
+		"kind":       "watchdog_" + kind,
+		"state":      state.String(),
+		"duration_ms": stuck.Milliseconds(),
+	})
+	b.telemetry.WriteIncident("watchdog_" + kind)
+}
+
 // checkStuck enforces a global watchdog: if the capture pipeline is dead,
 // or if the bot is in-progress for absurdly long, or has been sitting in
 // one place doing nothing for too long, we cycle the game to recover from
@@ -570,6 +582,7 @@ func (b *Bot) recordActivity() {
 func (b *Bot) checkStuck(gc *game.GameContext) {
 
 	if gc.ReadHealth().ConsecutiveFails >= 10 {
+		b.recordWatchdogIncident("capture_dead", gc.State, 0)
 		b.logger.Error().
 			Int("consecutive_fails", gc.ReadHealth().ConsecutiveFails).
 			Str("state", gc.State.String()).
@@ -581,6 +594,8 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 
 	if b.seqRunning.Load() {
 		if time.Since(b.lastSequenceStart) > 15*time.Minute {
+			seqStuck := time.Since(b.lastSequenceStart)
+			b.recordWatchdogIncident("sequence_timeout", gc.State, seqStuck)
 			b.logger.Warn().
 				Dur("seq_time", time.Since(b.lastSequenceStart)).
 				Msg("attack sequence exceeded maximum duration, triggering emergency restart...")
@@ -614,6 +629,7 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 		bootStuck := time.Since(b.lastAction)
 		const bootSplashTimeout = 5 * time.Minute
 		if bootStuck > bootSplashTimeout {
+			b.recordWatchdogIncident("boot_splash", state, bootStuck)
 			b.logger.Warn().
 				Str("state", state.String()).
 				Time("last_action", b.lastAction).
@@ -632,6 +648,7 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 		attackPhaseStuck := time.Since(b.lastAction)
 		const attackPhaseTimeout = 30 * time.Second
 		if attackPhaseStuck > attackPhaseTimeout {
+			b.recordWatchdogIncident("attack_phase", state, attackPhaseStuck)
 			b.logger.Warn().
 				Str("state", state.String()).
 				Time("last_action", b.lastAction).
@@ -648,6 +665,7 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 
 	stuckTime := time.Since(b.lastAction)
 	if stuckTime > timeout {
+		b.recordWatchdogIncident("idle", state, stuckTime)
 		b.logger.Warn().
 			Str("state", state.String()).
 			Time("last_action", b.lastAction).
