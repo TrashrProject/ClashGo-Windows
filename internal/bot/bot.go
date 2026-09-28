@@ -383,7 +383,6 @@ func (b *Bot) Stop() {
 		b.attackExec.Close()
 	}
 
-	globalAsyncWriter.Close()
 	vision.CloseTemplateCache()
 	if b.resourceReader != nil {
 		b.resourceReader.Close()
