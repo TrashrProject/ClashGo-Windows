@@ -16,9 +16,11 @@ jobs:
           go-version: '1.25.x'
           cache: true
 
-      - name: Test config and account service
+      - name: Test lightweight core packages
         run: |
           go test ./internal/config
+          go test ./internal/telemetry
+          go test ./internal/intelligence
           go test ./cmd/account_proxy
 
       # The repository's existing Windows Build workflow is authoritative for
