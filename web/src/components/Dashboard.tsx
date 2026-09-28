@@ -338,7 +338,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                   <div className="flex items-center gap-3 flex-wrap">
                     <span className="text-lg font-bold">{latestAttack.strategy || 'Unknown strategy'}</span>
                     <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                      {latestAttack.target_edge || 'Auto edge'}
+                      {latestAttack.target_edge || 'Auto edge'}{latestAttack.deploy_side && latestAttack.deploy_side !== 'Unknown' ? ` → ${latestAttack.deploy_side}` : ''}
                     </span>
                     <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider ${
                       latestAttack.deploy_success
@@ -447,7 +447,9 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
 
                         <td className="px-4 py-4">
                           <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{rep.strategy || 'Unknown'}</div>
-                          <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-1">{rep.target_edge || 'Auto'}</div>
+                          <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-1">
+                            {rep.target_edge || 'Auto'}{rep.deploy_side && rep.deploy_side !== 'Unknown' ? ` → ${rep.deploy_side}` : ''}
+                          </div>
                         </td>
 
                         <td className="px-4 py-4">
