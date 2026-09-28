@@ -197,11 +197,12 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 	a.mu.Unlock()
 
-	// Persist final stats. saveStats writes through the async writer;
-	// with the worker now flushing synchronously-blocked requests
-	// immediately (see AsyncWriter.worker), this returns in ~1ms
-	// instead of stalling the close for up to the 5s ticker.
+	// Persist final stats. saveStats writes through the process-global async
+	// writer, then close that writer only on real application shutdown. Normal
+	// Bot Stop/Start cycles intentionally keep it alive so later sessions do
+	// not fall back to synchronous disk I/O.
 	a.saveStats()
+	bot.CloseAsyncWriter()
 }
 
 // forwardUpdaterStatus pushes the updater's status to the React side
