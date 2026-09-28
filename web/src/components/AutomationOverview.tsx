@@ -13,6 +13,10 @@ type OverviewState = {
   elixir: number | null;
   dark: number | null;
   resourceTime: string;
+  maxAttacksPerHour: number;
+  breakEveryAttacks: number;
+  breakDuration: string;
+  recoveryPauseThreshold: number;
 };
 
 const AutomationOverview: React.FC = React.memo(() => {
@@ -24,6 +28,10 @@ const AutomationOverview: React.FC = React.memo(() => {
     farmLabel: '',
     gold: null, elixir: null, dark: null,
     resourceTime: '',
+    maxAttacksPerHour: 0,
+    breakEveryAttacks: 0,
+    breakDuration: '',
+    recoveryPauseThreshold: 0,
   });
 
   React.useEffect(() => {
@@ -52,6 +60,10 @@ const AutomationOverview: React.FC = React.memo(() => {
           elixir: resources?.elixir_valid ? Number(resources.elixir) : null,
           dark: resources?.dark_valid ? Number(resources.dark_elixir) : null,
           resourceTime: resources?.timestamp || '',
+          maxAttacksPerHour: Number((cfg as any)?.automation?.max_attacks_per_hour || 0),
+          breakEveryAttacks: Number((cfg as any)?.automation?.break_every_attacks || 0),
+          breakDuration: String((cfg as any)?.automation?.break_duration || ''),
+          recoveryPauseThreshold: Number((cfg as any)?.automation?.recovery_pause_threshold || 0),
         });
       } catch {
         // Dashboard stays usable while the backend is starting.
@@ -117,6 +129,19 @@ const AutomationOverview: React.FC = React.memo(() => {
             {ok ? '✓' : '…'} {label}
           </div>
         ))}
+        <div className="px-3 py-2 rounded-xl border border-sky-500/20 bg-sky-500/10 text-sky-300 text-[10px] font-black uppercase tracking-wider">
+          Governor {state.maxAttacksPerHour > 0 ? `≤ ${state.maxAttacksPerHour}/h` : 'unlimited'}
+        </div>
+        {state.breakEveryAttacks > 0 && (
+          <div className="px-3 py-2 rounded-xl border border-sky-500/20 bg-sky-500/10 text-sky-300 text-[10px] font-black uppercase tracking-wider">
+            Break every {state.breakEveryAttacks} attacks{state.breakDuration ? ` · ${state.breakDuration}` : ''}
+          </div>
+        )}
+        {state.recoveryPauseThreshold > 0 && (
+          <div className="px-3 py-2 rounded-xl border border-sky-500/20 bg-sky-500/10 text-sky-300 text-[10px] font-black uppercase tracking-wider">
+            Recovery breaker ×{state.recoveryPauseThreshold}
+          </div>
+        )}
         {state.resourceTime && (
           <div className="ml-auto text-[10px] font-bold text-zinc-600">
             Last village scan {new Date(state.resourceTime).toLocaleTimeString()}
