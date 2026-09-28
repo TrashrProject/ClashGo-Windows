@@ -322,6 +322,10 @@ func mergeStats(acc, current bot.BotStats) bot.BotStats {
 		PreferredScaleFallbacks: current.PreferredScaleFallbacks,
 		PreferredScaleHitRate:   current.PreferredScaleHitRate,
 		PreferredScaleEnabled:   current.PreferredScaleEnabled,
+		UIAnchorAttempts:        current.UIAnchorAttempts,
+		UIAnchorHits:            current.UIAnchorHits,
+		UIAnchorFallbacks:       current.UIAnchorFallbacks,
+		UIAnchorHitRate:         current.UIAnchorHitRate,
 	}
 
 	// Recovery rate is meaningful over the persisted + live totals.
