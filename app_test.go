@@ -165,6 +165,15 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 		PreferredScaleFallbacks: 5,
 		PreferredScaleHitRate:   75,
 		PreferredScaleEnabled:   true,
+		UIAnchorAttempts:        24,
+		UIAnchorHits:            20,
+		UIAnchorFallbacks:       4,
+		UIAnchorHitRate:         83.33,
+		UIAnchorEnabled:         true,
+		NearMissTargets:         7,
+		NearMiss5Targets:        2,
+		NearMiss10Targets:       5,
+		NearMiss15Targets:       7,
 	}
 
 	got := mergeStats(acc, current)
@@ -187,6 +196,14 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 	if got.PreferredScaleAttempts != 20 || got.PreferredScaleHits != 15 ||
 		got.PreferredScaleFallbacks != 5 || got.PreferredScaleHitRate != 75 || !got.PreferredScaleEnabled {
 		t.Fatalf("preferred-scale metrics lost: %+v", got)
+	}
+	if got.UIAnchorAttempts != 24 || got.UIAnchorHits != 20 || got.UIAnchorFallbacks != 4 ||
+		got.UIAnchorHitRate != 83.33 || !got.UIAnchorEnabled {
+		t.Fatalf("UI-anchor metrics lost: %+v", got)
+	}
+	if got.NearMissTargets != 7 || got.NearMiss5Targets != 2 ||
+		got.NearMiss10Targets != 5 || got.NearMiss15Targets != 7 {
+		t.Fatalf("threshold-sensitivity metrics lost: %+v", got)
 	}
 	if got.GoldPerHour != 3_000_000 {
 		t.Fatalf("gold/hour=%v want 3000000", got.GoldPerHour)
