@@ -488,9 +488,11 @@ func (c *Client) TapAsync(x, y int) error {
 // the persistent pipe (when alive) or the legacy transport.Exec fallback.
 func (c *Client) routeTap(cmd string, x, y int, async bool) (err error) {
 	started := time.Now()
+	usedPipe := false
 	defer func() {
 		c.healthMu.Lock()
 		c.health.RecordTap(time.Since(started))
+		c.health.RecordTapRoute(usedPipe)
 		c.healthMu.Unlock()
 	}()
 
@@ -498,6 +500,7 @@ func (c *Client) routeTap(cmd string, x, y int, async bool) (err error) {
 		full := fmt.Sprintf("%s %d %d", cmd, x, y)
 		if async {
 			if err := p.SendAsync(full); err == nil {
+				usedPipe = true
 				return nil
 			} else if err != ErrShellPipeBusy {
 				// Broken: drop pipe so subsequent calls take legacy path
@@ -507,6 +510,7 @@ func (c *Client) routeTap(cmd string, x, y int, async bool) (err error) {
 			// Busy: fall through to legacy
 		} else {
 			if err := p.Send(full); err == nil {
+				usedPipe = true
 				return nil
 			}
 			// Broken: fall back
