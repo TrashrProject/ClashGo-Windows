@@ -2,7 +2,7 @@ name: Core CI
 
 on:
   push:
-    branches: [windows/core-port]
+    branches: [windows/core-port, feature/intelligence-v2]
   pull_request:
 
 jobs:
