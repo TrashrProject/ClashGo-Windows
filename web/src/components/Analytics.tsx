@@ -392,6 +392,25 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   }, [history]);
 
 
+  const deployBottleneck = React.useMemo(() => {
+    const candidates = [
+      { key: 'detect', label: 'Position detection', ms: deployHotPath.avgDetectMs },
+      { key: 'classify', label: 'Classification', ms: deployHotPath.avgClassifyMs },
+      { key: 'ocr', label: 'Selected-card OCR', ms: deployHotPath.avgCardOCRMs },
+    ];
+    const measured = candidates.filter((x) => Number.isFinite(x.ms) && x.ms > 0);
+    if (measured.length === 0) {
+      return { label: 'Learning', ms: 0, share: 0 };
+    }
+    const total = measured.reduce((sum, x) => sum + x.ms, 0);
+    const dominant = measured.reduce((best, x) => x.ms > best.ms ? x : best, measured[0]);
+    return {
+      label: dominant.label,
+      ms: dominant.ms,
+      share: total > 0 ? dominant.ms * 100 / total : 0,
+    };
+  }, [deployHotPath]);
+
   const lootCapture = React.useMemo(() => {
     let offeredGE = 0, stolenGE = 0, offeredDE = 0, stolenDE = 0, targetScore = 0, scored = 0;
     for (const rep of history ?? []) {
@@ -612,7 +631,12 @@ Best optimization target: {pipeline.dominantTunable.label}
             <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Live-bar cost per attack</h3>
             <p className="text-sm text-zinc-500 mt-1">Positions are still rescanned after every card; OCR is now limited to the selected card.</p>
           </div>
-          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{deployHotPath.attacks} measured attacks</div>
+          <div className="text-right">
+            <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{deployHotPath.attacks} measured attacks</div>
+            <div className="mt-1 text-[9px] font-black uppercase tracking-wider text-zinc-500">
+              Bottleneck: {deployBottleneck.label}{deployBottleneck.ms > 0 ? ` · ${deployBottleneck.ms.toFixed(1)}ms / ${deployBottleneck.share.toFixed(0)}%` : ''}
+            </div>
+          </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           {[
