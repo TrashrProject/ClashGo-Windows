@@ -5,8 +5,10 @@ type PerformanceSample struct {
 	DeployMS       int64
 	RoutineMS      int64
 	CaptureMS      float64
-	TargetScanMS   float64
-	DeploySuccess  bool
+	TargetScanMS    float64
+	DeploySuccess   bool
+	ReturnHomeOK    bool
+	SafeDeployment  bool
 }
 
 type PerformanceRegression struct {
@@ -74,6 +76,22 @@ func AnalyzePerformance(samples []PerformanceSample) PerformanceAssessment {
 			DeltaPct: recent.deploySuccessRate - base.deploySuccessRate,
 		})
 	}
+	if base.returnHomeRate-recent.returnHomeRate >= 20 {
+		out.Regressions = append(out.Regressions, PerformanceRegression{
+			Metric:   "return_home_rate",
+			Current:  recent.returnHomeRate,
+			Baseline: base.returnHomeRate,
+			DeltaPct: recent.returnHomeRate - base.returnHomeRate,
+		})
+	}
+	if base.safeDeployRate-recent.safeDeployRate >= 20 {
+		out.Regressions = append(out.Regressions, PerformanceRegression{
+			Metric:   "safe_deployment_rate",
+			Current:  recent.safeDeployRate,
+			Baseline: base.safeDeployRate,
+			DeltaPct: recent.safeDeployRate - base.safeDeployRate,
+		})
+	}
 
 	if len(out.Regressions) > 0 {
 		out.Status = "watch"
@@ -88,6 +106,8 @@ type performanceSummary struct {
 	captureMS         float64
 	scanMS            float64
 	deploySuccessRate float64
+	returnHomeRate    float64
+	safeDeployRate    float64
 }
 
 func summarizePerformance(samples []PerformanceSample) performanceSummary {
@@ -95,7 +115,7 @@ func summarizePerformance(samples []PerformanceSample) performanceSummary {
 		return performanceSummary{}
 	}
 	var out performanceSummary
-	var success int
+	var success, returned, safe int
 	var searchN, deployN, routineN, captureN, scanN int
 	for _, s := range samples {
 		if s.SearchMS > 0 {
@@ -121,6 +141,12 @@ func summarizePerformance(samples []PerformanceSample) performanceSummary {
 		if s.DeploySuccess {
 			success++
 		}
+		if s.ReturnHomeOK {
+			returned++
+		}
+		if s.SafeDeployment {
+			safe++
+		}
 	}
 	if searchN > 0 { out.searchMS /= float64(searchN) }
 	if deployN > 0 { out.deployMS /= float64(deployN) }
@@ -128,6 +154,8 @@ func summarizePerformance(samples []PerformanceSample) performanceSummary {
 	if captureN > 0 { out.captureMS /= float64(captureN) }
 	if scanN > 0 { out.scanMS /= float64(scanN) }
 	out.deploySuccessRate = float64(success) * 100 / float64(len(samples))
+	out.returnHomeRate = float64(returned) * 100 / float64(len(samples))
+	out.safeDeployRate = float64(safe) * 100 / float64(len(samples))
 	return out
 }
 
