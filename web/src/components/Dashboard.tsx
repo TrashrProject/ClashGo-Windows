@@ -436,6 +436,10 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                     <span className="px-2 py-1 rounded-lg bg-white/10 text-zinc-300 text-[9px] font-black uppercase tracking-wider">
                       {latestAttack.destruction_pct || 0}% · {(latestAttack.battle_end_reason || 'unknown').replaceAll('_', ' ')}
                     </span>
+                    <span className="px-2 py-1 rounded-lg bg-white/10 text-zinc-300 text-[9px] font-black uppercase tracking-wider">
+                      {latestAttack.full_routine_duration_ms > 0 ? `${(latestAttack.full_routine_duration_ms / 1000).toFixed(0)}s true loop` : `${(latestAttack.cycle_duration_ms / 1000).toFixed(0)}s cycle`}
+                      {latestAttack.return_home_duration_ms > 0 ? ` · ${(latestAttack.return_home_duration_ms / 1000).toFixed(1)}s home` : ''}
+                    </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
@@ -574,7 +578,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                             {((rep.search_duration_ms || 0) / 1000).toFixed(1)}s
                           </div>
                           <div className="text-[9px] font-black text-zinc-400 uppercase tracking-wider mt-1">
-                            {rep.search_skips || 0} skips · {((rep.cycle_duration_ms || 0) / 1000).toFixed(0)}s cycle
+                            {rep.search_skips || 0} skips · {((rep.full_routine_duration_ms || rep.cycle_duration_ms || 0) / 1000).toFixed(0)}s true loop
                           </div>
                           <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mt-1">
                             {rep.destruction_pct || 0}% · {(rep.battle_end_reason || 'unknown').replaceAll('_', ' ')}
