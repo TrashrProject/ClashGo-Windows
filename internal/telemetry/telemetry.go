@@ -46,6 +46,7 @@ type Snapshot struct {
 	Events             int64   `json:"events"`
 	Searches           int64   `json:"searches"`
 	TargetsFound       int64   `json:"targets_found"`
+	TargetsAccepted    int64   `json:"targets_accepted"`
 	TargetsSkipped     int64   `json:"targets_skipped"`
 	AttacksFinished    int64   `json:"attacks_finished"`
 	Recoveries         int64   `json:"recoveries"`
@@ -71,6 +72,7 @@ type Bus struct {
 	events          atomic.Int64
 	searches        atomic.Int64
 	targetsFound    atomic.Int64
+	targetsAccepted atomic.Int64
 	targetsSkipped  atomic.Int64
 	attacksFinished atomic.Int64
 	recoveries      atomic.Int64
@@ -168,6 +170,9 @@ func (b *Bus) record(ev Event) {
 		b.searches.Add(1)
 	case EventTargetFound:
 		b.targetsFound.Add(1)
+		if accepted, ok := ev.Fields["accept"].(bool); ok && accepted {
+			b.targetsAccepted.Add(1)
+		}
 		if raw, ok := ev.Fields["scan_us"]; ok {
 			switch v := raw.(type) {
 			case int64:
@@ -243,6 +248,7 @@ func (b *Bus) Snapshot() Snapshot {
 		Events:          b.events.Load(),
 		Searches:        b.searches.Load(),
 		TargetsFound:    b.targetsFound.Load(),
+		TargetsAccepted: b.targetsAccepted.Load(),
 		TargetsSkipped:  b.targetsSkipped.Load(),
 		AttacksFinished: b.attacksFinished.Load(),
 		Recoveries:      b.recoveries.Load(),
