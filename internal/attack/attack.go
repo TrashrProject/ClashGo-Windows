@@ -83,6 +83,8 @@ type Executor struct {
 	// zone is unconfigured (TH state unknown).
 	thDestroyed bool
 	lastBattleEndReason string
+	lastBattleLootOCRSamples int
+	lastBattleLootOCRMicros int64
 
 	// Initial loot snapshot for the currently selected enemy base. The battle
 	// wait compares live "Available Loot" against this baseline when the
@@ -185,6 +187,14 @@ func (e *Executor) LastBattleEndReason() string {
 		return "unknown"
 	}
 	return e.lastBattleEndReason
+}
+
+func (e *Executor) BattleLootOCRMetrics() (samples int, avgMS float64) {
+	samples = e.lastBattleLootOCRSamples
+	if samples > 0 {
+		avgMS = float64(e.lastBattleLootOCRMicros) / float64(samples) / 1000.0
+	}
+	return samples, avgMS
 }
 
 func (e *Executor) SetEarlyExitAllowed(allowed bool) {
@@ -1859,6 +1869,8 @@ func (e *Executor) ResetBattleOutcome() {
 	e.lastDestructionPct = 0
 	e.thDestroyed = false
 	e.lastBattleEndReason = ""
+	e.lastBattleLootOCRSamples = 0
+	e.lastBattleLootOCRMicros = 0
 }
 
 // endButtonVisible reports whether the red "End Battle" button is on the
@@ -1990,6 +2002,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 		)
 	}
 
+	battleTick := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -1997,6 +2010,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			e.logger.Info().Msg("battle end wait cancelled (bot stopping)")
 			return false
 		case <-ticker.C:
+			battleTick++
 			screen, err := e.client.CaptureToMat()
 			if err != nil {
 				e.logger.Warn().Err(err).Msg("battle-end wait capture failed; retrying next tick")
@@ -2017,8 +2031,12 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			var liveLootTick game.Resources
 			var liveLootTickErr error
 			liveLootSampled := false
-			if e.initialLootGold > 0 || e.initialLootElixir > 0 || e.initialLootDE > 0 {
+			lootSampleDue := e.cfg.LootExitEnabled || battleTick%3 == 1
+			if (e.initialLootGold > 0 || e.initialLootElixir > 0 || e.initialLootDE > 0) && lootSampleDue {
+				lootOCRStarted := time.Now()
 				liveLootTick, liveLootTickErr = lootRec.ReadAvailableLoot(screen)
+				e.lastBattleLootOCRSamples++
+				e.lastBattleLootOCRMicros += time.Since(lootOCRStarted).Microseconds()
 				liveLootSampled = true
 				plausible := liveLootTickErr == nil &&
 					liveLootTick.Gold >= 0 && liveLootTick.Gold <= e.initialLootGold &&
@@ -2072,7 +2090,10 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 				if initialTotal > 0 {
 					remaining, lootErr := liveLootTick, liveLootTickErr
 					if !liveLootSampled {
+						lootOCRStarted := time.Now()
 						remaining, lootErr = lootRec.ReadAvailableLoot(screen)
+						e.lastBattleLootOCRSamples++
+						e.lastBattleLootOCRMicros += time.Since(lootOCRStarted).Microseconds()
 					}
 					if lootErr == nil {
 						remainingTotal := remaining.Gold + remaining.Elixir + remaining.DarkElixir
@@ -2189,7 +2210,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 				// the stall timer is active).
 				if endAtPct > 0 && currentPct != lastPct {
 					lastPct = currentPct
-					e.logger.Info().Int("percent", currentPct).Int("threshold", endAtPct).Msg("destruction progress toward strategy threshold")
+					e.logger.Debug().Int("percent", currentPct).Int("threshold", endAtPct).Msg("destruction progress toward strategy threshold")
 				}
 
 				if e.earlyExitAllowed && endAtPercentReached(endAtPct, currentPct) {
