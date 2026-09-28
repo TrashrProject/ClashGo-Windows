@@ -183,6 +183,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       elixir: number;
       dark: number;
       cycleMs: number;
+      routineMs: number;
       searchMs: number;
       deployMs: number;
       newestAt: number;
@@ -193,7 +194,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       if (!rep.session_id) continue;
       const row = map.get(rep.session_id) ?? {
         id: rep.session_id, attacks: 0, stars: 0, triples: 0, complete: 0,
-        gold: 0, elixir: 0, dark: 0, cycleMs: 0, searchMs: 0, deployMs: 0,
+        gold: 0, elixir: 0, dark: 0, cycleMs: 0, routineMs: 0, searchMs: 0, deployMs: 0,
         newestAt: 0, oldestAt: 0, firstCycleMs: 0,
       };
       row.attacks++;
@@ -204,6 +205,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       row.elixir += (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
       row.dark += (rep.dark_elixir_stolen || 0) + (rep.bonus_de || 0);
       row.cycleMs += rep.cycle_duration_ms || 0;
+      row.routineMs += rep.full_routine_duration_ms || 0;
       row.searchMs += rep.search_duration_ms || 0;
       row.deployMs += rep.deploy_duration_ms || 0;
       const ts = Date.parse(rep.timestamp || '');
@@ -890,18 +892,20 @@ Best optimization target: {pipeline.dominantTunable.label}
                   <th className="pb-3 px-3">E / h</th>
                   <th className="pb-3 px-3">DE / h</th>
                   <th className="pb-3 px-3">Search</th>
-                  <th className="pb-3 pl-3">Deploy</th>
+                  <th className="pb-3 px-3">Deploy</th>
+                  <th className="pb-3 pl-3">True loop</th>
                 </tr>
               </thead>
               <tbody>
                 {sessionStats.map((row, index) => {
-                  // Use wall-clock span between the first and last result,
-                  // plus the first attack's own cycle. Unlike summing cycles,
-                  // this includes Return Home / cooldown / preparation gaps.
-                  const wallMs = row.attacks <= 1
+                  // Prefer the explicit ready-to-return-home routine timings.
+                  // Older history rows lack that field, so keep the wall-clock
+                  // fallback for backward compatibility.
+                  const fallbackWallMs = row.attacks <= 1
                     ? row.cycleMs
                     : Math.max(row.firstCycleMs, row.newestAt - row.oldestAt + row.firstCycleMs);
-                  const hours = wallMs > 0 ? wallMs / 3_600_000 : 0;
+                  const effectiveMs = row.routineMs > 0 ? row.routineMs : fallbackWallMs;
+                  const hours = effectiveMs > 0 ? effectiveMs / 3_600_000 : 0;
                   return (
                     <tr key={row.id} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
                       <td className="py-4 pr-4">
@@ -916,7 +920,8 @@ Best optimization target: {pipeline.dominantTunable.label}
                       <td className="py-4 px-3 text-sm font-bold text-fuchsia-500 tabular-nums">{hours > 0 ? compact(row.elixir / hours) : '—'}</td>
                       <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{hours > 0 ? compact(row.dark / hours) : '—'}</td>
                       <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.searchMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</td>
-                      <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.deployMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.deployMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</td>
+                      <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{(effectiveMs / Math.max(1, row.attacks) / 1000).toFixed(0)}s</td>
                     </tr>
                   );
                 })}
