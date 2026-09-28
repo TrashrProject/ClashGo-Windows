@@ -396,6 +396,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 	// 5. Detect troop counts
 	troopCounter := NewTroopCounter(pCfg.Width, pCfg.Height, e.logger)
+	defer troopCounter.Close()
 	troopCounts := troopCounter.DetectCounts(deployScreen, slotMgr.GetAllSlots(), mBarY)
 	countMap := GetAllCounts(troopCounts)
 	farmProfile, farmControlled := e.cfg.Farm.ActiveProfile()
