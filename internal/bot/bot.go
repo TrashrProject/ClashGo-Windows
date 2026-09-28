@@ -36,6 +36,7 @@ type Bot struct {
 	templates  *game.TemplateStore
 	recognizer     *game.Recognizer
 	resourceReader *game.VillageResourceReader
+	searchLootRec  *game.LootRecognizer
 	cfg            *config.BotConfig
 
 	classify func(gocv.Mat) (game.GameState, int)
@@ -254,6 +255,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 	ctx, cancel := context.WithCancel(bootCtx)
 
 	resourceReader := game.NewVillageResourceReader(cal, templates, log.Logger)
+	searchLootRec := game.NewLootRecognizer(cal, templates, log.Logger)
 
 	b = &Bot{
 		client:            client,
@@ -262,6 +264,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		templates:         templates,
 		recognizer:        recognizer,
 		resourceReader:    resourceReader,
+		searchLootRec:     searchLootRec,
 		cfg:               cfg,
 		attackExec:        attackExec,
 		ctx:               ctx,
@@ -405,6 +408,9 @@ func (b *Bot) Stop() {
 		}
 		if b.resourceReader != nil {
 			b.resourceReader.Close()
+		}
+		if b.searchLootRec != nil {
+			b.searchLootRec.Close()
 		}
 		if b.templates != nil {
 			b.templates.Close()
@@ -1629,8 +1635,17 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		b.telemetry.Emit(telemetry.EventSearchStarted, nil)
 	}
 
-	lootRec := game.NewLootRecognizer(b.cal, b.templates, b.logger)
-	defer lootRec.Close()
+	lootRec := b.searchLootRec
+	closeLootRec := false
+	if lootRec == nil {
+		// Defensive fallback for tests/legacy constructors. Production bots
+		// keep one recognizer hot for the whole session.
+		lootRec = game.NewLootRecognizer(b.cal, b.templates, b.logger)
+		closeLootRec = true
+	}
+	if closeLootRec {
+		defer lootRec.Close()
+	}
 
 	var remainingUndeployed int
 	var deployErr error
@@ -2003,11 +2018,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			gocv.IMWrite(paths.ResolveConfig("last_battle_result.png"), resultScreen)
 			b.logger.Info().Msg("saved battle result screenshot to last_battle_result.png")
 
-			lootRec := game.NewLootRecognizer(b.cal, b.templates, b.logger)
 			res, rerr := lootRec.ReadBattleResult(resultScreen)
 			hash := resultPanelHash(resultScreen, b.cal)
 			resultScreen.Close()
-			lootRec.Close()
 
 			if rerr != nil {
 				b.logger.Warn().Err(rerr).Msg("battle result parse error; retrying")
