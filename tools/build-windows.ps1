@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.6.0-windows-beta",
+    [string]$Version = "0.6.7-windows-beta",
     [string]$AccountServiceURL = $env:CLASHGO_ACCOUNT_API_URL,
     [switch]$SkipSync,
     [switch]$SkipTests
