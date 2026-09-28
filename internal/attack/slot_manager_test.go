@@ -226,3 +226,32 @@ func TestWindowsLiveRescanTemplateFiltersNormalTroops(t *testing.T) {
 		}
 	}
 }
+
+func TestWindowsSlotActivityProfilePrefixMatchesWindowRatio(t *testing.T) {
+	// Five columns over four rows with non-zero counts:
+	// [0, 2, 4, 2, 0]. Prefix = [0, 0, 2, 6, 8, 8].
+	p := &windowsSlotActivityProfile{
+		prefix: []int{0, 0, 2, 6, 8, 8},
+		rows:   4,
+		cols:   5,
+		size:   1,
+	}
+	if got := p.ActivityAt(2); got != 0.75 {
+		t.Fatalf("ActivityAt(2)=%.3f want 0.750", got)
+	}
+	// Edge clamp: x=0 -> columns [0,1), all zero.
+	if got := p.ActivityAt(0); got != 0 {
+		t.Fatalf("ActivityAt(0)=%.3f want 0", got)
+	}
+	// x=4 -> columns [3,5): 2 / 8 = 0.25.
+	if got := p.ActivityAt(4); got != 0.25 {
+		t.Fatalf("ActivityAt(4)=%.3f want 0.250", got)
+	}
+}
+
+func TestWindowsSlotActivityProfileInvalidIsZero(t *testing.T) {
+	var p *windowsSlotActivityProfile
+	if got := p.ActivityAt(100); got != 0 {
+		t.Fatalf("nil profile activity=%.3f want 0", got)
+	}
+}
