@@ -112,6 +112,12 @@ type Bot struct {
 	telemetry    *telemetry.Bus
 	lastPrepTimings PreparationTimings
 
+	uiAnchorMu        sync.RWMutex
+	uiAnchors         map[string]image.Point
+	uiAnchorAttempts  atomic.Int64
+	uiAnchorHits      atomic.Int64
+	uiAnchorFallbacks atomic.Int64
+
 	diagMu          sync.Mutex
 	lastDiagnostics map[string]time.Time
 
@@ -300,6 +306,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		dukePicksFile:     dukePicksFile,
 		telemetry:          telemetry.New(paths.ResolveConfig("telemetry/events.ndjson")),
 		lastDiagnostics:    make(map[string]time.Time),
+		uiAnchors:          make(map[string]image.Point),
 	}
 
 	// Resolve the strategy's declared army slot once at boot so the
@@ -2619,6 +2626,121 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	b.zoomedOut.Store(false)
 }
 
+type buttonColorSpec struct {
+	low, high    gocv.Scalar
+	minW, minH   int
+	minArea      float64
+	halfW, halfH int
+}
+
+func (b *Bot) buttonColorSpec(name string) (buttonColorSpec, bool) {
+	switch name {
+	case "Attack":
+		return buttonColorSpec{
+			low: gocv.NewScalar(0, 70, 110, 0),
+			high: gocv.NewScalar(200, 255, 255, 0),
+			minW: 18, minH: 12, minArea: 180,
+			halfW: 70, halfH: 55,
+		}, true
+	case "Find Match":
+		return buttonColorSpec{
+			low: gocv.NewScalar(0, 70, 110, 0),
+			high: gocv.NewScalar(210, 255, 255, 0),
+			minW: 55, minH: 24, minArea: 900,
+			halfW: 150, halfH: 90,
+		}, true
+	case "Battle Attack":
+		return buttonColorSpec{
+			low: gocv.NewScalar(0, 110, 70, 0),
+			high: gocv.NewScalar(170, 255, 210, 0),
+			minW: 70, minH: 24, minArea: 1100,
+			halfW: 150, halfH: 90,
+		}, true
+	default:
+		return buttonColorSpec{}, false
+	}
+}
+
+func locateColoredButtonNear(screen gocv.Mat, center image.Point, spec buttonColorSpec) (int, int, bool) {
+	if screen.Empty() {
+		return 0, 0, false
+	}
+	x0 := center.X - spec.halfW
+	x1 := center.X + spec.halfW
+	y0 := center.Y - spec.halfH
+	y1 := center.Y + spec.halfH
+	if x0 < 0 { x0 = 0 }
+	if y0 < 0 { y0 = 0 }
+	if x1 > screen.Cols() { x1 = screen.Cols() }
+	if y1 > screen.Rows() { y1 = screen.Rows() }
+	if x1-x0 < spec.minW || y1-y0 < spec.minH {
+		return 0, 0, false
+	}
+
+	roi := screen.Region(image.Rect(x0, y0, x1, y1))
+	defer roi.Close()
+	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+
+	gocv.InRangeWithScalar(roi, spec.low, spec.high, &mask)
+	contours := gocv.FindContours(mask, gocv.RetrievalExternal, gocv.ChainApproxSimple)
+	defer contours.Close()
+
+	bestArea := 0.0
+	bestRect := image.Rectangle{}
+	for i := 0; i < contours.Size(); i++ {
+		contour := contours.At(i)
+		area := gocv.ContourArea(contour)
+		if area <= bestArea {
+			continue
+		}
+		rect := gocv.BoundingRect(contour)
+		if rect.Dx() < spec.minW || rect.Dy() < spec.minH {
+			continue
+		}
+		bestArea = area
+		bestRect = rect
+	}
+	if bestArea < spec.minArea || bestRect.Empty() {
+		return 0, 0, false
+	}
+	return x0 + bestRect.Min.X + bestRect.Dx()/2,
+		y0 + bestRect.Min.Y + bestRect.Dy()/2,
+		true
+}
+
+func (b *Bot) rememberedUIAnchor(name string) (image.Point, bool) {
+	b.uiAnchorMu.RLock()
+	defer b.uiAnchorMu.RUnlock()
+	pt, ok := b.uiAnchors[name]
+	return pt, ok
+}
+
+func (b *Bot) rememberUIAnchor(name string, pt image.Point) {
+	b.uiAnchorMu.Lock()
+	b.uiAnchors[name] = pt
+	b.uiAnchorMu.Unlock()
+}
+
+func (b *Bot) locateRememberedButton(name string, screen gocv.Mat) (int, int, bool) {
+	spec, ok := b.buttonColorSpec(name)
+	if !ok {
+		return 0, 0, false
+	}
+	pt, ok := b.rememberedUIAnchor(name)
+	if !ok {
+		return 0, 0, false
+	}
+	b.uiAnchorAttempts.Add(1)
+	x, y, found := locateColoredButtonNear(screen, pt, spec)
+	if found {
+		b.uiAnchorHits.Add(1)
+		return x, y, true
+	}
+	b.uiAnchorFallbacks.Add(1)
+	return 0, 0, false
+}
+
 // focusedButtonClick trades a tiny amount of latency for much better UI
 // precision. At the faster capture cadence a button can still be moving during
 // its opening animation; clicking the first detected contour can therefore hit
@@ -2636,7 +2758,10 @@ func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, 
 			time.Sleep(70 * time.Millisecond)
 			continue
 		}
-		x1, y1, ok1 := locator(first)
+		x1, y1, ok1 := b.locateRememberedButton(name, first)
+		if !ok1 {
+			x1, y1, ok1 = locator(first)
+		}
 		first.Close()
 		if !ok1 {
 			time.Sleep(70 * time.Millisecond)
@@ -2650,7 +2775,13 @@ func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, 
 			if !second.Empty() { second.Close() }
 			continue
 		}
-		x2, y2, ok2 := locator(second)
+		x2, y2, ok2 := 0, 0, false
+		if spec, specOK := b.buttonColorSpec(name); specOK {
+			x2, y2, ok2 = locateColoredButtonNear(second, image.Pt(x1, y1), spec)
+		}
+		if !ok2 {
+			x2, y2, ok2 = locator(second)
+		}
 		second.Close()
 		if !ok2 {
 			continue
@@ -2677,6 +2808,7 @@ func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, 
 
 		x := (x1 + x2) / 2
 		y := (y1 + y2) / 2
+		b.rememberUIAnchor(name, image.Pt(x, y))
 		b.logger.Debug().
 			Str("button", name).
 			Int("x", x).
