@@ -70,16 +70,19 @@ type PreferredScaleStats struct {
 	Attempts  int64 `json:"attempts"`
 	Hits      int64 `json:"hits"`
 	Fallbacks int64 `json:"fallbacks"`
+	Enabled   bool  `json:"enabled"`
 }
 
 var preferredScaleAttempts atomic.Int64
 var preferredScaleHits atomic.Int64
 var preferredScaleFallbacks atomic.Int64
+var preferredScaleEnabled atomic.Bool
 
 func ResetPreferredScaleStats() {
 	preferredScaleAttempts.Store(0)
 	preferredScaleHits.Store(0)
 	preferredScaleFallbacks.Store(0)
+	preferredScaleEnabled.Store(true)
 }
 
 func PreferredScaleRuntimeStats() PreferredScaleStats {
@@ -87,6 +90,7 @@ func PreferredScaleRuntimeStats() PreferredScaleStats {
 		Attempts: preferredScaleAttempts.Load(),
 		Hits: preferredScaleHits.Load(),
 		Fallbacks: preferredScaleFallbacks.Load(),
+		Enabled: preferredScaleEnabled.Load(),
 	}
 }
 
@@ -114,6 +118,7 @@ func preferredTemplateScale(templateName string, minScale, maxScale float64, ste
 // doubtful or missing preferred-scale result falls back to the exact full
 // multi-scale matcher used before this optimization.
 func MatchMultiScaleROICachedPreferred(screen, template gocv.Mat, templateName string, minScale, maxScale float64, steps int, threshold float32, roi image.Rectangle) ([]Match, error) {
+	if preferredScaleEnabled.Load() {
 	if scale, ok := preferredTemplateScale(templateName, minScale, maxScale, steps); ok {
 		preferredScaleAttempts.Add(1)
 		fastThreshold := threshold + 0.12
@@ -126,6 +131,17 @@ func MatchMultiScaleROICachedPreferred(screen, template gocv.Mat, templateName s
 			return matches, nil
 		}
 		preferredScaleFallbacks.Add(1)
+		attempts := preferredScaleAttempts.Load()
+		if attempts >= 20 {
+			hits := preferredScaleHits.Load()
+			if float64(hits)*100/float64(attempts) < 15 {
+				// The optimization is not earning its extra probe. Disable it
+				// for the remainder of this bot session; accuracy is unchanged
+				// because the full multi-scale path below remains authoritative.
+				preferredScaleEnabled.Store(false)
+			}
+		}
+	}
 	}
 
 	matches, err := MatchMultiScaleROICached(screen, template, templateName, minScale, maxScale, steps, threshold, roi)
