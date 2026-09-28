@@ -211,6 +211,14 @@ type SearchConfig struct {
 	MinLootGold          int  `json:"min_loot_gold"`
 	MinLootElixir        int  `json:"min_loot_elixir"`
 	MinLootDarkElixir    int  `json:"min_loot_de"`
+
+	// AdaptiveSearch progressively relaxes loot thresholds after a long skip
+	// streak, but never below AdaptiveFloorPercent of the configured values.
+	AdaptiveSearch          bool `json:"adaptive_search"`
+	AdaptiveStartAfterSkips int  `json:"adaptive_start_after_skips"`
+	AdaptiveStepEverySkips  int  `json:"adaptive_step_every_skips"`
+	AdaptiveStepPercent     int  `json:"adaptive_step_percent"`
+	AdaptiveFloorPercent    int  `json:"adaptive_floor_percent"`
 }
 
 type DebugConfig struct {
@@ -313,6 +321,11 @@ func DefaultConfig() *BotConfig {
 			MinLootGold:          750000,
 			MinLootElixir:        750000,
 			MinLootDarkElixir:    2000,
+			AdaptiveSearch:          true,
+			AdaptiveStartAfterSkips: 8,
+			AdaptiveStepEverySkips:  4,
+			AdaptiveStepPercent:     5,
+			AdaptiveFloorPercent:    70,
 		},
 		Upgrade: UpgradeConfig{
 			UpgradeWalls: false,
