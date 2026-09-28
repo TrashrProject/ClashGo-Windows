@@ -655,6 +655,9 @@ func (b *Bot) restartGame() {
 //     configured resolution, then poll up to 2 min for adb
 func (b *Bot) recoverEmulator() {
 	b.recoveryAttempts.Add(1)
+	if b.telemetry != nil {
+		b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "start", "attempt": b.recoveryAttempts.Load()})
+	}
 	b.logger.Warn().Msg("capture pipeline dead; beginning device recovery ladder")
 
 	deviceOK := func() bool {
@@ -666,6 +669,7 @@ func (b *Bot) recoverEmulator() {
 		b.logger.Info().Msg("device still responsive; restarting game only")
 		b.restartGame()
 		b.recoverySuccesses.Add(1)
+		if b.telemetry != nil { b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "success"}) }
 		return
 	}
 
@@ -676,6 +680,7 @@ func (b *Bot) recoverEmulator() {
 	if deviceOK() {
 		b.restartGame()
 		b.recoverySuccesses.Add(1)
+		if b.telemetry != nil { b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "success"}) }
 		return
 	}
 
@@ -688,6 +693,7 @@ func (b *Bot) recoverEmulator() {
 	if deviceOK() {
 		b.restartGame()
 		b.recoverySuccesses.Add(1)
+		if b.telemetry != nil { b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "success"}) }
 		return
 	}
 
@@ -712,6 +718,7 @@ func (b *Bot) recoverEmulator() {
 	}
 	b.restartGame()
 	b.recoverySuccesses.Add(1)
+	if b.telemetry != nil { b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "success", "bluestacks_restart": true}) }
 }
 
 // locateRewardPopup detects the seasonal/event "Pick a Reward!" modal.
@@ -2937,6 +2944,15 @@ func (b *Bot) Stats() BotStats {
 	}
 	tm := telemetry.Snapshot{}
 	if b.telemetry != nil { tm = b.telemetry.Snapshot() }
+	adbHealth := b.client.Health()
+	healthScore := 100
+	healthScore -= adbHealth.ConsecutiveFails * 8
+	failedRecoveries := int(b.recoveryAttempts.Load() - b.recoverySuccesses.Load())
+	if failedRecoveries > 0 { healthScore -= failedRecoveries * 6 }
+	healthScore -= int(b.blueStacksRestarts.Load()) * 2
+	if adbHealth.AvgCaptureMs > 1200 { healthScore -= 15 } else if adbHealth.AvgCaptureMs > 700 { healthScore -= 7 }
+	if healthScore < 0 { healthScore = 0 }
+	if healthScore > 100 { healthScore = 100 }
 	return BotStats{
 		AttacksCompleted: b.attackCount.Load(),
 		SearchSkips:      b.skipsCount.Load(),
@@ -2948,7 +2964,7 @@ func (b *Bot) Stats() BotStats {
 		Stars2:           b.stars2.Load(),
 		Stars3:           b.stars3.Load(),
 		Uptime:           uptime,
-		AdbHealth:          b.client.Health(),
+		AdbHealth:          adbHealth,
 		CPUTimeSec:         CPUTime().Seconds(),
 		CPUCores:           b.cpuSampler.Usage(),
 		RecoveryAttempts:   b.recoveryAttempts.Load(),
@@ -2963,6 +2979,7 @@ func (b *Bot) Stats() BotStats {
 		LastCaptureMS:      tm.LastCaptureMS,
 		TelemetryEvents:    tm.Events,
 		TargetsSkipped:     tm.TargetsSkipped,
+		HealthScore:        healthScore,
 	}
 }
 
@@ -2996,6 +3013,7 @@ type BotStats struct {
 	LastCaptureMS    float64 `json:"last_capture_ms"`
 	TelemetryEvents  int64   `json:"telemetry_events"`
 	TargetsSkipped   int64   `json:"targets_skipped"`
+	HealthScore      int     `json:"health_score"`
 }
 
 type AttackReport struct {
