@@ -434,7 +434,17 @@ func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates 
 			continue
 		}
 		sm.templatesTried++
-		matches, _ := vision.MatchMultiScaleROICached(screen, tpl, tplName, 0.2, 1.2, 20, 0.55, barROI)
+		var matches []vision.Match
+		if specialsOnly {
+			matches, _ = vision.MatchMultiScaleROICachedPreferred(screen, tpl, tplName, 0.2, 1.2, 20, 0.55, barROI)
+		} else {
+			// First/full classification remains exact and seeds the scale hint
+			// used only by later high-confidence live rescans.
+			matches, _ = vision.MatchMultiScaleROICached(screen, tpl, tplName, 0.2, 1.2, 20, 0.55, barROI)
+			if len(matches) > 0 {
+				vision.RememberPreferredTemplateScale(tplName, 0.2, 1.2, 20, matches[0].Scale)
+			}
+		}
 		if len(matches) > 0 {
 			sm.templatesMatched++
 			sort.Slice(matches, func(i, j int) bool { return matches[i].Confidence > matches[j].Confidence })
