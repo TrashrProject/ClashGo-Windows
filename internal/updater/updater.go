@@ -111,6 +111,7 @@ type serviceConfig struct {
 	RepoOwner      string
 	RepoName       string
 	CurrentVersion string
+	Channel        string
 	HTTPClient     *http.Client
 	Now            func() time.Time
 }
@@ -361,6 +362,12 @@ func (s *Service) Check(ctx context.Context) (Status, error) {
 // semver-published release; /latest/download/<asset> then serves the
 // file with a 302 to the actual CDN URL.
 func (s *Service) manifestURL() string {
+	if s.cfg.Channel == "beta" {
+		return fmt.Sprintf(
+			"https://github.com/%s/%s/releases/download/beta-latest/latest-beta.json",
+			s.cfg.RepoOwner, s.cfg.RepoName,
+		)
+	}
 	return fmt.Sprintf(
 		"https://github.com/%s/%s/releases/latest/download/latest.json",
 		s.cfg.RepoOwner, s.cfg.RepoName,
@@ -424,6 +431,12 @@ func (s *Service) fetchLatestRelease(ctx context.Context) (githubRelease, error)
 		"https://api.github.com/repos/%s/%s/releases/latest",
 		s.cfg.RepoOwner, s.cfg.RepoName,
 	)
+	if s.cfg.Channel == "beta" {
+		url = fmt.Sprintf(
+			"https://api.github.com/repos/%s/%s/releases/tags/beta-latest",
+			s.cfg.RepoOwner, s.cfg.RepoName,
+		)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return githubRelease{}, err
@@ -568,9 +581,13 @@ func computeAvailable(latest, current, skip, minSupported string) bool {
 
 // releasePageURL is the human-facing link embedded in the UI.
 func (s *Service) releasePageURL(version string) string {
+	tag := "v" + version
+	if s.cfg.Channel == "beta" {
+		tag = "beta-latest"
+	}
 	return fmt.Sprintf(
-		"https://github.com/%s/%s/releases/tag/v%s",
-		s.cfg.RepoOwner, s.cfg.RepoName, version,
+		"https://github.com/%s/%s/releases/tag/%s",
+		s.cfg.RepoOwner, s.cfg.RepoName, tag,
 	)
 }
 
