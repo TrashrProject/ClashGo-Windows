@@ -17,6 +17,7 @@ import (
 
 	"github.com/Ducky705/ClashGO/internal/adb"
 	"github.com/Ducky705/ClashGO/internal/attack"
+	autopolicy "github.com/Ducky705/ClashGO/internal/automation"
 	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/game"
 	"github.com/Ducky705/ClashGO/internal/intelligence"
@@ -52,6 +53,7 @@ type Bot struct {
 	classify func(gocv.Mat) (game.GameState, int)
 
 	attackExec *attack.Executor
+	governor   *autopolicy.Governor
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -293,6 +295,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		searchLootRec:     searchLootRec,
 		cfg:               cfg,
 		attackExec:        attackExec,
+		governor:          autopolicy.NewGovernor(cfg.Automation),
 		ctx:               ctx,
 		cancel:            cancel,
 		done:              make(chan struct{}),
@@ -1697,6 +1700,40 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		return
 	}
 
+	// Long-session governor: combine hourly rate limits, scheduled rest and
+	// recovery circuit-breaking before touching the village Attack button.
+	// Re-evaluate after every wait because more than one policy can become
+	// active at the same boundary (for example scheduled break + hourly cap).
+	for b.governor != nil {
+		gate := b.governor.Gate(time.Now(), b.attackCount.Load(), b.recoveryAttempts.Load())
+		if gate.Wait <= 0 {
+			break
+		}
+		b.logger.Info().
+			Str("reason", gate.Reason).
+			Dur("wait", gate.Wait).
+			Int32("attacks", b.attackCount.Load()).
+			Int32("recoveries", b.recoveryAttempts.Load()).
+			Msg("automation governor pausing before next attack")
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
+				"mode": "Paused",
+				"reason": "automation_governor",
+				"policy": gate.Reason,
+				"wait_ms": gate.Wait.Milliseconds(),
+			})
+		}
+		timer := time.NewTimer(gate.Wait)
+		select {
+		case <-timer.C:
+		case <-b.ctx.Done():
+			if !timer.Stop() {
+				select { case <-timer.C: default: }
+			}
+			return
+		}
+	}
+
 	sequenceStartedAt := time.Now()
 	var cooldownDurationMS int64
 	var preparationDurationMS int64
@@ -2383,6 +2420,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	// history row appeared — and the entry was dropped entirely if
 	// ReturnHome failed.
 	b.attackCount.Add(1)
+	if b.governor != nil {
+		b.governor.RecordAttack(time.Now())
+	}
 
 	depErrStr := ""
 	if deployErr != nil {
