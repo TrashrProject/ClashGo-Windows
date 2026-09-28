@@ -292,6 +292,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               </div>
               <div className="mt-2 text-[10px] font-bold text-zinc-500">
                 Bottleneck: {(sessionReport.bottleneck || 'learning').split('_').join(' ')}
+                {sessionReport.optimization_target ? ` · optimize ${sessionReport.optimization_target.split('_').join(' ')}` : ''}
                 {sessionReport.top_strategy ? ` · ${sessionReport.top_strategy}` : ''}
                 {sessionReport.top_deploy_side ? ` · ${sessionReport.top_deploy_side}` : ''}
               </div>
