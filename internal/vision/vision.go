@@ -79,6 +79,10 @@ var preferredScaleFallbacks atomic.Int64
 var preferredScaleEnabled atomic.Bool
 
 func ResetPreferredScaleStats() {
+	// A new Bot session may use a different emulator resolution/DPI. Learned
+	// scales from the previous session are hints only, so discard them together
+	// with their counters and relearn from the first exact classification.
+	preferredTemplateScales = sync.Map{}
 	preferredScaleAttempts.Store(0)
 	preferredScaleHits.Store(0)
 	preferredScaleFallbacks.Store(0)
