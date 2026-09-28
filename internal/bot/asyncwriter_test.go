@@ -70,3 +70,59 @@ func TestAsyncWriterWriteAfterClose(t *testing.T) {
 		t.Fatal("Write after Close blocked — must fall through to direct os.WriteFile")
 	}
 }
+
+func TestAsyncWriterWriteSoonPersistsWithoutCallerWait(t *testing.T) {
+	aw := NewAsyncWriter()
+	defer aw.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history.json")
+	data := []byte(`{"attack":1}`)
+
+	start := time.Now()
+	if err := aw.WriteSoon(path, data, 0o644); err != nil {
+		t.Fatalf("WriteSoon returned error: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Fatalf("WriteSoon blocked caller for %v", elapsed)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		got, err := os.ReadFile(path)
+		if err == nil && string(got) == string(data) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("queued write was not persisted within 1s; got=%q err=%v", got, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestAsyncWriterWriteSoonPreservesOrderForSamePath(t *testing.T) {
+	aw := NewAsyncWriter()
+	defer aw.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history.json")
+
+	if err := aw.WriteSoon(path, []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatalf("first WriteSoon: %v", err)
+	}
+	if err := aw.WriteSoon(path, []byte(`{"version":2}`), 0o644); err != nil {
+		t.Fatalf("second WriteSoon: %v", err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		got, err := os.ReadFile(path)
+		if err == nil && string(got) == `{"version":2}` {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("latest queued version not persisted; got=%q err=%v", got, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
