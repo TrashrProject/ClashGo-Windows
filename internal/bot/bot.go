@@ -579,13 +579,13 @@ func (b *Bot) captureLoop() {
 // so the stuck-check distinguishes "spinning" from "working".
 func (b *Bot) recordActivity() {
 	b.watchdogMu.Lock()
-	b.recordActivity()
+	b.lastAction = time.Now()
 	b.watchdogMu.Unlock()
 }
 
 func (b *Bot) recordSequenceStart() {
 	b.watchdogMu.Lock()
-	b.recordSequenceStart()
+	b.lastSequenceStart = time.Now()
 	b.watchdogMu.Unlock()
 }
 
