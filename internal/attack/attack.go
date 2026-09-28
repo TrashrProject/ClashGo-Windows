@@ -304,6 +304,21 @@ func (e *Executor) loadTemplates() {
 		e.templates[name] = mat
 		e.logger.Debug().Str("name", name).Msg("cached attack template")
 	}
+
+	// Warm the exact multi-scale cache used by the Windows live-bar classifier.
+	// This shifts resize/allocation work to startup so the first real attack has
+	// the same hot-cache behavior as later attacks.
+	warmStarted := time.Now()
+	for name, mat := range e.templates {
+		if mat.Empty() {
+			continue
+		}
+		_ = vision.GetScaledTemplates(name, mat, 0.2, 1.2, 20)
+	}
+	e.logger.Debug().
+		Int("templates", len(e.templates)).
+		Dur("duration", time.Since(warmStarted)).
+		Msg("prewarmed attack template scale cache")
 }
 
 // Close releases native OpenCV templates owned by the attack executor.
