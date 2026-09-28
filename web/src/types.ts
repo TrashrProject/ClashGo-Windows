@@ -30,6 +30,10 @@ export interface BotStats {
   targets_skipped: number;
   health_score: number;
   speed_profile: string;
+  targets_seen: number;
+  target_acceptance_rate: number;
+  avg_skips_per_attack: number;
+  recovery_success_rate: number;
   adb_health: {
     avg_capture_ms: number;
     consecutive_fails: number;
