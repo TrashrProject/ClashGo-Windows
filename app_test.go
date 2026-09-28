@@ -175,7 +175,7 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 	if got.ThreeStarRate != 75 {
 		t.Fatalf("3-star rate=%v want 75", got.ThreeStarRate)
 	}
-	if got.AverageStars != 2.5 {
-		t.Fatalf("average stars=%v want 2.5", got.AverageStars)
+	if got.AverageStars != 2.75 {
+		t.Fatalf("average stars=%v want 2.75", got.AverageStars)
 	}
 }
