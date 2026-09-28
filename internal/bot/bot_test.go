@@ -51,3 +51,35 @@ func TestHistoryCacheNoWipeOnReadError(t *testing.T) {
 		t.Errorf("history cache order/copy wrong: %+v", b.historyCache)
 	}
 }
+
+func TestHistorySnapshotReturnsIndependentCopy(t *testing.T) {
+	b := &Bot{
+		historyCache: []AttackReport{
+			{Timestamp: "one", Stars: 3},
+			{Timestamp: "two", Stars: 2},
+		},
+	}
+
+	got := b.HistorySnapshot()
+	if len(got) != 2 {
+		t.Fatalf("snapshot len=%d want 2", len(got))
+	}
+
+	got[0].Stars = 0
+	got = append(got, AttackReport{Timestamp: "mutated"})
+
+	again := b.HistorySnapshot()
+	if len(again) != 2 {
+		t.Fatalf("mutating returned slice changed bot cache len=%d", len(again))
+	}
+	if again[0].Stars != 3 {
+		t.Fatalf("mutating returned report leaked into bot cache: %+v", again[0])
+	}
+}
+
+func TestHistorySnapshotNilBotIsEmpty(t *testing.T) {
+	var b *Bot
+	if got := b.HistorySnapshot(); len(got) != 0 {
+		t.Fatalf("nil bot snapshot len=%d want 0", len(got))
+	}
+}
