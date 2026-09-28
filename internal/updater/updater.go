@@ -41,10 +41,10 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// PollInterval is the cadence between background checks. 6h respects
-// GitHub's 60/hr unauth rate limit (10 polls per hour worst-case under
-// ETag-304 hits which don't count against the limit).
+// PollInterval is the stable-channel cadence. Beta builds poll more often so
+// freshly published rolling betas appear quickly while testers are active.
 const PollInterval = 6 * time.Hour
+const BetaPollInterval = 2 * time.Minute
 
 // minCheckDelay guards against rapid-fire manual "Check now" clicks from
 // the UI (or a future scheduler bug).
@@ -296,7 +296,11 @@ func (s *Service) StartBackgroundPoller(ctx context.Context) {
 		if _, err := s.Check(ctx); err != nil {
 			log.Warn().Err(err).Msg("initial update check failed")
 		}
-		t := time.NewTicker(PollInterval)
+		interval := PollInterval
+		if s.cfg.Channel == "beta" {
+			interval = BetaPollInterval
+		}
+		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
 			select {
@@ -395,7 +399,7 @@ func (s *Service) fetchManifest(ctx context.Context, url string) (*Manifest, err
 	s.etagMu.RLock()
 	etag := s.etag
 	s.etagMu.RUnlock()
-	if etag != "" {
+	if etag != "" && s.cfg.Channel != "beta" {
 		req.Header.Set("If-None-Match", etag)
 	}
 
@@ -440,12 +444,6 @@ func (s *Service) fetchLatestRelease(ctx context.Context) (githubRelease, error)
 		"https://api.github.com/repos/%s/%s/releases/latest",
 		s.cfg.RepoOwner, s.cfg.RepoName,
 	)
-	if s.cfg.Channel == "beta" {
-		url = fmt.Sprintf(
-			"https://api.github.com/repos/%s/%s/releases/tags/beta-latest",
-			s.cfg.RepoOwner, s.cfg.RepoName,
-		)
-	}
 	if s.cfg.Channel == "beta" {
 		url = fmt.Sprintf(
 			"https://api.github.com/repos/%s/%s/releases/tags/beta-latest",
