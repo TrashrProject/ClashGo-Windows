@@ -216,3 +216,40 @@ func TestPruneIncidentDirKeepsNewestFiles(t *testing.T) {
 		t.Fatalf("kept wrong incidents: %q %q", entries[0].Name(), entries[1].Name())
 	}
 }
+
+func TestNextEfficiencyAggregatesRetriesAndProbes(t *testing.T) {
+	b := New(filepath.Join(t.TempDir(), "events.ndjson"))
+	defer b.Close()
+
+	b.Emit(EventTargetSkipped, map[string]any{
+		"transition_us": int64(1_000_000),
+		"retry_used": false,
+		"verify_probes": 1,
+	})
+	b.Emit(EventTargetSkipped, map[string]any{
+		"transition_us": int64(2_000_000),
+		"retry_used": false,
+		"verify_probes": 2,
+	})
+	b.Emit(EventTargetSkipped, map[string]any{
+		"transition_us": int64(4_000_000),
+		"retry_used": true,
+		"verify_probes": 5,
+	})
+
+	s := b.Snapshot()
+	if s.NextTransitions != 3 || s.NextRetries != 1 {
+		t.Fatalf("unexpected Next counters: %+v", s)
+	}
+	wantRate := 200.0 / 3.0
+	if diff := s.NextFirstPassRate - wantRate; diff < -0.0001 || diff > 0.0001 {
+		t.Fatalf("first-pass rate=%v want %v", s.NextFirstPassRate, wantRate)
+	}
+	wantProbes := 8.0 / 3.0
+	if diff := s.AvgNextVerifyProbes - wantProbes; diff < -0.0001 || diff > 0.0001 {
+		t.Fatalf("avg probes=%v want %v", s.AvgNextVerifyProbes, wantProbes)
+	}
+	if s.AvgNextTransitionMS != (1000.0+2000.0+4000.0)/3.0 {
+		t.Fatalf("avg transition=%v", s.AvgNextTransitionMS)
+	}
+}
