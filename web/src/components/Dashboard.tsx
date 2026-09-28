@@ -459,6 +459,17 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                         safety {latestAttack.safety_mode.replaceAll('_', ' ')}
                       </span>
                     )}
+                    {(latestAttack.result_confidence || latestAttack.stars_source || latestAttack.loot_source) && (
+                      <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider ${
+                        latestAttack.result_confidence === 'high'
+                          ? 'bg-emerald-500/15 text-emerald-300'
+                          : latestAttack.result_confidence === 'low'
+                            ? 'bg-amber-500/15 text-amber-300'
+                            : 'bg-white/10 text-zinc-300'
+                      }`}>
+                        result {latestAttack.result_confidence || 'unknown'} · ★ {(latestAttack.stars_source || 'unknown').replaceAll('_', ' ')} · loot {(latestAttack.loot_source || 'unknown').replaceAll('_', ' ')}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
@@ -550,6 +561,11 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                               <div className="text-[9px] font-black text-zinc-400 uppercase tracking-wider mt-0.5">
                                 Attack #{rep.total_attacks_session || history.length - i}
                               </div>
+                              {rep.stars_source && (
+                                <div className="text-[8px] font-bold text-zinc-400 uppercase tracking-wider mt-0.5">
+                                  stars: {rep.stars_source.replaceAll('_', ' ')}
+                                </div>
+                              )}
                             </div>
                           </div>
                         </td>
@@ -573,6 +589,11 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                           <div className="text-[9px] text-zinc-400 font-black uppercase tracking-wider mt-1">
                             {(totalLoot / 1e6).toFixed(2)}M combined
                           </div>
+                          {(rep.loot_source || rep.result_confidence) && (
+                            <div className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider mt-1">
+                              {(rep.loot_source || 'unknown').replaceAll('_', ' ')} · {rep.result_confidence || 'unknown'} confidence
+                            </div>
+                          )}
                         </td>
 
                         <td className="px-4 py-4">
