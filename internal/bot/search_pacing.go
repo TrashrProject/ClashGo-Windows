@@ -10,6 +10,50 @@ import (
 // changes troop-card selection delays, red-zone geometry or deployment tap
 // cadence. The profile automatically falls back to conservative timings when
 // BlueStacks/ADB shows pressure.
+type nextVerificationPacing struct {
+	InitialWait time.Duration
+	ProbeGap    time.Duration
+	Mode        string
+}
+
+// chooseNextVerificationPacing only shortens the time BEFORE checking whether
+// Clash accepted a verified Next tap. It never adds extra taps and never
+// changes the retry path. The fast timings unlock only after enough successful
+// transitions prove the current BlueStacks/ADB session is stable.
+func chooseNextVerificationPacing(h adb.Health, transitions int64, firstPassRate float64) nextVerificationPacing {
+	captureMs := h.FastCaptureMs
+	if captureMs <= 0 {
+		captureMs = h.AvgCaptureMs
+	}
+
+	safe := nextVerificationPacing{
+		InitialWait: 650 * time.Millisecond,
+		ProbeGap:    550 * time.Millisecond,
+		Mode:        "Safe",
+	}
+	if h.ConsecutiveFails > 0 || captureMs >= 900 {
+		return safe
+	}
+
+	if transitions >= 20 && firstPassRate >= 98 && captureMs > 0 && captureMs <= 500 {
+		return nextVerificationPacing{
+			InitialWait: 575 * time.Millisecond,
+			ProbeGap:    475 * time.Millisecond,
+			Mode:        "Fast",
+		}
+	}
+
+	if transitions >= 10 && firstPassRate >= 95 && captureMs > 0 && captureMs <= 700 {
+		return nextVerificationPacing{
+			InitialWait: 615 * time.Millisecond,
+			ProbeGap:    515 * time.Millisecond,
+			Mode:        "Balanced",
+		}
+	}
+
+	return safe
+}
+
 type searchPacing struct {
 	Mode                string
 	PostTransitionPause time.Duration
