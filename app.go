@@ -1605,38 +1605,40 @@ func (a *App) ApplyUpdate() error {
 }
 
 // InstallAndRestart is the one-click auto-install path.
-// Sequence (intentional ordering):
-//  1. Stop the bot synchronously so ADB + stats flush cleanly.
-//  2. Save persisted stats via the existing path.
-//  3. Mark Status=StateRestarting so React covers the Wails ↔ helper
-//     transition with a non-dismissible splash.
-//  4. Spawn updater.ApplyAuto() which detaches install_update.sh.
-//  5. Schedule os.Exit(0) AFTER a short delay so the IPC reply has
-//     time to land at React before the process dies (about 1s is
-//     safe on the local socket). Using runtime.Quit is tempting but
-//     races with the helper script's `kill -0 $PPID` loop.
-//
-// Returns nil iff the helper was successfully started. If the helper
-// fails afterwards, it's the helper's responsibility to surface a
-// native macOS notification (see install_update.sh).
+// It downloads + SHA256-verifies an available update when necessary,
+// stops the bot only after the archive is ready, launches the platform
+// update helper, publishes the restarting state, then exits so the helper
+// can replace the running bundle and relaunch ClashGO.
 func (a *App) InstallAndRestart() error {
 	if a.updater == nil {
 		return fmt.Errorf("updater not initialized")
 	}
 
-	// Stop the bot first so ADB and session state are quiet before the updater
-	// replaces the executable and runtime DLLs.
+	// True one-click path: if the update is only "available", download and
+	// SHA256-verify it first. Previous builds jumped straight to ApplyAuto(),
+	// which correctly rejected the request with "download not ready".
+	st := a.updater.GetStatus()
+	if st.State != updater.StateReady {
+		if !st.Available {
+			return fmt.Errorf("no update is ready or available")
+		}
+		log.Info().
+			Str("version", st.LatestVersion).
+			Msg("InstallAndRestart: downloading update before installation")
+		if _, err := a.updater.Download(a.ctx); err != nil {
+			return fmt.Errorf("download update before install: %w", err)
+		}
+	}
+
+	// Stop the bot only after the archive has been fully downloaded and
+	// verified, so normal automation is not interrupted during the download.
 	if a.IsRunning() {
 		log.Info().Msg("InstallAndRestart: stopping bot to drain ADB before exit")
 		_ = a.StopBot()
 	}
 	a.saveStats()
 
-	// IMPORTANT: ApplyAuto requires StateReady. The old implementation set
-	// StateRestarting BEFORE calling ApplyAuto, which made ApplyAuto reject
-	// every install with "download not ready" and then made the manual
-	// fallback reject it for the same reason. Start the helper while the
-	// verified download is still Ready; only then expose Restarting to React.
+	// ApplyAuto requires StateReady and a SHA256-backed manifest.
 	started, err := a.updater.ApplyAuto()
 	if err != nil || !started {
 		log.Warn().Err(err).Msg("InstallAndRestart: auto helper unavailable, falling back to manual reveal")
@@ -1653,9 +1655,6 @@ func (a *App) InstallAndRestart() error {
 	}
 
 	a.updater.SetState(updater.StateRestarting)
-	// Push the transition immediately. The normal updater event bridge ticks
-	// every two seconds, while this process exits after ~1.2s; relying on that
-	// ticker meant the restart splash often never rendered.
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, "updater_status", a.updater.GetStatus())
 	}
