@@ -77,6 +77,7 @@ type Bot struct {
 	returnHomeCount     atomic.Int64
 	returnHomeMicros    atomic.Int64
 	lastReturnHomeUS    atomic.Int64
+	safePacingUntilUS   atomic.Int64
 
 	chestDismissInFlight  atomic.Bool
 	rewardDismissInFlight atomic.Bool
@@ -779,8 +780,38 @@ func (b *Bot) restartGame() {
 //     (note: drops ALL adb connections on this host — logged)
 //  4. EnsureBlueStacksMac   — emulator really gone; relaunch at the
 //     configured resolution, then poll up to 2 min for adb
+func safePacingActive(untilUS, nowUS int64) bool {
+	return untilUS > nowUS
+}
+
+func (b *Bot) forceSafePacing(reason string, duration time.Duration) {
+	if duration <= 0 {
+		duration = 2 * time.Minute
+	}
+	until := time.Now().Add(duration).UnixMicro()
+	for {
+		current := b.safePacingUntilUS.Load()
+		if current >= until || b.safePacingUntilUS.CompareAndSwap(current, until) {
+			break
+		}
+	}
+	if b.telemetry != nil {
+		b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
+			"mode": "Safe",
+			"reason": "safety_governor",
+			"incident": reason,
+			"safe_until_unix_us": until,
+		})
+	}
+}
+
+func (b *Bot) safePacingForced() bool {
+	return safePacingActive(b.safePacingUntilUS.Load(), time.Now().UnixMicro())
+}
+
 func (b *Bot) recoverEmulator() {
 	b.recoveryAttempts.Add(1)
+	b.forceSafePacing("device_recovery", 2*time.Minute)
 	if b.telemetry != nil {
 		b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "start", "attempt": b.recoveryAttempts.Load()})
 		b.telemetry.WriteIncident("device_recovery")
@@ -1726,6 +1757,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	attackStartedAt := time.Time{}
 	sequenceSkips := 0
 	selectSearchPace := func() searchPacing {
+		if b.safePacingForced() {
+			return chooseSearchPacing(adb.Health{ConsecutiveFails: 1})
+		}
 		tm := telemetry.Snapshot{}
 		if b.telemetry != nil {
 			tm = b.telemetry.Snapshot()
@@ -1741,6 +1775,18 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{"mode": searchPace.Mode, "reason": "search_start"})
 	}
 	updateSearchPace := func() {
+		if b.safePacingForced() {
+			next := chooseSearchPacing(adb.Health{ConsecutiveFails: 1})
+			if b.telemetry != nil && next.Mode != searchPace.Mode {
+				b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
+					"from": searchPace.Mode,
+					"mode": next.Mode,
+					"reason": "safety_governor",
+				})
+			}
+			searchPace = next
+			return
+		}
 		health := b.client.Health()
 		tm := telemetry.Snapshot{}
 		if b.telemetry != nil {
@@ -2075,6 +2121,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 
 	if deployErr != nil || remainingUndeployed > 0 {
+		b.forceSafePacing("incomplete_deployment", 2*time.Minute)
 		b.logger.Warn().
 			Int("remaining", remainingUndeployed).
 			Msg("deployment ended with units still unverified; battle continues but deployment is NOT marked complete")
@@ -2702,6 +2749,9 @@ func (b *Bot) clickSequence() bool {
 
 	b.lastPrepTimings = PreparationTimings{}
 	prepPace := chooseSearchPacing(b.client.Health())
+	if b.safePacingForced() {
+		prepPace = chooseSearchPacing(adb.Health{ConsecutiveFails: 1})
+	}
 	stepStarted := time.Now()
 	attackClicked := false
 	for attempt := 0; attempt < 3; attempt++ {
