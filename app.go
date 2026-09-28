@@ -295,6 +295,12 @@ func mergeStats(acc, current bot.BotStats) bot.BotStats {
 		LastReturnHomeMS:        current.LastReturnHomeMS,
 		AverageNextTransitionMS: current.AverageNextTransitionMS,
 		LastNextTransitionMS:    current.LastNextTransitionMS,
+		AvgAcceptedGE:           current.AvgAcceptedGE,
+		AvgRejectedGE:           current.AvgRejectedGE,
+		AvgAcceptedDE:           current.AvgAcceptedDE,
+		AvgRejectedDE:           current.AvgRejectedDE,
+		AvgAcceptedScore:        current.AvgAcceptedScore,
+		AvgRejectedScore:        current.AvgRejectedScore,
 	}
 
 	// Recovery rate is meaningful over the persisted + live totals.
