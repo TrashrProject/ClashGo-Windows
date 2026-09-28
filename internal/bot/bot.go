@@ -2104,10 +2104,13 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		RuntimeMode:      attackMode,
 		CaptureMS:        attackHealth.AvgCaptureMs,
 		TargetScanMS:     attackTelemetry.AvgTargetScanMS,
+		BattleEndReason:  b.attackExec.LastBattleEndReason(),
+		DestructionPct:   b.attackExec.LastDestructionPercent(),
+		TownHallDestroyed: b.attackExec.ThDestroyed(),
 	}
 
 	if b.telemetry != nil {
-		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore})
+		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore, "end_reason": rep.BattleEndReason, "destruction_pct": rep.DestructionPct, "town_hall_destroyed": rep.TownHallDestroyed})
 	}
 
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
@@ -3160,7 +3163,10 @@ type AttackReport struct {
 	TargetScore      int     `json:"target_score"`
 	RuntimeMode      string  `json:"runtime_mode"`
 	CaptureMS        float64 `json:"capture_ms"`
-	TargetScanMS     float64 `json:"target_scan_ms"`
+	TargetScanMS      float64 `json:"target_scan_ms"`
+	BattleEndReason   string  `json:"battle_end_reason"`
+	DestructionPct    int     `json:"destruction_pct"`
+	TownHallDestroyed bool    `json:"town_hall_destroyed"`
 }
 
 type adbLogAdapter struct {
