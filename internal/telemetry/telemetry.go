@@ -25,6 +25,7 @@ const (
 	EventCaptureSample   EventType = "capture_sample"
 	EventSpeedProfile    EventType = "speed_profile"
 	EventReturnHome      EventType = "return_home"
+	EventAnomaly         EventType = "anomaly"
 )
 
 type Event struct {
@@ -48,6 +49,7 @@ type Snapshot struct {
 	TargetsSkipped     int64   `json:"targets_skipped"`
 	AttacksFinished    int64   `json:"attacks_finished"`
 	Recoveries         int64   `json:"recoveries"`
+	Anomalies          int64   `json:"anomalies"`
 	AvgCaptureMS       float64 `json:"avg_capture_ms"`
 	LastCaptureMS      float64 `json:"last_capture_ms"`
 	AvgTargetScanMS    float64 `json:"avg_target_scan_ms"`
@@ -72,6 +74,7 @@ type Bus struct {
 	targetsSkipped  atomic.Int64
 	attacksFinished atomic.Int64
 	recoveries      atomic.Int64
+	anomalies       atomic.Int64
 	captureCount     atomic.Int64
 	captureMicros    atomic.Int64
 	lastCaptureUS    atomic.Int64
@@ -199,6 +202,8 @@ func (b *Bus) record(ev Event) {
 		b.attacksFinished.Add(1)
 	case EventRecovery:
 		b.recoveries.Add(1)
+	case EventAnomaly:
+		b.anomalies.Add(1)
 	case EventCaptureSample:
 		if raw, ok := ev.Fields["duration_us"]; ok {
 			switch v := raw.(type) {
@@ -241,6 +246,7 @@ func (b *Bus) Snapshot() Snapshot {
 		TargetsSkipped:  b.targetsSkipped.Load(),
 		AttacksFinished: b.attacksFinished.Load(),
 		Recoveries:      b.recoveries.Load(),
+		Anomalies:       b.anomalies.Load(),
 		AvgCaptureMS:     avg,
 		LastCaptureMS:    float64(b.lastCaptureUS.Load()) / 1000.0,
 		AvgTargetScanMS:  avgScan,
