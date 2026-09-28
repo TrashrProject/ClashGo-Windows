@@ -79,7 +79,35 @@ func windowsDeployCorridor(zone RedZone, w, h, uiCutoff int) (side string, p1, p
 		p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
 	}
 
+	if !windowsDeployLineSafe(zone, w, h, uiCutoff, side, p1, p2) {
+		return "", image.Point{}, image.Point{}, 0, false
+	}
 	return side, p1, p2, freeSpace, true
+}
+
+// windowsDeployLineSafe is the final runtime guard before a Windows line may
+// be used for troop/hero/siege deployment. It rejects points outside the
+// capture, points inside the lower HUD, and any line that is not strictly on
+// the advertised outside side of the live red-zone bounding box.
+func windowsDeployLineSafe(zone RedZone, w, h, uiCutoff int, side string, p1, p2 image.Point) bool {
+	if !zone.Valid || w <= 0 || h <= 0 || uiCutoff <= 0 {
+		return false
+	}
+	for _, p := range []image.Point{p1, p2} {
+		if p.X < 0 || p.X >= w || p.Y < 0 || p.Y >= h || p.Y >= uiCutoff {
+			return false
+		}
+	}
+	switch side {
+	case "left":
+		return p1.X < zone.BBox.Min.X && p2.X < zone.BBox.Min.X
+	case "right":
+		return p1.X > zone.BBox.Max.X && p2.X > zone.BBox.Max.X
+	case "top":
+		return p1.Y < zone.BBox.Min.Y && p2.Y < zone.BBox.Min.Y
+	default:
+		return false
+	}
 }
 
 func windowsCategoryPriority(category string) int {
