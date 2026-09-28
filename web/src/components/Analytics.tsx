@@ -519,6 +519,40 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     return { status, message, natural: n, early: e, deltaYieldPct };
   }, [history]);
 
+  const farmForecast = React.useMemo(() => {
+    const attacks = history?.length ?? 0;
+    const goldPerHour = stats.gold_per_hour || 0;
+    const elixirPerHour = stats.elixir_per_hour || 0;
+    const dePerHour = stats.de_per_hour || 0;
+
+    const recentRows = (history ?? []).slice(0, 10);
+    const recentRoutines = recentRows
+      .map((r) => r.full_routine_duration_ms || r.cycle_duration_ms || 0)
+      .filter((v) => v > 0);
+    const mean = recentRoutines.length
+      ? recentRoutines.reduce((sum, v) => sum + v, 0) / recentRoutines.length
+      : 0;
+    const variance = recentRoutines.length
+      ? recentRoutines.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / recentRoutines.length
+      : 0;
+    const cv = mean > 0 ? Math.sqrt(variance) / mean : 1;
+
+    let confidence = 'Learning';
+    if (attacks >= 30 && cv <= 0.25 && (stats.health_score ?? 0) >= 90) confidence = 'High';
+    else if (attacks >= 10 && cv <= 0.45 && (stats.health_score ?? 0) >= 75) confidence = 'Medium';
+
+    return {
+      confidence,
+      cv,
+      rows: [1, 8, 24].map((hours) => ({
+        hours,
+        gold: goldPerHour * hours,
+        elixir: elixirPerHour * hours,
+        de: dePerHour * hours,
+      })),
+    };
+  }, [history, stats.gold_per_hour, stats.elixir_per_hour, stats.de_per_hour, stats.health_score]);
+
   const sideStats = React.useMemo(() => {
     const map = new Map<string, {
       side: string;
@@ -1418,6 +1452,41 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">{metric.label}</div>
               <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Farm Forecast</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Projected resource yield</h3>
+            <p className="text-sm text-zinc-500 mt-1">Projection from measured session throughput; confidence falls when recent routine times are unstable.</p>
+          </div>
+          <div className="px-3 py-2 rounded-full bg-zinc-50 dark:bg-zinc-950/40 text-[9px] font-black uppercase tracking-widest text-zinc-500">
+            {farmForecast.confidence} confidence
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {farmForecast.rows.map((row) => (
+            <div key={row.hours} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-5">
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">{row.hours}h projection</div>
+              <div className="mt-4 grid grid-cols-3 gap-3">
+                <div>
+                  <div className="text-[8px] font-black uppercase tracking-wider text-zinc-400">Gold</div>
+                  <div className="mt-1 text-lg font-black text-amber-500 tabular-nums">{compact(row.gold)}</div>
+                </div>
+                <div>
+                  <div className="text-[8px] font-black uppercase tracking-wider text-zinc-400">Elixir</div>
+                  <div className="mt-1 text-lg font-black text-fuchsia-500 tabular-nums">{compact(row.elixir)}</div>
+                </div>
+                <div>
+                  <div className="text-[8px] font-black uppercase tracking-wider text-zinc-400">DE</div>
+                  <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white tabular-nums">{compact(row.de)}</div>
+                </div>
+              </div>
             </div>
           ))}
         </div>
