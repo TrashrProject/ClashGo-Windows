@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,6 +30,13 @@ type Event struct {
 	At         time.Time        `json:"at"`
 	SessionID  string           `json:"session_id,omitempty"`
 	Fields     map[string]any   `json:"fields,omitempty"`
+}
+
+type Incident struct {
+	At       time.Time `json:"at"`
+	Reason   string    `json:"reason"`
+	Metrics  Snapshot  `json:"metrics"`
+	Recent   []Event   `json:"recent_events"`
 }
 
 type Snapshot struct {
@@ -173,6 +181,41 @@ func (b *Bus) Snapshot() Snapshot {
 		AvgCaptureMS:    avg,
 		LastCaptureMS:   float64(b.lastCaptureUS.Load()) / 1000.0,
 	}
+}
+
+// WriteIncident persists a compact black-box snapshot only on exceptional
+// paths. Normal farming never pays this disk-write cost.
+func (b *Bus) WriteIncident(reason string) string {
+	if b == nil || b.path == "" {
+		return ""
+	}
+	clean := strings.NewReplacer("/", "_", "\\", "_", " ", "_", ":", "_").Replace(strings.TrimSpace(reason))
+	if clean == "" {
+		clean = "incident"
+	}
+	if len(clean) > 64 {
+		clean = clean[:64]
+	}
+	incident := Incident{
+		At:      time.Now().UTC(),
+		Reason:  reason,
+		Metrics: b.Snapshot(),
+		Recent:  b.Recent(60),
+	}
+	data, err := json.MarshalIndent(incident, "", "  ")
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Join(filepath.Dir(b.path), "incidents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	name := incident.At.Format("20060102T150405.000000000Z") + "_" + clean + ".json"
+	out := filepath.Join(dir, name)
+	if err := os.WriteFile(out, data, 0o644); err != nil {
+		return ""
+	}
+	return out
 }
 
 func (b *Bus) Close() {
