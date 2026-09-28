@@ -160,6 +160,10 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 		AvgRejectedDE:           1_200,
 		AvgAcceptedScore:        91,
 		AvgRejectedScore:        57,
+		PreferredScaleAttempts:  20,
+		PreferredScaleHits:      15,
+		PreferredScaleFallbacks: 5,
+		PreferredScaleHitRate:   75,
 	}
 
 	got := mergeStats(acc, current)
@@ -178,6 +182,10 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 		got.AvgAcceptedDE != 4_500 || got.AvgRejectedDE != 1_200 ||
 		got.AvgAcceptedScore != 91 || got.AvgRejectedScore != 57 {
 		t.Fatalf("search intelligence metrics lost: %+v", got)
+	}
+	if got.PreferredScaleAttempts != 20 || got.PreferredScaleHits != 15 ||
+		got.PreferredScaleFallbacks != 5 || got.PreferredScaleHitRate != 75 {
+		t.Fatalf("preferred-scale metrics lost: %+v", got)
 	}
 	if got.GoldPerHour != 3_000_000 {
 		t.Fatalf("gold/hour=%v want 3000000", got.GoldPerHour)
