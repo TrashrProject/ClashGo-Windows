@@ -54,6 +54,10 @@ type Executor struct {
 	lastRedZoneValid      bool
 	lastCorridorVerified  bool
 	lastHUDSafe           bool
+	lastRedZoneBBox       image.Rectangle
+	lastDeployP1          image.Point
+	lastDeployP2          image.Point
+	lastDeployFreeSpace   int
 
 	// Windows live-bar observability. These counters measure slot-rescan and
 	// selected-card OCR cost without changing deployment decisions.
@@ -114,10 +118,19 @@ func (e *Executor) LastResolvedEdge() string { return e.lastResolvedEdge }
 func (e *Executor) LastDeploySide() string { return e.lastDeploySide }
 
 type DeploymentSafetySnapshot struct {
-	Mode               string `json:"mode"`
-	RedZoneValid       bool   `json:"red_zone_valid"`
-	CorridorVerified   bool   `json:"corridor_verified"`
-	HUDSafe            bool   `json:"hud_safe"`
+	Mode             string `json:"mode"`
+	RedZoneValid     bool   `json:"red_zone_valid"`
+	CorridorVerified bool   `json:"corridor_verified"`
+	HUDSafe          bool   `json:"hud_safe"`
+	RedZoneX1        int    `json:"red_zone_x1"`
+	RedZoneY1        int    `json:"red_zone_y1"`
+	RedZoneX2        int    `json:"red_zone_x2"`
+	RedZoneY2        int    `json:"red_zone_y2"`
+	DeployX1         int    `json:"deploy_x1"`
+	DeployY1         int    `json:"deploy_y1"`
+	DeployX2         int    `json:"deploy_x2"`
+	DeployY2         int    `json:"deploy_y2"`
+	FreeSpace        int    `json:"free_space"`
 }
 
 func (e *Executor) DeploymentSafety() DeploymentSafetySnapshot {
@@ -126,6 +139,15 @@ func (e *Executor) DeploymentSafety() DeploymentSafetySnapshot {
 		RedZoneValid:     e.lastRedZoneValid,
 		CorridorVerified: e.lastCorridorVerified,
 		HUDSafe:          e.lastHUDSafe,
+		RedZoneX1:        e.lastRedZoneBBox.Min.X,
+		RedZoneY1:        e.lastRedZoneBBox.Min.Y,
+		RedZoneX2:        e.lastRedZoneBBox.Max.X,
+		RedZoneY2:        e.lastRedZoneBBox.Max.Y,
+		DeployX1:         e.lastDeployP1.X,
+		DeployY1:         e.lastDeployP1.Y,
+		DeployX2:         e.lastDeployP2.X,
+		DeployY2:         e.lastDeployP2.Y,
+		FreeSpace:        e.lastDeployFreeSpace,
 	}
 }
 
