@@ -125,6 +125,9 @@ export interface AttackReport {
   runtime_mode: string;
   capture_ms: number;
   target_scan_ms: number;
+  live_bar_rescans: number;
+  avg_live_bar_rescan_ms: number;
+  avg_selected_card_ocr_ms: number;
   preparation_duration_ms: number;
   cooldown_duration_ms: number;
   battle_end_reason: string;
