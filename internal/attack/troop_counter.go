@@ -40,6 +40,28 @@ func NewTroopCounter(refW, refH int, logger zerolog.Logger) *TroopCounter {
 	return tc
 }
 
+// Close releases native OpenCV matrices owned by this counter. A new
+// TroopCounter is created per deployment, so failing to close these templates
+// and resized-cache Mats leaks native memory across long farming sessions.
+func (tc *TroopCounter) Close() {
+	if tc == nil {
+		return
+	}
+	for i := range tc.digitTemplates {
+		if !tc.digitTemplates[i].Closed() {
+			tc.digitTemplates[i].Close()
+		}
+	}
+	for key, scaled := range tc.scaledDigitCache {
+		for i := range scaled {
+			if !scaled[i].Closed() {
+				scaled[i].Close()
+			}
+		}
+		delete(tc.scaledDigitCache, key)
+	}
+}
+
 // loadDigitTemplates loads digit_0..digit_9 templates from the templates directory.
 func (tc *TroopCounter) loadDigitTemplates() {
 	digitDir := paths.Resolve("templates/digits")
