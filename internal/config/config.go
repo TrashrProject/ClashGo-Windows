@@ -40,6 +40,19 @@ type AutomationConfig struct {
 
 	// AutoProfileSync keeps account data fresh without manual Sync clicks.
 	AutoProfileSync bool `json:"auto_profile_sync"`
+
+	// MaxAttacksPerHour bounds the rolling one-hour farming rate. 0 disables it.
+	MaxAttacksPerHour int `json:"max_attacks_per_hour"`
+
+	// BreakEveryAttacks inserts a longer human-scale pause after every N
+	// completed attacks. 0 disables scheduled breaks.
+	BreakEveryAttacks int `json:"break_every_attacks"`
+	BreakDuration Duration `json:"break_duration"`
+
+	// RecoveryPauseThreshold trips a circuit breaker after N emulator/device
+	// recovery incidents. The pause is consumed once per incident batch.
+	RecoveryPauseThreshold int `json:"recovery_pause_threshold"`
+	RecoveryPause Duration `json:"recovery_pause"`
 }
 
 type AccountConfig struct {
@@ -318,11 +331,16 @@ func DefaultConfig() *BotConfig {
 		},
 		Account: AccountConfig{},
 		Automation: AutomationConfig{
-			SimpleMode:            true,
-			AutoFarmProfile:       true,
-			AutoArmyGuard:         true,
-			AutoResourceTracking:  true,
-			AutoProfileSync:       true,
+			SimpleMode:             true,
+			AutoFarmProfile:        true,
+			AutoArmyGuard:          true,
+			AutoResourceTracking:   true,
+			AutoProfileSync:        true,
+			MaxAttacksPerHour:      12,
+			BreakEveryAttacks:      5,
+			BreakDuration:          Duration{3 * time.Minute},
+			RecoveryPauseThreshold: 3,
+			RecoveryPause:          Duration{5 * time.Minute},
 		},
 	}
 }
