@@ -149,6 +149,7 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 		AverageNextTransitionMS: 735,
 		HealthScore:             94,
 		SpeedProfile:            "Fast",
+		Anomalies:               2,
 		TargetsSeen:             12,
 		TargetAcceptanceRate:    16.7,
 		AvgSkipsPerAttack:       5,
@@ -159,7 +160,7 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 	if got.AttacksCompleted != 4 || got.TotalGold != 3_000_000 || got.TotalElixir != 2_000_000 {
 		t.Fatalf("additive counters not merged: %+v", got)
 	}
-	if got.SpeedProfile != "Fast" || got.HealthScore != 94 {
+	if got.SpeedProfile != "Fast" || got.HealthScore != 94 || got.Anomalies != 2 {
 		t.Fatalf("runtime intelligence metrics lost: %+v", got)
 	}
 	if got.AverageCaptureMS != 321 || got.AverageTargetScanMS != 42 ||
