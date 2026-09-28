@@ -36,6 +36,8 @@ export interface BotStats {
   recovery_success_rate: number;
   average_target_scan_ms: number;
   last_target_scan_ms: number;
+  average_return_home_ms: number;
+  last_return_home_ms: number;
   adb_health: {
     avg_capture_ms: number;
     consecutive_fails: number;
