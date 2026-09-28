@@ -151,6 +151,8 @@ export interface AttackReport {
   templates_tried: number;
   templates_matched: number;
   avg_selected_card_ocr_ms: number;
+  battle_loot_ocr_samples: number;
+  avg_battle_loot_ocr_ms: number;
   preparation_duration_ms: number;
   prep_attack_button_ms: number;
   prep_find_match_ms: number;
