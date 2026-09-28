@@ -1560,6 +1560,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	var deployDurationMS int64
 	var stratName string = "Unknown"
 	var targetEdge string = "Unknown"
+	var deploySide string = "Unknown"
 
 	searchStart := time.Now()
 	attackStartedAt := time.Time{}
@@ -1648,6 +1649,12 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			deployStarted := time.Now()
 			remainingUndeployed, deployErr = b.deployTroops(screen)
 			deployDurationMS = time.Since(deployStarted).Milliseconds()
+			if resolved := b.attackExec.LastResolvedEdge(); resolved != "" {
+				targetEdge = resolved
+			}
+			if side := b.attackExec.LastDeploySide(); side != "" {
+				deploySide = side
+			}
 			b.attackExec.SetEarlyExitAllowed(deployErr == nil && remainingUndeployed == 0)
 			if deployErr != nil || remainingUndeployed > 0 {
 				b.logger.Warn().
@@ -2036,6 +2043,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		Timestamp:        time.Now().Format(time.RFC3339),
 		Strategy:         stratName,
 		TargetEdge:       targetEdge,
+		DeploySide:       deploySide,
 		DeploySuccess:    deployErr == nil && remainingUndeployed == 0,
 		UndeployedSlots:  remainingUndeployed,
 		DeployError:      depErrStr,
@@ -2055,7 +2063,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 
 	if b.telemetry != nil {
-		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "cycle_ms": rep.CycleDurationMS})
+		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "cycle_ms": rep.CycleDurationMS})
 	}
 
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
@@ -3040,6 +3048,7 @@ type AttackReport struct {
 	Timestamp        string `json:"timestamp"`
 	Strategy         string `json:"strategy"`
 	TargetEdge       string `json:"target_edge"`
+	DeploySide       string `json:"deploy_side"`
 	DeploySuccess    bool   `json:"deploy_success"`
 	UndeployedSlots  int    `json:"undeployed_slots"`
 	DeployError      string `json:"deploy_error,omitempty"`
