@@ -52,11 +52,11 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// re-picking TopLeft every process restart. See
 		// rotation_state.go for the failure-mode / concurrency story.
 		targetEdge = NextEdgeIndex()
-		e.logger.Info().Str("edge", targetEdge).Msg("rotated to next edge")
+		e.logger.Debug().Str("edge", targetEdge).Msg("rotated to next edge")
 	case strings.EqualFold(targetEdge, "Random"):
 		edges := []string{"TopLeft", "TopRight", "BottomLeft", "BottomRight"}
 		targetEdge = edges[rand.Intn(len(edges))]
-		e.logger.Info().Str("edge", targetEdge).Msg("random edge selected")
+		e.logger.Debug().Str("edge", targetEdge).Msg("random edge selected")
 	}
 
 	e.lastResolvedEdge = targetEdge
@@ -370,7 +370,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// meaningful as the formula's intent reference and avoids
 		// "which center do we reflect around" ambiguity.
 		formulaPtr.ApplyScreenScale(formulaPtr.Screen.W, formulaPtr.Screen.H, w, h)
-		e.logger.Info().
+		e.logger.Debug().
 			Str("strategy", s.Name).
 			Int("units", len(formulaPtr.Units)).
 			Int("formula_w", formulaPtr.Screen.W).
@@ -437,7 +437,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	// never transitioning). For Windows, prefer the slots we just detected on
 	// THIS live 860x732 battle frame and deploy them directly along a safe edge.
 	if runtime.GOOS == "windows" {
-		e.logger.Info().Int("slots", len(slotMgr.GetAllSlots())).Msg("using Windows live-slot deployment path")
+		e.logger.Debug().Int("slots", len(slotMgr.GetAllSlots())).Msg("using Windows live-slot deployment path")
 
 		// Build the Windows deployment line from the LIVE red deployment
 		// boundary, not from fixed percentages. Clash of Clans only accepts
@@ -966,7 +966,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			return remaining, fmt.Errorf("deploy budget exhausted (%s); %d slots undeployed", DeployBudget, remaining)
 		}
 
-		e.logger.Info().Str("phase", plan.Phase.Name).Msg("attack phase")
+		e.logger.Debug().Str("phase", plan.Phase.Name).Msg("attack phase")
 		if e.OnPhaseStart != nil {
 			e.OnPhaseStart(plan.Phase.Name, targetEdge)
 		}
@@ -981,7 +981,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			if up.Slot == nil {
 				continue
 			}
-			e.logger.Info().
+			e.logger.Debug().
 				Str("unit", up.Unit.Name).
 				Int("x", up.Slot.X).
 				Msg("deploying spell")
@@ -1016,7 +1016,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				// card loop (live: 1-charge rage re-fired for the old 2-
 				// round budget while OCR read "1" every time).
 				if extra, confirmed := spellDeployer.VerifyAndReconcile(up.Unit, up.Slot, targetEdge, plan.Phase.Pattern, 4); extra > 0 {
-					e.logger.Info().
+					e.logger.Debug().
 						Str("unit", up.Unit.Name).
 						Int("extra_fired", extra).
 						Bool("confirmed_empty", confirmed).
@@ -1043,7 +1043,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			if up.Slot == nil {
 				continue
 			}
-			e.logger.Info().
+			e.logger.Debug().
 				Str("unit", up.Unit.Name).
 				Int("x", up.Slot.X).
 				Msg("deploying troop")
@@ -1074,7 +1074,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			if up.Slot == nil {
 				continue
 			}
-			e.logger.Info().
+			e.logger.Debug().
 				Str("unit", up.Unit.Name).
 				Int("x", up.Slot.X).
 				Msg("deploying siege")
