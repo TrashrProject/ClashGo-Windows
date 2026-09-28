@@ -19,6 +19,7 @@ import (
 	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/logger"
 	"github.com/Ducky705/ClashGO/internal/paths"
+	"github.com/Ducky705/ClashGO/internal/telemetry"
 	"github.com/Ducky705/ClashGO/internal/updater"
 	"github.com/labstack/echo/v4"
 	"github.com/rs/zerolog/log"
@@ -1015,6 +1016,18 @@ func (a *App) SetBlueStacksInstance(instance string) error {
 		return err
 	}
 	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644)
+}
+
+// GetActivity returns a compact high-level feed for the dashboard. It is
+// intentionally capped and contains no screenshot/capture spam.
+func (a *App) GetActivity() []telemetry.Event {
+	a.mu.Lock()
+	b := a.bot
+	a.mu.Unlock()
+	if b == nil {
+		return []telemetry.Event{}
+	}
+	return b.RecentActivity(24)
 }
 
 // GetStats returns the bot's live runtime statistics
