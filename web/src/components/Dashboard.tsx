@@ -450,6 +450,13 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                       {latestAttack.full_routine_duration_ms > 0 ? `${(latestAttack.full_routine_duration_ms / 1000).toFixed(0)}s true loop` : `${(latestAttack.cycle_duration_ms / 1000).toFixed(0)}s cycle`}
                       {latestAttack.return_home_duration_ms > 0 ? ` · ${(latestAttack.return_home_duration_ms / 1000).toFixed(1)}s home` : ''}
                     </span>
+                    {latestAttack.red_zone_valid && (
+                      <span className="px-2 py-1 rounded-lg bg-white/10 text-zinc-300 text-[9px] font-black uppercase tracking-wider">
+                        RZ {latestAttack.red_zone_x1},{latestAttack.red_zone_y1}→{latestAttack.red_zone_x2},{latestAttack.red_zone_y2}
+                        {' · '}line {latestAttack.deploy_line_x1},{latestAttack.deploy_line_y1}→{latestAttack.deploy_line_x2},{latestAttack.deploy_line_y2}
+                        {' · '}free {latestAttack.deploy_free_space || 0}px
+                      </span>
+                    )}
                     {latestAttack.safety_mode && (
                       <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider ${
                         latestAttack.corridor_verified && latestAttack.hud_safe
