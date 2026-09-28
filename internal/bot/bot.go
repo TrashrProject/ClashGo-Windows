@@ -2018,11 +2018,15 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 		transitioned := false
 		if nextClicked {
-			// Give Clash/BlueStacks time to start the clouds transition before
-			// asking for another screenshot. The old 220ms polling burst could
-			// issue 8-12 PNG screencaps immediately after every Next tap and
-			// was correlated with HD-Player.exe access-violation crashes.
-			time.Sleep(650 * time.Millisecond)
+			// Shorten verification only after this exact runtime has accumulated
+			// enough reliable first-pass transitions. We never add taps here; a
+			// weak sample or ADB pressure restores the proven 650/550ms timings.
+			nextVerifyPace := nextVerificationPacing{InitialWait: 650 * time.Millisecond, ProbeGap: 550 * time.Millisecond, Mode: "Safe"}
+			if b.telemetry != nil {
+				tm := b.telemetry.Snapshot()
+				nextVerifyPace = chooseNextVerificationPacing(b.client.Health(), tm.NextTransitions, tm.NextFirstPassRate)
+			}
+			time.Sleep(nextVerifyPace.InitialWait)
 			for verify := 0; verify < 3 && !transitioned; verify++ {
 				nextVerifyProbes++
 				probe, capErr := b.client.CaptureToMat()
@@ -2037,7 +2041,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 					probe.Close()
 				}
 				if verify < 2 {
-					time.Sleep(550 * time.Millisecond)
+					time.Sleep(nextVerifyPace.ProbeGap)
 				}
 			}
 		}
