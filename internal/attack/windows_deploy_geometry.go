@@ -110,6 +110,10 @@ func windowsDeployLineSafe(zone RedZone, w, h, uiCutoff int, side string, p1, p2
 	}
 }
 
+func windowsAnonymousOneShotCategory(category string) bool {
+	return category == "Siege" || category == "CC"
+}
+
 func windowsCategoryPriority(category string) int {
 	switch category {
 	case "Troop":
