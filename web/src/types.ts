@@ -123,6 +123,8 @@ export interface AttackReport {
   runtime_mode: string;
   capture_ms: number;
   target_scan_ms: number;
+  preparation_duration_ms: number;
+  cooldown_duration_ms: number;
   battle_end_reason: string;
   destruction_pct: number;
   town_hall_destroyed: boolean;
