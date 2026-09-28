@@ -771,6 +771,67 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       return { ...band, attacks: n, avgStars: n ? stars/n : 0, fullDeployRate: n ? complete*100/n : 0, avgGE: n ? ge/n : 0, gePerHour: hours ? ge/hours : 0 };
     }).filter((band) => band.attacks > 0);
   }, [history]);
+  const farmForecast = React.useMemo(() => {
+    const rows = (history ?? []).slice(0, 20).filter((rep) =>
+      (rep.full_routine_duration_ms || rep.cycle_duration_ms || 0) > 0
+    );
+    if (rows.length < 3) {
+      return {
+        ready: false, samples: rows.length, attacksPerHour: 0,
+        gold30: 0, elixir30: 0, de30: 0,
+        gold60: 0, elixir60: 0, de60: 0,
+        lowGE60: 0, highGE60: 0,
+      };
+    }
+
+    let totalMs = 0, gold = 0, elixir = 0, de = 0;
+    const geRates: number[] = [];
+    for (const rep of rows) {
+      const ms = rep.full_routine_duration_ms || rep.cycle_duration_ms || 0;
+      if (ms <= 0) continue;
+      const hours = ms / 3_600_000;
+      const g = (rep.gold_stolen || 0) + (rep.bonus_gold || 0);
+      const e = (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+      const d = (rep.dark_elixir_stolen || 0) + (rep.bonus_de || 0);
+      totalMs += ms;
+      gold += g;
+      elixir += e;
+      de += d;
+      if (hours > 0) geRates.push((g + e) / hours);
+    }
+
+    const hours = totalMs / 3_600_000;
+    const goldPerHour = hours > 0 ? gold / hours : 0;
+    const elixirPerHour = hours > 0 ? elixir / hours : 0;
+    const dePerHour = hours > 0 ? de / hours : 0;
+    const attacksPerHour = hours > 0 ? rows.length / hours : 0;
+
+    const percentile = (values: number[], q: number) => {
+      if (values.length === 0) return 0;
+      const sorted = [...values].sort((a, b) => a - b);
+      const pos = (sorted.length - 1) * q;
+      const lo = Math.floor(pos);
+      const hi = Math.ceil(pos);
+      if (lo === hi) return sorted[lo];
+      const weight = pos - lo;
+      return sorted[lo] * (1 - weight) + sorted[hi] * weight;
+    };
+
+    return {
+      ready: true,
+      samples: rows.length,
+      attacksPerHour,
+      gold30: goldPerHour * 0.5,
+      elixir30: elixirPerHour * 0.5,
+      de30: dePerHour * 0.5,
+      gold60: goldPerHour,
+      elixir60: elixirPerHour,
+      de60: dePerHour,
+      lowGE60: percentile(geRates, 0.25),
+      highGE60: percentile(geRates, 0.75),
+    };
+  }, [history]);
+
   const recentPerformance = React.useMemo(() => {
     const summarize = (rows: AttackReport[]) => {
       const n = rows.length;
@@ -1696,6 +1757,49 @@ Best optimization target: {pipeline.dominantTunable.label}
           )}
         </div>
       </div>
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Farm Forecast</div>
+            <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">What the next hour should produce</h3>
+            <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">
+              Projection from the last {farmForecast.samples} measured ready-to-ready routines. Observational only; no target rules are changed.
+            </p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-wider text-zinc-500">
+            {farmForecast.ready ? `${farmForecast.attacksPerHour.toFixed(2)} attacks/h` : 'Learning'}
+          </div>
+        </div>
+
+        {farmForecast.ready ? (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+              {[
+                { label: '30m Gold', value: compact(farmForecast.gold30) },
+                { label: '30m Elixir', value: compact(farmForecast.elixir30) },
+                { label: '30m DE', value: compact(farmForecast.de30) },
+                { label: '60m Gold', value: compact(farmForecast.gold60) },
+                { label: '60m Elixir', value: compact(farmForecast.elixir60) },
+                { label: '60m DE', value: compact(farmForecast.de60) },
+                { label: '60m G+E range', value: `${compact(farmForecast.lowGE60)}–${compact(farmForecast.highGE60)}` },
+              ].map((metric) => (
+                <div key={metric.label} className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-4">
+                  <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
+                  <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 text-[9px] font-bold uppercase tracking-wider text-zinc-500">
+              Range = observed 25th–75th percentile of per-attack G+E/hour, not a guaranteed result.
+            </div>
+          </>
+        ) : (
+          <div className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-5 text-sm font-bold text-zinc-400 dark:text-zinc-500">
+            Need at least 3 attacks with measured true-loop duration.
+          </div>
+        )}
+      </div>
+
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
           <div>
