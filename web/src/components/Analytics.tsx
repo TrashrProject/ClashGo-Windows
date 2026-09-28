@@ -593,24 +593,6 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     };
   }, [history]);
 
-  const prepBreakdown = React.useMemo(() => {
-    const rows = (history ?? []).filter((rep) => (rep.preparation_duration_ms || 0) > 0);
-    const avg = (pick: (rep: AttackReport) => number) => rows.length
-      ? rows.reduce((sum, rep) => sum + (pick(rep) || 0), 0) / rows.length
-      : 0;
-    const parts = [
-      { label: 'Attack', ms: avg((r) => r.prep_attack_button_ms || 0) },
-      { label: 'Find Match', ms: avg((r) => r.prep_find_match_ms || 0) },
-      { label: 'Army menu', ms: avg((r) => r.prep_army_menu_ms || 0) },
-      { label: 'Army slot', ms: avg((r) => r.prep_army_slot_ms || 0) },
-      { label: 'Battle', ms: avg((r) => r.prep_battle_button_ms || 0) },
-      { label: 'Matchmaking ready', ms: avg((r) => r.prep_matchmaking_ready_ms || 0) },
-    ];
-    const measured = parts.reduce((sum, row) => sum + row.ms, 0);
-    const total = avg((r) => r.preparation_duration_ms || 0);
-    const dominant = parts.reduce((best, row) => row.ms > best.ms ? row : best, parts[0]);
-    return { rows: parts, measured, total, dominant, attacks: rows.length };
-  }, [history]);
 
   const pipeline = React.useMemo(() => {
     const rows = [
@@ -1417,40 +1399,6 @@ Best optimization target: {pipeline.dominantTunable.label}
             <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
           </div>
         ))}
-      </div>
-
-      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
-          <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Preparation breakdown</div>
-            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Before matchmaking</h3>
-            <p className="text-sm text-zinc-500 mt-1">Measured UI steps only. Deployment timings and red-zone logic are untouched.</p>
-          </div>
-          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
-            Slowest: {prepBreakdown.dominant.label} · {(prepBreakdown.dominant.ms / 1000).toFixed(1)}s
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-          {prepBreakdown.rows.map((row) => (
-            <div key={row.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
-              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{row.label}</div>
-              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{(row.ms / 1000).toFixed(2)}s</div>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-4 flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-wider text-zinc-400">
-          <span className="px-3 py-2 rounded-full bg-zinc-50 dark:bg-zinc-950/40">
-            Avg prep {(prepBreakdown.total / 1000).toFixed(1)}s
-          </span>
-          <span className="px-3 py-2 rounded-full bg-zinc-50 dark:bg-zinc-950/40">
-            Measured steps {(prepBreakdown.measured / 1000).toFixed(1)}s
-          </span>
-          <span className="px-3 py-2 rounded-full bg-zinc-50 dark:bg-zinc-950/40">
-            n={prepBreakdown.attacks}
-          </span>
-        </div>
       </div>
 
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
