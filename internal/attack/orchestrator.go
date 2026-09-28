@@ -621,7 +621,6 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				return liveSlots[i].X < liveSlots[j].X
 			})
 
-			liveCounts := troopCounter.DetectCounts(fresh, liveSlots, liveMgr.GetBarY())
 			var chosen *TrackedSlot
 			chosenCount := 0
 			chosenActivity := 0.0
@@ -673,14 +672,11 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 					continue
 				}
 
-				count := GetCountForSlot(liveCounts, slot.X)
-				if count > 50 { count = 0 }
-				if armyState != nil && count > 0 && strings.TrimSpace(slot.UnitName) != "" {
-					armyState.ObserveRemaining(slot.UnitName, count)
-				}
-
+				// Slot ordering/activity decides which card is next. OCR only that
+				// selected card instead of every visible card on every rescan.
+				// This preserves the live re-indexing safety while removing
+				// repeated digit-template work from the Windows hot path.
 				chosen = slot
-				chosenCount = count
 				chosenActivity = activity
 				break
 			}
@@ -690,6 +686,12 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				liveRemaining = 0
 				e.logger.Debug().Int("round", liveRound).Msg("Windows live deployment: only spent/ability cards remain")
 				break
+			}
+
+			chosenCount = troopCounter.DetectCount(fresh, chosen, liveMgr.GetBarY())
+			if chosenCount > 50 { chosenCount = 0 }
+			if armyState != nil && chosenCount > 0 && strings.TrimSpace(chosen.UnitName) != "" {
+				armyState.ObserveRemaining(chosen.UnitName, chosenCount)
 			}
 
 			key := oneShotKey(chosen)
