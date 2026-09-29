@@ -226,6 +226,7 @@ const createEmptyStats = (): BotStats => new bot.BotStats({
 
 function App() {
   const [tab, setTab] = useState<TabType>('dashboard');
+  const tabRef = useRef<TabType>('dashboard');
   const [accountPage, setAccountPage] = useState<'account' | 'settings' | 'village'>('account');
   const [stats, setStats] = useState<BotStats>(() => createEmptyStats());
   const [isRunning, setIsRunning] = useState(false);
@@ -277,6 +278,10 @@ function App() {
   const startupCheckAutoRan = useRef(false);
   const startInFlightRef = useRef(false);
   const testSessionInFlightRef = useRef(false);
+
+  useEffect(() => {
+    tabRef.current = tab;
+  }, [tab]);
 
   // Config states
   const [goldThreshold, setGoldThreshold] = useState(400000);
@@ -542,7 +547,7 @@ function App() {
 
     const fetchLogs = async () => {
       if (!uiVisible()) return;
-      if (tab !== 'settings' && tab !== 'developer') return;
+      if (tabRef.current !== 'settings' && tabRef.current !== 'developer') return;
       try {
         const l = await GetLogs();
         setLogs(l ?? []);
@@ -634,7 +639,7 @@ function App() {
       void fetchCurrentArmy();
       void fetchSessionReport();
       void fetchDiagnostics();
-      if (tab === 'settings' || tab === 'developer') {
+      if (tabRef.current === 'settings' || tabRef.current === 'developer') {
         void fetchLogs();
       }
     };
@@ -927,7 +932,7 @@ function App() {
     } finally {
       setStartupCheckRunning(false);
     }
-  }, [tab]);
+  }, []);
 
   const handleStart = async () => {
     if (startInFlightRef.current || isRunning || isStarting) return;
