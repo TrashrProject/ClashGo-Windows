@@ -17,6 +17,7 @@ func TestStateFromStoredKeepsMemberMetadata(t *testing.T) {
 	st := storedLicense{
 		Key:           "CGO-ABCDEF-GHIJKL-MNOPQR-STUVWX",
 		Role:          RoleMember,
+		LicenseID:     "license-test-id",
 		MemberName:    "Nathan",
 		MachineID:     "machine-hash",
 		LastValidated: "2026-09-29T04:00:00Z",
@@ -28,6 +29,9 @@ func TestStateFromStoredKeepsMemberMetadata(t *testing.T) {
 	got := s.stateFromStored(st)
 	if !got.Activated {
 		t.Fatal("expected stored key to restore an activated state")
+	}
+	if got.LicenseID != "license-test-id" {
+		t.Fatalf("LicenseID = %q, want license-test-id", got.LicenseID)
 	}
 	if got.MemberName != "Nathan" {
 		t.Fatalf("MemberName = %q, want Nathan", got.MemberName)
@@ -308,7 +312,7 @@ func TestSetBaseURLSwitchesNextActivationImmediately(t *testing.T) {
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true,"role":"member","member_name":"Live Switch","offline_until":"2099-01-01T00:00:00Z","plan":"month_1","expires_at":"2099-01-01T00:00:00Z"}`))
+		_, _ = w.Write([]byte(`{"ok":true,"role":"member","license_id":"live-switch-license-id","member_name":"Live Switch","offline_until":"2099-01-01T00:00:00Z","plan":"month_1","expires_at":"2099-01-01T00:00:00Z"}`))
 	}))
 	defer newServer.Close()
 
@@ -324,7 +328,7 @@ func TestSetBaseURLSwitchesNextActivationImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Activate after SetBaseURL: %v", err)
 	}
-	if !state.Activated || state.MemberName != "Live Switch" {
+	if !state.Activated || state.MemberName != "Live Switch" || state.LicenseID != "live-switch-license-id" {
 		t.Fatalf("unexpected activation state: %+v", state)
 	}
 	if oldHits != 0 {
