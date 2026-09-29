@@ -770,6 +770,24 @@ function App() {
     void handleStartupCheck();
   }, [accountReady, licenseAccessReady, handleStartupCheck]);
 
+  const refreshStartupReadiness = useCallback(async () => {
+    startupCheckAutoRan.current = true;
+    setStartupCheckRunning(true);
+    try {
+      const result = await GetStartupReadiness();
+      setStartupCheck(result as unknown as {
+        ready: boolean;
+        checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
+      });
+    } catch (err) {
+      console.warn('Startup readiness refresh failed:', err);
+      setStartupCheck(null);
+      startupCheckAutoRan.current = false;
+    } finally {
+      setStartupCheckRunning(false);
+    }
+  }, []);
+
   const handleStart = async () => {
     if (startInFlightRef.current || isRunning || isStarting) return;
     startInFlightRef.current = true;
@@ -880,6 +898,7 @@ function App() {
     await SetBlueStacksInstance(instance);
     const d = await GetSystemDiagnostics();
     setSystemDiagnostics(d as SystemDiagnostics);
+    await refreshStartupReadiness();
   };
 
   const handleExportDiagnostics = async (): Promise<string> => {
@@ -1094,11 +1113,12 @@ function App() {
       // which made save feel broken when SaveConfig (the Wails IPC)
       // rejected (e.g. backend down, malformed payload).
       await saveSettings();
+      await refreshStartupReadiness();
     }
   }), [
     goldThreshold, elixirThreshold, deThreshold,
     selectedStrategy, strategies, searchEnabled, upgradeWalls, stallTimer,
-    lootExitEnabled, lootExitPercent, simpleMode
+    lootExitEnabled, lootExitPercent, simpleMode, refreshStartupReadiness
   ]);
 
   if (!licenseAccessReady) {
@@ -1314,6 +1334,7 @@ function App() {
                 setPlayerTag(tag);
                 if (tag) setTab('account');
               }}
+              onReadinessChanged={() => { void refreshStartupReadiness(); }}
             />
           )}
           {tab === 'analytics' && <Analytics stats={stats} resourceHistory={resourceHistory} history={history as any} />}
