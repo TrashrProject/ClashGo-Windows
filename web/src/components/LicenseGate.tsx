@@ -154,7 +154,7 @@ const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
 
           {(error || state?.error) && (
             <div className="mt-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-xs font-bold text-rose-400">
-              {error || state?.error}
+              {friendlyLicenseError(error || state?.error)}
             </div>
           )}
 
