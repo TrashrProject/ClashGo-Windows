@@ -45,6 +45,21 @@ jobs:
       - name: Validate control API parity
         run: node tools/check-control-api-parity.mjs
 
+      - name: Validate updater PowerShell syntax
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "build/windows/install_update.ps1"),
+            [ref]$null,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Host "Updater PowerShell syntax OK."
+
       - name: Validate frontend TSX syntax
         working-directory: web
         shell: bash
