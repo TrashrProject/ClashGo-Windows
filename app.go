@@ -974,6 +974,19 @@ func (a *App) GetLicenseState() licensing.State {
 	return a.license.GetState()
 }
 
+func (a *App) RefreshLicense() licensing.State {
+	if a.license == nil {
+		return licensing.State{Activated: false, Error: "license service is unavailable"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	state := a.license.Validate(ctx)
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "license_state", state)
+	}
+	return state
+}
+
 // ActivateLicense validates and binds a license to this Windows machine.
 func (a *App) ActivateLicense(key string) (licensing.State, error) {
 	if a.license == nil {
