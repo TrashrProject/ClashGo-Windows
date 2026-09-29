@@ -1515,18 +1515,12 @@ func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error
 
 	settings = sanitizeMemberSettings(settings)
 	cfg := config.LoadOrDefault("config.json")
-	applyMemberSpeedProfile(cfg, settings.SpeedProfile)
-
-	cfg.Automation.MaxAttacksPerHour = settings.MaxAttacksPerHour
-	cfg.Automation.BreakEveryAttacks = settings.BreakEveryAttacks
-	cfg.Automation.BreakDuration = config.Duration{Duration: time.Duration(settings.BreakMinutes) * time.Minute}
-
-	cfg.Search.AdaptiveSearch = settings.AdaptiveSearch
-	cfg.Automation.AutoProfileSync = settings.AutoProfileSync
-	cfg.Automation.AutoArmyGuard = settings.AutoArmyGuard
-	cfg.Automation.AutoResourceTracking = settings.AutoResourceTracking
+	applyMemberSettingsToConfig(cfg, settings)
 
 	if err := config.Save("config.json", cfg); err != nil {
+		return MemberSettings{}, err
+	}
+	if err := a.persistMemberProfile(settings); err != nil {
 		return MemberSettings{}, err
 	}
 	if a.bot != nil {
