@@ -107,7 +107,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
       const path = await onExportDiagnostics();
       setDiagnosticsPath(path);
     } catch {
-      setDiagnosticsPath('Échec de l’export — consulte app.log');
+      setDiagnosticsPath('Échec de l’export — consulte le journal app.log');
     } finally {
       setDiagnosticsBusy(false);
     }
@@ -199,7 +199,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
               <div className="min-w-0">
                 <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">Connexion avancée</div>
                 <div className="text-[11px] text-zinc-300 mt-1">
-                  BlueStacks instance · {systemDiagnostics?.configured_instance
+                  Instance BlueStacks · {systemDiagnostics?.configured_instance
                     ? `Manuelle : ${systemDiagnostics.configured_instance}`
                     : `Automatique : ${systemDiagnostics?.emulator.preferred_instance || 'détection…'}`}
                 </div>
@@ -470,7 +470,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
                  <span className={`material-symbols-outlined text-xl ${resetArmed ? 'text-white animate-pulse' : 'text-rose-500 dark:text-rose-400'}`} style={{ fontVariationSettings: "'FILL' 1" }}>{resetArmed ? 'warning' : 'delete_forever'}</span>
                </div>
                <div className="flex flex-col text-left">
-                 <span className={`text-[10px] font-black uppercase tracking-[0.2em] mb-0.5 ${resetArmed ? 'text-white/80' : 'text-rose-600 dark:text-rose-500'}`}>Danger Zone</span>
+                 <span className={`text-[10px] font-black uppercase tracking-[0.2em] mb-0.5 ${resetArmed ? 'text-white/80' : 'text-rose-600 dark:text-rose-500'}`}>Zone sensible</span>
                  <span className={`text-sm font-bold ${resetArmed ? 'text-white' : 'text-rose-600 dark:text-rose-400'}`}>
                    {isRunning ? 'Arrête le bot avant de réinitialiser' : (resetArmed ? 'Cliquer encore pour confirmer — efface toutes les statistiques' : 'Réinitialiser toutes les statistiques')}
                  </span>
