@@ -33,6 +33,7 @@ export interface BotStats {
   targets_skipped: number;
   health_score: number;
   speed_profile: string;
+  member_speed_profile: string;
   targets_seen: number;
   targets_accepted: number;
   target_acceptance_rate: number;
