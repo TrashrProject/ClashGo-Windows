@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -117,6 +118,15 @@ func (c *Client) currentPipe() *ShellPipe {
 }
 
 func NewClient(opts ...Option) *Client {
+	minCaptureGap := 250 * time.Millisecond
+	if runtime.GOOS == "windows" {
+		// BlueStacks HD-Player can crash natively when ADB framebuffer requests
+		// arrive in sustained bursts during matchmaking. Keep Windows on a
+		// deliberately conservative global screencap budget. The search/deploy
+		// code already reuses live frames where possible, so stability is worth
+		// more here than sub-second observer refreshes.
+		minCaptureGap = 750 * time.Millisecond
+	}
 	c := &Client{
 		DeviceID:        "",
 		host:            DefaultHost,
@@ -127,7 +137,7 @@ func NewClient(opts ...Option) *Client {
 		jitterDelays:    true,
 		maxJitterPixels: 2.0,
 		jitterFraction:  0.15,
-		minCaptureGap:   250 * time.Millisecond,
+		minCaptureGap:   minCaptureGap,
 	}
 	for _, o := range opts {
 		o(c)
