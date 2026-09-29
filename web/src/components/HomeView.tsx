@@ -14,7 +14,7 @@ interface HomeViewProps {
   onStart: () => void;
   onStartWithPreset: (preset: 'short' | 'balanced' | 'fast') => void;
   onSpeedChange: (profile: 'cautious' | 'normal' | 'fast') => void;
-  onExtendSession: (extra: 10 | 25) => void;
+  onExtendSession: (extra: number) => void;
   onScheduleStop: (minutes: number) => void;
   onCancelScheduledStop: () => void;
   scheduledStopAt: string;
@@ -267,6 +267,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const [customElixirM, setCustomElixirM] = React.useState('');
   const [customDarkK, setCustomDarkK] = React.useState('');
   const [customStopMinutes, setCustomStopMinutes] = React.useState('');
+  const [customExtraAttacks, setCustomExtraAttacks] = React.useState('');
 
   React.useEffect(() => {
     if (!starting) {
@@ -697,7 +698,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                 />
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 onClick={() => onExtendSession(10)}
@@ -712,6 +713,28 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
               >
                 +25 ATTAQUES
               </button>
+              <div className="flex overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={customExtraAttacks}
+                  onChange={(e) => setCustomExtraAttacks(e.target.value)}
+                  placeholder="+"
+                  className="h-10 w-16 bg-zinc-50 px-3 text-center text-xs font-black outline-none dark:bg-zinc-950"
+                />
+                <button
+                  type="button"
+                  disabled={!customExtraAttacks}
+                  onClick={() => {
+                    const extra = Math.max(1, Math.min(100, Math.round(Number(customExtraAttacks) || 0)));
+                    if (extra > 0) onExtendSession(extra);
+                  }}
+                  className="h-10 border-l border-zinc-200 bg-emerald-500 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-950 disabled:opacity-30 dark:border-zinc-700"
+                >
+                  AJOUTER
+                </button>
+              </div>
             </div>
           </div>
         </section>
