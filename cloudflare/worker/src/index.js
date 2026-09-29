@@ -638,6 +638,10 @@ async function renewLicense(request, env) {
   const requestedPlan = clean(body.plan);
   const planInfo = requestedPlan ? normalizePlan(requestedPlan) : normalizePlan(current.plan);
 
+  if (current.plan === "lifetime" && planInfo.plan !== "lifetime") {
+    return json({ message: "lifetime license cannot be downgraded by renewal" }, 409);
+  }
+
   if (planInfo.plan === "lifetime") {
     await env.DB.prepare(
       "UPDATE licenses SET plan = 'lifetime', duration_days = NULL, expires_at = NULL, active = 1 WHERE id = ?1"
