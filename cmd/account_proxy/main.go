@@ -255,6 +255,29 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+
+func corsMiddleware(next http.Handler, allowedOrigin string) http.Handler {
+	allowedOrigin = strings.TrimRight(strings.TrimSpace(allowedOrigin), "/")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := strings.TrimRight(strings.TrimSpace(r.Header.Get("Origin")), "/")
+		if allowedOrigin != "" && origin == allowedOrigin {
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-ClashGO-Admin-Key")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		}
+		if r.Method == http.MethodOptions {
+			if origin != allowedOrigin || allowedOrigin == "" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	apiKey := strings.TrimSpace(os.Getenv("COC_API_KEY"))
 	if apiKey == "" {
@@ -285,6 +308,10 @@ func main() {
 	}
 	control := newControlStore(controlPath)
 	adminKey := strings.TrimSpace(os.Getenv("CLASHGO_ADMIN_KEY"))
+	webOrigin := strings.TrimSpace(os.Getenv("CLASHGO_WEB_ORIGIN"))
+	if webOrigin == "" {
+		webOrigin = "https://trashrproject.github.io"
+	}
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -667,7 +694,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           corsMiddleware(mux, webOrigin),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
