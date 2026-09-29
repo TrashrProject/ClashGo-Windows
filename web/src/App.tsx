@@ -223,6 +223,7 @@ function App() {
   const [botError, setBotError] = useState('');
   const [botDiagnosticPath, setBotDiagnosticPath] = useState('');
   const [memberNotice, setMemberNotice] = useState('');
+  const [testSessionActive, setTestSessionActive] = useState(false);
   const [startupCheck, setStartupCheck] = useState<{
     ready: boolean;
     checks: Array<{ id: string; label: string; ok: boolean; message: string }>;
@@ -587,11 +588,13 @@ function App() {
     // "STOP BOT" forever and Stop becomes a confusing no-op (there's
     // no bot to stop). Flip the button back to START on either event.
     const unsubBotError = safeEventsOn("bot_error", (payload: unknown) => {
+      setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(false);
       setBotError(normalizeBotErrorMessage(payload, 'Le bot n’a pas pu démarrer.'));
     });
     const unsubBotInitFailed = safeEventsOn("bot_init_failed", (payload: unknown) => {
+      setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(false);
       setBotError(normalizeBotErrorMessage(payload, 'L’initialisation BlueStacks / ADB a échoué.'));
@@ -602,6 +605,7 @@ function App() {
       setBotError('');
     });
     const unsubBotStopped = safeEventsOn("bot_stopped", () => {
+      setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(false);
       setBotError('');
@@ -610,6 +614,7 @@ function App() {
       void fetchSessionReport();
     });
     const unsubMemberTestRestored = safeEventsOn("member_test_session_restored", (payload: unknown) => {
+      setTestSessionActive(false);
       const message = normalizeBotErrorMessage(payload, 'Session test terminée · tes réglages personnels ont été restaurés.');
       setMemberNotice(message || 'Session test terminée · tes réglages personnels ont été restaurés.');
       window.setTimeout(() => setMemberNotice(''), 8000);
@@ -816,6 +821,7 @@ function App() {
       await syncMemberScopedView(true);
 
       if (res.running) {
+        setTestSessionActive(true);
         setIsStarting(true);
         setIsRunning(false);
       } else {
@@ -837,6 +843,7 @@ function App() {
   const handleStop = async () => {
     try {
       const res = await StopBot();
+      setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(res.running);
     } catch (err) {
@@ -1230,6 +1237,7 @@ function App() {
               history={history}
               activity={activity}
               sessionReport={sessionReport}
+              testSessionActive={testSessionActive}
               running={isRunning}
               starting={isStarting}
               onStart={handleStart}
