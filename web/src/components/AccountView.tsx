@@ -1,10 +1,10 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmée, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetVillageResources, SaveMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetVillageResources, SaveMemberSettings } from '../../wailsjs/go/main/App';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
-type CurrentArméeUnit = {
+type CurrentArmyUnit = {
   name: string;
   category: string;
   count: number;
@@ -12,9 +12,9 @@ type CurrentArméeUnit = {
   slot_x: number;
 };
 
-type CurrentArmée = {
+type CurrentArmy = {
   timestamp: string;
-  units: CurrentArméeUnit[];
+  units: CurrentArmyUnit[];
   target_town_hall?: number;
   target_label?: string;
   ready: boolean;
@@ -28,7 +28,7 @@ type FarmProfile = {
   label: string;
   troop_capacity: number;
   spell_capacity: number;
-  troupes: FarmUnit[];
+  troops: FarmUnit[];
   spells: FarmUnit[];
   heroes: string[];
   siege: string;
@@ -92,7 +92,7 @@ type PlayerProfile = {
   attackWins: number; defenseWins: number; donations: number; donationsReceived: number;
   clan?: { tag: string; name: string; clanLevel: number };
   league?: { id: number; name: string };
-  troupes: Unit[]; heroes: Unit[]; spells: Unit[]; heroEquipment: Unit[];
+  troops: Unit[]; heroes: Unit[]; spells: Unit[]; heroEquipment: Unit[];
 };
 
 interface AccountViewProps {
@@ -111,7 +111,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [profile, setProfile] = React.useState<PlayerProfile | null>(null);
   const [resources, setResources] = React.useState<VillageResources | null>(null);
   const [farmProfile, setFarmProfile] = React.useState<FarmProfile | null>(null);
-  const [currentArmy, setCurrentArmée] = React.useState<CurrentArmée | null>(null);
+  const [currentArmy, setCurrentArmy] = React.useState<CurrentArmy | null>(null);
   const [serviceConfigured, setServiceConfigured] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState('');
@@ -260,9 +260,9 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     let active = true;
     const loadResources = async () => {
       try {
-        const [snap, army] = await Promise.all([GetVillageResources(), GetCurrentArmée()]);
+        const [snap, army] = await Promise.all([GetVillageResources(), GetCurrentArmy()]);
         if (active && snap) setResources(snap as VillageResources);
-        if (active && army) setCurrentArmée(army as CurrentArmée);
+        if (active && army) setCurrentArmy(army as CurrentArmy);
       } catch {
         // Live tracking is best-effort while BlueStacks is unavailable.
       }
