@@ -29,6 +29,21 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+func gracefulStopReached(history []bot.AttackReport, sequenceStartUnix int64) bool {
+	if sequenceStartUnix <= 0 || len(history) == 0 {
+		return false
+	}
+	latest := history[0]
+	if latest.ReturnHomeDurationMS <= 0 || !latest.ReturnHomeSuccess {
+		return false
+	}
+	reportAt, err := time.Parse(time.RFC3339, latest.Timestamp)
+	if err != nil {
+		return false
+	}
+	return reportAt.Unix() >= sequenceStartUnix
+}
+
 // App struct
 type App struct {
 	ctx       context.Context
@@ -40,6 +55,7 @@ type App struct {
 	lastStats   bot.BotStats
 	lastActivity []telemetry.Event
 	gracefulStopRequested bool
+	gracefulStopSequenceStartUnix int64
 
 	// Logs are high-frequency and unrelated to bot lifecycle ownership.
 	// Keep them off the main App mutex so console traffic cannot delay
@@ -1299,8 +1315,9 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 
 			shouldStopGracefully := false
 			a.mu.Lock()
-			if a.gracefulStopRequested && len(history) > 0 && history[0].ReturnHomeDurationMS > 0 {
+			if a.gracefulStopRequested && gracefulStopReached(history, a.gracefulStopSequenceStartUnix) {
 				a.gracefulStopRequested = false
+				a.gracefulStopSequenceStartUnix = 0
 				shouldStopGracefully = true
 			}
 			a.mu.Unlock()
@@ -1595,7 +1612,13 @@ func (a *App) StopAfterCurrentAttack() BotStatus {
 		a.mu.Unlock()
 		return a.StopBot()
 	}
+	sequenceStartUnix := a.bot.SequenceStartedAtUnix()
+	if sequenceStartUnix <= 0 {
+		a.mu.Unlock()
+		return a.StopBot()
+	}
 	a.gracefulStopRequested = true
+	a.gracefulStopSequenceStartUnix = sequenceStartUnix
 	a.mu.Unlock()
 
 	if a.ctx != nil {
@@ -1609,6 +1632,7 @@ func (a *App) StopAfterCurrentAttack() BotStatus {
 func (a *App) StopBot() BotStatus {
 	a.mu.Lock()
 	a.gracefulStopRequested = false
+	a.gracefulStopSequenceStartUnix = 0
 
 	if a.stopping {
 		a.mu.Unlock()
