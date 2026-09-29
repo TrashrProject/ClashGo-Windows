@@ -42,6 +42,7 @@ type LicenseRow = {
 type LicenseState = {
   activated?: boolean;
   role?: 'member' | 'developer' | 'admin' | '';
+  license_hint?: string;
 };
 
 const copyText = async (value: string): Promise<void> => {
@@ -82,6 +83,7 @@ const DeveloperView: React.FC = () => {
   const [incidents, setIncidents] = React.useState<Incident[]>([]);
   const [licenses, setLicenses] = React.useState<LicenseRow[]>([]);
   const [role, setRole] = React.useState<LicenseState['role']>('');
+  const [currentLicenseHint, setCurrentLicenseHint] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [actionID, setActionID] = React.useState('');
@@ -111,6 +113,7 @@ const DeveloperView: React.FC = () => {
         GetDeveloperLicenses(),
       ]);
       setRole((state as LicenseState)?.role || '');
+      setCurrentLicenseHint((state as LicenseState)?.license_hint || '');
       setIncidents((i || []) as Incident[]);
       setLicenses((l || []) as LicenseRow[]);
     } catch (e) {
@@ -128,6 +131,7 @@ const DeveloperView: React.FC = () => {
 
   const createLicense = async () => {
     if (!isAdmin || creating) return;
+    if (newRole === 'admin' && !window.confirm('Créer une nouvelle licence ADMIN ? Elle pourra gérer toutes les licences ClashGO.')) return;
     setCreating(true);
     setError('');
     setNotice('');
@@ -143,7 +147,11 @@ const DeveloperView: React.FC = () => {
       const keys = (result as { licenses?: string[] })?.licenses || [];
       if (keys.length === 0) throw new Error('Aucune clé retournée par le serveur.');
       setGeneratedKey(keys[0]);
-      setNotice('Licence créée. Copie la clé maintenant : elle ne sera plus affichée en clair ensuite.');
+      setNotice('Licence créée. Copie la clé maintenant : elle sera masquée automatiquement dans 2 minutes.');
+      window.setTimeout(() => {
+        setGeneratedKey('');
+        setCopied(false);
+      }, 120000);
       setCustomerName('');
       setCustomerContact('');
       await refresh();
@@ -367,6 +375,16 @@ const DeveloperView: React.FC = () => {
                 >
                   {copied ? 'Copiée ✓' : 'Copier'}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGeneratedKey('');
+                    setCopied(false);
+                  }}
+                  className="h-11 shrink-0 rounded-xl border border-emerald-500/30 px-4 text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400"
+                >
+                  Masquer
+                </button>
               </div>
               {notice && <div className="mt-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">{notice}</div>}
             </div>
@@ -489,6 +507,11 @@ const DeveloperView: React.FC = () => {
                     <span className="px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-[9px] font-black uppercase tracking-widest text-zinc-500">
                       {planLabel(item.plan)}
                     </span>
+                    {Boolean(currentLicenseHint && item.hint === currentLicenseHint) && (
+                      <span className="px-2 py-1 rounded-lg bg-sky-500/10 text-[9px] font-black uppercase tracking-widest text-sky-500">
+                        Cette licence
+                      </span>
+                    )}
                   </div>
                   <div className="mt-1 text-[10px] font-mono text-zinc-400">
                     {item.hint || '••••'} · {shortMachine(item.machine_id)}
@@ -511,7 +534,7 @@ const DeveloperView: React.FC = () => {
                   <div className="lg:w-full xl:w-auto xl:min-w-[390px] flex flex-wrap items-center gap-2 lg:justify-end">
                     <select
                       value={(item.role === 'developer' || item.role === 'admin') ? item.role : 'member'}
-                      disabled={actionID === item.id}
+                      disabled={actionID === item.id || Boolean(currentLicenseHint && item.hint === currentLicenseHint)}
                       onChange={(e) => void setLicenseRole(item, e.target.value as 'member' | 'developer' | 'admin')}
                       className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-2 text-[9px] font-black uppercase tracking-wider outline-none disabled:opacity-40"
                     >
@@ -547,7 +570,7 @@ const DeveloperView: React.FC = () => {
 
                     <button
                       type="button"
-                      disabled={actionID === item.id || !item.machine_id}
+                      disabled={actionID === item.id || !item.machine_id || Boolean(currentLicenseHint && item.hint === currentLicenseHint)}
                       onClick={() => void resetMachine(item)}
                       className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-30"
                     >
@@ -556,7 +579,7 @@ const DeveloperView: React.FC = () => {
 
                     <button
                       type="button"
-                      disabled={actionID === item.id}
+                      disabled={actionID === item.id || Boolean(currentLicenseHint && item.hint === currentLicenseHint)}
                       onClick={() => void setActive(item, item.active === false)}
                       className={
                         'h-9 rounded-lg border px-3 text-[9px] font-black uppercase tracking-wider disabled:opacity-40 ' +
