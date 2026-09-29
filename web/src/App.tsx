@@ -851,6 +851,16 @@ function App() {
               onStop={handleStop}
               onOpenAutomation={() => setTab('config')}
               onOpenAccount={() => setTab('account')}
+              licenseReady={licenseAccessReady}
+              accountLinked={Boolean(playerTag)}
+              windowsReady={systemDiagnostics
+                ? Boolean(
+                    systemDiagnostics.assets_ready &&
+                    systemDiagnostics.emulator?.adb_found &&
+                    systemDiagnostics.emulator?.bluestacks_player_found &&
+                    systemDiagnostics.emulator?.preferred_instance
+                  )
+                : null}
             />
           )}
           {tab === 'activity' && <Dashboard {...dashboardProps} />}
