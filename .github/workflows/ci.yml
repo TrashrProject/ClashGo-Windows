@@ -7,6 +7,9 @@ on:
 
 jobs:
   lightweight:
+    # feature/intelligence-v2 already runs this exact Core CI on push.
+    # Skip the duplicate pull_request invocation for that branch only.
+    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'feature/intelligence-v2' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
