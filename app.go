@@ -3667,6 +3667,30 @@ func (a *App) StartQuickTestSession(gold, elixir, dark int, upgradeWalls bool, s
 	return a.startTemporaryTestSession(3, gold, elixir, dark, upgradeWalls, searchEnabled)
 }
 
+func (a *App) SetMemberSpeedProfile(profile string) (MemberSettings, error) {
+	current := a.GetMemberSettings()
+	switch normalizeSpeedProfile(profile) {
+	case "cautious":
+		current.SpeedProfile = "cautious"
+		current.MaxAttacksPerHour = 8
+		current.BreakEveryAttacks = 4
+		current.BreakMinutes = 4
+	case "fast":
+		current.SpeedProfile = "fast"
+		current.MaxAttacksPerHour = 16
+		current.BreakEveryAttacks = 6
+		current.BreakMinutes = 2
+	default:
+		current.SpeedProfile = "normal"
+		current.MaxAttacksPerHour = 12
+		current.BreakEveryAttacks = 5
+		current.BreakMinutes = 3
+	}
+	// MaxAttacksPerSession and the other member preferences are intentionally
+	// preserved. This is a live pacing change, not a full session preset.
+	return a.SaveMemberSettings(current)
+}
+
 func (a *App) ApplyMemberPreset(preset string) (MemberSettings, error) {
 	current := a.GetMemberSettings()
 	next, err := applyMemberPreset(current, preset)
