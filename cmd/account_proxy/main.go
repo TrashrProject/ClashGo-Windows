@@ -49,7 +49,11 @@ type licenseRecord struct {
 	MachineID  string    `json:"machine_id,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	LastSeenAt time.Time `json:"last_seen_at,omitempty"`
-	AppVersion string    `json:"app_version,omitempty"`
+	AppVersion  string    `json:"app_version,omitempty"`
+	Plan        string    `json:"plan,omitempty"`
+	DurationDays int      `json:"duration_days,omitempty"`
+	ActivatedAt time.Time `json:"activated_at,omitempty"`
+	ExpiresAt   time.Time `json:"expires_at,omitempty"`
 }
 
 type supportIncident struct {
@@ -143,6 +147,23 @@ func validRole(role string) string {
 	}
 }
 
+func validPlan(plan string) (string, int) {
+	switch strings.ToLower(strings.TrimSpace(plan)) {
+	case "free_2d":
+		return "free_2d", 2
+	case "week_1":
+		return "week_1", 7
+	case "month_1":
+		return "month_1", 30
+	default:
+		return "lifetime", 0
+	}
+}
+
+func licenseExpired(rec *licenseRecord, now time.Time) bool {
+	return rec != nil && !rec.ExpiresAt.IsZero() && !now.Before(rec.ExpiresAt)
+}
+
 func adminAuthorized(r *http.Request, adminKey string) bool {
 	if adminKey == "" {
 		return false
@@ -175,7 +196,7 @@ func (s *controlStore) lookup(key string) (*licenseRecord, bool) {
 
 func (s *controlStore) authorizeDeveloper(key, machineID string) (*licenseRecord, bool) {
 	rec, ok := s.lookup(key)
-	if !ok || !rec.Active {
+	if !ok || !rec.Active || licenseExpired(rec, time.Now().UTC()) {
 		return nil, false
 	}
 	if rec.Role != "developer" && rec.Role != "admin" {
@@ -430,9 +451,15 @@ func main() {
 		h := hashLicense(in.LicenseKey)
 		control.mu.Lock()
 		rec := control.data.Licenses[h]
+		now := time.Now().UTC()
 		if rec == nil || !rec.Active {
 			control.mu.Unlock()
 			writeJSON(w, http.StatusForbidden, map[string]string{"message": "license is invalid or revoked"})
+			return
+		}
+		if licenseExpired(rec, now) {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusForbidden, map[string]string{"message": "license has expired"})
 			return
 		}
 		if rec.MachineID != "" && rec.MachineID != in.MachineID {
@@ -440,24 +467,41 @@ func main() {
 			writeJSON(w, http.StatusConflict, map[string]string{"message": "license is already activated on another machine"})
 			return
 		}
+		if rec.ActivatedAt.IsZero() {
+			rec.ActivatedAt = now
+			if rec.DurationDays > 0 {
+				rec.ExpiresAt = now.Add(time.Duration(rec.DurationDays) * 24 * time.Hour)
+			}
+		}
 		rec.MachineID = in.MachineID
-		rec.LastSeenAt = time.Now().UTC()
+		rec.LastSeenAt = now
 		rec.AppVersion = strings.TrimSpace(in.AppVersion)
 		_ = control.saveLocked()
 		role := rec.Role
+		plan := rec.Plan
+		expiresAt := rec.ExpiresAt
 		control.mu.Unlock()
 
-		writeJSON(w, http.StatusOK, map[string]any{
+		offlineUntil := now.Add(72 * time.Hour)
+		if !expiresAt.IsZero() && expiresAt.Before(offlineUntil) {
+			offlineUntil = expiresAt
+		}
+		payload := map[string]any{
 			"ok": true,
 			"role": role,
-			"offline_until": time.Now().UTC().Add(72 * time.Hour).Format(time.RFC3339),
-		})
+			"plan": plan,
+			"offline_until": offlineUntil.Format(time.RFC3339),
+		}
+		if !expiresAt.IsZero() {
+			payload["expires_at"] = expiresAt.Format(time.RFC3339)
+		}
+		writeJSON(w, http.StatusOK, payload)
 	})
 
 	mux.HandleFunc("POST /v1/support/incidents", func(w http.ResponseWriter, r *http.Request) {
 		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
 		rec, ok := control.lookup(key)
-		if !ok || !rec.Active {
+		if !ok || !rec.Active || licenseExpired(rec, time.Now().UTC()) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "valid license required"})
 			return
 		}
@@ -536,6 +580,7 @@ func main() {
 		}
 		var in struct {
 			Role  string `json:"role"`
+			Plan  string `json:"plan"`
 			Count int    `json:"count"`
 		}
 		_ = json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in)
@@ -546,6 +591,7 @@ func main() {
 			in.Count = 100
 		}
 		role := validRole(in.Role)
+		plan, durationDays := validPlan(in.Plan)
 		keys := make([]string, 0, in.Count)
 		control.mu.Lock()
 		for i := 0; i < in.Count; i++ {
@@ -562,12 +608,14 @@ func main() {
 				Role: role,
 				Active: true,
 				CreatedAt: time.Now().UTC(),
+				Plan: plan,
+				DurationDays: durationDays,
 			}
 			keys = append(keys, key)
 		}
 		_ = control.saveLocked()
 		control.mu.Unlock()
-		writeJSON(w, http.StatusCreated, map[string]any{"role": role, "licenses": keys})
+		writeJSON(w, http.StatusCreated, map[string]any{"role": role, "plan": plan, "duration_days": durationDays, "licenses": keys})
 	})
 
 	mux.HandleFunc("GET /v1/admin/licenses", func(w http.ResponseWriter, r *http.Request) {
