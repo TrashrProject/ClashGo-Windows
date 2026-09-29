@@ -39,6 +39,7 @@ import {
   GetAccountConfig,
   GetLicenseState,
   GetMemberInterfaceLevel,
+  ApplyMemberPreset,
   GetPlayerProfile,
   GetVillageResourceHistory,
   SaveMemberInterfaceLevel,
