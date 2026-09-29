@@ -112,27 +112,54 @@ func New(baseURL, appVersion string) *Service {
 	return s
 }
 
-func (s *Service) load() {
-	b, err := os.ReadFile(s.path)
-	if err != nil {
-		return
-	}
+func decodeStoredLicense(data []byte) (storedLicense, bool, error) {
 	var st storedLicense
-	if json.Unmarshal(b, &st) != nil {
-		return
+	if err := json.Unmarshal(data, &st); err != nil {
+		return storedLicense{}, false, err
 	}
-
 	legacyPlaintext := secretNeedsMigration(st.Key)
 	key, err := unprotectSecret(st.Key)
 	if err != nil {
-		s.stored = storedLicense{}
-		s.state = State{
-			Activated: false,
-			Error:     "stored license could not be decrypted",
+		return storedLicense{}, false, err
+	}
+	st.Key = strings.ToUpper(strings.TrimSpace(key))
+	return st, legacyPlaintext, nil
+}
+
+func (s *Service) load() {
+	var (
+		st              storedLicense
+		legacyPlaintext bool
+		loadErr         error
+	)
+
+	if b, err := os.ReadFile(s.path); err == nil {
+		st, legacyPlaintext, loadErr = decodeStoredLicense(b)
+	} else {
+		loadErr = err
+	}
+
+	// Transactional writes keep the previous license as .bak during the swap.
+	// Recover it if the primary file is missing/corrupt after an interrupted
+	// Windows write.
+	if loadErr != nil {
+		if backup, err := os.ReadFile(s.path + ".bak"); err == nil {
+			if recovered, legacy, err := decodeStoredLicense(backup); err == nil {
+				st = recovered
+				legacyPlaintext = legacy
+				loadErr = nil
+			}
+		}
+	}
+	if loadErr != nil {
+		// Missing state is normal on first launch. Corrupt/unreadable state is
+		// surfaced only when a file actually exists.
+		if !os.IsNotExist(loadErr) {
+			s.state = State{Activated: false, Error: "stored license could not be loaded"}
 		}
 		return
 	}
-	st.Key = strings.ToUpper(strings.TrimSpace(key))
+
 	s.stored = st
 	s.state = s.stateFromStored(st)
 
@@ -184,7 +211,46 @@ func (s *Service) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, b, 0o600)
+
+	tmpPath := s.path + ".tmp"
+	backupPath := s.path + ".bak"
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	_ = os.Remove(backupPath)
+	hadOriginal := false
+	if _, err := os.Stat(s.path); err == nil {
+		if err := os.Rename(s.path, backupPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return err
+		}
+		hadOriginal = true
+	}
+	if err := os.Rename(tmpPath, s.path); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backupPath, s.path)
+		}
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	_ = os.Remove(backupPath)
+	return nil
 }
 
 func licenseHint(key string) string {
