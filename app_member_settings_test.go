@@ -690,3 +690,186 @@ func TestArchiveMemberRuntimeStateRemovesDeletedArchivedFiles(t *testing.T) {
 		t.Fatalf("stale archived stats should be removed, stat err=%v", err)
 	}
 }
+
+
+func TestMemberAutomationProfileRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "members", "profile.automation.json")
+	want := MemberAutomationProfile{
+		SearchEnabled:     true,
+		MinLootGold:       650000,
+		MinLootElixir:     700000,
+		MinLootDarkElixir: 3500,
+		UpgradeWalls:      true,
+		StrategyFile:      "auto_edrag_rush.yaml",
+		StallTimerSeconds: 25,
+		LootExitEnabled:   true,
+		LootExitPercent:   82,
+		FarmEnabled:       true,
+		FarmTownHall:      17,
+		FarmProfiles: map[string]config.FarmProfile{
+			"17": {
+				TownHall:      17,
+				Label:         "Test Farm",
+				TroopCapacity: 340,
+				SpellCapacity: 11,
+				Troops: []config.FarmUnit{
+					{Name: "Electro Dragon", Count: 11, Housing: 30},
+				},
+				Spells: []config.FarmUnit{
+					{Name: "Rage Spell", Count: 5, Housing: 2},
+				},
+			},
+		},
+	}
+
+	if err := saveMemberAutomationFile(path, want); err != nil {
+		t.Fatalf("saveMemberAutomationFile: %v", err)
+	}
+	got, ok := loadMemberAutomationFile(path)
+	if !ok {
+		t.Fatal("expected automation profile to load")
+	}
+	if got.MinLootGold != want.MinLootGold ||
+		got.MinLootElixir != want.MinLootElixir ||
+		got.MinLootDarkElixir != want.MinLootDarkElixir ||
+		got.UpgradeWalls != want.UpgradeWalls ||
+		got.StrategyFile != want.StrategyFile ||
+		got.StallTimerSeconds != want.StallTimerSeconds ||
+		got.LootExitEnabled != want.LootExitEnabled ||
+		got.LootExitPercent != want.LootExitPercent ||
+		got.FarmTownHall != want.FarmTownHall {
+		t.Fatalf("automation profile mismatch: got=%+v want=%+v", got, want)
+	}
+	if _, ok := got.FarmProfiles["17"]; !ok {
+		t.Fatal("farm profile was not preserved")
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("temporary automation profile survived successful save: %v", err)
+	}
+}
+
+func TestMemberAutomationProfileRecoversBackup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "members", "profile.automation.json")
+	want := MemberAutomationProfile{
+		SearchEnabled:     true,
+		MinLootGold:       500000,
+		MinLootElixir:     510000,
+		MinLootDarkElixir: 2500,
+		StrategyFile:      "auto_edrag_rush.yaml",
+		StallTimerSeconds: 20,
+		LootExitPercent:   90,
+		FarmTownHall:      16,
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	blob, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".bak", blob, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := loadMemberAutomationFile(path)
+	if !ok {
+		t.Fatal("expected backup automation profile to recover")
+	}
+	if got.MinLootGold != want.MinLootGold || got.FarmTownHall != want.FarmTownHall {
+		t.Fatalf("recovered automation mismatch: got=%+v want=%+v", got, want)
+	}
+	primary, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("recovered primary missing: %v", err)
+	}
+	var restored MemberAutomationProfile
+	if err := json.Unmarshal(primary, &restored); err != nil {
+		t.Fatalf("recovered primary invalid json: %v", err)
+	}
+}
+
+func TestApplyMemberAutomationPreservesInternalEngineSettings(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Attack.UseQueen = true
+	cfg.Attack.UseWarden = true
+	cfg.Attack.UseClanCastle = true
+	cfg.Attack.MaxAttackPerSession = 41
+	cfg.Attack.DropDelay = config.Duration{Duration: 777 * time.Millisecond}
+	cfg.Attack.SpellDelay = config.Duration{Duration: 1777 * time.Millisecond}
+	cfg.Attack.MinSecondsBetweenAttacks = 33
+	cfg.Search.AdaptiveSearch = false
+	cfg.Automation.MaxAttacksPerHour = 14
+	cfg.Automation.BreakEveryAttacks = 9
+
+	profile := MemberAutomationProfile{
+		SearchEnabled:     false,
+		MinLootGold:       900000,
+		MinLootElixir:     800000,
+		MinLootDarkElixir: 4000,
+		UpgradeWalls:      true,
+		StallTimerSeconds: 44,
+		LootExitEnabled:   true,
+		LootExitPercent:   75,
+		FarmEnabled:       false,
+		FarmTownHall:      17,
+	}
+	applyMemberAutomationToConfig(cfg, profile)
+
+	if cfg.Search.Enabled {
+		t.Fatal("search enabled was not restored from member automation")
+	}
+	if cfg.Search.MinLootGold != 900000 || cfg.Search.MinLootElixir != 800000 || cfg.Search.MinLootDarkElixir != 4000 {
+		t.Fatalf("loot settings not applied: %+v", cfg.Search)
+	}
+	if !cfg.Upgrade.UpgradeWalls || cfg.Attack.StallTimerSeconds != 44 ||
+		!cfg.Attack.LootExitEnabled || cfg.Attack.LootExitPercent != 75 {
+		t.Fatalf("user automation settings not applied")
+	}
+
+	// These are engine/member-pacing settings owned by other subsystems and
+	// must never be overwritten by an advanced automation profile restore.
+	if !cfg.Attack.UseQueen || !cfg.Attack.UseWarden || !cfg.Attack.UseClanCastle {
+		t.Fatal("automation profile changed hero/clan-castle behavior")
+	}
+	if cfg.Attack.MaxAttackPerSession != 41 {
+		t.Fatalf("session cap changed: %d", cfg.Attack.MaxAttackPerSession)
+	}
+	if cfg.Attack.DropDelay.Duration != 777*time.Millisecond ||
+		cfg.Attack.SpellDelay.Duration != 1777*time.Millisecond ||
+		cfg.Attack.MinSecondsBetweenAttacks != 33 {
+		t.Fatal("automation profile changed pacing internals")
+	}
+	if cfg.Search.AdaptiveSearch {
+		t.Fatal("automation profile changed adaptive search member preference")
+	}
+	if cfg.Automation.MaxAttacksPerHour != 14 || cfg.Automation.BreakEveryAttacks != 9 {
+		t.Fatal("automation profile changed member governor preferences")
+	}
+}
+
+func TestSanitizeMemberAutomationBounds(t *testing.T) {
+	got := sanitizeMemberAutomationProfile(MemberAutomationProfile{
+		MinLootGold:       -1,
+		MinLootElixir:     99_000_000,
+		MinLootDarkElixir: -500,
+		StallTimerSeconds:  9999,
+		LootExitPercent:   300,
+		FarmTownHall:      99,
+		StrategyFile:      "../unsafe.yaml",
+	})
+	if got.MinLootGold != 0 || got.MinLootElixir != 10_000_000 || got.MinLootDarkElixir != 0 {
+		t.Fatalf("loot bounds not sanitized: %+v", got)
+	}
+	if got.StallTimerSeconds != 600 || got.LootExitPercent != 100 {
+		t.Fatalf("timer/loot exit bounds not sanitized: %+v", got)
+	}
+	if got.FarmTownHall != 18 {
+		t.Fatalf("FarmTownHall=%d want 18", got.FarmTownHall)
+	}
+	if got.StrategyFile != "unsafe.yaml" {
+		t.Fatalf("strategy path was not reduced to basename: %q", got.StrategyFile)
+	}
+}
