@@ -152,6 +152,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [memberMessage, setMemberMessage] = React.useState('');
   const [memberSaveError, setMemberSaveError] = React.useState('');
   const [memberPage, setMemberPage] = React.useState<'account' | 'settings' | 'village'>('account');
+  const [confirmDeactivate, setConfirmDeactivate] = React.useState(false);
 
   const refreshLicense = React.useCallback(async () => {
     try {
@@ -220,6 +221,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     setLicenseError('');
     try {
       await DeactivateLicense();
+      setConfirmDeactivate(false);
       await refreshLicense();
       onInterfaceLevelChange('simple');
     } catch (e) {
@@ -435,14 +437,42 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
           </div>
 
           {licenseState?.activated ? (
-            <button
-              type="button"
-              onClick={() => void deactivateLicense()}
-              disabled={licenseBusy}
-              className="shrink-0 px-5 py-3 rounded-xl border border-white/10 dark:border-zinc-200 text-[10px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600 hover:text-white dark:hover:text-zinc-950 disabled:opacity-40"
-            >
-              Désactiver sur ce PC
-            </button>
+            <div className="shrink-0">
+              {!confirmDeactivate ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeactivate(true)}
+                  disabled={licenseBusy}
+                  className="px-5 py-3 rounded-xl border border-white/10 dark:border-zinc-200 text-[10px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600 hover:text-white dark:hover:text-zinc-950 disabled:opacity-40"
+                >
+                  Désactiver sur ce PC
+                </button>
+              ) : (
+                <div className="max-w-[320px] rounded-2xl border border-rose-500/20 bg-rose-500/10 p-3">
+                  <div className="text-[11px] font-bold text-rose-300 dark:text-rose-700">
+                    Tu devras ressaisir ta clé pour réactiver ClashGO sur ce PC.
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void deactivateLicense()}
+                      disabled={licenseBusy}
+                      className="rounded-xl bg-rose-500 px-3 py-2 text-[9px] font-black uppercase tracking-widest text-white disabled:opacity-40"
+                    >
+                      {licenseBusy ? 'Désactivation…' : 'Confirmer'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeactivate(false)}
+                      disabled={licenseBusy}
+                      className="rounded-xl border border-white/10 dark:border-zinc-300 px-3 py-2 text-[9px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600 disabled:opacity-40"
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           ) : (
             <div className="w-full xl:w-auto flex flex-col sm:flex-row gap-2">
               <input
