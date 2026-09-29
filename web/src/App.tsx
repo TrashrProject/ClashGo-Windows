@@ -1057,7 +1057,7 @@ function App() {
     activity: 'Activité',
     analytics: 'Statistiques',
     settings: 'Paramètres',
-    developer: 'Support',
+    developer: licenseRole === 'admin' ? 'Administration' : 'Support',
   };
 
   const configProps = useMemo(() => ({
