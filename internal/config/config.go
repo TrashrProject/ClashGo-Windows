@@ -23,6 +23,10 @@ type BotConfig struct {
 }
 
 type AutomationConfig struct {
+	// SpeedProfile controls the real bot pacing exposed in the member area.
+	// Supported values: cautious, normal, fast.
+	SpeedProfile string `json:"speed_profile"`
+
 	// SimpleMode is the default user experience: ClashGO derives sane values
 	// from the linked account and only exposes a few meaningful controls.
 	SimpleMode bool `json:"simple_mode"`
@@ -344,6 +348,7 @@ func DefaultConfig() *BotConfig {
 		},
 		Account: AccountConfig{},
 		Automation: AutomationConfig{
+			SpeedProfile:           "normal",
 			SimpleMode:             true,
 			AutoFarmProfile:        true,
 			AutoArmyGuard:          true,
