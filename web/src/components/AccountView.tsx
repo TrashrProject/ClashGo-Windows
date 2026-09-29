@@ -269,6 +269,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   }, [playerTag]);
   const [confirmDeactivate, setConfirmDeactivate] = React.useState(false);
   const [supportCodeCopied, setSupportCodeCopied] = React.useState(false);
+  const [supportSummaryCopied, setSupportSummaryCopied] = React.useState(false);
   const [confirmUnlink, setConfirmUnlink] = React.useState(false);
   const [appVersion, setAppVersion] = React.useState('');
   const [memberUpdate, setMemberUpdate] = React.useState<MemberUpdateStatus | null>(null);
@@ -845,6 +846,46 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                   className="rounded-lg border border-white/10 dark:border-zinc-200/70 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-600 hover:text-white dark:hover:text-zinc-950"
                 >
                   {supportCodeCopied ? 'Copié' : 'Copier'}
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const code = `${licenseState.license_hint?.replace(/[^A-Z0-9]/gi, '').slice(-4) || 'LIC'}-${licenseState.machine_id?.slice(0, 8).toUpperCase() || 'DEVICE'}`;
+                    const plan = licenseState.plan === 'free_2d'
+                      ? 'FREE 2J'
+                      : licenseState.plan === 'week_1'
+                        ? '1 semaine'
+                        : licenseState.plan === 'month_1'
+                          ? '1 mois'
+                          : 'À vie';
+                    const lines = [
+                      'ClashGO · Infos support',
+                      'Code support: ' + code,
+                      'Version: ' + (appVersion ? 'v' + appVersion : 'inconnue'),
+                      'Rôle: ' + (licenseState.role || 'member'),
+                      'Plan: ' + plan,
+                      'Expiration: ' + (licenseState.expires_at ? new Date(licenseState.expires_at).toLocaleString('fr-FR') : 'Jamais'),
+                      'Dernière validation: ' + (licenseState.last_validated ? new Date(licenseState.last_validated).toLocaleString('fr-FR') : 'Inconnue'),
+                    ];
+                    const value = lines.join('\n');
+                    try {
+                      await navigator.clipboard.writeText(value);
+                    } catch {
+                      const ta = document.createElement('textarea');
+                      ta.value = value;
+                      ta.style.position = 'fixed';
+                      ta.style.opacity = '0';
+                      document.body.appendChild(ta);
+                      ta.select();
+                      document.execCommand('copy');
+                      document.body.removeChild(ta);
+                    }
+                    setSupportSummaryCopied(true);
+                    window.setTimeout(() => setSupportSummaryCopied(false), 1800);
+                  }}
+                  className="rounded-lg border border-white/10 dark:border-zinc-200/70 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-600 hover:text-white dark:hover:text-zinc-950"
+                >
+                  {supportSummaryCopied ? 'Infos copiées' : 'Copier infos support'}
                 </button>
               </div>
             )}
