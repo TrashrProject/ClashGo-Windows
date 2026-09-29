@@ -1209,6 +1209,16 @@ func clashAccountServiceURL(cfg *config.BotConfig) string {
 	return "http://127.0.0.1:8787"
 }
 
+func clashAccountServiceConfigured(cfg *config.BotConfig) bool {
+	if strings.TrimSpace(os.Getenv("CLASHGO_ACCOUNT_API_URL")) != "" {
+		return true
+	}
+	if strings.TrimSpace(accountServiceURL) != "" {
+		return true
+	}
+	return cfg != nil && strings.TrimSpace(cfg.Account.ProxyURL) != ""
+}
+
 func clashControlServiceURL(cfg *config.BotConfig) string {
 	if raw := strings.TrimSpace(os.Getenv("CLASHGO_CONTROL_API_URL")); raw != "" {
 		return strings.TrimRight(raw, "/")
@@ -1228,7 +1238,7 @@ func (a *App) GetAccountConfig() ClashAccountPublicConfig {
 	serviceURL := clashAccountServiceURL(cfg)
 	return ClashAccountPublicConfig{
 		PlayerTag:         cfg.Account.PlayerTag,
-		ServiceConfigured: strings.TrimSpace(serviceURL) != "",
+		ServiceConfigured: clashAccountServiceConfigured(cfg),
 		ServiceURL:        serviceURL,
 	}
 }
