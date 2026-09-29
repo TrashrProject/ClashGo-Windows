@@ -8,7 +8,6 @@ import Analytics from './components/Analytics';
 import ConfigView from './components/ConfigView';
 import SettingsView from './components/SettingsView';
 import AccountView from './components/AccountView';
-import AccountOnboarding from './components/AccountOnboarding';
 import { EventsOn } from '../wailsjs/runtime';
 import {
   GetStats,
@@ -227,7 +226,7 @@ function App() {
   const [testSessionActive, setTestSessionActive] = useState(false);
   const [startupCheck, setStartupCheck] = useState<{
     ready: boolean;
-    checks: Array<{ id: string; label: string; ok: boolean; message: string; action?: string; action_label?: string }>;
+    checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
   } | null>(null);
   const [latestBootReport, setLatestBootReport] = useState<{
     started_at?: string;
@@ -747,7 +746,7 @@ function App() {
       const result = await GetStartupReadiness();
       setStartupCheck(result as unknown as {
         ready: boolean;
-        checks: Array<{ id: string; label: string; ok: boolean; message: string; action?: string; action_label?: string }>;
+        checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
       });
     } catch (err) {
       console.warn('Startup readiness check failed:', err);
@@ -781,7 +780,7 @@ function App() {
       const readiness = await GetStartupReadiness();
       const typedReadiness = readiness as unknown as {
         ready: boolean;
-        checks: Array<{ id: string; label: string; ok: boolean; message: string; action?: string; action_label?: string }>;
+        checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
       };
       setStartupCheck(typedReadiness);
       setStartupCheckRunning(false);
@@ -830,7 +829,7 @@ function App() {
       const readiness = await GetStartupReadiness();
       const typedReadiness = readiness as unknown as {
         ready: boolean;
-        checks: Array<{ id: string; label: string; ok: boolean; message: string; action?: string; action_label?: string }>;
+        checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
       };
       setStartupCheck(typedReadiness);
       setStartupCheckRunning(false);
@@ -1278,6 +1277,10 @@ function App() {
                 setAccountPage('settings');
                 setTab('account');
               }}
+              onOpenVillage={() => {
+                setAccountPage('village');
+                setTab('account');
+              }}
               onOpenSettings={() => setTab('settings')}
               licenseReady={licenseAccessReady}
               memberName={licenseMemberName}
@@ -1329,14 +1332,6 @@ function App() {
         </div>
       </main>
 
-      {accountReady && !playerTag && (
-        <AccountOnboarding
-          onLinked={(tag) => {
-            setPlayerTag(tag);
-            setTab('dashboard');
-          }}
-        />
-      )}
     </div>
   );
 }
