@@ -800,6 +800,58 @@ func main() {
 	})
 
 
+	mux.HandleFunc("POST /v1/developer/licenses/update-customer", func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
+		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
+		if !control.authorizeAdmin(key, machineID) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"message": "admin license required"})
+			return
+		}
+		var in struct {
+			LicenseID       string `json:"license_id"`
+			CustomerName    string `json:"customer_name"`
+			CustomerContact string `json:"customer_contact,omitempty"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
+			return
+		}
+		in.LicenseID = strings.TrimSpace(in.LicenseID)
+		in.CustomerName = strings.TrimSpace(in.CustomerName)
+		in.CustomerContact = strings.TrimSpace(in.CustomerContact)
+		if in.LicenseID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "license_id is required"})
+			return
+		}
+		if in.CustomerName == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "customer_name is required"})
+			return
+		}
+		if len(in.CustomerName) > 120 {
+			in.CustomerName = in.CustomerName[:120]
+		}
+		if len(in.CustomerContact) > 180 {
+			in.CustomerContact = in.CustomerContact[:180]
+		}
+
+		control.mu.Lock()
+		rec := findLicenseRecordByIDLocked(control, in.LicenseID)
+		if rec == nil {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "license not found"})
+			return
+		}
+		rec.CustomerName = in.CustomerName
+		rec.CustomerContact = in.CustomerContact
+		_ = control.saveLocked()
+		control.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true,
+			"customer_name": in.CustomerName,
+			"customer_contact": in.CustomerContact,
+		})
+	})
+
 	mux.HandleFunc("POST /v1/developer/licenses/set-role", func(w http.ResponseWriter, r *http.Request) {
 		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
 		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
