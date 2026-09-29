@@ -161,6 +161,7 @@ func (a *App) startup(ctx context.Context) {
 	a.updater.StartBackgroundPoller(bgCtx)
 	go a.forwardUpdaterStatus(bgCtx)
 	go a.licenseValidationLoop(bgCtx)
+	go a.accountProfileSyncLoop(bgCtx)
 
 	// Skip the standalone web dashboard on `wails dev`. Wails injects
 	// its own dev proxy at :34115 → Vite at :5173 by parsing stdout
@@ -438,6 +439,44 @@ func (a *App) shutdown(ctx context.Context) {
 		}
 	}
 	bot.CloseAsyncWriter()
+}
+
+func (a *App) accountProfileSyncLoop(ctx context.Context) {
+	// Keep the linked Clash profile fresh independently of which React page is
+	// open. The UI may additionally refresh its visible card, but the backend
+	// owns the actual automation contract.
+	first := time.NewTimer(20 * time.Second)
+	defer first.Stop()
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-first.C:
+	}
+
+	syncOnce := func() {
+		cfg := config.LoadOrDefault("config.json")
+		if cfg == nil || !cfg.Automation.AutoProfileSync || strings.TrimSpace(cfg.Account.PlayerTag) == "" {
+			return
+		}
+		if _, err := a.GetPlayerProfile(); err != nil {
+			log.Debug().Err(err).Msg("automatic Clash profile sync deferred")
+			return
+		}
+		log.Debug().Msg("automatic Clash profile sync completed")
+	}
+
+	syncOnce()
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			syncOnce()
+		}
+	}
 }
 
 func (a *App) licenseValidationLoop(ctx context.Context) {
