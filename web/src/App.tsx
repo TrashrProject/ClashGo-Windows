@@ -40,6 +40,7 @@ import {
   GetLicenseState,
   RefreshLicense,
   GetMemberInterfaceLevel,
+  ApplyMemberPreset,
   SetSimpleMode,
   StartTestSession,
   StartQuickTestSession,
@@ -1050,6 +1051,24 @@ function App() {
     }
   }, []);
 
+  const handleStartWithPreset = async (preset: 'short' | 'balanced' | 'fast') => {
+    if (startInFlightRef.current || isRunning || isStarting) return;
+    if (updateInstallBusy) {
+      setBotError('Une mise à jour ClashGO est en cours d’installation. Attends le redémarrage avant de lancer le bot.');
+      return;
+    }
+
+    try {
+      await ApplyMemberPreset(preset);
+      await syncMemberScopedView(true);
+      await refreshStartupReadiness();
+      await handleStart();
+    } catch (err) {
+      console.error('Preset session start failed:', err);
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
   const handleStart = async () => {
     if (startInFlightRef.current || isRunning || isStarting) return;
     if (updateInstallBusy) {
@@ -1678,6 +1697,7 @@ function App() {
               running={isRunning}
               starting={isStarting}
               onStart={handleStart}
+              onStartWithPreset={(preset) => void handleStartWithPreset(preset)}
               onStartTestSession={handleStartTestSession}
               onStartQuickTestSession={handleStartQuickTestSession}
               onStop={handleStop}
