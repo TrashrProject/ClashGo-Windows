@@ -2041,6 +2041,212 @@ func (a *App) applyMemberAccountForCurrentLicense() error {
 	return nil
 }
 
+type MemberAutomationProfile struct {
+	SearchEnabled       bool                          `json:"search_enabled"`
+	MinLootGold         int                           `json:"min_loot_gold"`
+	MinLootElixir       int                           `json:"min_loot_elixir"`
+	MinLootDarkElixir   int                           `json:"min_loot_dark_elixir"`
+	UpgradeWalls        bool                          `json:"upgrade_walls"`
+	StrategyFile        string                        `json:"strategy_file"`
+	StallTimerSeconds   int                           `json:"stall_timer_seconds"`
+	LootExitEnabled     bool                          `json:"loot_exit_enabled"`
+	LootExitPercent     int                           `json:"loot_exit_percent"`
+	FarmEnabled         bool                          `json:"farm_enabled"`
+	FarmTownHall        int                           `json:"farm_town_hall"`
+	FarmProfiles        map[string]config.FarmProfile `json:"farm_profiles,omitempty"`
+}
+
+func memberAutomationFromConfig(cfg *config.BotConfig) MemberAutomationProfile {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	profile := MemberAutomationProfile{
+		SearchEnabled:     cfg.Search.Enabled,
+		MinLootGold:       cfg.Search.MinLootGold,
+		MinLootElixir:     cfg.Search.MinLootElixir,
+		MinLootDarkElixir: cfg.Search.MinLootDarkElixir,
+		UpgradeWalls:      cfg.Upgrade.UpgradeWalls,
+		StrategyFile:      filepath.Base(cfg.Attack.StrategyFile),
+		StallTimerSeconds: cfg.Attack.StallTimerSeconds,
+		LootExitEnabled:   cfg.Attack.LootExitEnabled,
+		LootExitPercent:   cfg.Attack.LootExitPercent,
+		FarmEnabled:       cfg.Attack.Farm.Enabled,
+		FarmTownHall:      cfg.Attack.Farm.TownHall,
+		FarmProfiles:      map[string]config.FarmProfile{},
+	}
+	for key, value := range cfg.Attack.Farm.Profiles {
+		profile.FarmProfiles[key] = value
+	}
+	return sanitizeMemberAutomationProfile(profile)
+}
+
+func sanitizeMemberAutomationProfile(profile MemberAutomationProfile) MemberAutomationProfile {
+	const maxLootThreshold = 10_000_000
+	profile.MinLootGold = max(0, min(maxLootThreshold, profile.MinLootGold))
+	profile.MinLootElixir = max(0, min(maxLootThreshold, profile.MinLootElixir))
+	profile.MinLootDarkElixir = max(0, min(maxLootThreshold, profile.MinLootDarkElixir))
+	profile.StallTimerSeconds = max(0, min(600, profile.StallTimerSeconds))
+	profile.LootExitPercent = max(0, min(100, profile.LootExitPercent))
+	if profile.FarmTownHall < 8 || profile.FarmTownHall > 18 {
+		profile.FarmTownHall = 18
+	}
+	profile.StrategyFile = filepath.Base(strings.TrimSpace(profile.StrategyFile))
+	if profile.FarmProfiles == nil {
+		profile.FarmProfiles = map[string]config.FarmProfile{}
+	}
+	return profile
+}
+
+func applyMemberAutomationToConfig(cfg *config.BotConfig, profile MemberAutomationProfile) {
+	if cfg == nil {
+		return
+	}
+	profile = sanitizeMemberAutomationProfile(profile)
+	cfg.Search.Enabled = profile.SearchEnabled
+	cfg.Search.MinLootGold = profile.MinLootGold
+	cfg.Search.MinLootElixir = profile.MinLootElixir
+	cfg.Search.MinLootDarkElixir = profile.MinLootDarkElixir
+	cfg.Upgrade.UpgradeWalls = profile.UpgradeWalls
+	cfg.Attack.StallTimerSeconds = profile.StallTimerSeconds
+	cfg.Attack.LootExitEnabled = profile.LootExitEnabled
+	cfg.Attack.LootExitPercent = profile.LootExitPercent
+
+	if profile.StrategyFile != "" {
+		candidate := paths.Resolve(filepath.Join("strategies", filepath.Base(profile.StrategyFile)))
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			cfg.Attack.StrategyFile = candidate
+		}
+	}
+
+	cfg.Attack.Farm.Enabled = profile.FarmEnabled
+	cfg.Attack.Farm.TownHall = profile.FarmTownHall
+	if len(profile.FarmProfiles) > 0 {
+		cfg.Attack.Farm.Profiles = make(map[string]config.FarmProfile, len(profile.FarmProfiles))
+		for key, value := range profile.FarmProfiles {
+			cfg.Attack.Farm.Profiles[key] = value
+		}
+	}
+}
+
+func (a *App) memberAutomationPath() string {
+	if a == nil || a.license == nil {
+		return ""
+	}
+	id := strings.TrimSpace(a.license.ProfileID())
+	if id == "" {
+		return ""
+	}
+	return paths.ResolveConfig(filepath.Join("members", id+".automation.json"))
+}
+
+func saveMemberAutomationFile(path string, profile MemberAutomationProfile) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	profile = sanitizeMemberAutomationProfile(profile)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmpPath := path + ".tmp"
+	backupPath := path + ".bak"
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	_ = os.Remove(backupPath)
+	hadOriginal := false
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Rename(path, backupPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return err
+		}
+		hadOriginal = true
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backupPath, path)
+		}
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	_ = os.Remove(backupPath)
+	return nil
+}
+
+func loadMemberAutomationFile(path string) (MemberAutomationProfile, bool) {
+	if strings.TrimSpace(path) == "" {
+		return MemberAutomationProfile{}, false
+	}
+	read := func(candidate string) (MemberAutomationProfile, bool) {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			return MemberAutomationProfile{}, false
+		}
+		var profile MemberAutomationProfile
+		if json.Unmarshal(data, &profile) != nil {
+			return MemberAutomationProfile{}, false
+		}
+		return sanitizeMemberAutomationProfile(profile), true
+	}
+	if profile, ok := read(path); ok {
+		return profile, true
+	}
+	if profile, ok := read(path + ".bak"); ok {
+		_ = saveMemberAutomationFile(path, profile)
+		return profile, true
+	}
+	return MemberAutomationProfile{}, false
+}
+
+func (a *App) persistMemberAutomation(cfg *config.BotConfig) error {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return nil
+	}
+	return saveMemberAutomationFile(a.memberAutomationPath(), memberAutomationFromConfig(cfg))
+}
+
+func (a *App) applyMemberAutomationForCurrentLicense() error {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return nil
+	}
+	cfg := config.LoadOrDefault("config.json")
+	profile, ok := loadMemberAutomationFile(a.memberAutomationPath())
+	if !ok {
+		// Upgrade migration: the first active licence adopts the user's current
+		// advanced automation choices exactly once.
+		return saveMemberAutomationFile(a.memberAutomationPath(), memberAutomationFromConfig(cfg))
+	}
+	applyMemberAutomationToConfig(cfg, profile)
+	if err := config.Save("config.json", cfg); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	a.mu.Unlock()
+	return nil
+}
+
 func (a *App) GetMemberSettings() MemberSettings {
 	cfg := config.LoadOrDefault("config.json")
 	profile := normalizeSpeedProfile(cfg.Automation.SpeedProfile)
