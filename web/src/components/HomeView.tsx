@@ -131,6 +131,21 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
             </div>
             <h2 className="mt-3 text-3xl md:text-4xl font-black tracking-tight">{botLabel}</h2>
             <p className="mt-2 max-w-xl text-sm font-semibold text-zinc-400 dark:text-zinc-600">{botSub}</p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <span className="rounded-full border border-white/10 dark:border-zinc-200 bg-white/5 dark:bg-zinc-100 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600">
+                Cadence · {stats.speed_profile === 'fast' ? 'Rapide' : stats.speed_profile === 'cautious' ? 'Prudente' : 'Normale'}
+              </span>
+              <span className={
+                'rounded-full border px-3 py-1.5 text-[9px] font-black uppercase tracking-widest ' +
+                ((stats.health_score ?? 100) >= 85
+                  ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-400 dark:text-emerald-600'
+                  : (stats.health_score ?? 100) >= 65
+                    ? 'border-amber-400/20 bg-amber-400/10 text-amber-400 dark:text-amber-600'
+                    : 'border-rose-400/20 bg-rose-400/10 text-rose-400 dark:text-rose-600')
+              }>
+                Santé · {Math.max(0, Math.min(100, stats.health_score ?? 100))}/100
+              </span>
+            </div>
           </div>
           <button
             type="button"
