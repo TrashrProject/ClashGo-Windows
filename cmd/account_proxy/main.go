@@ -593,7 +593,8 @@ func main() {
 	mux.HandleFunc("GET /v1/developer/licenses", func(w http.ResponseWriter, r *http.Request) {
 		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
 		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
-		if _, ok := control.authorizeDeveloper(key, machineID); !ok {
+		actor, ok := control.authorizeDeveloper(key, machineID)
+		if !ok {
 			writeJSON(w, http.StatusForbidden, map[string]string{"message": "developer license required"})
 			return
 		}
@@ -604,6 +605,10 @@ func main() {
 				cp := *rec
 				if cp.ID == "" {
 					cp.ID = licenseIDFromHash(hash)
+				}
+				if actor.Role != "admin" {
+					cp.CustomerName = ""
+					cp.CustomerContact = ""
 				}
 				rows = append(rows, cp)
 			}
