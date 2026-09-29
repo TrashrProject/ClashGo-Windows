@@ -2702,6 +2702,9 @@ func (a *App) GetPlayerProfile() (*ClashPlayerProfile, error) {
 			if writeErr := config.Save("config.json", cfg); writeErr != nil {
 				log.Warn().Err(writeErr).Msg("account sync: could not persist automatic farm profile")
 			} else {
+				if profileErr := a.persistMemberAutomation(cfg); profileErr != nil {
+					log.Warn().Err(profileErr).Msg("account sync: could not persist member automation profile")
+				}
 				a.mu.Lock()
 				if a.bot != nil {
 					a.bot.UpdateConfig(cfg)
