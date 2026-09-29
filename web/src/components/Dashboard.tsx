@@ -69,7 +69,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       return typeof raw === 'string' ? raw : '';
     };
     const rows: Array<{ at: string; icon: string; title: string; detail: string }> = [];
-    for (const ev sur activity ?? []) {
+    for (const ev of activity ?? []) {
       if (rows.length >= 7) break;
       if (ev.type === 'target_found' && ev.fields?.accept !== true) continue;
       if (ev.type === 'target_skipped' || ev.type === 'state_changed') continue;
@@ -162,7 +162,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
     const events = (replay?.events ?? []).filter((ev) => ev.kind === 'deploy');
     let maxX = 860;
     let maxY = 732;
-    for (const ev sur events) {
+    for (const ev of events) {
       maxX = Math.max(maxX, ev.p1?.x || 0, ev.p2?.x || 0, ev.slot_x || 0);
       maxY = Math.max(maxY, ev.p1?.y || 0, ev.p2?.y || 0, ev.slot_y || 0);
     }
@@ -197,7 +197,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
 
   const severityCounts = React.useMemo(() => {
     const counts: Record<LogSeverity, number> = { debug: 0, info: 0, success: 0, warn: 0, error: 0 };
-    for (const l sur parsedLogs) counts[l.level]++;
+    for (const l of parsedLogs) counts[l.level]++;
     return counts;
   }, [parsedLogs]);
 
@@ -445,7 +445,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               <div className="px-6 pt-5">
                 <div className="grid grid-cols-1 xl:grid-cols-[1.5fr_auto] gap-4 items-start">
                   <div className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-zinc-950 overflow-hidden relative">
-                    <div className="absolute top-4 restant(s)-4 z-10">
+                    <div className="absolute top-4 left-4 z-10">
                       <div className="text-[9px] font-black uppercase tracking-[0.22em] text-zinc-500">Carte de déploiement</div>
                       <div className="mt-1 text-xs font-bold text-zinc-300">{replayMap.events.length} recorded deploy actions</div>
                     </div>
@@ -657,7 +657,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                         ? 'bg-emerald-500/15 text-emerald-400'
                         : 'bg-amber-500/15 text-amber-300'
                     }`}>
-                      {latestAttack.deploy_success ? 'Deploy complete' : `${latestAttack.undeployed_slots} slot(s) restant(s)`}
+                      {latestAttack.deploy_success ? 'Déploiement complet' : `${latestAttack.undeployed_slots} emplacement(s) restant(s)`}
                     </span>
                     <span className="px-2 py-1 rounded-lg bg-white/10 text-zinc-300 text-[9px] font-black uppercase tracking-wider">
                       {(latestAttack.search_duration_ms / 1000 || 0).toFixed(1)} s recherche · {latestAttack.search_skips || 0} ignorés
@@ -960,7 +960,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         {/* Filter bar: text search + severity chips. */}
         <div className="px-8 py-3 flex flex-wrap items-center gap-3 border-b border-zinc-100 dark:border-zinc-900/50">
           <div className="relative flex-1 min-w-[180px] max-w-sm">
-            <span className="absolute restant(s)-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-sm text-zinc-600">search</span>
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-sm text-zinc-600">search</span>
             <input
               value={logFilter}
               onChange={(e) => setLogFilter(e.target.value)}
