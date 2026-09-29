@@ -144,11 +144,27 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
           detail: `${numberField(ev, 'gold').toLocaleString()} G · ${(numberField(ev, 'deploy_ms') / 1000).toFixed(1)} s déploiement · ${(numberField(ev, 'cycle_ms') / 1000).toFixed(0)} s cycle`,
         });
       } else if (ev.type === 'recovery') {
+        const stage = textField(ev, 'stage').toLowerCase();
+        const method = textField(ev, 'method').toLowerCase();
+        const methodLabel =
+          method === 'game_restart' ? 'jeu relancé' :
+          method === 'adb_reconnect' ? 'ADB reconnecté' :
+          method === 'adb_server_reset' ? 'serveur ADB réinitialisé' :
+          method === 'bluestacks_relaunch' ? 'BlueStacks relancé' :
+          ev.fields?.bluestacks_restart === true ? 'BlueStacks relancé' :
+          'récupération automatique';
+
         rows.push({
           at: ev.at,
-          icon: 'healing',
-          title: textField(ev, 'stage') === 'success' ? 'Récupération terminée' : 'Récupération en cours',
-          detail: textField(ev, 'bluestacks_restart') ? 'BlueStacks redémarré' : 'Récupération automatique',
+          icon: stage === 'failed' ? 'warning' : 'healing',
+          title: stage === 'success'
+            ? 'Session récupérée'
+            : stage === 'failed'
+              ? 'Récupération à réessayer'
+              : 'Récupération en cours',
+          detail: stage === 'failed'
+            ? methodLabel + ' · ClashGO réessaiera automatiquement'
+            : methodLabel,
         });
       } else if (ev.type === 'speed_profile') {
         const mode = textField(ev, 'mode') || 'Balanced';
@@ -182,6 +198,35 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         });
       } else if (ev.type === 'anomaly') {
         const kind = textField(ev, 'kind') || 'performance_anomaly';
+
+        if (kind === 'army_guard_rejected_target') {
+          rows.push({
+            at: ev.at,
+            icon: 'shield',
+            title: 'Base ignorée · armée non conforme',
+            detail: 'Aucun déploiement effectué. ClashGO poursuit la recherche.',
+          });
+          continue;
+        }
+        if (kind === 'army_guard_uncertain') {
+          rows.push({
+            at: ev.at,
+            icon: 'rule',
+            title: 'Contrôle armée incertain',
+            detail: 'La lecture n’était pas assez fiable pour bloquer l’attaque.',
+          });
+          continue;
+        }
+        if (kind === 'army_guard_unavailable') {
+          rows.push({
+            at: ev.at,
+            icon: 'shield_question',
+            title: 'Contrôle armée indisponible',
+            detail: 'ClashGO n’a pas bloqué l’attaque sur une lecture non concluante.',
+          });
+          continue;
+        }
+
         const duration = numberField(ev, 'duration_ms');
         const rawRegressions = ev.fields?.regressions;
         let regressionDetail = '';
