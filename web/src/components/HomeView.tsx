@@ -19,6 +19,7 @@ interface HomeViewProps {
   onOpenVillage: () => void;
   onOpenSettings: () => void;
   licenseReady: boolean;
+  licenseRequired: boolean;
   accountLinked: boolean;
   windowsReady: boolean | null;
   readinessIssues: string[];
@@ -162,7 +163,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, sessionReport, testSessionActive, running, starting,
     onStart, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
-    licenseReady, accountLinked, windowsReady, readinessIssues,
+    licenseReady, licenseRequired, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
     memberName, licensePlan, licenseExpiresAt, latestBootReport,
   } = props;
@@ -336,8 +337,9 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
         {[
           {
             label: 'Licence',
-            value: licenseReady ? 'Prête' : 'À activer',
+            value: licenseReady ? 'Active' : licenseRequired ? 'À activer' : 'Mode beta',
             ok: licenseReady,
+            optional: !licenseReady && !licenseRequired,
             icon: 'license',
           },
           {
@@ -378,7 +380,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
 
       {!running && (
         <section className="rounded-[1.75rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-premium dark:shadow-none">
-          {!licenseReady ? (
+          {licenseRequired && !licenseReady ? (
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
                 <div className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">Étape suivante</div>
