@@ -33,6 +33,8 @@ type State struct {
 	MachineID     string `json:"machine_id,omitempty"`
 	LastValidated string `json:"last_validated,omitempty"`
 	OfflineUntil  string `json:"offline_until,omitempty"`
+	Plan          string `json:"plan,omitempty"`
+	ExpiresAt     string `json:"expires_at,omitempty"`
 	Error         string `json:"error,omitempty"`
 }
 
@@ -42,6 +44,8 @@ type storedLicense struct {
 	MachineID     string `json:"machine_id"`
 	LastValidated string `json:"last_validated"`
 	OfflineUntil  string `json:"offline_until"`
+	Plan          string `json:"plan,omitempty"`
+	ExpiresAt     string `json:"expires_at,omitempty"`
 }
 
 type activateRequest struct {
@@ -54,6 +58,8 @@ type activateResponse struct {
 	OK           bool   `json:"ok"`
 	Role         Role   `json:"role"`
 	OfflineUntil string `json:"offline_until"`
+	Plan         string `json:"plan,omitempty"`
+	ExpiresAt    string `json:"expires_at,omitempty"`
 	Message      string `json:"message,omitempty"`
 }
 
@@ -124,6 +130,8 @@ func (s *Service) stateFromStored(st storedLicense) State {
 		MachineID: st.MachineID,
 		LastValidated: st.LastValidated,
 		OfflineUntil: st.OfflineUntil,
+		Plan: st.Plan,
+		ExpiresAt: st.ExpiresAt,
 	}
 }
 
@@ -213,6 +221,8 @@ func (s *Service) Activate(ctx context.Context, key string) (State, error) {
 		MachineID: machineID,
 		LastValidated: now.Format(time.RFC3339),
 		OfflineUntil: out.OfflineUntil,
+		Plan: out.Plan,
+		ExpiresAt: out.ExpiresAt,
 	}
 	s.state = s.stateFromStored(s.stored)
 	err = s.saveLocked()
@@ -243,6 +253,13 @@ func (s *Service) Validate(ctx context.Context) State {
 		s.state = s.stateFromStored(s.stored)
 		s.state.Activated = false
 		s.state.Error = remoteErr.Error()
+		return s.state
+	}
+
+	if expiry, parseErr := time.Parse(time.RFC3339, s.stored.ExpiresAt); parseErr == nil && !time.Now().Before(expiry) {
+		s.state = s.stateFromStored(s.stored)
+		s.state.Activated = false
+		s.state.Error = "license has expired"
 		return s.state
 	}
 
