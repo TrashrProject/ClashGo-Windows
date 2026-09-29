@@ -39,7 +39,7 @@ import {
   GetAccountConfig,
   GetLicenseState,
   GetMemberInterfaceLevel,
-  ApplyMemberPreset,
+  StartTestSession,
   GetPlayerProfile,
   GetVillageResourceHistory,
   SaveMemberInterfaceLevel,
@@ -784,13 +784,42 @@ function App() {
   const handleStartTestSession = async () => {
     if (testSessionInFlightRef.current || startInFlightRef.current || isRunning || isStarting) return;
     testSessionInFlightRef.current = true;
+    setBotError('');
+    setBotDiagnosticPath('');
     try {
-      setBotError('');
-      await ApplyMemberPreset('short');
+      setStartupCheckRunning(true);
+      const readiness = await GetStartupReadiness();
+      const typedReadiness = readiness as unknown as {
+        ready: boolean;
+        checks: Array<{ id: string; label: string; ok: boolean; message: string; action?: string; action_label?: string }>;
+      };
+      setStartupCheck(typedReadiness);
+      setStartupCheckRunning(false);
+
+      if (!typedReadiness.ready) {
+        const firstBlocked = typedReadiness.checks.find((check) => !check.ok);
+        setBotError(firstBlocked
+          ? `${firstBlocked.label} : ${firstBlocked.message}`
+          : 'La configuration ClashGO n’est pas prête.');
+        return;
+      }
+
+      const res = await StartTestSession(goldThreshold, elixirThreshold, deThreshold, upgradeWalls, searchEnabled);
       await syncMemberScopedView(true);
-      await handleStart();
+
+      if (res.running) {
+        setIsStarting(true);
+        setIsRunning(false);
+      } else {
+        setIsStarting(false);
+        setIsRunning(false);
+        if (res.message) setBotError(friendlyBotErrorMessage(res.message));
+      }
     } catch (err) {
       console.error('Test session start failed:', err);
+      setStartupCheckRunning(false);
+      setIsStarting(false);
+      setIsRunning(false);
       setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
     } finally {
       testSessionInFlightRef.current = false;
