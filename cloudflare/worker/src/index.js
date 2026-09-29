@@ -154,9 +154,13 @@ async function activateLicense(request, env) {
   }
 
   const hash = await sha256(key);
-  const license = await env.DB.prepare(
-    "SELECT id, hint, role, active, machine_id, plan, duration_days, activated_at, expires_at FROM licenses WHERE license_hash = ?1"
-  ).bind(hash).first();
+  const license = await env.DB.prepare(`
+    SELECT l.id, l.hint, l.role, l.active, l.machine_id, l.plan, l.duration_days,
+           l.activated_at, l.expires_at, c.display_name AS member_name
+    FROM licenses l
+    LEFT JOIN customers c ON c.id = l.customer_id
+    WHERE l.license_hash = ?1
+  `).bind(hash).first();
 
   if (!license || Number(license.active) !== 1) {
     return json({ message: "license is invalid or revoked" }, 403);
@@ -189,6 +193,7 @@ async function activateLicense(request, env) {
   return json({
     ok: true,
     role: license.role,
+    member_name: license.member_name || "",
     plan: license.plan || "lifetime",
     expires_at: expiresAt,
     offline_until: offlineUntil.toISOString(),
