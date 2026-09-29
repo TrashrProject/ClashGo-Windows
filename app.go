@@ -3351,7 +3351,10 @@ func (a *App) restoreTestSessionSettings() error {
 	return nil
 }
 
-func (a *App) StartTestSession(gold, elixir, dark int, upgradeWalls bool, searchEnabled bool) BotStatus {
+func (a *App) startTemporaryTestSession(limit int, gold, elixir, dark int, upgradeWalls bool, searchEnabled bool) BotStatus {
+	if limit < 1 {
+		limit = 1
+	}
 	a.mu.Lock()
 	busy := a.bot != nil || a.cancel != nil || a.stopping
 	a.mu.Unlock()
@@ -3375,6 +3378,7 @@ func (a *App) StartTestSession(gold, elixir, dark int, upgradeWalls bool, search
 		removeTestSessionRestoreFiles(path)
 		return BotStatus{Running: false, Message: err.Error()}
 	}
+	testSettings.MaxAttacksPerSession = limit
 	if _, err := a.SaveMemberSettings(testSettings); err != nil {
 		removeTestSessionRestoreFiles(path)
 		return BotStatus{Running: false, Message: "Impossible de préparer la session test : " + err.Error()}
@@ -3387,6 +3391,14 @@ func (a *App) StartTestSession(gold, elixir, dark int, upgradeWalls bool, search
 		}
 	}
 	return status
+}
+
+func (a *App) StartTestSession(gold, elixir, dark int, upgradeWalls bool, searchEnabled bool) BotStatus {
+	return a.startTemporaryTestSession(10, gold, elixir, dark, upgradeWalls, searchEnabled)
+}
+
+func (a *App) StartQuickTestSession(gold, elixir, dark int, upgradeWalls bool, searchEnabled bool) BotStatus {
+	return a.startTemporaryTestSession(3, gold, elixir, dark, upgradeWalls, searchEnabled)
 }
 
 func (a *App) ApplyMemberPreset(preset string) (MemberSettings, error) {
