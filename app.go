@@ -1095,7 +1095,7 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			// surfaces `error="..."` so the user no longer has to
 			// grep app.log to see what failed.
 			log.Error().Err(err).Msg("failed to initialize bot")
-			runtime.EventsEmit(a.ctx, "bot_error", fmt.Sprintf("Initialization Error: %v", err))
+			runtime.EventsEmit(a.ctx, "bot_error", fmt.Sprintf("Erreur d’initialisation : %v", err))
 			runtime.EventsEmit(a.ctx, "bot_init_failed", map[string]interface{}{
 				"message": err.Error(),
 			})
@@ -1198,7 +1198,7 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			}
 
 			log.Error().Err(err).Msg("failed to start bot")
-			runtime.EventsEmit(a.ctx, "bot_error", fmt.Sprintf("Start Error: %v", err))
+			runtime.EventsEmit(a.ctx, "bot_error", fmt.Sprintf("Erreur de démarrage : %v", err))
 
 			// Clear the WHOLE start placeholder (bot AND cancel/botCtx)
 			// — leaving a.cancel set would make every future StartBot
