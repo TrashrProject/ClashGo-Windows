@@ -1155,6 +1155,9 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 				a.mu.Lock()
 				a.clearStartStateLocked()
 				a.mu.Unlock()
+				if err := a.restoreTestSessionSettings(); err != nil {
+					log.Error().Err(err).Msg("failed to restore member settings after cancelled test start")
+				}
 				go func() {
 					defer func() {
 						if r := recover(); r != nil {
@@ -1175,6 +1178,9 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			a.mu.Lock()
 			a.clearStartStateLocked()
 			a.mu.Unlock()
+			if err := a.restoreTestSessionSettings(); err != nil {
+				log.Error().Err(err).Msg("failed to restore member settings after failed test start")
+			}
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
