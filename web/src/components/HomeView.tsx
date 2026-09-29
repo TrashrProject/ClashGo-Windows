@@ -141,6 +141,14 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     [activity],
   );
 
+  const runtimeSpeedLabel = React.useMemo(() => {
+    const raw = String(stats.speed_profile || '').trim().toLowerCase();
+    if (raw === 'fast') return 'Rapide';
+    if (raw === 'safe' || raw === 'cautious') return 'Prudente';
+    if (raw === 'balanced' || raw === 'normal') return 'Normale';
+    return 'Normale';
+  }, [stats.speed_profile]);
+
   const sessionCap = Math.max(0, Number(stats.session_attack_cap || 0));
   const sessionAttacks = Math.max(0, Number(stats.session_attacks || 0));
   const sessionProgress = sessionCap > 0
@@ -229,7 +237,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                 className="rounded-full border border-white/10 dark:border-zinc-200 bg-white/5 dark:bg-zinc-100 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600 transition hover:border-white/30 dark:hover:border-zinc-400"
                 title="Ouvrir les réglages de cadence"
               >
-                Cadence · {stats.speed_profile === 'fast' ? 'Rapide' : stats.speed_profile === 'cautious' ? 'Prudente' : 'Normale'}
+                Cadence · {runtimeSpeedLabel}
               </button>
               <span className={
                 'rounded-full border px-3 py-1.5 text-[9px] font-black uppercase tracking-widest ' +
