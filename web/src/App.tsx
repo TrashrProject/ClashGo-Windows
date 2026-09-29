@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import HomeView from './components/HomeView';
@@ -34,6 +34,7 @@ import {
   SkipCurrentVersion,
   ClearSkippedVersion,
   GetAccountConfig,
+  GetLicenseState,
   GetPlayerProfile,
   GetVillageResourceHistory,
   SetSimpleMode,
@@ -192,6 +193,15 @@ function App() {
   const [lootExitPercent, setLootExitPercent] = useState(100);
   const [simpleMode, setSimpleMode] = useState(true);
 
+  const handleInterfaceLevelChange = useCallback((level: InterfaceLevel) => {
+    setInterfaceLevel(level);
+    if (level !== 'developer') {
+      const simple = level === 'simple';
+      setSimpleMode(simple);
+      void SetSimpleMode(simple);
+    }
+  }, []);
+
   useEffect(() => {
     const init = async () => {
       try {
@@ -251,6 +261,14 @@ function App() {
         setUpdateStatus(s);
       } catch (err) {
         console.warn('GetUpdateStatus failed:', err);
+      }
+      try {
+        const license = await GetLicenseState();
+        if (license?.activated && (license.role === 'developer' || license.role === 'admin')) {
+          setInterfaceLevel('developer');
+        }
+      } catch (err) {
+        console.warn('GetLicenseState failed:', err);
       }
     };
     init();
@@ -766,14 +784,7 @@ function App() {
             <AccountView
               playerTag={playerTag}
               interfaceLevel={interfaceLevel}
-              onInterfaceLevelChange={(level) => {
-                setInterfaceLevel(level);
-                if (level !== 'developer') {
-                  const simple = level === 'simple';
-                  setSimpleMode(simple);
-                  void SetSimpleMode(simple);
-                }
-              }}
+              onInterfaceLevelChange={handleInterfaceLevelChange}
               onAccountChanged={(tag) => {
                 setPlayerTag(tag);
                 if (tag) setTab('account');
