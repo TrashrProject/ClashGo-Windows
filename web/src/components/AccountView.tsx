@@ -493,61 +493,82 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <label className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <div className="text-sm font-black text-zinc-950 dark:text-white">Attaques / heure</div>
-                    <div className="text-[11px] font-semibold text-zinc-500">Limite de sécurité du cycle automatique</div>
-                  </div>
-                  <input
-                    type="number"
-                    min={1}
-                    max={24}
-                    value={memberSettings.max_attacks_per_hour}
-                    onChange={(e) => setMemberSettings({ ...memberSettings, max_attacks_per_hour: Math.max(1, Math.min(24, Number(e.target.value) || 1)) })}
-                    onBlur={() => void saveMemberSettings(memberSettings)}
-                    className="w-20 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-center text-sm font-black"
-                  />
-                </div>
-              </label>
-
-              <label className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <div className="text-sm font-black text-zinc-950 dark:text-white">Pause automatique</div>
-                    <div className="text-[11px] font-semibold text-zinc-500">Toutes les X attaques · 0 pour désactiver</div>
-                  </div>
-                  <input
-                    type="number"
-                    min={0}
-                    max={20}
-                    value={memberSettings.break_every_attacks}
-                    onChange={(e) => setMemberSettings({ ...memberSettings, break_every_attacks: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })}
-                    onBlur={() => void saveMemberSettings(memberSettings)}
-                    className="w-20 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-center text-sm font-black"
-                  />
-                </div>
-              </label>
-
-              <label className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <div className="text-sm font-black text-zinc-950 dark:text-white">Durée de pause</div>
-                    <div className="text-[11px] font-semibold text-zinc-500">Minutes de repos automatique</div>
-                  </div>
-                  <input
-                    type="number"
-                    min={0}
-                    max={30}
-                    value={memberSettings.break_minutes}
-                    onChange={(e) => setMemberSettings({ ...memberSettings, break_minutes: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })}
-                    onBlur={() => void saveMemberSettings(memberSettings)}
-                    className="w-20 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-center text-sm font-black"
-                  />
-                </div>
-              </label>
+            <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/30 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                <span>Profil {memberSettings.speed_profile === 'cautious' ? 'Prudent' : memberSettings.speed_profile === 'fast' ? 'Rapide' : 'Normal'}</span>
+                <span>{memberSettings.max_attacks_per_hour} attaques/h max</span>
+                <span>
+                  {memberSettings.break_every_attacks > 0
+                    ? `Pause ${memberSettings.break_minutes} min / ${memberSettings.break_every_attacks} attaques`
+                    : 'Pauses planifiées désactivées'}
+                </span>
+              </div>
             </div>
+
+            <details className="group rounded-2xl border border-zinc-100 dark:border-zinc-800 overflow-hidden">
+              <summary className="cursor-pointer list-none flex items-center justify-between gap-4 px-5 py-4 bg-zinc-50/50 dark:bg-zinc-950/30">
+                <div>
+                  <div className="text-sm font-black text-zinc-950 dark:text-white">Réglages avancés de cadence</div>
+                  <div className="mt-1 text-[11px] font-semibold text-zinc-500">À modifier seulement si tu veux affiner le preset choisi.</div>
+                </div>
+                <span className="material-symbols-outlined text-zinc-400 transition-transform group-open:rotate-180">expand_more</span>
+              </summary>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
+                <label className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-black text-zinc-950 dark:text-white">Attaques / heure</div>
+                      <div className="text-[11px] font-semibold text-zinc-500">Limite de sécurité du cycle automatique</div>
+                    </div>
+                    <input
+                      type="number"
+                      min={1}
+                      max={24}
+                      value={memberSettings.max_attacks_per_hour}
+                      onChange={(e) => setMemberSettings({ ...memberSettings, max_attacks_per_hour: Math.max(1, Math.min(24, Number(e.target.value) || 1)) })}
+                      onBlur={() => void saveMemberSettings(memberSettings)}
+                      className="w-20 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-center text-sm font-black"
+                    />
+                  </div>
+                </label>
+
+                <label className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-black text-zinc-950 dark:text-white">Pause automatique</div>
+                      <div className="text-[11px] font-semibold text-zinc-500">Toutes les X attaques · 0 pour désactiver</div>
+                    </div>
+                    <input
+                      type="number"
+                      min={0}
+                      max={20}
+                      value={memberSettings.break_every_attacks}
+                      onChange={(e) => setMemberSettings({ ...memberSettings, break_every_attacks: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })}
+                      onBlur={() => void saveMemberSettings(memberSettings)}
+                      className="w-20 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-center text-sm font-black"
+                    />
+                  </div>
+                </label>
+
+                <label className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 md:col-span-2">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-black text-zinc-950 dark:text-white">Durée de pause</div>
+                      <div className="text-[11px] font-semibold text-zinc-500">Minutes de repos automatique</div>
+                    </div>
+                    <input
+                      type="number"
+                      min={0}
+                      max={30}
+                      value={memberSettings.break_minutes}
+                      onChange={(e) => setMemberSettings({ ...memberSettings, break_minutes: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })}
+                      onBlur={() => void saveMemberSettings(memberSettings)}
+                      className="w-20 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-center text-sm font-black"
+                    />
+                  </div>
+                </label>
+              </div>
+            </details>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {([
