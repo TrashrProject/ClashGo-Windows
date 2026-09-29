@@ -46,7 +46,7 @@ import {
   SaveMemberInterfaceLevel,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
-import { InterfaceLevel, TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent, AttackReplayView, SessionReportView } from './types';
+import { InterfaceLevel, TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent, AttackReplayView, SessionReportView, BotStats, AttackReport } from './types';
 import UpdateBanner from './components/UpdateBanner';
 import './App.css';
 
@@ -171,7 +171,7 @@ const getInitialSidebarExpanded = (): boolean => {
 function App() {
   const [tab, setTab] = useState<TabType>('dashboard');
   const [accountPage, setAccountPage] = useState<'account' | 'settings' | 'village'>('account');
-  const [stats, setStats] = useState<bot.BotStats>(new bot.BotStats({
+  const [stats, setStats] = useState<BotStats>(new bot.BotStats({
     attacks_completed: 0,
     search_skips: 0,
     total_gold: 0,
@@ -195,10 +195,10 @@ function App() {
       errors_total: 0,
       last_error: ""
     }
-  }));
+  }) as unknown as BotStats);
   const [isRunning, setIsRunning] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
-  const [history, setHistory] = useState<bot.AttackReport[]>([]);
+  const [history, setHistory] = useState<AttackReport[]>([]);
   const [resourceHistory, setResourceHistory] = useState<VillageResourceSnapshot[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [replay, setReplay] = useState<AttackReplayView>({ available: false, complete: false, events: [] });
@@ -300,10 +300,10 @@ function App() {
       setPlayerTag(accountResult.value?.player_tag || '');
     }
     if (statsResult.status === 'fulfilled') {
-      setStats(statsResult.value);
+      setStats(statsResult.value as unknown as BotStats);
     }
     if (historyResult.status === 'fulfilled') {
-      setHistory(historyResult.value ?? []);
+      setHistory((historyResult.value ?? []) as unknown as AttackReport[]);
     }
     if (resourceResult.status === 'fulfilled') {
       setResourceHistory((resourceResult.value ?? []) as VillageResourceSnapshot[]);
@@ -471,7 +471,7 @@ function App() {
           GetStats(),
           GetActivity(),
         ]);
-        setStats(s);
+        setStats(s as unknown as BotStats);
         setActivity((a ?? []) as unknown as ActivityEvent[]);
       } catch (err) {
         console.error('Fast data fetch failed:', err);
@@ -481,7 +481,7 @@ function App() {
     const fetchHistory = async () => {
       try {
         const h = await GetAttackHistory();
-        setHistory(h ?? []);
+        setHistory((h ?? []) as unknown as AttackReport[]);
       } catch (err) {
         console.warn('Attack history refresh failed:', err);
       }
@@ -685,7 +685,7 @@ function App() {
     });
     const unsubStatsUpdated = safeEventsOn("stats_updated", (payload: bot.BotStats) => {
       if (payload && typeof payload === 'object') {
-        setStats(payload);
+        setStats(payload as unknown as BotStats);
       }
     });
 
@@ -947,7 +947,7 @@ function App() {
     try {
       await ResetStats();
       const s = await GetStats();
-      setStats(s);
+      setStats(s as unknown as BotStats);
     } catch (err) {
       console.error('Reset failed:', err);
     }
