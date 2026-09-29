@@ -351,3 +351,20 @@ func TestWaitForBotTeardownTimesOutOnStuckStartup(t *testing.T) {
 		t.Fatalf("timeout returned too early: %s", elapsed)
 	}
 }
+
+
+func TestSetBlueStacksInstanceRejectsInFlightStartup(t *testing.T) {
+	t.Setenv("CLASHGO_CONFIG_DIR", t.TempDir())
+	a := &App{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a.mu.Lock()
+	a.botCtx = ctx
+	a.cancel = cancel
+	a.mu.Unlock()
+
+	if err := a.SetBlueStacksInstance(""); err == nil {
+		t.Fatal("expected BlueStacks instance change to be rejected during startup")
+	}
+}
