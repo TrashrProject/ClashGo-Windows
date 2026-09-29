@@ -207,14 +207,31 @@ func copyRuntimeStateFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
+
 	tmp := dst + ".tmp"
+	backup := dst + ".bak"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
+
+	_ = os.Remove(backup)
+	hadOriginal := false
+	if _, err := os.Stat(dst); err == nil {
+		if err := os.Rename(dst, backup); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+		hadOriginal = true
+	}
+
 	if err := os.Rename(tmp, dst); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backup, dst)
+		}
 		_ = os.Remove(tmp)
 		return err
 	}
+	_ = os.Remove(backup)
 	return nil
 }
 
@@ -269,7 +286,10 @@ func (a *App) restoreMemberRuntimeState(adoptLegacy bool) error {
 	for _, rel := range memberRuntimeStateFiles {
 		src := filepath.Join(dir, rel)
 		dst := paths.ResolveConfig(rel)
-		_ = os.Remove(dst)
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			_ = os.Remove(dst)
+			continue
+		}
 		if err := copyRuntimeStateFile(src, dst); err != nil {
 			return fmt.Errorf("restore member state %s: %w", rel, err)
 		}
