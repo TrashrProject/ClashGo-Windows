@@ -835,6 +835,28 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                       className="w-20 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-center text-sm font-black"
                     />
                   </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {[10, 25, 50, 100].map((limit) => (
+                      <button
+                        key={limit}
+                        type="button"
+                        disabled={memberSaving}
+                        onClick={() => {
+                          const next = { ...memberSettings, max_attacks_per_session: limit };
+                          setMemberSettings(next);
+                          void saveMemberSettings(next);
+                        }}
+                        className={
+                          'rounded-lg px-2.5 py-1.5 text-[9px] font-black uppercase tracking-wider transition ' +
+                          (memberSettings.max_attacks_per_session === limit
+                            ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950'
+                            : 'bg-zinc-100 text-zinc-500 hover:text-zinc-950 dark:bg-zinc-800 dark:hover:text-white')
+                        }
+                      >
+                        {limit}
+                      </button>
+                    ))}
+                  </div>
                 </label>
 
                 <label className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4">
