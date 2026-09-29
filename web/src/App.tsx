@@ -1692,6 +1692,7 @@ function App() {
     lootExitPercent, setLootExitPercent,
     simpleMode,
     testSessionActive,
+    automationActive: isRunning || isStarting,
     onSetSimpleMode: async (enabled: boolean) => {
       const level: InterfaceLevel = enabled ? 'simple' : 'advanced';
       // The Go automation mode is authoritative. Reflect it immediately after
@@ -1722,7 +1723,7 @@ function App() {
   }), [
     goldThreshold, elixirThreshold, deThreshold,
     selectedStrategy, strategies, searchEnabled, upgradeWalls, stallTimer,
-    lootExitEnabled, lootExitPercent, simpleMode, testSessionActive, refreshStartupReadiness
+    lootExitEnabled, lootExitPercent, simpleMode, testSessionActive, isRunning, isStarting, refreshStartupReadiness
   ]);
 
   if (!licenseAccessReady) {
