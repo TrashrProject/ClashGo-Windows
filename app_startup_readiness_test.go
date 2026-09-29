@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"strings"
 	"testing"
 	"time"
@@ -158,5 +161,33 @@ func TestStartupFailureRemainsBlockingByDefault(t *testing.T) {
 	)
 	if !item.Blocking {
 		t.Fatalf("required startup failure became advisory: %+v", item)
+	}
+}
+
+
+func TestAttackStrategyReady(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Attack.StrategyFile = ""
+	if ok, _ := attackStrategyReady(cfg); ok {
+		t.Fatal("empty strategy unexpectedly reported ready")
+	}
+
+	cfg.Attack.StrategyFile = filepath.Join(t.TempDir(), "missing.yaml")
+	if ok, _ := attackStrategyReady(cfg); ok {
+		t.Fatal("missing strategy unexpectedly reported ready")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "farm.yaml")
+	if err := os.WriteFile(path, []byte("name: test\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Attack.StrategyFile = path
+	ok, message := attackStrategyReady(cfg)
+	if !ok {
+		t.Fatalf("existing strategy reported unavailable: %s", message)
+	}
+	if !strings.Contains(message, "farm.yaml") {
+		t.Fatalf("strategy readiness message does not identify selected file: %q", message)
 	}
 }
