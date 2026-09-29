@@ -1102,3 +1102,23 @@ func TestApplyMemberPresetRejectsUnknownPreset(t *testing.T) {
 		t.Fatal("expected unknown preset to be rejected")
 	}
 }
+
+
+func TestMemberInterfaceLevelDoesNotChangeAutomationMode(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Automation.SimpleMode = false
+
+	settings := defaultMemberSettings()
+	settings.InterfaceLevel = "simple"
+	applyMemberSettingsToConfig(cfg, settings)
+	if cfg.Automation.SimpleMode {
+		t.Fatal("simple interface unexpectedly enabled automatic bot mode")
+	}
+
+	cfg.Automation.SimpleMode = true
+	settings.InterfaceLevel = "advanced"
+	applyMemberSettingsToConfig(cfg, settings)
+	if !cfg.Automation.SimpleMode {
+		t.Fatal("advanced interface unexpectedly disabled automatic bot mode")
+	}
+}
