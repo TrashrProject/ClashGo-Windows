@@ -1679,6 +1679,7 @@ type ControlServiceConfig struct {
 	ServiceURL      string `json:"service_url,omitempty"`
 	Configured      bool   `json:"configured"`
 	Embedded        bool   `json:"embedded"`
+	OverrideAllowed bool   `json:"override_allowed"`
 	RequiresRestart bool   `json:"requires_restart"`
 }
 
@@ -1690,15 +1691,17 @@ func (a *App) GetControlServiceConfig() ControlServiceConfig {
 			ServiceURL: embedded,
 			Configured: true,
 			Embedded: true,
+			OverrideAllowed: false,
 		}
 	}
 	if !betaControlOverrideAllowed() {
-		return ControlServiceConfig{}
+		return ControlServiceConfig{OverrideAllowed: false}
 	}
 	raw := strings.TrimRight(strings.TrimSpace(cfg.Account.ControlURL), "/")
 	return ControlServiceConfig{
 		ServiceURL: raw,
 		Configured: raw != "",
+		OverrideAllowed: true,
 	}
 }
 
@@ -1758,6 +1761,7 @@ func (a *App) SetBetaControlServiceURL(raw string) (ControlServiceConfig, error)
 	return ControlServiceConfig{
 		ServiceURL: normalized,
 		Configured: true,
+		OverrideAllowed: true,
 		RequiresRestart: false,
 	}, nil
 }
