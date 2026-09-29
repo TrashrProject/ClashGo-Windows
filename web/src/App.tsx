@@ -926,6 +926,8 @@ function App() {
               onOpenAccount={() => setTab('account')}
               onOpenSettings={() => setTab('settings')}
               licenseReady={licenseAccessReady}
+              memberName={licenseMemberName}
+              licensePlan={licensePlan}
               accountLinked={Boolean(playerTag)}
               windowsReady={systemDiagnostics
                 ? Boolean(
