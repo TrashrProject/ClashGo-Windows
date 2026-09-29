@@ -78,3 +78,12 @@ CREATE TABLE IF NOT EXISTS license_events (
 CREATE INDEX IF NOT EXISTS idx_license_events_license ON license_events(license_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_license_events_customer ON license_events(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_license_events_type ON license_events(event_type);
+
+
+CREATE TABLE IF NOT EXISTS trial_claims (
+  machine_id TEXT PRIMARY KEY,
+  license_id TEXT NOT NULL,
+  claimed_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_trial_claims_license ON trial_claims(license_id);
