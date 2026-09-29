@@ -39,6 +39,7 @@ import {
   GetAccountConfig,
   GetLicenseState,
   GetMemberInterfaceLevel,
+  SetSimpleMode,
   StartTestSession,
   GetPlayerProfile,
   GetVillageResourceHistory,
@@ -1114,11 +1115,16 @@ function App() {
     simpleMode,
     onSetSimpleMode: async (enabled: boolean) => {
       const level: InterfaceLevel = enabled ? 'simple' : 'advanced';
+      // Persist the actual automation mode first; the interface level is only
+      // the presentation preference. Keeping both in sync avoids the UI saying
+      // "Automatique" while the Go runtime still uses the previous mode.
+      await SetSimpleMode(enabled);
       await SaveMemberInterfaceLevel(level);
       setSimpleMode(enabled);
       if (interfaceLevel !== 'developer') {
         setInterfaceLevel(level);
       }
+      await refreshStartupReadiness();
     },
     onSave: async () => {
       // Errors intentionally bubble so ConfigView's save-status
