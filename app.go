@@ -754,10 +754,19 @@ func (a *App) GetStartupReadiness() StartupReadiness {
 		}())
 	}
 
-	strategyOK := strings.TrimSpace(cfg.Attack.StrategyFile) != ""
-	strategyMessage := "Stratégie configurée"
-	if !strategyOK {
-		strategyMessage = "Aucune stratégie d’attaque configurée"
+	strategyPath := strings.TrimSpace(cfg.Attack.StrategyFile)
+	strategyOK := false
+	strategyMessage := "Aucune stratégie d’attaque configurée"
+	if strategyPath != "" {
+		if !filepath.IsAbs(strategyPath) {
+			strategyPath = paths.Resolve(filepath.Join("strategies", filepath.Base(strategyPath)))
+		}
+		if info, err := os.Stat(strategyPath); err == nil && !info.IsDir() {
+			strategyOK = true
+			strategyMessage = "Stratégie disponible : " + filepath.Base(strategyPath)
+		} else {
+			strategyMessage = "Fichier de stratégie introuvable : " + filepath.Base(strategyPath)
+		}
 	}
 	add("strategy", "Stratégie", strategyOK, strategyMessage)
 
