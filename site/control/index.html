@@ -120,12 +120,20 @@
       $('licenses').innerHTML = state.licenses.length ? state.licenses.map(x => `
         <div class="row">
           <div><div class="title">${escapeHtml(x.hint || x.id || 'Licence')}</div><div class="sub">${escapeHtml(x.id || '')}</div></div>
-          <div><span class="badge">${escapeHtml(x.role || 'member')}</span></div>
+          <div>
+            <select class="select" style="height:34px;font-size:10px" onchange="setRole('${escapeHtml(x.id || '')}', this.value)">
+              <option value="member" ${x.role === 'member' ? 'selected' : ''}>Member</option>
+              <option value="developer" ${x.role === 'developer' ? 'selected' : ''}>Developer</option>
+              <option value="admin" ${x.role === 'admin' ? 'selected' : ''}>Admin</option>
+            </select>
+          </div>
           <div class="${x.active ? 'ok' : 'bad'}" style="font-size:11px;font-weight:900">${x.active ? 'ACTIVE' : 'RÉVOQUÉE'}</div>
           <div><div class="title">${escapeHtml(shortMachine(x.machine_id))}</div><div class="sub">${escapeHtml(x.app_version || 'Jamais connectée')} · ${escapeHtml(date(x.last_seen_at))}</div></div>
           <div class="actions2">
             <button class="button secondary mini" onclick="resetMachine('${escapeHtml(x.id || '')}')">RESET PC</button>
-            ${x.active ? '<button class="button danger mini" onclick="revoke(\'' + escapeHtml(x.id || '') + '\')">RÉVOQUER</button>' : ''}
+            ${x.active
+              ? '<button class="button danger mini" onclick="setActive(\'' + escapeHtml(x.id || '') + '\', false)">RÉVOQUER</button>'
+              : '<button class="button secondary mini" onclick="setActive(\'' + escapeHtml(x.id || '') + '\', true)">RÉACTIVER</button>'}
           </div>
         </div>
       `).join('') : '<div class="empty">Aucune licence.</div>';
@@ -171,6 +179,30 @@
         await request('/v1/admin/licenses/reset-machine',{method:'POST',body:JSON.stringify({license_id:id})});
         await loadAll();
         flash('Machine réinitialisée.', 'success');
+      } catch(e) { flash(e.message); }
+    };
+
+    window.setRole = async (id, role) => {
+      if (!id) return;
+      try {
+        await request('/v1/admin/licenses/set-role',{
+          method:'POST',
+          body:JSON.stringify({license_id:id,role})
+        });
+        await loadAll();
+        flash('Rôle mis à jour.', 'success');
+      } catch(e) { flash(e.message); }
+    };
+
+    window.setActive = async (id, active) => {
+      if (!id || !confirm(active ? 'Réactiver cette licence ?' : 'Révoquer cette licence ?')) return;
+      try {
+        await request('/v1/admin/licenses/set-active',{
+          method:'POST',
+          body:JSON.stringify({license_id:id,active})
+        });
+        await loadAll();
+        flash(active ? 'Licence réactivée.' : 'Licence révoquée.', 'success');
       } catch(e) { flash(e.message); }
     };
 
