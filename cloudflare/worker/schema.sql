@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS licenses (
   role TEXT NOT NULL CHECK(role IN ('member','developer','admin')),
   active INTEGER NOT NULL DEFAULT 1,
   machine_id TEXT,
+  machine_name TEXT,
   created_at TEXT NOT NULL,
   last_seen_at TEXT,
   app_version TEXT,
