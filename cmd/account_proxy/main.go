@@ -210,6 +210,31 @@ func (s *controlStore) authorizeDeveloper(key, machineID string) (*licenseRecord
 	return rec, true
 }
 
+func (s *controlStore) authorizeAdmin(key, machineID string) bool {
+	rec, ok := s.authorizeDeveloper(key, machineID)
+	return ok && rec.Role == "admin"
+}
+
+func findLicenseRecordByIDLocked(s *controlStore, id string) *licenseRecord {
+	id = strings.TrimSpace(id)
+	if s == nil || id == "" {
+		return nil
+	}
+	for hash, candidate := range s.data.Licenses {
+		if candidate == nil {
+			continue
+		}
+		candidateID := candidate.ID
+		if candidateID == "" {
+			candidateID = licenseIDFromHash(hash)
+		}
+		if candidateID == id {
+			return candidate
+		}
+	}
+	return nil
+}
+
 func (c *profileCache) get(tag string) (cacheEntry, bool) {
 	c.mu.RLock()
 	entry, ok := c.entries[tag]
@@ -632,6 +657,114 @@ func main() {
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"role": role, "plan": plan, "duration_days": durationDays, "licenses": keys,
 		})
+	})
+
+	mux.HandleFunc("POST /v1/developer/licenses/reset-machine", func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
+		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
+		if !control.authorizeAdmin(key, machineID) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"message": "admin license required"})
+			return
+		}
+		var in struct {
+			LicenseID string `json:"license_id"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil || strings.TrimSpace(in.LicenseID) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "license_id is required"})
+			return
+		}
+		control.mu.Lock()
+		rec := findLicenseRecordByIDLocked(control, in.LicenseID)
+		if rec == nil {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "license not found"})
+			return
+		}
+		rec.MachineID = ""
+		rec.LastSeenAt = time.Time{}
+		rec.AppVersion = ""
+		_ = control.saveLocked()
+		control.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+
+	mux.HandleFunc("POST /v1/developer/licenses/set-active", func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
+		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
+		if !control.authorizeAdmin(key, machineID) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"message": "admin license required"})
+			return
+		}
+		var in struct {
+			LicenseID string `json:"license_id"`
+			Active    bool   `json:"active"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil || strings.TrimSpace(in.LicenseID) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "license_id is required"})
+			return
+		}
+		control.mu.Lock()
+		rec := findLicenseRecordByIDLocked(control, in.LicenseID)
+		if rec == nil {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "license not found"})
+			return
+		}
+		rec.Active = in.Active
+		_ = control.saveLocked()
+		control.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "active": in.Active})
+	})
+
+	mux.HandleFunc("POST /v1/developer/licenses/renew", func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
+		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
+		if !control.authorizeAdmin(key, machineID) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"message": "admin license required"})
+			return
+		}
+		var in struct {
+			LicenseID string `json:"license_id"`
+			Plan      string `json:"plan,omitempty"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil || strings.TrimSpace(in.LicenseID) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "license_id is required"})
+			return
+		}
+		control.mu.Lock()
+		rec := findLicenseRecordByIDLocked(control, in.LicenseID)
+		if rec == nil {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "license not found"})
+			return
+		}
+		plan := strings.TrimSpace(in.Plan)
+		if plan == "" {
+			plan = rec.Plan
+		}
+		plan, durationDays := validPlan(plan)
+		rec.Plan = plan
+		rec.DurationDays = durationDays
+		rec.Active = true
+		if durationDays == 0 {
+			rec.ExpiresAt = time.Time{}
+		} else {
+			now := time.Now().UTC()
+			base := now
+			if !rec.ExpiresAt.IsZero() && rec.ExpiresAt.After(now) {
+				base = rec.ExpiresAt
+			}
+			rec.ExpiresAt = base.Add(time.Duration(durationDays) * 24 * time.Hour)
+		}
+		expiresAt := rec.ExpiresAt
+		_ = control.saveLocked()
+		control.mu.Unlock()
+
+		payload := map[string]any{"ok": true, "plan": plan, "duration_days": durationDays}
+		if !expiresAt.IsZero() {
+			payload["expires_at"] = expiresAt.Format(time.RFC3339)
+		}
+		writeJSON(w, http.StatusOK, payload)
 	})
 
 	mux.HandleFunc("POST /v1/admin/licenses", func(w http.ResponseWriter, r *http.Request) {
