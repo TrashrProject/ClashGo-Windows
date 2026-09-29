@@ -1373,6 +1373,33 @@ function App() {
           ? 'Vérifie BlueStacks et ADB dans Paramètres > État Windows.'
           : '';
 
+  const openStartupFix = useCallback((action?: string) => {
+    switch (action) {
+      case 'license_account':
+        setAccountPage('account');
+        setTab('account');
+        break;
+      case 'member_settings':
+        setAccountPage('settings');
+        setTab('account');
+        break;
+      case 'village':
+      case 'account':
+        setAccountPage('village');
+        setTab('account');
+        break;
+      case 'automation':
+        setTab('config');
+        break;
+      case 'settings':
+        setTab('settings');
+        break;
+      default:
+        setTab('dashboard');
+        break;
+    }
+  }, []);
+
   const readinessIssues = useMemo(() => {
     if (!systemDiagnostics) return [] as string[];
     const issues: string[] = [];
@@ -1593,6 +1620,15 @@ function App() {
                   )}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
+                  {blockingStartupCheck?.action && (
+                    <button
+                      type="button"
+                      onClick={() => openStartupFix(blockingStartupCheck.action)}
+                      className="rounded-xl bg-zinc-950 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+                    >
+                      {blockingStartupCheck.action_label || 'Corriger maintenant'}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
