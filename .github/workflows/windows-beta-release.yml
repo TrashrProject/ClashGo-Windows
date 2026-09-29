@@ -45,9 +45,28 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install MinGW CMake and NSIS
+      - name: Ensure MinGW CMake and NSIS
         shell: powershell
-        run: choco install mingw cmake nsis -y --no-progress
+        run: |
+          $packages = @()
+          if (-not (Get-Command g++ -ErrorAction SilentlyContinue)) { $packages += "mingw" }
+          if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) { $packages += "cmake" }
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) { $packages += "nsis" }
+
+          if ($packages.Count -gt 0) {
+            Write-Host "Installing missing tools: $($packages -join ', ')"
+            choco install $packages -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "Chocolatey tool installation failed" }
+          } else {
+            Write-Host "MinGW, CMake and NSIS already available; skipping Chocolatey install."
+          }
+
+          g++ --version
+          if ($LASTEXITCODE -ne 0) { throw "g++ is unavailable" }
+          cmake --version
+          if ($LASTEXITCODE -ne 0) { throw "cmake is unavailable" }
+          makensis /VERSION
+          if ($LASTEXITCODE -ne 0) { throw "makensis is unavailable" }
 
       - name: Restore cached OpenCV
         id: opencv-cache
