@@ -244,12 +244,12 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   );
 
   const runtimeSpeedLabel = React.useMemo(() => {
-    const raw = String(stats.speed_profile || '').trim().toLowerCase();
+    const raw = String(stats.member_speed_profile || stats.speed_profile || '').trim().toLowerCase();
     if (raw === 'fast') return 'Rapide';
     if (raw === 'safe' || raw === 'cautious') return 'Prudente';
     if (raw === 'balanced' || raw === 'normal') return 'Normale';
     return 'Normale';
-  }, [stats.speed_profile]);
+  }, [stats.member_speed_profile, stats.speed_profile]);
 
   const sessionCap = Math.max(0, Number(stats.session_attack_cap || 0));
   const sessionAttacks = Math.max(0, Number(stats.session_attacks || 0));
