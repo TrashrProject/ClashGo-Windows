@@ -29,32 +29,58 @@ type ArmyInspectionSnapshot struct {
 	Warnings       []string             `json:"warnings,omitempty"`
 }
 
-func writeArmyInspection(slots []*TrackedSlot, counts []TroopCount, profile *config.FarmProfile) {
+func buildArmyInspection(slots []*TrackedSlot, counts []TroopCount, profile *config.FarmProfile) ArmyInspectionSnapshot {
 	s := ArmyInspectionSnapshot{Timestamp: time.Now(), Ready: true}
 	observed := make(map[string]int)
-	unknown := 0
+	quantityUnknown := make(map[string]bool)
+	unknownSlots := 0
+
+	countAt := func(x int) (TroopCount, bool) {
+		for _, c := range counts {
+			if c.X == x {
+				return c, true
+			}
+		}
+		return TroopCount{}, false
+	}
 
 	for _, slot := range slots {
 		if slot == nil {
 			continue
 		}
-		count := GetCountForSlot(counts, slot.X)
+
+		countInfo, countSeen := countAt(slot.X)
+		count := countInfo.Count
 		if count <= 0 && (slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC") {
+			// One-shot cards do not expose a troop quantity. Presence of the
+			// active card itself is enough for the inspection snapshot.
 			count = 1
 		}
+
 		s.Units = append(s.Units, ArmyInspectionUnit{
-			Name: slot.UnitName,
-			Category: slot.Category,
-			Count: count,
+			Name:       slot.UnitName,
+			Category:   slot.Category,
+			Count:      count,
 			Confidence: slot.Confidence,
-			SlotX: slot.X,
+			SlotX:      slot.X,
 		})
+
 		name := strings.ToLower(strings.TrimSpace(slot.UnitName))
 		if name == "" {
-			unknown++
+			unknownSlots++
 			continue
 		}
+
 		observed[name] += count
+
+		// A live troop/spell card with no reliable quantity read is not proof
+		// that the unit is missing. Treat it as uncertainty so AutoArmyGuard
+		// fails open instead of skipping a perfectly valid target because OCR
+		// missed the small xN label.
+		if (slot.Category == "Troop" || slot.Category == "Spell") &&
+			(!countSeen || countInfo.Confidence <= 0 || countInfo.Count <= 0) {
+			quantityUnknown[name] = true
+		}
 	}
 
 	if profile != nil {
@@ -65,17 +91,23 @@ func writeArmyInspection(slots []*TrackedSlot, counts []TroopCount, profile *con
 			if expected <= 0 || strings.TrimSpace(name) == "" {
 				return
 			}
-			got := observed[strings.ToLower(strings.TrimSpace(name))]
+			key := strings.ToLower(strings.TrimSpace(name))
+			got := observed[key]
 			if got >= expected {
 				return
 			}
-			msg := fmt.Sprintf("%s %s: detected %d, target %d", category, name, got, expected)
-			s.Warnings = append(s.Warnings, msg)
-			if unknown > 0 {
+
+			s.Warnings = append(s.Warnings,
+				fmt.Sprintf("%s %s: detected %d, target %d", category, name, got, expected))
+
+			// Unknown portraits OR an unreadable quantity for this exact unit
+			// mean the mismatch is not proven. Keep Ready=true and mark the
+			// snapshot uncertain so callers can safely fail open.
+			if unknownSlots > 0 || quantityUnknown[key] {
 				s.Uncertain = true
-			} else {
-				s.Ready = false
+				return
 			}
+			s.Ready = false
 		}
 
 		for _, unit := range profile.Troops {
@@ -93,10 +125,17 @@ func writeArmyInspection(slots []*TrackedSlot, counts []TroopCount, profile *con
 	if len(s.Warnings) == 0 {
 		s.Uncertain = false
 	}
+	return s
+}
 
+func writeArmyInspectionSnapshot(s ArmyInspectionSnapshot) {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return
 	}
 	_ = os.WriteFile(paths.ResolveConfig("current_army.json"), data, 0o600)
+}
+
+func writeArmyInspection(slots []*TrackedSlot, counts []TroopCount, profile *config.FarmProfile) {
+	writeArmyInspectionSnapshot(buildArmyInspection(slots, counts, profile))
 }
