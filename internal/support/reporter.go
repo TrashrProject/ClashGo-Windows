@@ -291,7 +291,7 @@ func (r *Reporter) flushLoop() {
 }
 
 func (r *Reporter) Flush(ctx context.Context) {
-	if r.baseURL == "" || r.identity == nil {
+	if r.identity == nil {
 		return
 	}
 	licenseKey := strings.TrimSpace(r.identity.LicenseKey())
@@ -303,6 +303,10 @@ func (r *Reporter) Flush(ctx context.Context) {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	baseURL := r.baseURL
+	if baseURL == "" {
+		return
+	}
 
 	pending := trimQueue(r.readQueueLocked(), time.Now().UTC())
 	if len(pending) == 0 {
@@ -327,7 +331,7 @@ func (r *Reporter) Flush(ctx context.Context) {
 		send := ev
 		send.QueueOwner = "" // local routing metadata must never leave the PC.
 		body, _ := json.Marshal(send)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.baseURL+"/v1/support/incidents", bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/support/incidents", bytes.NewReader(body))
 		if err != nil {
 			keep = append(keep, ev)
 			keep = append(keep, pending[i+1:]...)
