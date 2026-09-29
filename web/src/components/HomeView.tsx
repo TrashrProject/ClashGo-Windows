@@ -9,6 +9,7 @@ interface HomeViewProps {
   running: boolean;
   starting: boolean;
   onStart: () => void;
+  onStartTestSession: () => void;
   onStop: () => void;
   onOpenAutomation: () => void;
   onOpenAccount: () => void;
@@ -325,9 +326,18 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                 <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">ClashGO peut démarrer</div>
                 <div className="mt-1 text-xs font-semibold text-zinc-500">Licence, compte Clash et environnement Windows sont prêts.</div>
               </div>
-              <button type="button" onClick={onStart} className="rounded-xl bg-emerald-500 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white">
-                Démarrer maintenant
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={onStartTestSession}
+                  className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white"
+                >
+                  Test · 10 attaques
+                </button>
+                <button type="button" onClick={onStart} className="rounded-xl bg-emerald-500 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white">
+                  Démarrer maintenant
+                </button>
+              </div>
             </div>
           ) : (
             <div className="flex items-center gap-3 text-sm font-semibold text-zinc-500">
