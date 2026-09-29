@@ -111,6 +111,24 @@ const friendlyBotErrorMessage = (value: string): string => {
   if (text.includes('adb was not detected') || text.includes('adb executable') || text.includes('adb not found')) {
     return 'ADB n’est pas détecté. ClashGO peut utiliser Android platform-tools ou le HD-Adb de BlueStacks.';
   }
+  if (text.includes('no adb devices found') || text.includes('no running bluestacks device found')) {
+    return 'Aucun appareil BlueStacks actif n’est visible par ADB. Démarre BlueStacks, attends l’écran du village puis utilise Re-tester maintenant.';
+  }
+  if (text.includes('timeout waiting for adb connection') || text.includes('adb dial') || text.includes('transport connect')) {
+    return 'ClashGO n’arrive pas à joindre BlueStacks via ADB. Vérifie que l’instance est démarrée puis relance le pré-contrôle.';
+  }
+  if (text.includes('boot probe') || text.includes('timeout waiting for boot')) {
+    return 'BlueStacks est encore en démarrage ou ne répond pas correctement. Attends quelques secondes puis utilise Re-tester maintenant.';
+  }
+  if (text.includes('screen size') || text.includes('parse wm size')) {
+    return 'ClashGO ne parvient pas à lire correctement la résolution de BlueStacks. Vérifie l’instance sélectionnée dans Paramètres > État Windows.';
+  }
+  if (text.includes('screencap') && (text.includes('too short') || text.includes('invalid') || text.includes('incomplete'))) {
+    return 'La capture de l’écran BlueStacks est invalide ou incomplète. ClashGO a arrêté le démarrage pour éviter une mauvaise automatisation.';
+  }
+  if (text.includes('touchscreen device not found')) {
+    return 'Le périphérique tactile Android n’a pas été détecté. Redémarre l’instance BlueStacks puis relance le pré-contrôle.';
+  }
   if (text.includes('no bluestacks instance') || text.includes('preferred instance')) {
     return 'Aucune instance BlueStacks n’est disponible. Lance ton instance une fois puis réessaie.';
   }
