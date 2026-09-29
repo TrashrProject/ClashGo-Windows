@@ -486,7 +486,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                   <div className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-zinc-950 overflow-hidden relative">
                     <div className="absolute top-4 left-4 z-10">
                       <div className="text-[9px] font-black uppercase tracking-[0.22em] text-zinc-500">Carte de déploiement</div>
-                      <div className="mt-1 text-xs font-bold text-zinc-300">{replayMap.events.length} recorded deploy actions</div>
+                      <div className="mt-1 text-xs font-bold text-zinc-300">{replayMap.events.length} actions de déploiement enregistrées</div>
                     </div>
                     <svg
                       viewBox={`0 0 ${replayMap.width} ${replayMap.height}`}
@@ -602,7 +602,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                         {ev.kind === 'deploy' ? (
                           pointMode
                             ? `point (${ev.p1?.x ?? 0}, ${ev.p1?.y ?? 0})`
-                            : `line (${ev.p1?.x ?? 0}, ${ev.p1?.y ?? 0}) → (${ev.p2?.x ?? 0}, ${ev.p2?.y ?? 0})`
+                            : `ligne (${ev.p1?.x ?? 0}, ${ev.p1?.y ?? 0}) → (${ev.p2?.x ?? 0}, ${ev.p2?.y ?? 0})`
                         ) : ev.kind}
                       </div>
                     </div>
@@ -778,8 +778,8 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
             <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
               <span className="material-symbols-outlined text-zinc-400 text-2xl">history</span>
             </div>
-            <div className="text-sm font-bold text-zinc-600 dark:text-zinc-300">No attaques sauvegardées for this filter</div>
-            <div className="text-xs text-zinc-400 mt-1">Completed battles will appear here automatically and survive restarts.</div>
+            <div className="text-sm font-bold text-zinc-600 dark:text-zinc-300">Aucune attaque sauvegardée pour ce filtre</div>
+            <div className="text-xs text-zinc-400 mt-1">Les combats terminés apparaîtront ici automatiquement et resteront disponibles après redémarrage.</div>
           </div>
         ) : (
           <>
@@ -918,7 +918,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                     onClick={() => setHistoryLimit(10)}
                     className="h-9 px-4 rounded-xl border border-zinc-200 dark:border-zinc-700 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
                   >
-                    Collapse
+                    Réduire
                   </button>
                 )}
                 {historyLimit < filteredHistory.length && (
@@ -1060,7 +1060,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               </div>
             ) : filteredLogs.length === 0 ? (
               <div className="text-zinc-400 dark:text-zinc-700 py-2 text-[11px] font-bold uppercase tracking-[0.25em]">
-                No logs match the current filter
+                Aucun journal ne correspond au filtre actuel
               </div>
             ) : (
               filteredLogs.map((line, i) => (
