@@ -496,7 +496,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 }}
                 className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-950 dark:hover:text-white disabled:opacity-40"
               >
-                Restaurer les réglages recommandés
+                Restaurer la cadence recommandée
               </button>
             </div>
 
@@ -504,9 +504,9 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400 mb-3">Vitesse du bot</div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {([
-                  ['cautious', 'Prudente', 'Plus lente et conservatrice'],
-                  ['normal', 'Normale', 'Équilibre par défaut'],
-                  ['fast', 'Rapide', 'Actions et enchaînements accélérés'],
+                  ['cautious', 'Prudente', '8 attaques/h · 45 s minimum entre attaques'],
+                  ['normal', 'Normale', '12 attaques/h · 30 s minimum entre attaques'],
+                  ['fast', 'Rapide', '16 attaques/h · 20 s minimum entre attaques'],
                 ] as const).map(([value, label, description]) => (
                   <button
                     key={value}
