@@ -124,12 +124,38 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
           : 'ClashGO a terminé la session.',
         icon: 'task_alt',
       };
-    case 'recovery':
+    case 'recovery': {
+      const stage = String(event.fields?.stage || '').toLowerCase();
+      const method = String(event.fields?.method || '').toLowerCase();
+      const methodLabel =
+        method === 'game_restart' ? 'jeu relancé' :
+        method === 'adb_reconnect' ? 'ADB reconnecté' :
+        method === 'adb_server_reset' ? 'serveur ADB réinitialisé' :
+        method === 'bluestacks_relaunch' ? 'BlueStacks relancé' :
+        '';
+
+      if (stage === 'failed') {
+        return {
+          title: 'Récupération à réessayer',
+          detail: methodLabel
+            ? 'Tentative effectuée : ' + methodLabel + '. ClashGO réessaiera automatiquement.'
+            : 'ClashGO réessaiera automatiquement au prochain contrôle.',
+          icon: 'warning',
+        };
+      }
+      if (stage === 'success') {
+        return {
+          title: 'Session récupérée',
+          detail: methodLabel ? 'Correction automatique : ' + methodLabel + '.' : 'La session a été stabilisée automatiquement.',
+          icon: 'healing',
+        };
+      }
       return {
-        title: event.fields?.stage === 'success' ? 'Récupération terminée' : 'Récupération automatique',
-        detail: 'ClashGO stabilise automatiquement la session.',
+        title: 'Récupération automatique',
+        detail: 'ClashGO détecte le blocage et applique les corrections sûres dans l’ordre.',
         icon: 'healing',
       };
+    }
     case 'speed_profile': {
       const profile = String(event.fields?.profile || '');
       const perHour = n('max_attacks_per_hour');
