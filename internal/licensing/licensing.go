@@ -112,6 +112,24 @@ func New(baseURL, appVersion string) *Service {
 	return s
 }
 
+func (s *Service) SetBaseURL(raw string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.baseURL = strings.TrimRight(strings.TrimSpace(raw), "/")
+	s.mu.Unlock()
+}
+
+func (s *Service) baseURLSnapshot() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.baseURL
+}
+
 func decodeStoredLicense(data []byte) (storedLicense, bool, error) {
 	var st storedLicense
 	if err := json.Unmarshal(data, &st); err != nil {
@@ -303,7 +321,8 @@ func (s *Service) Activate(ctx context.Context, key string) (State, error) {
 	if err != nil {
 		return s.GetState(), fmt.Errorf("machine fingerprint: %w", err)
 	}
-	if s.baseURL == "" {
+	baseURL := s.baseURLSnapshot()
+	if baseURL == "" {
 		return s.GetState(), errors.New("license service is not configured")
 	}
 
@@ -312,7 +331,7 @@ func (s *Service) Activate(ctx context.Context, key string) (State, error) {
 		MachineID: machineID,
 		AppVersion: s.appVersion,
 	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.baseURL+"/v1/license/activate", bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/license/activate", bytes.NewReader(reqBody))
 	if err != nil {
 		return s.GetState(), err
 	}
