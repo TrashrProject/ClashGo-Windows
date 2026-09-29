@@ -729,6 +729,17 @@ type StartupReadiness struct {
 	Checks []StartupCheckItem `json:"checks"`
 }
 
+func newStartupCheckItem(id, label string, ok bool, message, action, actionLabel string) StartupCheckItem {
+	if ok {
+		action = ""
+		actionLabel = ""
+	}
+	return StartupCheckItem{
+		ID: id, Label: label, OK: ok, Message: message,
+		Action: action, ActionLabel: actionLabel,
+	}
+}
+
 func memberRuntimeConfigReady(cfg *config.BotConfig) (bool, string) {
 	if cfg == nil {
 		return false, "Configuration membre indisponible"
@@ -761,14 +772,7 @@ func memberRuntimeConfigReady(cfg *config.BotConfig) (bool, string) {
 func (a *App) GetStartupReadiness() StartupReadiness {
 	checks := make([]StartupCheckItem, 0, 7)
 	add := func(id, label string, ok bool, message, action, actionLabel string) {
-		if ok {
-			action = ""
-			actionLabel = ""
-		}
-		checks = append(checks, StartupCheckItem{
-			ID: id, Label: label, OK: ok, Message: message,
-			Action: action, ActionLabel: actionLabel,
-		})
+		checks = append(checks, newStartupCheckItem(id, label, ok, message, action, actionLabel))
 	}
 
 	licenseOK := true
