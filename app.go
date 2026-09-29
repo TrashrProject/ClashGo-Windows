@@ -1429,6 +1429,95 @@ func accountProfileCachePath() string {
 	return paths.ResolveConfig("account_profile.json")
 }
 
+func savePlayerProfileFile(path string, profile *ClashPlayerProfile) error {
+	if strings.TrimSpace(path) == "" || profile == nil || strings.TrimSpace(profile.Tag) == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	tmpPath := path + ".tmp"
+	backupPath := path + ".bak"
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	_ = os.Remove(backupPath)
+	hadOriginal := false
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Rename(path, backupPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return err
+		}
+		hadOriginal = true
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backupPath, path)
+		}
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	_ = os.Remove(backupPath)
+	return nil
+}
+
+func loadPlayerProfileFile(path string) (*ClashPlayerProfile, bool) {
+	if strings.TrimSpace(path) == "" {
+		return nil, false
+	}
+	read := func(candidate string) (*ClashPlayerProfile, bool) {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			return nil, false
+		}
+		var profile ClashPlayerProfile
+		if json.Unmarshal(data, &profile) != nil || strings.TrimSpace(profile.Tag) == "" {
+			return nil, false
+		}
+		return &profile, true
+	}
+	if profile, ok := read(path); ok {
+		return profile, true
+	}
+	if profile, ok := read(path + ".bak"); ok {
+		_ = savePlayerProfileFile(path, profile)
+		return profile, true
+	}
+	return nil, false
+}
+
+func (a *App) memberPlayerProfilePath() string {
+	if a == nil || a.license == nil {
+		return ""
+	}
+	id := strings.TrimSpace(a.license.ProfileID())
+	if id == "" {
+		return ""
+	}
+	return paths.ResolveConfig(filepath.Join("members", id+".player.json"))
+}
+
 func applySimpleAutomationDefaults(cfg *config.BotConfig) {
 	if cfg == nil || !cfg.Automation.SimpleMode {
 		return
@@ -1462,26 +1551,27 @@ func applySimpleAutomationDefaults(cfg *config.BotConfig) {
 // The UI can render this immediately at launch while the network refresh runs
 // in the background, so reopening ClashGO never presents an empty account page.
 func (a *App) GetCachedPlayerProfile() *ClashPlayerProfile {
-	data, err := os.ReadFile(accountProfileCachePath())
-	if err != nil {
+	profile, ok := loadPlayerProfileFile(accountProfileCachePath())
+	if !ok {
 		return nil
 	}
-	var profile ClashPlayerProfile
-	if json.Unmarshal(data, &profile) != nil || strings.TrimSpace(profile.Tag) == "" {
-		return nil
-	}
-	return &profile
+	return profile
 }
 
 func persistPlayerProfile(profile *ClashPlayerProfile) {
+	_ = savePlayerProfileFile(accountProfileCachePath(), profile)
+}
+
+func (a *App) persistPlayerProfileForCurrentLicense(profile *ClashPlayerProfile) {
 	if profile == nil || strings.TrimSpace(profile.Tag) == "" {
 		return
 	}
-	data, err := json.MarshalIndent(profile, "", "  ")
-	if err != nil {
-		return
+	persistPlayerProfile(profile)
+	if path := a.memberPlayerProfilePath(); path != "" {
+		if err := savePlayerProfileFile(path, profile); err != nil {
+			log.Warn().Err(err).Msg("could not persist per-license Clash profile cache")
+		}
 	}
-	_ = os.WriteFile(accountProfileCachePath(), data, 0600)
 }
 
 // SetSimpleMode toggles the one-click automation experience. Turning it on
@@ -2160,7 +2250,7 @@ func (a *App) GetPlayerProfile() (*ClashPlayerProfile, error) {
 		return nil, fmt.Errorf("parse Clash player profile: %w", err)
 	}
 
-	persistPlayerProfile(&profile)
+	a.persistPlayerProfileForCurrentLicense(&profile)
 
 	// Simple mode turns the linked account into the source of truth for HDV.
 	// We only select a bundled profile when ClashGO actually has one for that
