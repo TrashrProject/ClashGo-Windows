@@ -1009,7 +1009,7 @@ func (a *App) GetStartupReadiness() StartupReadiness {
 				if diag.Emulator.BlueStacksRunning {
 					return "BlueStacks est installé et démarré"
 				}
-				return "BlueStacks est installé"
+				return "BlueStacks est installé · ClashGO le lancera automatiquement au démarrage"
 			}
 			return "BlueStacks 5 n’est pas détecté"
 		}(), "settings", "Configurer Windows")
