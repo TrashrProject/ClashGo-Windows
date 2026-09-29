@@ -1846,3 +1846,53 @@ func TestTemporaryValidationSessionDoesNotReplaceUndoSnapshot(t *testing.T) {
 		t.Fatalf("temporary session did not restore current profile: got %+v want %+v", gotCurrent, current)
 	}
 }
+
+
+func TestMemberPresetsAreIsolatedPerLicense(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+
+	first := testLicensedApp(t, "CGO-PRESET-A1-PRESET-A2-PRESET-A3-PRESET-A4")
+	firstSettings := defaultMemberSettings()
+	firstSettings.SpeedProfile = "fast"
+	firstSettings.MaxAttacksPerHour = 16
+	firstSettings.MaxAttacksPerSession = 88
+	if _, err := first.SaveMemberSettings(firstSettings); err != nil {
+		t.Fatalf("save first member settings: %v", err)
+	}
+	if _, err := first.SaveMemberPreset(1, "Profil licence A"); err != nil {
+		t.Fatalf("save first preset: %v", err)
+	}
+	firstPath := first.memberPresetStorePath()
+
+	// Simulate another locally activated member on the same Windows account.
+	secondKey := "CGO-PRESET-B1-PRESET-B2-PRESET-B3-PRESET-B4"
+	payload := map[string]any{
+		"license_key": secondKey,
+		"role":        "member",
+		"machine_id":  "test-machine",
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "license.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second := &App{license: licensing.New("", "test")}
+	secondPath := second.memberPresetStorePath()
+
+	if firstPath == "" || secondPath == "" {
+		t.Fatalf("expected per-license preset paths: first=%q second=%q", firstPath, secondPath)
+	}
+	if firstPath == secondPath {
+		t.Fatalf("preset paths are shared across licenses: %q", firstPath)
+	}
+	if got := second.GetMemberPresets(); len(got) != 0 {
+		t.Fatalf("second license inherited first license presets: %+v", got)
+	}
+	gotFirst := loadMemberPresetStore(firstPath)
+	if len(gotFirst.Slots) != 1 || gotFirst.Slots[0].Name != "Profil licence A" {
+		t.Fatalf("first license preset disappeared or changed: %+v", gotFirst)
+	}
+}
