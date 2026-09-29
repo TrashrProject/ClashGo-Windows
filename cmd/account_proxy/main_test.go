@@ -141,3 +141,87 @@ func TestLicensePlanAndRoleNormalization(t *testing.T) {
 		t.Fatalf("lifetime plan = %q/%d", plan, days)
 	}
 }
+
+
+func TestControlStoreRoleAuthorization(t *testing.T) {
+	memberKey := "CGO-MEMBER-TEST-KEY-0001"
+	devKey := "CGO-DEVELOPER-TEST-KEY-0002"
+	adminKey := "CGO-ADMIN-TEST-KEY-0003"
+	expiredKey := "CGO-EXPIRED-TEST-KEY-0004"
+
+	store := &controlStore{}
+	store.data.Licenses = map[string]*licenseRecord{
+		hashLicense(memberKey): {
+			ID: "member-id", Role: "member", Active: true, MachineID: "pc-member",
+		},
+		hashLicense(devKey): {
+			ID: "developer-id", Role: "developer", Active: true, MachineID: "pc-dev",
+		},
+		hashLicense(adminKey): {
+			ID: "admin-id", Role: "admin", Active: true, MachineID: "pc-admin",
+		},
+		hashLicense(expiredKey): {
+			ID: "expired-id", Role: "admin", Active: true, MachineID: "pc-expired",
+			ExpiresAt: time.Now().UTC().Add(-time.Hour),
+		},
+	}
+
+	if _, ok := store.authorizeDeveloper(memberKey, "pc-member"); ok {
+		t.Fatal("member license must not receive developer access")
+	}
+	if _, ok := store.authorizeDeveloper(devKey, "pc-dev"); !ok {
+		t.Fatal("developer license should receive developer access")
+	}
+	if _, ok := store.authorizeDeveloper(devKey, "wrong-pc"); ok {
+		t.Fatal("developer license must be bound to the matching machine")
+	}
+
+	adminID, ok := store.authorizedAdminLicenseID(adminKey, "pc-admin")
+	if !ok || adminID != "admin-id" {
+		t.Fatalf("admin authorization failed: id=%q ok=%v", adminID, ok)
+	}
+	if _, ok := store.authorizedAdminLicenseID(devKey, "pc-dev"); ok {
+		t.Fatal("developer license must not receive admin actions")
+	}
+	if _, ok := store.authorizedAdminLicenseID(expiredKey, "pc-expired"); ok {
+		t.Fatal("expired admin license must be rejected")
+	}
+}
+
+func TestAuthorizedAdminLicenseIDFallsBackToDerivedID(t *testing.T) {
+	key := "CGO-ADMIN-DERIVED-ID-TEST"
+	store := &controlStore{}
+	store.data.Licenses = map[string]*licenseRecord{
+		hashLicense(key): {
+			Role: "admin", Active: true, MachineID: "pc-admin",
+		},
+	}
+
+	got, ok := store.authorizedAdminLicenseID(key, "pc-admin")
+	if !ok {
+		t.Fatal("expected admin authorization")
+	}
+	want := licenseIDFromHash(hashLicense(key))
+	if got != want {
+		t.Fatalf("derived admin id=%q want %q", got, want)
+	}
+}
+
+func TestValidLicensePlans(t *testing.T) {
+	tests := []struct {
+		in   string
+		plan string
+		days int
+	}{
+		{"free_2d", "free_2d", 2},
+		{"week_1", "week_1", 7},
+		{"month_1", "month_1", 30},
+		{"lifetime", "lifetime", 0},
+	}
+	for _, tc := range tests {
+		plan, days := validPlan(tc.in)
+		if plan != tc.plan || days != tc.days {
+			t.Fatalf("validPlan(%q)=(%q,%d), want (%q,%d)", tc.in, plan, days, tc.plan, tc.days)
+		}
+	}
+}
