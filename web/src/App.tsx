@@ -1430,6 +1430,8 @@ function App() {
         licenseRole={licenseRole}
         memberName={licenseMemberName}
         licensePlan={licensePlan}
+        licenseExpiresAt={licenseExpiresAt}
+        speedProfile={String(stats.member_speed_profile || stats.speed_profile || 'normal')}
         startReady={startReady}
         startBlockedReason={startBlockedReason}
       />
