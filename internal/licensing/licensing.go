@@ -429,11 +429,21 @@ func (s *Service) Validate(ctx context.Context) State {
 func (s *Service) DeactivateLocal() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Clear every transactional artifact. Leaving a stale .bak behind could
+	// make load() recover an intentionally deactivated licence on next launch.
+	var firstErr error
+	for _, candidate := range []string{s.path, s.path + ".bak", s.path + ".tmp"} {
+		if err := os.Remove(candidate); err != nil && !os.IsNotExist(err) && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr != nil {
+		return firstErr
+	}
+
 	s.stored = storedLicense{}
 	s.state = State{}
-	if err := os.Remove(s.path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
 	return nil
 }
 
