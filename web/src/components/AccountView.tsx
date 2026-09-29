@@ -119,6 +119,13 @@ const applySpeedPreset = (settings: MemberSettings, profile: MemberSettings['spe
   }
 };
 
+const isCustomPacing = (settings: MemberSettings): boolean => {
+  const preset = applySpeedPreset(settings, settings.speed_profile);
+  return preset.max_attacks_per_hour !== settings.max_attacks_per_hour
+    || preset.break_every_attacks !== settings.break_every_attacks
+    || preset.break_minutes !== settings.break_minutes;
+};
+
 type LicensePolicy = {
   enforced: boolean;
   service_configured: boolean;
@@ -688,7 +695,10 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
 
             <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/30 px-4 py-3">
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[10px] font-black uppercase tracking-widest text-zinc-500">
-                <span>Profil {memberSettings.speed_profile === 'cautious' ? 'Prudent' : memberSettings.speed_profile === 'fast' ? 'Rapide' : 'Normal'}</span>
+                <span>
+                  Profil {memberSettings.speed_profile === 'cautious' ? 'Prudent' : memberSettings.speed_profile === 'fast' ? 'Rapide' : 'Normal'}
+                  {isCustomPacing(memberSettings) ? ' · personnalisé' : ''}
+                </span>
                 <span>{memberSettings.max_attacks_per_hour} attaques/h max</span>
                 <span>
                   {memberSettings.break_every_attacks > 0
