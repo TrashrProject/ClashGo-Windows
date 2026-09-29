@@ -24,6 +24,45 @@ const getTerminalAutoScroll = (): boolean => {
 
 // Clipboard write with a fallback for webviews where the async clipboard
 // API isn't granted (Wails WkWebView in some macOS versions).
+const stageLabel = (value?: string): string => {
+  const raw = String(value || '').trim().toLowerCase();
+  const labels: Record<string, string> = {
+    cooldown_intentional: 'pause programmée',
+    preparation: 'préparation',
+    search: 'recherche',
+    deployment_protected: 'déploiement protégé',
+    combat: 'combat',
+    return_home: 'retour au village',
+    learning: 'apprentissage',
+  };
+  return labels[raw] || (raw ? raw.split('_').join(' ') : 'apprentissage');
+};
+
+const sideLabel = (value?: string): string => {
+  const raw = String(value || '').trim().toLowerCase();
+  const labels: Record<string, string> = {
+    left: 'gauche',
+    right: 'droite',
+    top: 'haut',
+    bottom: 'bas',
+    north: 'haut',
+    south: 'bas',
+    east: 'droite',
+    west: 'gauche',
+    unknown: 'inconnu',
+    auto: 'auto',
+  };
+  return labels[raw] || (raw ? raw : 'auto');
+};
+
+const runtimeModeLabel = (value?: string): string => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'fast') return 'Rapide';
+  if (raw === 'safe' || raw === 'cautious') return 'Prudent';
+  if (raw === 'balanced' || raw === 'normal') return 'Équilibré';
+  return value || 'Inconnu';
+};
+
 const copyText = async (text: string): Promise<void> => {
   try {
     await navigator.clipboard.writeText(text);
@@ -341,10 +380,10 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                 </span>
               </div>
               <div className="mt-2 text-[10px] font-bold text-zinc-500">
-                Point limitant : {(sessionReport.bottleneck || 'learning').split('_').join(' ')}
-                {sessionReport.optimization_target ? ` · optimiser ${sessionReport.optimization_target.split('_').join(' ')}` : ''}
+                Point limitant : {stageLabel(sessionReport.bottleneck)}
+                {sessionReport.optimization_target ? ` · optimiser ${stageLabel(sessionReport.optimization_target)}` : ''}
                 {sessionReport.top_strategy ? ` · ${sessionReport.top_strategy}` : ''}
-                {sessionReport.top_deploy_side ? ` · ${sessionReport.top_deploy_side}` : ''}
+                {sessionReport.top_deploy_side ? ` · côté ${sideLabel(sessionReport.top_deploy_side)}` : ''}
               </div>
             </div>
 
@@ -557,7 +596,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                       </div>
                       <div className="mt-2 text-sm font-black text-zinc-950 dark:text-white truncate">{title}</div>
                       <div className="mt-1 text-[10px] font-bold text-zinc-500">
-                        {ev.count ? `×${ev.count}` : 'event'}{ev.deploy_side ? ` · ${ev.deploy_side}` : ''}
+                        {ev.count ? `×${ev.count}` : 'événement'}{ev.deploy_side ? ` · ${sideLabel(ev.deploy_side)}` : ''}
                       </div>
                       <div className="mt-3 text-[9px] font-mono text-zinc-400 leading-relaxed">
                         {ev.kind === 'deploy' ? (
@@ -648,9 +687,9 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                 <div>
                   <div className="text-[9px] uppercase tracking-[0.25em] font-black text-zinc-400 mb-1">Dernière attaque</div>
                   <div className="flex items-center gap-3 flex-wrap">
-                    <span className="text-lg font-bold">{latestAttack.strategy || 'Unknown strategy'}</span>
+                    <span className="text-lg font-bold">{latestAttack.strategy || 'Stratégie inconnue'}</span>
                     <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                      {latestAttack.target_edge || 'Auto edge'}{latestAttack.deploy_side && latestAttack.deploy_side !== 'Inconnu' ? ` → ${latestAttack.deploy_side}` : ''}
+                      {sideLabel(latestAttack.target_edge || 'auto')}{latestAttack.deploy_side && latestAttack.deploy_side !== 'Inconnu' ? ` → ${sideLabel(latestAttack.deploy_side)}` : ''}
                     </span>
                     <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider ${
                       latestAttack.deploy_success
@@ -802,10 +841,10 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                         <td className="px-4 py-4">
                           <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{rep.strategy || 'Inconnu'}</div>
                           <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-1">
-                            {rep.target_edge || 'Auto'}{rep.deploy_side && rep.deploy_side !== 'Inconnu' ? ` → ${rep.deploy_side}` : ''}
+                            {sideLabel(rep.target_edge || 'auto')}{rep.deploy_side && rep.deploy_side !== 'Inconnu' ? ` → ${sideLabel(rep.deploy_side)}` : ''}
                           </div>
                           <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mt-1">
-                            score {rep.target_score || 0}/100 · {rep.runtime_mode || 'Inconnu'}
+                            score {rep.target_score || 0}/100 · {runtimeModeLabel(rep.runtime_mode)}
                           </div>
                         </td>
 
