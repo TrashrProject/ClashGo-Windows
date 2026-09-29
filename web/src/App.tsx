@@ -431,6 +431,9 @@ function App() {
     if (role === 'developer' || role === 'admin') {
       setInterfaceLevel('developer');
     } else if (state?.activated) {
+      // Clamp immediately so a previous developer/admin session can never
+      // flash privileged UI while this member's saved level is loading.
+      setInterfaceLevel('simple');
       void GetMemberInterfaceLevel()
         .then((saved: unknown) => {
           const level: InterfaceLevel = saved === 'advanced' ? 'advanced' : 'simple';
@@ -743,6 +746,8 @@ function App() {
       if (role === 'developer' || role === 'admin') {
         setInterfaceLevel('developer');
       } else if (payload?.activated) {
+        // Same immediate clamp for live licence switches/revalidation events.
+        setInterfaceLevel('simple');
         void GetMemberInterfaceLevel()
           .then((saved: unknown) => setInterfaceLevel(saved === 'advanced' ? 'advanced' : 'simple'))
           .catch(() => setInterfaceLevel('simple'));
