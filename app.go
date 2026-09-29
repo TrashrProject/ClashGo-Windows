@@ -1429,11 +1429,7 @@ func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error
 	cfg.Automation.AutoArmyGuard = settings.AutoArmyGuard
 	cfg.Automation.AutoResourceTracking = settings.AutoResourceTracking
 
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return MemberSettings{}, err
-	}
-	if err := os.WriteFile(paths.ResolveConfig("config.json"), data, 0600); err != nil {
+	if err := config.Save("config.json", cfg); err != nil {
 		return MemberSettings{}, err
 	}
 	if a.bot != nil {
@@ -1457,11 +1453,7 @@ func (a *App) SetSimpleMode(enabled bool) error {
 	if enabled {
 		applySimpleAutomationDefaults(cfg)
 	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(paths.ResolveConfig("config.json"), data, 0600); err != nil {
+	if err := config.Save("config.json", cfg); err != nil {
 		return err
 	}
 	if a.bot != nil {
@@ -1486,11 +1478,7 @@ func (a *App) SaveAccountConfig(playerTag string) error {
 	// Purge legacy desktop keys during the first save after upgrading.
 	cfg.Account.LegacyAPIKey = ""
 
-	bytes, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0600); err != nil {
+	if err := config.Save("config.json", cfg); err != nil {
 		return err
 	}
 	if a.bot != nil {
@@ -1509,11 +1497,7 @@ func (a *App) ClearAccount() error {
 	cfg.Account.PlayerTag = ""
 	cfg.Account.LegacyAPIKey = ""
 
-	bytes, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0600); err != nil {
+	if err := config.Save("config.json", cfg); err != nil {
 		return err
 	}
 
@@ -1590,10 +1574,7 @@ func (a *App) GetPlayerProfile() (*ClashPlayerProfile, error) {
 			cfg.Attack.Farm.TownHall = profile.TownHallLevel
 			cfg.Attack.Farm.Enabled = true
 
-			data, marshalErr := json.MarshalIndent(cfg, "", "  ")
-			if marshalErr != nil {
-				log.Warn().Err(marshalErr).Msg("account sync: could not encode automatic farm profile")
-			} else if writeErr := os.WriteFile(paths.ResolveConfig("config.json"), data, 0600); writeErr != nil {
+			if writeErr := config.Save("config.json", cfg); writeErr != nil {
 				log.Warn().Err(writeErr).Msg("account sync: could not persist automatic farm profile")
 			} else {
 				a.mu.Lock()
@@ -1639,11 +1620,7 @@ func (a *App) SetBlueStacksInstance(instance string) error {
 
 	cfg := config.LoadOrDefault("config.json")
 	cfg.Device.BlueStacksInstance = instance
-	bytes, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644)
+	return config.Save("config.json", cfg)
 }
 
 // GetActivity returns a compact high-level feed for the dashboard. It is
@@ -1924,11 +1901,7 @@ func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strat
 		cfg.Attack.StrategyFile = resolved
 	}
 
-	bytes, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644); err != nil {
+	if err := config.Save("config.json", cfg); err != nil {
 		return err
 	}
 
@@ -1993,11 +1966,7 @@ func (a *App) SaveFarmComposition(enabled bool, townHall int, profileJSON string
 	cfg.Attack.Farm.TownHall = townHall
 	cfg.Attack.Farm.Profiles[fmt.Sprintf("%d", townHall)] = profile
 
-	bytes, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644); err != nil {
+	if err := config.Save("config.json", cfg); err != nil {
 		return err
 	}
 	if a.bot != nil {
