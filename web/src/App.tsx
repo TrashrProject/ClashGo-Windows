@@ -26,6 +26,7 @@ import {
   GetStrategies,
   GetSystemDiagnostics,
   GetStartupReadiness,
+  GetLatestBootReport,
   ExportDiagnostics,
   SetBlueStacksInstance,
   GetUpdateStatus,
@@ -226,7 +227,16 @@ function App() {
   const [testSessionActive, setTestSessionActive] = useState(false);
   const [startupCheck, setStartupCheck] = useState<{
     ready: boolean;
-    checks: Array<{ id: string; label: string; ok: boolean; message: string }>;
+    checks: Array<{ id: string; label: string; ok: boolean; message: string; action?: string; action_label?: string }>;
+  } | null>(null);
+  const [latestBootReport, setLatestBootReport] = useState<{
+    started_at?: string;
+    completed_at?: string;
+    outcome?: string;
+    final_error?: string;
+    suggested_action?: string;
+    recovery_used?: string[];
+    attempts?: number;
   } | null>(null);
   const [startupCheckRunning, setStartupCheckRunning] = useState(false);
   const startupCheckAutoRan = useRef(false);
@@ -259,7 +269,7 @@ function App() {
       return;
     }
 
-    const [configResult, accountResult, statsResult, historyResult, resourceResult, activityResult, replayResult, reportResult] = await Promise.allSettled([
+    const [configResult, accountResult, statsResult, historyResult, resourceResult, activityResult, replayResult, reportResult, bootResult] = await Promise.allSettled([
       GetConfig(),
       GetAccountConfig(),
       GetStats(),
@@ -268,6 +278,7 @@ function App() {
       GetActivity(),
       GetLatestAttackReplay(),
       GetSessionReport(),
+      GetLatestBootReport(),
     ]);
 
     if (configResult.status === 'fulfilled') {
@@ -304,6 +315,9 @@ function App() {
     if (reportResult.status === 'fulfilled') {
       const report = reportResult.value as unknown as SessionReportView;
       setSessionReport(report && (report.attacks || 0) > 0 ? report : null);
+    }
+    if (bootResult.status === 'fulfilled') {
+      setLatestBootReport((bootResult.value || null) as typeof latestBootReport);
     }
   }, []);
 
@@ -587,22 +601,33 @@ function App() {
     // bot_init_failed — without listening, the sidebar stays on
     // "STOP BOT" forever and Stop becomes a confusing no-op (there's
     // no bot to stop). Flip the button back to START on either event.
+    const refreshBootReport = () => {
+      window.setTimeout(() => {
+        void GetLatestBootReport()
+          .then((report) => setLatestBootReport((report || null) as typeof latestBootReport))
+          .catch(() => {});
+      }, 250);
+    };
+
     const unsubBotError = safeEventsOn("bot_error", (payload: unknown) => {
       setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(false);
       setBotError(normalizeBotErrorMessage(payload, 'Le bot n’a pas pu démarrer.'));
+      refreshBootReport();
     });
     const unsubBotInitFailed = safeEventsOn("bot_init_failed", (payload: unknown) => {
       setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(false);
       setBotError(normalizeBotErrorMessage(payload, 'L’initialisation BlueStacks / ADB a échoué.'));
+      refreshBootReport();
     });
     const unsubBotStarted = safeEventsOn("bot_started", () => {
       setIsStarting(false);
       setIsRunning(true);
       setBotError('');
+      refreshBootReport();
     });
     const unsubBotStopped = safeEventsOn("bot_stopped", () => {
       setTestSessionActive(false);
@@ -624,6 +649,7 @@ function App() {
       setIsStarting(false);
       setIsRunning(false);
       setBotError(normalizeBotErrorMessage(payload, 'Le démarrage du bot a été annulé.'));
+      refreshBootReport();
     });
 
     const unsubAttackHistory = safeEventsOn("attack_history_updated", (payload: bot.AttackReport[]) => {
@@ -721,7 +747,7 @@ function App() {
       const result = await GetStartupReadiness();
       setStartupCheck(result as unknown as {
         ready: boolean;
-        checks: Array<{ id: string; label: string; ok: boolean; message: string }>;
+        checks: Array<{ id: string; label: string; ok: boolean; message: string; action?: string; action_label?: string }>;
       });
     } catch (err) {
       console.warn('Startup readiness check failed:', err);
@@ -755,7 +781,7 @@ function App() {
       const readiness = await GetStartupReadiness();
       const typedReadiness = readiness as unknown as {
         ready: boolean;
-        checks: Array<{ id: string; label: string; ok: boolean; message: string }>;
+        checks: Array<{ id: string; label: string; ok: boolean; message: string; action?: string; action_label?: string }>;
       };
       setStartupCheck(typedReadiness);
       setStartupCheckRunning(false);
@@ -1263,6 +1289,7 @@ function App() {
               startupCheck={startupCheck}
               startupCheckRunning={startupCheckRunning}
               onRunStartupCheck={() => void handleStartupCheck()}
+              latestBootReport={latestBootReport}
             />
           )}
           {tab === 'activity' && <Dashboard {...dashboardProps} />}
