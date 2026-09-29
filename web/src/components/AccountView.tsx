@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ApplyMemberPreset, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetVillageResources, RefreshLicense, SaveMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ApplyMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetUpdateStatus, GetVillageResources, RefreshLicense, SaveMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
@@ -45,6 +45,14 @@ type LicenseState = {
   offline_until?: string;
   plan?: string;
   expires_at?: string;
+  error?: string;
+};
+
+type MemberUpdateStatus = {
+  state?: string;
+  available?: boolean;
+  current_version?: string;
+  latest_version?: string;
   error?: string;
 };
 
@@ -199,6 +207,9 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [confirmDeactivate, setConfirmDeactivate] = React.useState(false);
   const [supportCodeCopied, setSupportCodeCopied] = React.useState(false);
   const [confirmUnlink, setConfirmUnlink] = React.useState(false);
+  const [appVersion, setAppVersion] = React.useState('');
+  const [memberUpdate, setMemberUpdate] = React.useState<MemberUpdateStatus | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = React.useState(false);
 
   const refreshLicense = React.useCallback(async () => {
     try {
@@ -213,6 +224,33 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       // service is not configured.
     }
   }, [onInterfaceLevelChange]);
+
+  const refreshMemberUpdate = React.useCallback(async () => {
+    try {
+      const [version, status] = await Promise.all([GetAppVersion(), GetUpdateStatus()]);
+      setAppVersion(String(version || ''));
+      setMemberUpdate(status as MemberUpdateStatus);
+    } catch {
+      // Update status is secondary information; the member area remains usable.
+    }
+  }, []);
+
+  const checkMemberUpdate = async () => {
+    if (checkingUpdate) return;
+    setCheckingUpdate(true);
+    try {
+      const status = await CheckForUpdate();
+      setMemberUpdate(status as MemberUpdateStatus);
+    } catch (e) {
+      setMemberUpdate((current) => ({
+        ...(current || {}),
+        state: 'error',
+        error: e instanceof Error ? e.message : String(e),
+      }));
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
 
   const refreshMemberSettings = React.useCallback(async () => {
     try {
@@ -371,7 +409,8 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     void refresh();
     void refreshLicense();
     void refreshMemberSettings();
-  }, [refresh, refreshLicense, refreshMemberSettings, playerTag]);
+    void refreshMemberUpdate();
+  }, [refresh, refreshLicense, refreshMemberSettings, refreshMemberUpdate, playerTag]);
 
   React.useEffect(() => {
     const off = safeLicenseEventsOn('license_state', (payload) => {
@@ -710,6 +749,50 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 ))}
               </div>
             </div>
+          </div>
+        </section>
+      )}
+
+      {memberPage === 'account' && (
+        <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+            <div className="min-w-0">
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Version ClashGO</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <h3 className="text-xl font-black text-zinc-950 dark:text-white">
+                  {appVersion ? 'v' + appVersion : 'Version actuelle'}
+                </h3>
+                <span className={
+                  'rounded-full px-2.5 py-1 text-[8px] font-black uppercase tracking-widest ' +
+                  (memberUpdate?.available
+                    ? 'bg-amber-500/10 text-amber-500'
+                    : memberUpdate?.state === 'error'
+                      ? 'bg-rose-500/10 text-rose-500'
+                      : 'bg-emerald-500/10 text-emerald-500')
+                }>
+                  {memberUpdate?.available
+                    ? 'Mise à jour disponible'
+                    : memberUpdate?.state === 'error'
+                      ? 'Vérification impossible'
+                      : 'À jour'}
+                </span>
+              </div>
+              <p className="mt-2 text-xs font-semibold text-zinc-500">
+                {memberUpdate?.available && memberUpdate.latest_version
+                  ? 'Nouvelle version : v' + memberUpdate.latest_version + '. Elle pourra être installée avec le système de mise à jour ClashGO.'
+                  : memberUpdate?.error
+                    ? 'ClashGO réessaiera automatiquement plus tard.'
+                    : 'Les mises à jour beta sont vérifiées automatiquement.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={checkingUpdate}
+              onClick={() => void checkMemberUpdate()}
+              className="shrink-0 rounded-xl border border-zinc-200 dark:border-zinc-700 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-950 dark:hover:text-white disabled:opacity-40"
+            >
+              {checkingUpdate ? 'Vérification…' : 'Vérifier maintenant'}
+            </button>
           </div>
         </section>
       )}
