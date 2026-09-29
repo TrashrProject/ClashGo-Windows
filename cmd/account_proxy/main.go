@@ -46,6 +46,7 @@ type licenseRecord struct {
 	Hint       string    `json:"hint"`
 	CustomerName    string `json:"customer_name,omitempty"`
 	CustomerContact string `json:"customer_contact,omitempty"`
+	CustomerNotes   string `json:"customer_notes,omitempty"`
 	Role       string    `json:"role"`
 	Active     bool      `json:"active"`
 	MachineID  string    `json:"machine_id,omitempty"`
@@ -609,6 +610,7 @@ func main() {
 				if actor.Role != "admin" {
 					cp.CustomerName = ""
 					cp.CustomerContact = ""
+					cp.CustomerNotes = ""
 				}
 				rows = append(rows, cp)
 			}
@@ -631,6 +633,7 @@ func main() {
 			Count           int    `json:"count"`
 			CustomerName    string `json:"customer_name,omitempty"`
 			CustomerContact string `json:"customer_contact,omitempty"`
+			CustomerNotes   string `json:"customer_notes,omitempty"`
 		}
 		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
@@ -660,6 +663,7 @@ func main() {
 				Hint:            licenseHint(generated),
 				CustomerName:    strings.TrimSpace(in.CustomerName),
 				CustomerContact: strings.TrimSpace(in.CustomerContact),
+				CustomerNotes:   strings.TrimSpace(in.CustomerNotes),
 				Role:            role,
 				Active:       true,
 				CreatedAt:    time.Now().UTC(),
@@ -811,6 +815,7 @@ func main() {
 			LicenseID       string `json:"license_id"`
 			CustomerName    string `json:"customer_name"`
 			CustomerContact string `json:"customer_contact,omitempty"`
+			CustomerNotes   string `json:"customer_notes,omitempty"`
 		}
 		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
@@ -819,6 +824,7 @@ func main() {
 		in.LicenseID = strings.TrimSpace(in.LicenseID)
 		in.CustomerName = strings.TrimSpace(in.CustomerName)
 		in.CustomerContact = strings.TrimSpace(in.CustomerContact)
+		in.CustomerNotes = strings.TrimSpace(in.CustomerNotes)
 		if in.LicenseID == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "license_id is required"})
 			return
@@ -833,6 +839,9 @@ func main() {
 		if len(in.CustomerContact) > 180 {
 			in.CustomerContact = in.CustomerContact[:180]
 		}
+		if len(in.CustomerNotes) > 1000 {
+			in.CustomerNotes = in.CustomerNotes[:1000]
+		}
 
 		control.mu.Lock()
 		rec := findLicenseRecordByIDLocked(control, in.LicenseID)
@@ -843,12 +852,14 @@ func main() {
 		}
 		rec.CustomerName = in.CustomerName
 		rec.CustomerContact = in.CustomerContact
+		rec.CustomerNotes = in.CustomerNotes
 		_ = control.saveLocked()
 		control.mu.Unlock()
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok": true,
 			"customer_name": in.CustomerName,
 			"customer_contact": in.CustomerContact,
+			"customer_notes": in.CustomerNotes,
 		})
 	})
 
