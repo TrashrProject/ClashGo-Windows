@@ -194,6 +194,15 @@ const DeveloperView: React.FC = () => {
 
   const isAdmin = role === 'admin';
 
+  const selectCreationPlan = (plan: 'free_2d' | 'week_1' | 'month_1' | 'lifetime') => {
+    setNewPlan(plan);
+    setCreationPaymentStatus((current) => {
+      if (plan === 'free_2d') return 'free';
+      return current === 'free' ? 'paid' : current;
+    });
+    if (plan === 'free_2d') setCreationAmount('');
+  };
+
   React.useEffect(() => {
     if (!isAdmin && tab === 'history') setTab('licenses');
   }, [isAdmin, tab]);
@@ -652,7 +661,7 @@ const DeveloperView: React.FC = () => {
                 <button
                   key={value}
                   type="button"
-                  onClick={() => setNewPlan(value)}
+                  onClick={() => selectCreationPlan(value)}
                   className={
                     'rounded-xl border px-3 py-3 text-left transition ' +
                     (newPlan === value
@@ -690,7 +699,7 @@ const DeveloperView: React.FC = () => {
               <div className="mb-2 text-[9px] font-black uppercase tracking-widest text-zinc-400">Durée</div>
               <select
                 value={newPlan}
-                onChange={(e) => setNewPlan(e.target.value as typeof newPlan)}
+                onChange={(e) => selectCreationPlan(e.target.value as typeof newPlan)}
                 className="h-12 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-4 text-sm font-bold outline-none"
               >
                 <option value="free_2d">FREE · 2 jours</option>
@@ -712,6 +721,13 @@ const DeveloperView: React.FC = () => {
               </select>
             </label>
           </div>
+
+          {!customerName.trim() && (
+            <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 px-3 py-2.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+              <span className="material-symbols-outlined text-base">info</span>
+              <span>Tu peux créer une clé sans client, mais renseigner un pseudo permet de la retrouver instantanément plus tard.</span>
+            </div>
+          )}
 
           <label className="mt-3 block">
             <div className="mb-2 text-[9px] font-black uppercase tracking-widest text-zinc-400">Note interne</div>
