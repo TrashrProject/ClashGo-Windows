@@ -142,6 +142,7 @@ func (a *App) startup(ctx context.Context) {
 	a.updaterBgStop = bgCancel
 	a.updater.StartBackgroundPoller(bgCtx)
 	go a.forwardUpdaterStatus(bgCtx)
+	go a.licenseValidationLoop(bgCtx)
 
 	// Skip the standalone web dashboard on `wails dev`. Wails injects
 	// its own dev proxy at :34115 → Vite at :5173 by parsing stdout
@@ -235,6 +236,34 @@ func (a *App) shutdown(ctx context.Context) {
 	// not fall back to synchronous disk I/O.
 	a.saveStats()
 	bot.CloseAsyncWriter()
+}
+
+func (a *App) licenseValidationLoop(ctx context.Context) {
+	if a.license == nil || !a.GetLicensePolicy().Enforced {
+		return
+	}
+
+	// The startup validation runs immediately in startup(). Subsequent checks
+	// keep server-side revocations and role changes effective without requiring
+	// an application restart.
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			state := a.license.Validate(ctx)
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "license_state", state)
+			}
+			if !state.Activated && a.IsRunning() {
+				log.Warn().Str("reason", state.Error).Msg("license became invalid; stopping bot")
+				_ = a.StopBot()
+			}
+		}
+	}
 }
 
 // forwardUpdaterStatus pushes the updater's status to the React side
@@ -561,6 +590,20 @@ func (a *App) GetLatestAttackReplay() AttackReplayView {
 // instead of finishing the boot and starting anyway (the old
 // behavior — see the concurrency notes in StopBot).
 func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled bool) BotStatus {
+	if a.GetLicensePolicy().Enforced {
+		if a.license == nil {
+			return BotStatus{Running: false, Message: "ClashGO license service is unavailable"}
+		}
+		state := a.license.GetState()
+		if !state.Activated {
+			msg := "A valid ClashGO license is required"
+			if strings.TrimSpace(state.Error) != "" {
+				msg += ": " + state.Error
+			}
+			return BotStatus{Running: false, Message: msg}
+		}
+	}
+
 	diag := collectSystemDiagnostics()
 	if !diag.AssetsReady {
 		return BotStatus{
