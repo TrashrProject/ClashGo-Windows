@@ -282,3 +282,72 @@ func TestAppendEventLockedFillsMetadata(t *testing.T) {
 		t.Fatal("expected generated event timestamp")
 	}
 }
+
+
+func TestApplyLicenseRenewalExtendsFutureExpiry(t *testing.T) {
+	now := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
+	rec := &licenseRecord{
+		Plan:      "week_1",
+		Active:    true,
+		ExpiresAt: now.Add(5 * 24 * time.Hour),
+	}
+
+	plan, days, expiresAt, err := applyLicenseRenewal(rec, "week_1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan != "week_1" || days != 7 {
+		t.Fatalf("renew result = %q/%d, want week_1/7", plan, days)
+	}
+	want := now.Add(12 * 24 * time.Hour)
+	if !expiresAt.Equal(want) {
+		t.Fatalf("expiresAt = %s, want %s", expiresAt, want)
+	}
+	if !rec.NextDueAt.Equal(want) {
+		t.Fatalf("NextDueAt = %s, want %s", rec.NextDueAt, want)
+	}
+}
+
+func TestApplyLicenseRenewalExpiredStartsFromNow(t *testing.T) {
+	now := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
+	rec := &licenseRecord{
+		Plan:      "month_1",
+		Active:    false,
+		ExpiresAt: now.Add(-48 * time.Hour),
+	}
+
+	plan, days, expiresAt, err := applyLicenseRenewal(rec, "month_1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan != "month_1" || days != 30 {
+		t.Fatalf("renew result = %q/%d, want month_1/30", plan, days)
+	}
+	want := now.Add(30 * 24 * time.Hour)
+	if !expiresAt.Equal(want) {
+		t.Fatalf("expiresAt = %s, want %s", expiresAt, want)
+	}
+	if !rec.Active {
+		t.Fatal("renewal should reactivate an expired/revoked timed license")
+	}
+}
+
+func TestApplyLicenseRenewalProtectsLifetime(t *testing.T) {
+	now := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
+	rec := &licenseRecord{Plan: "lifetime", Active: true}
+
+	if _, _, _, err := applyLicenseRenewal(rec, "month_1", now); err == nil {
+		t.Fatal("expected lifetime downgrade to be rejected")
+	}
+	if rec.Plan != "lifetime" {
+		t.Fatalf("failed renewal mutated lifetime plan to %q", rec.Plan)
+	}
+
+	plan, days, expiresAt, err := applyLicenseRenewal(rec, "lifetime", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan != "lifetime" || days != 0 || !expiresAt.IsZero() {
+		t.Fatalf("lifetime renewal = %q/%d/%s", plan, days, expiresAt)
+	}
+}
