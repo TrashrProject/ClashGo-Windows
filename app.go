@@ -1,6 +1,6 @@
 package main
 
-// Build marker: beta pipeline validation after contract/test alignment.
+// Build marker: beta pipeline validation after admin UI redesign.
 import (
 	"bytes"
 	"context"
