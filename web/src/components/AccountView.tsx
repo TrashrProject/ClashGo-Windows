@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { InterfaceLevel } from '../types';
 import { ClearAccount, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetPlayerProfile, GetVillageResources } from '../../wailsjs/go/main/App';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
@@ -55,10 +56,17 @@ type PlayerProfile = {
 
 interface AccountViewProps {
   playerTag: string;
+  interfaceLevel: InterfaceLevel;
+  onInterfaceLevelChange: (level: InterfaceLevel) => void;
   onAccountChanged: (tag: string) => void;
 }
 
-const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccountChanged }) => {
+const AccountView: React.FC<AccountViewProps> = React.memo(({
+  playerTag,
+  interfaceLevel,
+  onInterfaceLevelChange,
+  onAccountChanged,
+}) => {
   const [profile, setProfile] = React.useState<PlayerProfile | null>(null);
   const [resources, setResources] = React.useState<VillageResources | null>(null);
   const [farmProfile, setFarmProfile] = React.useState<FarmProfile | null>(null);
@@ -163,6 +171,38 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({ playerTag, onAccou
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
+      <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Interface level</div>
+            <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Choose how much ClashGO shows you</h3>
+            <p className="mt-2 text-sm font-semibold text-zinc-500 max-w-2xl">
+              Simple keeps only the essential screens. Advanced unlocks detailed activity, statistics and system settings.
+            </p>
+          </div>
+          <div className="flex gap-2 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 p-1.5">
+            {(['simple', 'advanced'] as InterfaceLevel[]).map((level) => (
+              <button
+                key={level}
+                type="button"
+                onClick={() => onInterfaceLevelChange(level)}
+                className={
+                  'px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.18em] transition-all ' +
+                  (interfaceLevel === level
+                    ? 'bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white')
+                }
+              >
+                {level}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mt-4 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+          <span className="material-symbols-outlined text-sm">shield_person</span>
+          Developer tools will be tied to a real ClashGO account role later.
+        </div>
+      </section>
       <section className="rounded-[2.5rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-8 shadow-premium dark:shadow-none">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
           <div className="min-w-0">
