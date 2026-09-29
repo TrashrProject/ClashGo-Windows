@@ -421,7 +421,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
               <div className="max-w-[80%]">
                 <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Quitter selon le butin récupéré</span>
                 <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">
-                  End the battle once the configured percentage of the starting disponible(s) loot has been collected.
+                  Met fin au combat quand le pourcentage choisi du butin disponible au départ a été récupéré.
                 </span>
               </div>
               <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${lootExitEnabled ? 'bg-emerald-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
@@ -433,7 +433,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <div className="text-[11px] font-black text-zinc-500 uppercase tracking-[0.2em]">Seuil de sortie par butin</div>
-                  <div className="text-xs text-zinc-400 mt-1">0–100% of the base's starting disponible(s) loot</div>
+                  <div className="text-xs text-zinc-400 mt-1">0–100 % du butin disponible au début du combat</div>
                 </div>
                 <div className="text-3xl font-black text-zinc-950 dark:text-white tabular-nums">{lootExitPercent}%</div>
               </div>
@@ -447,7 +447,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                 disabled={!lootExitEnabled}
                 onChange={(e) => setLootExitPercent(Number(e.target.value))}
                 className="w-full accent-emerald-500 disabled:cursor-not-allowed"
-                aria-label="Loot exit percentage"
+                aria-label="Pourcentage de sortie selon le butin"
               />
 
               <div className="mt-4 flex items-center gap-3">
@@ -469,7 +469,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                     ? lootExitPercent === 0
                       ? 'Quitte dès que ClashGO confirme que le combat peut être abandonné.'
                       : `Quitter après environ ${lootExitPercent} % du butin initial récupéré.`
-                    : 'Désactivé — battle ends normally.'}
+                    : 'Désactivé — le combat se termine normalement.'}
                 </span>
               </div>
             </div>
