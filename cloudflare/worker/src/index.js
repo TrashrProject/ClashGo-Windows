@@ -252,7 +252,7 @@ async function listLicenses(env) {
     SELECT
       l.id, l.hint, l.role, l.active, l.machine_id, l.created_at, l.last_seen_at, l.app_version,
       l.plan, l.duration_days, l.activated_at, l.expires_at, l.customer_id,
-      c.display_name AS customer_name, c.contact AS customer_contact
+      c.display_name AS customer_name, c.contact AS customer_contact, c.notes AS customer_notes
     FROM licenses l
     LEFT JOIN customers c ON c.id = l.customer_id
     ORDER BY l.created_at DESC LIMIT 1000
@@ -735,6 +735,7 @@ async function updateLicenseCustomer(request, env) {
   const licenseId = clean(body.license_id);
   const name = clean(body.customer_name).slice(0, 120);
   const contact = clean(body.customer_contact).slice(0, 180);
+  const notes = clean(body.customer_notes).slice(0, 1000);
   if (!licenseId) return json({ message: "license_id is required" }, 400);
   if (!name) return json({ message: "customer_name is required" }, 400);
 
@@ -747,13 +748,13 @@ async function updateLicenseCustomer(request, env) {
   const now = new Date().toISOString();
   if (customerId) {
     await env.DB.prepare(
-      "UPDATE customers SET display_name = ?1, contact = ?2, updated_at = ?3 WHERE id = ?4"
-    ).bind(name, contact, now, customerId).run();
+      "UPDATE customers SET display_name = ?1, contact = ?2, notes = ?3, updated_at = ?4 WHERE id = ?5"
+    ).bind(name, contact, notes, now, customerId).run();
   } else {
     customerId = randomHex(8);
     await env.DB.prepare(
-      "INSERT INTO customers (id, display_name, contact, notes, payment_status, total_paid_cents, next_due_at, created_at, updated_at) VALUES (?1, ?2, ?3, '', 'unknown', 0, NULL, ?4, ?4)"
-    ).bind(customerId, name, contact, now).run();
+      "INSERT INTO customers (id, display_name, contact, notes, payment_status, total_paid_cents, next_due_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'unknown', 0, NULL, ?5, ?5)"
+    ).bind(customerId, name, contact, notes, now).run();
     await env.DB.prepare(
       "UPDATE licenses SET customer_id = ?1 WHERE id = ?2"
     ).bind(customerId, licenseId).run();
@@ -764,6 +765,7 @@ async function updateLicenseCustomer(request, env) {
     customer_id: customerId,
     customer_name: name,
     customer_contact: contact,
+    customer_notes: notes,
   });
 }
 
