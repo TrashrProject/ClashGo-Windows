@@ -1511,6 +1511,18 @@ function App() {
                 <div className="flex shrink-0 flex-wrap gap-2">
                   <button
                     type="button"
+                    onClick={() => {
+                      void GetSystemDiagnostics()
+                        .then((value) => setSystemDiagnostics(value as SystemDiagnostics))
+                        .catch((err: unknown) => console.warn('GetSystemDiagnostics failed:', err));
+                      void refreshStartupReadiness();
+                    }}
+                    className="rounded-xl border border-rose-300/60 bg-rose-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-rose-700 transition hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-300"
+                  >
+                    Re-tester maintenant
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setTab('settings')}
                     className="rounded-xl border border-zinc-300/70 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
                   >
