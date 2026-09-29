@@ -198,6 +198,7 @@ async function activateLicense(request, env) {
 
   return json({
     ok: true,
+    license_id: license.id,
     role: license.role,
     member_name: license.member_name || "",
     plan: license.plan || "lifetime",
