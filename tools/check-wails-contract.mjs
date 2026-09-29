@@ -2,13 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
-const appPath = path.join(root, 'app.go');
 const webSrc = path.join(root, 'web', 'src');
 
-const appSource = fs.readFileSync(appPath, 'utf8');
 const appMethods = new Set();
-for (const match of appSource.matchAll(/func\s+\(a\s+\*App\)\s+([A-Z][A-Za-z0-9_]*)\s*\(/g)) {
-  appMethods.add(match[1]);
+for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+  if (!entry.isFile() || !entry.name.endsWith('.go') || entry.name.endsWith('_test.go')) continue;
+  const source = fs.readFileSync(path.join(root, entry.name), 'utf8');
+  for (const match of source.matchAll(/func\s+\(a\s+\*App\)\s+([A-Z][A-Za-z0-9_]*)\s*\(/g)) {
+    appMethods.add(match[1]);
+  }
 }
 
 const files = [];
@@ -46,4 +48,4 @@ if (missing.length) {
   process.exit(1);
 }
 
-console.log('Wails App contract OK: ' + appMethods.size + ' exported App methods scanned.');
+console.log('Wails App contract OK: ' + appMethods.size + ' exported App methods scanned across root Go files.');
