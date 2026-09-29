@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import HomeView from './components/HomeView';
 import DeveloperView from './components/DeveloperView';
+import LicenseGate from './components/LicenseGate';
 import Analytics from './components/Analytics';
 import ConfigView from './components/ConfigView';
 import SettingsView from './components/SettingsView';
@@ -172,6 +173,8 @@ function App() {
   const [interfaceLevel, setInterfaceLevel] = useState<InterfaceLevel>(getInitialInterfaceLevel);
   const [playerTag, setPlayerTag] = useState('');
   const [accountReady, setAccountReady] = useState(false);
+  const [licenseAccessReady, setLicenseAccessReady] = useState(false);
+  const [licenseRole, setLicenseRole] = useState<'member' | 'developer' | 'admin' | ''>('');
 
   // Updater state — pushed via `updater_status` event from Go.
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(DEFAULT_UPDATE_STATUS);
@@ -193,6 +196,28 @@ function App() {
   const [lootExitEnabled, setLootExitEnabled] = useState(false);
   const [lootExitPercent, setLootExitPercent] = useState(100);
   const [simpleMode, setSimpleMode] = useState(true);
+
+  const handleLicenseReady = useCallback((state: { activated: boolean; role?: string }, policy: { enforced: boolean }) => {
+    const role = state?.role === 'admin'
+      ? 'admin'
+      : state?.role === 'developer'
+        ? 'developer'
+        : state?.activated
+          ? 'member'
+          : '';
+    setLicenseRole(role);
+
+    if (role === 'developer' || role === 'admin') {
+      setInterfaceLevel('developer');
+    } else {
+      setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
+      setTab((current) => current === 'developer' ? 'dashboard' : current);
+    }
+
+    if (!policy.enforced || state?.activated) {
+      setLicenseAccessReady(true);
+    }
+  }, []);
 
   const handleInterfaceLevelChange = useCallback((level: InterfaceLevel) => {
     setInterfaceLevel(level);
@@ -266,7 +291,14 @@ function App() {
       try {
         const license = await GetLicenseState();
         if (license?.activated && (license.role === 'developer' || license.role === 'admin')) {
+          setLicenseRole(license.role);
           setInterfaceLevel('developer');
+        } else if (license?.activated) {
+          setLicenseRole('member');
+          setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
+        } else {
+          setLicenseRole('');
+          setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
         }
       } catch (err) {
         console.warn('GetLicenseState failed:', err);
@@ -468,10 +500,14 @@ function App() {
     } catch (e) {
       console.warn('Failed to save interface level:', e);
     }
+    if (tab === 'developer' && licenseRole !== 'developer' && licenseRole !== 'admin') {
+      setTab('dashboard');
+      return;
+    }
     if (interfaceLevel === 'simple' && (tab === 'activity' || tab === 'analytics' || tab === 'settings' || tab === 'developer')) {
       setTab('dashboard');
     }
-  }, [interfaceLevel, tab]);
+  }, [interfaceLevel, tab, licenseRole]);
 
   const saveSettings = async () => {
     await SaveConfig(
@@ -662,6 +698,10 @@ function App() {
     selectedStrategy, strategies, searchEnabled, upgradeWalls, stallTimer,
     lootExitEnabled, lootExitPercent, simpleMode
   ]);
+
+  if (!licenseAccessReady) {
+    return <LicenseGate onReady={handleLicenseReady} />;
+  }
 
   return (
     <div className="app-shell bg-zinc-50 dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50 transition-colors duration-500" style={{ display: 'flex', width: '100vw', height: '100vh' }}>
