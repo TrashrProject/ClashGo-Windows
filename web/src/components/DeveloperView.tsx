@@ -100,7 +100,7 @@ const DeveloperView: React.FC = () => {
   const [generatedKey, setGeneratedKey] = React.useState('');
   const [copied, setCopied] = React.useState(false);
   const [search, setSearch] = React.useState('');
-  const [licenseFilter, setLicenseFilter] = React.useState<'all' | 'active' | 'revoked'>('all');
+  const [licenseFilter, setLicenseFilter] = React.useState<'all' | 'active' | 'revoked' | 'expiring' | 'unactivated'>('all');
   const [renewPlans, setRenewPlans] = React.useState<Record<string, 'free_2d' | 'week_1' | 'month_1' | 'lifetime'>>({});
   const generatedKeyTimerRef = React.useRef<number | null>(null);
 
@@ -238,6 +238,16 @@ const DeveloperView: React.FC = () => {
 
   const recentErrors = incidents.filter((x) => x.level === 'error' || x.level === 'fatal' || x.level === 'panic');
   const activeLicenses = licenses.filter((x) => x.active !== false).length;
+  const now = Date.now();
+  const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+  const expiringSoon = licenses.filter((item) => {
+    if (item.active === false || !item.expires_at) return false;
+    const expiry = new Date(item.expires_at).getTime();
+    return Number.isFinite(expiry) && expiry > now && expiry - now <= sevenDaysMs;
+  }).length;
+  const neverActivated = licenses.filter((item) =>
+    item.active !== false && !item.machine_id && !item.activated_at
+  ).length;
   const isCurrentAdminLicense = (item: LicenseRow): boolean =>
     isAdmin &&
     Boolean(currentLicenseHint) &&
@@ -248,6 +258,11 @@ const DeveloperView: React.FC = () => {
   const filteredLicenses = licenses.filter((item) => {
     if (licenseFilter === 'active' && item.active === false) return false;
     if (licenseFilter === 'revoked' && item.active !== false) return false;
+    if (licenseFilter === 'unactivated' && (item.active === false || Boolean(item.machine_id) || Boolean(item.activated_at))) return false;
+    if (licenseFilter === 'expiring') {
+      const expiry = item.expires_at ? new Date(item.expires_at).getTime() : Number.NaN;
+      if (item.active === false || !Number.isFinite(expiry) || expiry <= now || expiry - now > sevenDaysMs) return false;
+    }
     if (!normalizedSearch) return true;
     return [
       item.customer_name,
@@ -298,10 +313,12 @@ const DeveloperView: React.FC = () => {
           </button>
         </div>
 
-        <div className="mt-6 grid grid-cols-3 gap-3">
+        <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-3">
           {[
             ['Licences', licenses.length],
             ['Actives', activeLicenses],
+            ['Expire < 7j', expiringSoon],
+            ['Jamais activées', neverActivated],
             ['Erreurs', recentErrors.length],
           ].map(([label, value]) => (
             <div key={String(label)} className="rounded-2xl bg-white/5 dark:bg-zinc-100 p-4">
@@ -455,6 +472,8 @@ const DeveloperView: React.FC = () => {
             >
               <option value="all">Toutes</option>
               <option value="active">Actives</option>
+              <option value="expiring">Expire &lt; 7j</option>
+              <option value="unactivated">Jamais activées</option>
               <option value="revoked">Révoquées</option>
             </select>
           )}
