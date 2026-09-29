@@ -919,3 +919,76 @@ func TestSanitizeMemberAutomationBounds(t *testing.T) {
 		t.Fatalf("strategy path was not reduced to basename: %q", got.StrategyFile)
 	}
 }
+
+
+func TestStartupAdoptsNewerSharedRuntimeState(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	a := testLicensedApp(t, "CGO-START1-START2-START3-START4")
+
+	stateDir := a.memberRuntimeStateDir()
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, ".initialized"), []byte("1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "stats.json"), []byte(`{"attacks_completed":2}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	newer := []byte(`{"attacks_completed":9}`)
+	if err := os.WriteFile(filepath.Join(dir, "stats.json"), newer, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.restoreMemberRuntimeState(true); err != nil {
+		t.Fatalf("startup adoption failed: %v", err)
+	}
+
+	shared, err := os.ReadFile(filepath.Join(dir, "stats.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(shared) != string(newer) {
+		t.Fatalf("startup overwrote newer shared state: %s", shared)
+	}
+	archived, err := os.ReadFile(filepath.Join(stateDir, "stats.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(archived) != string(newer) {
+		t.Fatalf("member archive was not refreshed from newer shared state: %s", archived)
+	}
+}
+
+func TestActivationRestoresMemberArchiveOverResidualSharedState(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	a := testLicensedApp(t, "CGO-REST01-REST02-REST03-REST04")
+
+	stateDir := a.memberRuntimeStateDir()
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, ".initialized"), []byte("1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	member := []byte(`{"attacks_completed":4}`)
+	if err := os.WriteFile(filepath.Join(stateDir, "stats.json"), member, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "stats.json"), []byte(`{"attacks_completed":88}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.restoreMemberRuntimeState(false); err != nil {
+		t.Fatalf("activation restore failed: %v", err)
+	}
+	shared, err := os.ReadFile(filepath.Join(dir, "stats.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(shared) != string(member) {
+		t.Fatalf("activation did not restore member archive: %s", shared)
+	}
+}
