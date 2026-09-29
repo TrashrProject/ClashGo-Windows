@@ -491,7 +491,20 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                   </span>
                 )}
               </div>
-              <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Réglages membre</h3>
+              <div className="mt-1 flex flex-wrap items-center gap-3">
+                <h3 className="text-xl font-black text-zinc-950 dark:text-white">Réglages membre</h3>
+                <span className={
+                  'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[8px] font-black uppercase tracking-widest ' +
+                  (memberSaving
+                    ? 'bg-amber-500/10 text-amber-500'
+                    : 'bg-emerald-500/10 text-emerald-500')
+                }>
+                  <span className="material-symbols-outlined text-[12px]">
+                    {memberSaving ? 'sync' : 'cloud_done'}
+                  </span>
+                  {memberSaving ? 'Enregistrement…' : 'Sauvegarde auto'}
+                </span>
+              </div>
               <p className="mt-2 text-sm font-semibold text-zinc-500 max-w-2xl">
                 Ces réglages agissent réellement sur le bot et sont appliqués sans redémarrage. Les contrôles de sécurité restent actifs, même en mode Rapide.
               </p>
