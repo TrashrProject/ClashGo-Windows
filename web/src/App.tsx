@@ -270,9 +270,7 @@ function App() {
   const handleInterfaceLevelChange = useCallback((level: InterfaceLevel) => {
     setInterfaceLevel(level);
     if (level !== 'developer') {
-      const simple = level === 'simple';
-      setSimpleMode(simple);
-      void SetSimpleMode(simple);
+      setSimpleMode(level === 'simple');
       void SaveMemberInterfaceLevel(level).catch((err) => {
         console.warn('Failed to save member interface level:', err);
       });
