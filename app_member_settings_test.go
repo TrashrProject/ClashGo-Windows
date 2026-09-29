@@ -1582,9 +1582,13 @@ func TestRestoreTestSessionSettingsRestoresExactMemberProfile(t *testing.T) {
 		t.Fatalf("save temporary config: %v", err)
 	}
 
+	// Reproduce the real autonomous/manual teardown state. Public member edits
+	// are blocked here, but internal test-session restoration must still work.
+	a.stopping = true
 	if err := a.restoreTestSessionSettings(); err != nil {
-		t.Fatalf("restoreTestSessionSettings: %v", err)
+		t.Fatalf("restoreTestSessionSettings while stopping: %v", err)
 	}
+	a.stopping = false
 
 	got, ok := a.loadMemberProfile()
 	if !ok {
