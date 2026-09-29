@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +13,7 @@ import (
 	"net/url"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +38,130 @@ type cacheEntry struct {
 type profileCache struct {
 	mu      sync.RWMutex
 	entries map[string]cacheEntry
+}
+
+
+type licenseRecord struct {
+	Hint       string    `json:"hint"`
+	Role       string    `json:"role"`
+	Active     bool      `json:"active"`
+	MachineID  string    `json:"machine_id,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastSeenAt time.Time `json:"last_seen_at,omitempty"`
+	AppVersion string    `json:"app_version,omitempty"`
+}
+
+type supportIncident struct {
+	ID         string         `json:"id"`
+	At         string         `json:"at"`
+	ReceivedAt time.Time      `json:"received_at"`
+	License    string         `json:"license_hint"`
+	Role       string         `json:"role"`
+	MachineID  string         `json:"machine_id,omitempty"`
+	AppVersion string         `json:"app_version,omitempty"`
+	Level      string         `json:"level"`
+	Message    string         `json:"message"`
+	Fields     map[string]any `json:"fields,omitempty"`
+}
+
+type controlData struct {
+	Licenses  map[string]*licenseRecord `json:"licenses"`
+	Incidents []supportIncident         `json:"incidents"`
+}
+
+type controlStore struct {
+	mu   sync.RWMutex
+	path string
+	data controlData
+}
+
+func newControlStore(path string) *controlStore {
+	s := &controlStore{path: path}
+	s.data.Licenses = make(map[string]*licenseRecord)
+	if b, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(b, &s.data)
+		if s.data.Licenses == nil {
+			s.data.Licenses = make(map[string]*licenseRecord)
+		}
+	}
+	return s
+}
+
+func (s *controlStore) saveLocked() error {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(s.data, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.path)
+}
+
+func hashLicense(key string) string {
+	sum := sha256.Sum256([]byte(strings.ToUpper(strings.TrimSpace(key))))
+	return hex.EncodeToString(sum[:])
+}
+
+func licenseHint(key string) string {
+	key = strings.ToUpper(strings.TrimSpace(key))
+	if len(key) <= 4 {
+		return key
+	}
+	return "••••-" + key[len(key)-4:]
+}
+
+func newLicenseKey() (string, error) {
+	buf := make([]byte, 12)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	raw := strings.ToUpper(hex.EncodeToString(buf))
+	return fmt.Sprintf("CGO-%s-%s-%s-%s", raw[0:6], raw[6:12], raw[12:18], raw[18:24]), nil
+}
+
+func validRole(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "developer":
+		return "developer"
+	case "admin":
+		return "admin"
+	default:
+		return "member"
+	}
+}
+
+func adminAuthorized(r *http.Request, adminKey string) bool {
+	if adminKey == "" {
+		return false
+	}
+	return subtleConstantTimeEqual(strings.TrimSpace(r.Header.Get("X-ClashGO-Admin-Key")), adminKey)
+}
+
+func subtleConstantTimeEqual(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	var diff byte
+	for i := 0; i < len(a); i++ {
+		diff |= a[i] ^ b[i]
+	}
+	return diff == 0
+}
+
+func (s *controlStore) lookup(key string) (*licenseRecord, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rec, ok := s.data.Licenses[hashLicense(key)]
+	if !ok || rec == nil {
+		return nil, false
+	}
+	cp := *rec
+	return &cp, true
 }
 
 func (c *profileCache) get(tag string) (cacheEntry, bool) {
@@ -127,6 +255,13 @@ func main() {
 	limiter := &limiterState{entries: make(map[string]*clientWindow)}
 	cache := &profileCache{entries: make(map[string]cacheEntry)}
 	mux := http.NewServeMux()
+
+	controlPath := strings.TrimSpace(os.Getenv("CLASHGO_CONTROL_DATA"))
+	if controlPath == "" {
+		controlPath = filepath.Join(".", "data", "clashgo-control.json")
+	}
+	control := newControlStore(controlPath)
+	adminKey := strings.TrimSpace(os.Getenv("CLASHGO_ADMIN_KEY"))
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -222,6 +357,204 @@ func main() {
 		w.Header().Set("X-ClashGO-Cache", "MISS")
 		w.WriteHeader(resp.StatusCode)
 		_, _ = w.Write(body)
+	})
+
+
+	mux.HandleFunc("POST /v1/license/activate", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			LicenseKey string `json:"license_key"`
+			MachineID  string `json:"machine_id"`
+			AppVersion string `json:"app_version"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
+			return
+		}
+		in.LicenseKey = strings.ToUpper(strings.TrimSpace(in.LicenseKey))
+		in.MachineID = strings.TrimSpace(in.MachineID)
+		if in.LicenseKey == "" || in.MachineID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "license key and machine id are required"})
+			return
+		}
+
+		h := hashLicense(in.LicenseKey)
+		control.mu.Lock()
+		rec := control.data.Licenses[h]
+		if rec == nil || !rec.Active {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusForbidden, map[string]string{"message": "license is invalid or revoked"})
+			return
+		}
+		if rec.MachineID != "" && rec.MachineID != in.MachineID {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusConflict, map[string]string{"message": "license is already activated on another machine"})
+			return
+		}
+		rec.MachineID = in.MachineID
+		rec.LastSeenAt = time.Now().UTC()
+		rec.AppVersion = strings.TrimSpace(in.AppVersion)
+		_ = control.saveLocked()
+		role := rec.Role
+		control.mu.Unlock()
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true,
+			"role": role,
+			"offline_until": time.Now().UTC().Add(72 * time.Hour).Format(time.RFC3339),
+		})
+	})
+
+	mux.HandleFunc("POST /v1/support/incidents", func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
+		rec, ok := control.lookup(key)
+		if !ok || !rec.Active {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "valid license required"})
+			return
+		}
+		var in supportIncident
+		if json.NewDecoder(io.LimitReader(r.Body, 256<<10)).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid incident"})
+			return
+		}
+		if rec.MachineID != "" && in.MachineID != "" && rec.MachineID != in.MachineID {
+			writeJSON(w, http.StatusConflict, map[string]string{"message": "machine mismatch"})
+			return
+		}
+		if len(in.Message) > 4000 {
+			in.Message = in.Message[:4000]
+		}
+		idBytes := make([]byte, 8)
+		_, _ = rand.Read(idBytes)
+		in.ID = hex.EncodeToString(idBytes)
+		in.ReceivedAt = time.Now().UTC()
+		in.License = rec.Hint
+		in.Role = rec.Role
+
+		control.mu.Lock()
+		control.data.Incidents = append(control.data.Incidents, in)
+		if len(control.data.Incidents) > 5000 {
+			control.data.Incidents = append([]supportIncident(nil), control.data.Incidents[len(control.data.Incidents)-5000:]...)
+		}
+		_ = control.saveLocked()
+		control.mu.Unlock()
+		writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "id": in.ID})
+	})
+
+	mux.HandleFunc("POST /v1/admin/licenses", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminKey) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "admin authorization required"})
+			return
+		}
+		var in struct {
+			Role  string `json:"role"`
+			Count int    `json:"count"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in)
+		if in.Count <= 0 {
+			in.Count = 1
+		}
+		if in.Count > 100 {
+			in.Count = 100
+		}
+		role := validRole(in.Role)
+		keys := make([]string, 0, in.Count)
+		control.mu.Lock()
+		for i := 0; i < in.Count; i++ {
+			key, err := newLicenseKey()
+			if err != nil {
+				control.mu.Unlock()
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "key generation failed"})
+				return
+			}
+			control.data.Licenses[hashLicense(key)] = &licenseRecord{
+				Hint: licenseHint(key),
+				Role: role,
+				Active: true,
+				CreatedAt: time.Now().UTC(),
+			}
+			keys = append(keys, key)
+		}
+		_ = control.saveLocked()
+		control.mu.Unlock()
+		writeJSON(w, http.StatusCreated, map[string]any{"role": role, "licenses": keys})
+	})
+
+	mux.HandleFunc("GET /v1/admin/licenses", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminKey) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "admin authorization required"})
+			return
+		}
+		control.mu.RLock()
+		rows := make([]licenseRecord, 0, len(control.data.Licenses))
+		for _, rec := range control.data.Licenses {
+			if rec != nil {
+				rows = append(rows, *rec)
+			}
+		}
+		control.mu.RUnlock()
+		writeJSON(w, http.StatusOK, map[string]any{"licenses": rows})
+	})
+
+	mux.HandleFunc("GET /v1/admin/incidents", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminKey) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "admin authorization required"})
+			return
+		}
+		control.mu.RLock()
+		rows := append([]supportIncident(nil), control.data.Incidents...)
+		control.mu.RUnlock()
+		if len(rows) > 250 {
+			rows = rows[len(rows)-250:]
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"incidents": rows})
+	})
+
+	mux.HandleFunc("POST /v1/admin/licenses/reset-machine", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminKey) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "admin authorization required"})
+			return
+		}
+		var in struct { LicenseKey string `json:"license_key"` }
+		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
+			return
+		}
+		control.mu.Lock()
+		rec := control.data.Licenses[hashLicense(in.LicenseKey)]
+		if rec == nil {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "license not found"})
+			return
+		}
+		rec.MachineID = ""
+		rec.LastSeenAt = time.Time{}
+		rec.AppVersion = ""
+		_ = control.saveLocked()
+		control.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+
+	mux.HandleFunc("POST /v1/admin/licenses/revoke", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminKey) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "admin authorization required"})
+			return
+		}
+		var in struct { LicenseKey string `json:"license_key"` }
+		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
+			return
+		}
+		control.mu.Lock()
+		rec := control.data.Licenses[hashLicense(in.LicenseKey)]
+		if rec == nil {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "license not found"})
+			return
+		}
+		rec.Active = false
+		_ = control.saveLocked()
+		control.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
 
 	server := &http.Server{
