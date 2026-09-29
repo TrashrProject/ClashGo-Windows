@@ -41,6 +41,7 @@ import {
   GetMemberInterfaceLevel,
   SetSimpleMode,
   StartTestSession,
+  StartQuickTestSession,
   GetPlayerProfile,
   GetVillageResourceHistory,
   SaveMemberInterfaceLevel,
@@ -920,6 +921,52 @@ function App() {
     }
   };
 
+  const handleStartQuickTestSession = async () => {
+    if (testSessionInFlightRef.current || startInFlightRef.current || isRunning || isStarting) return;
+    testSessionInFlightRef.current = true;
+    setBotError('');
+    setBotDiagnosticPath('');
+    try {
+      setStartupCheckRunning(true);
+      const readiness = await GetStartupReadiness();
+      const typedReadiness = readiness as unknown as {
+        ready: boolean;
+        checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
+      };
+      setStartupCheck(typedReadiness);
+      setStartupCheckRunning(false);
+
+      if (!typedReadiness.ready) {
+        const firstBlocked = typedReadiness.checks.find((check) => !check.ok && check.blocking !== false);
+        setBotError(friendlyBotErrorMessage(firstBlocked
+          ? `${firstBlocked.label} : ${firstBlocked.message}`
+          : 'La configuration ClashGO n’est pas prête.'));
+        return;
+      }
+
+      const res = await StartQuickTestSession(goldThreshold, elixirThreshold, deThreshold, upgradeWalls, searchEnabled);
+      await syncMemberScopedView(true);
+
+      if (res.running) {
+        setTestSessionActive(true);
+        setIsStarting(true);
+        setIsRunning(false);
+      } else {
+        setIsStarting(false);
+        setIsRunning(false);
+        if (res.message) setBotError(friendlyBotErrorMessage(res.message));
+      }
+    } catch (err) {
+      console.error('Quick test session start failed:', err);
+      setStartupCheckRunning(false);
+      setIsStarting(false);
+      setIsRunning(false);
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    } finally {
+      testSessionInFlightRef.current = false;
+    }
+  };
+
   const handleStartTestSession = async () => {
     if (testSessionInFlightRef.current || startInFlightRef.current || isRunning || isStarting) return;
     testSessionInFlightRef.current = true;
@@ -1387,6 +1434,7 @@ function App() {
               starting={isStarting}
               onStart={handleStart}
               onStartTestSession={handleStartTestSession}
+              onStartQuickTestSession={handleStartQuickTestSession}
               onStop={handleStop}
               onOpenAutomation={() => setTab('config')}
               onOpenAccount={() => {
