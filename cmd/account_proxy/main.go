@@ -687,6 +687,9 @@ func main() {
 					cp.CustomerName = ""
 					cp.CustomerContact = ""
 					cp.CustomerNotes = ""
+					cp.PaymentStatus = ""
+					cp.TotalPaidCents = 0
+					cp.NextDueAt = time.Time{}
 				}
 				rows = append(rows, cp)
 			}
