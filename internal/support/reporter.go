@@ -85,6 +85,15 @@ func New(baseURL, appVersion string, identity IdentityProvider) *Reporter {
 	return r
 }
 
+func (r *Reporter) SetBaseURL(raw string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.baseURL = strings.TrimRight(strings.TrimSpace(raw), "/")
+	r.mu.Unlock()
+}
+
 func (r *Reporter) Close() {
 	select {
 	case <-r.stop:
