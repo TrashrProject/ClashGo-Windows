@@ -30,6 +30,11 @@ type incident struct {
 	Fields     map[string]any `json:"fields,omitempty"`
 }
 
+const (
+	maxQueuedIncidents = 500
+	maxIncidentAge     = 30 * 24 * time.Hour
+)
+
 type Reporter struct {
 	baseURL    string
 	appVersion string
@@ -146,13 +151,65 @@ func (r *Reporter) enqueue(ev incident) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	_ = os.MkdirAll(filepath.Dir(r.queuePath), 0o755)
-	f, err := os.OpenFile(r.queuePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+
+	pending := r.readQueueLocked()
+	pending = append(pending, ev)
+	pending = trimQueue(pending, time.Now().UTC())
+
+	tmp := r.queuePath + ".tmp"
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
+	for _, item := range pending {
+		b, _ := json.Marshal(item)
+		_, _ = out.Write(append(b, '\n'))
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return
+	}
+	if err := os.Rename(tmp, r.queuePath); err != nil {
+		_ = os.Remove(tmp)
+	}
+}
+
+func trimQueue(items []incident, now time.Time) []incident {
+	if len(items) == 0 {
+		return nil
+	}
+	cutoff := now.Add(-maxIncidentAge)
+	kept := make([]incident, 0, len(items))
+	for _, ev := range items {
+		if ev.At != "" {
+			if at, err := time.Parse(time.RFC3339Nano, ev.At); err == nil && at.Before(cutoff) {
+				continue
+			}
+		}
+		kept = append(kept, ev)
+	}
+	if len(kept) > maxQueuedIncidents {
+		kept = kept[len(kept)-maxQueuedIncidents:]
+	}
+	return kept
+}
+
+func (r *Reporter) readQueueLocked() []incident {
+	f, err := os.Open(r.queuePath)
+	if err != nil {
+		return nil
+	}
 	defer f.Close()
-	b, _ := json.Marshal(ev)
-	_, _ = f.Write(append(b, '\n'))
+
+	pending := make([]incident, 0)
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var ev incident
+		if json.Unmarshal(scanner.Bytes(), &ev) == nil {
+			pending = append(pending, ev)
+		}
+	}
+	return pending
 }
 
 func (r *Reporter) flushLoop() {
@@ -175,20 +232,9 @@ func (r *Reporter) Flush(ctx context.Context) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	f, err := os.Open(r.queuePath)
-	if err != nil {
-		return
-	}
-	var pending []incident
-	s := bufio.NewScanner(f)
-	for s.Scan() {
-		var ev incident
-		if json.Unmarshal(s.Bytes(), &ev) == nil {
-			pending = append(pending, ev)
-		}
-	}
-	_ = f.Close()
+	pending := trimQueue(r.readQueueLocked(), time.Now().UTC())
 	if len(pending) == 0 {
+		_ = os.Remove(r.queuePath)
 		return
 	}
 
