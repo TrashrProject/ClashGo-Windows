@@ -1429,11 +1429,28 @@ func (a *App) watchBotRuntime(b *bot.Bot) {
 	a.stopping = true
 	a.mu.Unlock()
 
-	log.Info().Msg("bot runtime ended autonomously; synchronizing application state")
+	stopReason := "runtime_ended"
+	stopMessage := "La session ClashGO est terminée."
+	if current.SessionAttackCap > 0 && int(current.SessionAttacks) >= current.SessionAttackCap {
+		stopReason = "attack_cap"
+		stopMessage = fmt.Sprintf(
+			"Session terminée · limite de %d attaques atteinte.",
+			current.SessionAttackCap,
+		)
+	}
+
+	log.Info().
+		Str("reason", stopReason).
+		Int32("session_attacks", current.SessionAttacks).
+		Int("session_cap", current.SessionAttackCap).
+		Msg("bot runtime ended autonomously; synchronizing application state")
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, "bot_stopped", map[string]interface{}{
-			"message": "La session ClashGO est terminée.",
+			"message": stopMessage,
 			"automatic": true,
+			"reason": stopReason,
+			"attacks": current.SessionAttacks,
+			"cap": current.SessionAttackCap,
 		})
 	}
 
