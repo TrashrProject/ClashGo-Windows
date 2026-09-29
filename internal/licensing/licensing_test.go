@@ -1,8 +1,11 @@
 package licensing
 
 import (
+	"encoding/json"
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -209,5 +212,81 @@ func TestProfileIDEmptyWithoutLicense(t *testing.T) {
 	svc := &Service{}
 	if got := svc.ProfileID(); got != "" {
 		t.Fatalf("empty license profile id=%q want empty", got)
+	}
+}
+
+
+func TestLicenseSaveAndReloadRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "license.json")
+	svc := &Service{
+		path: path,
+		stored: storedLicense{
+			Key:           "CGO-ABCDEF-GHIJKL-MNOPQR-STUVWX",
+			Role:          RoleMember,
+			MemberName:    "Nathan",
+			MachineID:     "machine-hash",
+			LastValidated: time.Now().UTC().Format(time.RFC3339),
+			OfflineUntil:  time.Now().UTC().Add(72 * time.Hour).Format(time.RFC3339),
+			Plan:          "month_1",
+			ExpiresAt:     time.Now().UTC().Add(30 * 24 * time.Hour).Format(time.RFC3339),
+		},
+	}
+	svc.state = svc.stateFromStored(svc.stored)
+	if err := svc.saveLocked(); err != nil {
+		t.Fatalf("saveLocked: %v", err)
+	}
+
+	reloaded := &Service{path: path}
+	reloaded.load()
+	if reloaded.stored.Key != svc.stored.Key {
+		t.Fatalf("reloaded key mismatch: %q", reloaded.stored.Key)
+	}
+	if reloaded.state.MemberName != "Nathan" || reloaded.state.Plan != "month_1" {
+		t.Fatalf("reloaded metadata mismatch: %+v", reloaded.state)
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("temporary license file survived successful save: %v", err)
+	}
+	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+		t.Fatalf("backup license file survived successful save: %v", err)
+	}
+}
+
+func TestLicenseLoadRecoversBackup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "license.json")
+	backupState := storedLicense{
+		Key:          "CGO-ABCDEF-GHIJKL-MNOPQR-STUVWX",
+		Role:         RoleDeveloper,
+		MemberName:   "Recovered",
+		MachineID:    "machine-hash",
+		Plan:         "week_1",
+		ExpiresAt:    time.Now().UTC().Add(7 * 24 * time.Hour).Format(time.RFC3339),
+		OfflineUntil: time.Now().UTC().Add(72 * time.Hour).Format(time.RFC3339),
+	}
+
+	protected, err := protectSecret(backupState.Key)
+	if err != nil {
+		t.Fatalf("protectSecret: %v", err)
+	}
+	disk := backupState
+	disk.Key = protected
+	blob, err := json.Marshal(disk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".bak", blob, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &Service{path: path}
+	svc.load()
+	if !svc.state.Activated {
+		t.Fatalf("backup should restore active state: %+v", svc.state)
+	}
+	if svc.state.Role != RoleDeveloper || svc.state.MemberName != "Recovered" {
+		t.Fatalf("backup metadata mismatch: %+v", svc.state)
 	}
 }
