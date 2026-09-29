@@ -472,6 +472,10 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   }, [playerTag]);
 
   React.useEffect(() => {
+    try { localStorage.setItem('clashgo_member_page', memberPage); } catch {}
+  }, [memberPage]);
+
+  React.useEffect(() => {
     void refresh();
     void refreshLicense();
     void refreshMemberSettings();
