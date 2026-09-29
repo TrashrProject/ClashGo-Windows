@@ -32,7 +32,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   const strategyStats = React.useMemo(() => {
     const map = new Map<string, {
       name: string;
-      attaques: number;
+      attacks: number;
       stars: number;
       gold: number;
       elixir: number;
@@ -42,7 +42,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     for (const rep of history ?? []) {
       const name = rep.strategy || 'Unknown';
       const row = map.get(name) ?? {
-        name, attaques: 0, stars: 0, gold: 0, elixir: 0, dark: 0, completeDeploys: 0,
+        name, attacks: 0, stars: 0, gold: 0, elixir: 0, dark: 0, completeDeploys: 0,
       };
       row.attacks++;
       row.stars += rep.stars || 0;
@@ -62,7 +62,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       key: string;
       strategy: string;
       side: string;
-      attaques: number;
+      attacks: number;
       stars: number;
       goldElixir: number;
       dark: number;
@@ -79,7 +79,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         : (rep.target_edge || 'Unknown');
       const key = `${strategy}::${side}`;
       const row = map.get(key) ?? {
-        key, strategy, side, attaques: 0, stars: 0, goldElixir: 0, dark: 0,
+        key, strategy, side, attacks: 0, stars: 0, goldElixir: 0, dark: 0,
         deployMs: 0, cycleMs: 0, routineMs: 0, effectiveRoutineMs: 0, complete: 0,
       };
       row.attacks++;
@@ -125,7 +125,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   const modeStats = React.useMemo(() => {
     const map = new Map<string, {
       mode: string;
-      attaques: number;
+      attacks: number;
       stars: number;
       fullDeploys: number;
       searchMs: number;
@@ -138,7 +138,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     for (const rep of history ?? []) {
       const mode = rep.runtime_mode || 'Unknown';
       const row = map.get(mode) ?? {
-        mode, attaques: 0, stars: 0, fullDeploys: 0,
+        mode, attacks: 0, stars: 0, fullDeploys: 0,
         searchMs: 0, deployMs: 0, cycleMs: 0, captureMs: 0, scanMs: 0, goldElixir: 0,
       };
       row.attacks++;
@@ -205,7 +205,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   const sessionStats = React.useMemo(() => {
     const map = new Map<string, {
       id: string;
-      attaques: number;
+      attacks: number;
       stars: number;
       triples: number;
       complete: number;
@@ -223,7 +223,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     for (const rep of history ?? []) {
       if (!rep.session_id) continue;
       const row = map.get(rep.session_id) ?? {
-        id: rep.session_id, attaques: 0, stars: 0, triples: 0, complete: 0,
+        id: rep.session_id, attacks: 0, stars: 0, triples: 0, complete: 0,
         gold: 0, elixir: 0, dark: 0, cycleMs: 0, routineMs: 0, searchMs: 0, deployMs: 0,
         newestAt: 0, oldestAt: 0, firstCycleMs: 0,
       };
@@ -262,9 +262,9 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       const effectiveMs = row.routineMs > 0 ? row.routineMs : fallbackWallMs;
       const hours = effectiveMs > 0 ? effectiveMs / 3_600_000 : 0;
       return {
-        attaques: row.attacks,
+        attacks: row.attacks,
         gePerHour: hours > 0 ? (row.gold + row.elixir) / hours : 0,
-        attaquesPerHour: hours > 0 ? row.attacks / hours : 0,
+        attacksPerHour: hours > 0 ? row.attacks / hours : 0,
         avgStars: row.stars / Math.max(1, row.attacks),
         fullDeployRate: row.complete * 100 / Math.max(1, row.attacks),
         avgLoopSeconds: effectiveMs / Math.max(1, row.attacks) / 1000,
@@ -319,10 +319,10 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
 
   const targetScoreBuckets = React.useMemo(() => {
     const buckets = [
-      { label: '<60', min: 1, max: 59, attaques: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
-      { label: '60–74', min: 60, max: 74, attaques: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
-      { label: '75–89', min: 75, max: 89, attaques: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
-      { label: '90–100', min: 90, max: 100, attaques: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
+      { label: '<60', min: 1, max: 59, attacks: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
+      { label: '60–74', min: 60, max: 74, attacks: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
+      { label: '75–89', min: 75, max: 89, attacks: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
+      { label: '90–100', min: 90, max: 100, attacks: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
     ];
     for (const rep of history ?? []) {
       const score = rep.target_score || 0;
@@ -373,7 +373,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   const endReasonStats = React.useMemo(() => {
     const map = new Map<string, {
       reason: string;
-      attaques: number;
+      attacks: number;
       stars: number;
       cycleMs: number;
       destruction: number;
@@ -383,7 +383,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     for (const rep of history ?? []) {
       const reason = rep.battle_end_reason || 'unknown';
       const row = map.get(reason) ?? {
-        reason, attaques: 0, stars: 0, cycleMs: 0, destruction: 0, loot: 0, full: 0,
+        reason, attacks: 0, stars: 0, cycleMs: 0, destruction: 0, loot: 0, full: 0,
       };
       row.attacks++;
       row.stars += rep.stars || 0;
@@ -400,20 +400,20 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const rows = (history ?? []).filter((r) => (r.battle_end_wait_ms || 0) > 0);
     if (rows.length === 0) {
       return {
-        attaques: 0,
+        attacks: 0,
         early: 0,
         earlyRate: 0,
         avgWaitMS: 0,
         naturalWaitMS: 0,
         earlyWaitMS: 0,
         avgLootExitPct: 0,
-        groups: [] as Array<{ reason: string; attaques: number; avgWaitMS: number; avgStars: number; avgGE: number }>,
+        groups: [] as Array<{ reason: string; attacks: number; avgWaitMS: number; avgStars: number; avgGE: number }>,
       };
     }
 
     const earlyReasons = new Set(['loot_threshold', 'destruction_threshold', 'stall']);
     let early = 0, waitAll = 0, waitNatural = 0, naturalCount = 0, waitEarly = 0, lootPct = 0, lootPctCount = 0;
-    const map = new Map<string, { reason: string; attaques: number; waitMS: number; stars: number; ge: number }>();
+    const map = new Map<string, { reason: string; attacks: number; waitMS: number; stars: number; ge: number }>();
 
     for (const rep of rows) {
       const reason = rep.battle_end_reason || 'unknown';
@@ -432,7 +432,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         lootPctCount++;
       }
 
-      const row = map.get(reason) ?? { reason, attaques: 0, waitMS: 0, stars: 0, ge: 0 };
+      const row = map.get(reason) ?? { reason, attacks: 0, waitMS: 0, stars: 0, ge: 0 };
       row.attacks++;
       row.waitMS += wait;
       row.stars += rep.stars || 0;
@@ -441,7 +441,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     }
 
     return {
-      attaques: rows.length,
+      attacks: rows.length,
       early,
       earlyRate: early * 100 / rows.length,
       avgWaitMS: waitAll / rows.length,
@@ -451,7 +451,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       groups: Array.from(map.values())
         .map((row) => ({
           reason: row.reason,
-          attaques: row.attacks,
+          attacks: row.attacks,
           avgWaitMS: row.waitMS / Math.max(1, row.attacks),
           avgStars: row.stars / Math.max(1, row.attacks),
           avgGE: row.ge / Math.max(1, row.attacks),
@@ -524,7 +524,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   const sideStats = React.useMemo(() => {
     const map = new Map<string, {
       side: string;
-      attaques: number;
+      attacks: number;
       stars: number;
       loot: number;
       deployMs: number;
@@ -534,7 +534,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       const side = rep.deploy_side && rep.deploy_side !== 'Unknown'
         ? rep.deploy_side
         : (rep.target_edge || 'Unknown');
-      const row = map.get(side) ?? { side, attaques: 0, stars: 0, loot: 0, deployMs: 0, complete: 0 };
+      const row = map.get(side) ?? { side, attacks: 0, stars: 0, loot: 0, deployMs: 0, complete: 0 };
       row.attacks++;
       row.stars += rep.stars || 0;
       row.loot += (rep.gold_stolen || 0) + (rep.bonus_gold || 0) + (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
@@ -578,7 +578,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const rows = (history ?? []).filter((r) => Boolean(r.safety_mode));
     if (rows.length === 0) {
       return {
-        attaques: 0,
+        attacks: 0,
         liveCertified: 0,
         hudSafeRate: 0,
         corridorRate: 0,
@@ -602,7 +602,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     }
 
     return {
-      attaques: rows.length,
+      attacks: rows.length,
       liveCertified: liveCertified * 100 / rows.length,
       hudSafeRate: hudSafe * 100 / rows.length,
       corridorRate: corridor * 100 / rows.length,
@@ -624,10 +624,10 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   const deployHotPath = React.useMemo(() => {
     const rows = (history ?? []).filter((r) => (r.live_bar_rescans || 0) > 0);
     if (rows.length === 0) {
-      return { attaques: 0, avgRescans: 0, avgRescanMs: 0, avgDetectMs: 0, avgClassifyMs: 0, avgTemplatesTried: 0, avgTemplatesMatched: 0, avgCardOCRMs: 0 };
+      return { attacks: 0, avgRescans: 0, avgRescanMs: 0, avgDetectMs: 0, avgClassifyMs: 0, avgTemplatesTried: 0, avgTemplatesMatched: 0, avgCardOCRMs: 0 };
     }
     return {
-      attaques: rows.length,
+      attacks: rows.length,
       avgRescans: rows.reduce((sum, r) => sum + (r.live_bar_rescans || 0), 0) / rows.length,
       avgRescanMs: rows.reduce((sum, r) => sum + (r.avg_live_bar_rescan_ms || 0), 0) / rows.length,
       avgDetectMs: rows.reduce((sum, r) => sum + (r.avg_slot_detect_ms || 0), 0) / rows.length,
@@ -662,7 +662,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const rows = history ?? [];
     if (rows.length === 0) {
       return {
-        attaquesPerHour: 0,
+        attacksPerHour: 0,
         gePerActiveMinute: 0,
         gePerTrueMinute: 0,
         overheadShare: 0,
@@ -687,7 +687,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const activeMinutes = activeMS > 0 ? activeMS / 60_000 : 0;
     const trueMinutes = trueMS > 0 ? trueMS / 60_000 : 0;
     return {
-      attaquesPerHour: hours > 0 ? rows.length / hours : 0,
+      attacksPerHour: hours > 0 ? rows.length / hours : 0,
       gePerActiveMinute: activeMinutes > 0 ? ge / activeMinutes : 0,
       gePerTrueMinute: trueMinutes > 0 ? ge / trueMinutes : 0,
       overheadShare: trueMS > 0 ? overheadMS * 100 / trueMS : 0,
@@ -845,7 +845,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       all[0] ?? { key: 'none', label: 'Apprentissage', ms: 0 },
     );
     return {
-      attaques: rows.length,
+      attacks: rows.length,
       rows: all.map((row) => ({
         ...row,
         share: avgTotal > 0 ? row.ms * 100 / avgTotal : 0,
@@ -896,13 +896,13 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       }
       const n = rows.length;
       const hours = routine > 0 ? routine / 3_600_000 : 0;
-      return { ...band, attaques: n, avgStars: n ? stars/n : 0, fullDeployRate: n ? complete*100/n : 0, avgGE: n ? ge/n : 0, gePerHour: hours ? ge/hours : 0 };
+      return { ...band, attacks: n, avgStars: n ? stars/n : 0, fullDeployRate: n ? complete*100/n : 0, avgGE: n ? ge/n : 0, gePerHour: hours ? ge/hours : 0 };
     }).filter((band) => band.attacks > 0);
   }, [history]);
   const farmingWindows = React.useMemo(() => {
     const buckets = new Map<number, {
       hour: number;
-      attaques: number;
+      attacks: number;
       gold: number;
       elixir: number;
       dark: number;
@@ -916,7 +916,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       if (!Number.isFinite(ts)) continue;
       const hour = new Date(ts).getHours();
       const row = buckets.get(hour) ?? {
-        hour, attaques: 0, gold: 0, elixir: 0, dark: 0,
+        hour, attacks: 0, gold: 0, elixir: 0, dark: 0,
         stars: 0, complete: 0, routineMs: 0,
       };
       row.attacks++;
@@ -966,7 +966,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       const eph = stats.elixir_per_hour || 0;
       const dph = stats.de_per_hour || 0;
       return {
-        ready: false, samples: measured.length, attaquesPerHour: 0,
+        ready: false, samples: measured.length, attacksPerHour: 0,
         gold30: 0, elixir30: 0, de30: 0,
         gold60: 0, elixir60: 0, de60: 0,
         lowGE60: 0, highGE60: 0,
@@ -997,7 +997,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const goldPerHour = hours > 0 ? gold / hours : 0;
     const elixirPerHour = hours > 0 ? elixir / hours : 0;
     const dePerHour = hours > 0 ? de / hours : 0;
-    const attaquesPerHour = hours > 0 ? measured.length / hours : 0;
+    const attacksPerHour = hours > 0 ? measured.length / hours : 0;
 
     const percentile = (values: number[], q: number) => {
       if (values.length === 0) return 0;
@@ -1017,7 +1017,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     return {
       ready: true,
       samples: measured.length,
-      attaquesPerHour,
+      attacksPerHour,
       gold30: goldPerHour * 0.5,
       elixir30: elixirPerHour * 0.5,
       de30: dePerHour * 0.5,
@@ -1042,7 +1042,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       const n = rows.length;
       if (n === 0) {
         return {
-          attaques: 0, avgStars: 0, threeStarRate: 0, fullDeployRate: 0,
+          attacks: 0, avgStars: 0, threeStarRate: 0, fullDeployRate: 0,
           avgSearchMs: 0, avgDeployMs: 0, avgCycleMs: 0,
           avgGold: 0, avgElixir: 0, avgDE: 0,
         };
@@ -1062,7 +1062,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         de += (rep.dark_elixir_stolen || 0) + (rep.bonus_de || 0);
       }
       return {
-        attaques: n,
+        attacks: n,
         avgStars: stars / n,
         threeStarRate: triples * 100 / n,
         fullDeployRate: complete * 100 / n,
@@ -1195,8 +1195,8 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const adbEvents = captures + errors;
     const adbErrorRate = adbEvents > 0 ? errors * 100 / adbEvents : 0;
     const attaques = Math.max(0, stats.attacks_completed || history?.length || 0);
-    const anomalyRate = attaques > 0 ? (stats.anomalies || 0) * 100 / attaques : 0;
-    const restartRate = attaques > 0 ? (stats.bluestacks_restarts || 0) * 100 / attaques : 0;
+    const anomalyRate = attaques > 0 ? (stats.anomalies || 0) * 100 / attacks: 0;
+    const restartRate = attaques > 0 ? (stats.bluestacks_restarts || 0) * 100 / attacks: 0;
     const tapTotal = stats.adb_health?.taps_total || 0;
     const legacy = stats.adb_health?.legacy_taps_total || 0;
     const pipe = stats.adb_health?.pipe_taps_total || 0;
