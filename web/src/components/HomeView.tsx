@@ -1,11 +1,12 @@
 import React from 'react';
-import { ActivityEvent, AttackReport, BotStats } from '../types';
+import { ActivityEvent, AttackReport, BotStats, SessionReportView } from '../types';
 import { formatUptime } from '../utils';
 
 interface HomeViewProps {
   stats: BotStats;
   history: AttackReport[];
   activity: ActivityEvent[];
+  sessionReport: SessionReportView | null;
   running: boolean;
   starting: boolean;
   onStart: () => void;
@@ -125,7 +126,7 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
 
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
-    stats, history, activity, running, starting,
+    stats, history, activity, sessionReport, running, starting,
     onStart, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenSettings,
     licenseReady, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
@@ -498,6 +499,38 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           </div>
         ))}
       </section>
+
+      {!running && !starting && sessionReport && sessionReport.attacks > 0 && (
+        <section className="rounded-[2rem] border border-emerald-200/70 dark:border-emerald-900/40 bg-emerald-50/60 dark:bg-emerald-950/10 p-5 shadow-premium dark:shadow-none">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+            <div>
+              <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-400">
+                <span className="material-symbols-outlined text-base">task_alt</span>
+                Dernière session
+              </div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white">
+                {sessionReport.attacks} attaque{sessionReport.attacks > 1 ? 's' : ''} terminée{sessionReport.attacks > 1 ? 's' : ''}
+              </div>
+              <div className="mt-1 text-xs font-semibold text-zinc-500">
+                {sessionReport.recommendations?.[0] || 'Rapport sauvegardé automatiquement par ClashGO.'}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:min-w-[560px]">
+              {[
+                ['Or / h', formatLoot(Math.round(sessionReport.gold_per_hour || 0))],
+                ['Élixir / h', formatLoot(Math.round(sessionReport.elixir_per_hour || 0))],
+                ['Étoiles moy.', (sessionReport.average_stars || 0).toFixed(1)],
+                ['Santé', Math.max(0, Math.min(100, sessionReport.health_score || 0)) + '/100'],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="rounded-2xl border border-emerald-100/80 dark:border-emerald-900/30 bg-white/80 dark:bg-zinc-900/70 px-3 py-3">
+                  <div className="text-sm font-black text-zinc-950 dark:text-white tabular-nums">{value}</div>
+                  <div className="mt-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">{label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {(running || (stats.attacks_completed || 0) > 0) && (
         <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-premium dark:shadow-none">
