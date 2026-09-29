@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import Sidebar, { InterfaceLevel } from './components/Sidebar';
 import Dashboard from './components/Dashboard';
+import HomeView from './components/HomeView';
 import Analytics from './components/Analytics';
 import ConfigView from './components/ConfigView';
 import SettingsView from './components/SettingsView';
@@ -448,7 +449,7 @@ function App() {
     } catch (e) {
       console.warn('Failed to save interface level:', e);
     }
-    if (interfaceLevel === 'simple' && (tab === 'analytics' || tab === 'settings')) {
+    if (interfaceLevel === 'simple' && (tab === 'activity' || tab === 'analytics' || tab === 'settings')) {
       setTab('dashboard');
     }
   }, [interfaceLevel, tab]);
@@ -747,7 +748,20 @@ function App() {
             </section>
           )}
 
-          {tab === 'dashboard' && <Dashboard {...dashboardProps} />}
+          {tab === 'dashboard' && (
+            <HomeView
+              stats={stats}
+              history={history}
+              activity={activity}
+              running={isRunning}
+              starting={isStarting}
+              onStart={handleStart}
+              onStop={handleStop}
+              onOpenAutomation={() => setTab('config')}
+              onOpenAccount={() => setTab('account')}
+            />
+          )}
+          {tab === 'activity' && <Dashboard {...dashboardProps} />}
           {tab === 'account' && (
             <AccountView
               playerTag={playerTag}
