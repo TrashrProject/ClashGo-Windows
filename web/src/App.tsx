@@ -1182,7 +1182,7 @@ function App() {
     }
   };
 
-  const handleScheduleStop = async (minutes: 30 | 60 | 120) => {
+  const handleScheduleStop = async (minutes: number) => {
     if (!isRunning) return;
     try {
       const at = await ScheduleSessionStop(minutes);
