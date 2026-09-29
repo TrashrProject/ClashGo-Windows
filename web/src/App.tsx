@@ -40,7 +40,6 @@ import {
   GetMemberInterfaceLevel,
   GetPlayerProfile,
   GetVillageResourceHistory,
-  SetSimpleMode,
   SaveMemberInterfaceLevel,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
@@ -781,10 +780,11 @@ function App() {
     lootExitPercent, setLootExitPercent,
     simpleMode,
     onSetSimpleMode: async (enabled: boolean) => {
-      await SetSimpleMode(enabled);
+      const level: InterfaceLevel = enabled ? 'simple' : 'advanced';
+      await SaveMemberInterfaceLevel(level);
       setSimpleMode(enabled);
       if (interfaceLevel !== 'developer') {
-        setInterfaceLevel(enabled ? 'simple' : 'advanced');
+        setInterfaceLevel(level);
       }
     },
     onSave: async () => {
