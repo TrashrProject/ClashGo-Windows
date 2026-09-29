@@ -20,6 +20,24 @@ interface LicenseGateProps {
   onReady: (state: LicenseState, policy: LicensePolicy) => void;
 }
 
+const friendlyLicenseError = (value: unknown): string => {
+  const raw = value instanceof Error ? value.message : String(value || '');
+  const text = raw.toLowerCase();
+  if (text.includes('already activated on another machine') || text.includes('machine mismatch')) {
+    return 'Cette licence est déjà liée à un autre PC. Demande une réinitialisation de la machine.';
+  }
+  if (text.includes('expired')) {
+    return 'Cette licence a expiré. Elle doit être renouvelée avant de pouvoir utiliser ClashGO.';
+  }
+  if (text.includes('invalid') || text.includes('revoked')) {
+    return 'Cette licence est invalide ou a été désactivée.';
+  }
+  if (text.includes('service') || text.includes('network') || text.includes('fetch') || text.includes('connection')) {
+    return 'Impossible de joindre le service de licence. Vérifie ta connexion Internet puis réessaie.';
+  }
+  return raw || 'Impossible de vérifier la licence pour le moment.';
+};
+
 const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
   const [policy, setPolicy] = React.useState<LicensePolicy | null>(null);
   const [state, setState] = React.useState<LicenseState | null>(null);
@@ -41,7 +59,7 @@ const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
         onReady(stateValue, policyValue);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyLicenseError(e));
     } finally {
       setBusy(false);
     }
@@ -63,7 +81,7 @@ const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
         onReady(nextState, policy || { enforced: true, service_configured: true });
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyLicenseError(e));
     } finally {
       setBusy(false);
     }
