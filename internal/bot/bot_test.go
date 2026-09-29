@@ -3,6 +3,8 @@ package bot
 import (
 	"image"
 	"testing"
+
+	"github.com/Ducky705/ClashGO/internal/telemetry"
 )
 
 func TestButtonROIConsistency(t *testing.T) {
@@ -81,5 +83,28 @@ func TestHistorySnapshotNilBotIsEmpty(t *testing.T) {
 	var b *Bot
 	if got := b.HistorySnapshot(); len(got) != 0 {
 		t.Fatalf("nil bot snapshot len=%d want 0", len(got))
+	}
+}
+
+
+func TestRecordMemberSettingsChangeAddsActivity(t *testing.T) {
+	bus := telemetry.New("")
+	defer bus.Close()
+
+	b := &Bot{telemetry: bus}
+	b.RecordMemberSettingsChange("fast", 16, 6, 2)
+
+	events := b.RecentActivity(1)
+	if len(events) != 1 {
+		t.Fatalf("recent activity len=%d want 1", len(events))
+	}
+	if events[0].Type != telemetry.EventSpeedProfile {
+		t.Fatalf("event type=%q want %q", events[0].Type, telemetry.EventSpeedProfile)
+	}
+	if got := events[0].Fields["profile"]; got != "fast" {
+		t.Fatalf("profile=%v want fast", got)
+	}
+	if got := events[0].Fields["max_attacks_per_hour"]; got != 16 {
+		t.Fatalf("max_attacks_per_hour=%v want 16", got)
 	}
 }
