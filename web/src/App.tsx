@@ -225,6 +225,7 @@ function App() {
     checks: Array<{ id: string; label: string; ok: boolean; message: string }>;
   } | null>(null);
   const [startupCheckRunning, setStartupCheckRunning] = useState(false);
+  const startupCheckAutoRan = useRef(false);
 
   // Config states
   const [goldThreshold, setGoldThreshold] = useState(400000);
@@ -719,10 +720,33 @@ function App() {
     }
   }, [startupCheckRunning]);
 
+  useEffect(() => {
+    if (!accountReady || !licenseAccessReady || startupCheckAutoRan.current) return;
+    startupCheckAutoRan.current = true;
+    void handleStartupCheck();
+  }, [accountReady, licenseAccessReady, handleStartupCheck]);
+
   const handleStart = async () => {
     setBotError('');
     setBotDiagnosticPath('');
     try {
+      setStartupCheckRunning(true);
+      const readiness = await GetStartupReadiness();
+      const typedReadiness = readiness as unknown as {
+        ready: boolean;
+        checks: Array<{ id: string; label: string; ok: boolean; message: string }>;
+      };
+      setStartupCheck(typedReadiness);
+      setStartupCheckRunning(false);
+
+      if (!typedReadiness.ready) {
+        const firstBlocked = typedReadiness.checks.find((check) => !check.ok);
+        setBotError(firstBlocked
+          ? `${firstBlocked.label} : ${firstBlocked.message}`
+          : 'La configuration ClashGO n’est pas prête.');
+        return;
+      }
+
       const res = await StartBot(goldThreshold, elixirThreshold, deThreshold, upgradeWalls, searchEnabled);
       if (res.running) {
         // "running=true" from StartBot means the asynchronous boot was
@@ -739,6 +763,7 @@ function App() {
       }
     } catch (err) {
       console.error('Start failed:', err);
+      setStartupCheckRunning(false);
       setIsStarting(false);
       setIsRunning(false);
       setBotError(err instanceof Error ? err.message : String(err));
