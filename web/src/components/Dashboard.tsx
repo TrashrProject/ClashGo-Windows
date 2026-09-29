@@ -49,7 +49,7 @@ const sideLabel = (value?: string): string => {
     south: 'bas',
     east: 'droite',
     west: 'gauche',
-    inconnu: 'inconnu',
+    unknown: 'inconnu',
     auto: 'auto',
   };
   return labels[raw] || (raw ? raw : 'auto');
