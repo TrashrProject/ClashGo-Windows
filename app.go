@@ -1673,6 +1673,9 @@ func (a *App) GetControlServiceConfig() ControlServiceConfig {
 			Embedded: true,
 		}
 	}
+	if !betaControlOverrideAllowed() {
+		return ControlServiceConfig{}
+	}
 	raw := strings.TrimRight(strings.TrimSpace(cfg.Account.ControlURL), "/")
 	return ControlServiceConfig{
 		ServiceURL: raw,
@@ -1704,6 +1707,9 @@ func normalizeControlServiceURL(raw string) (string, error) {
 }
 
 func (a *App) SetBetaControlServiceURL(raw string) (ControlServiceConfig, error) {
+	if !betaControlOverrideAllowed() {
+		return a.GetControlServiceConfig(), fmt.Errorf("local control-service override is disabled in stable builds")
+	}
 	if embeddedControlServiceURL() != "" {
 		return a.GetControlServiceConfig(), fmt.Errorf("the control service is embedded in this build")
 	}
@@ -2299,11 +2305,19 @@ func embeddedControlServiceURL() string {
 	return ""
 }
 
+func betaControlOverrideAllowed() bool {
+	channel := strings.ToLower(strings.TrimSpace(updateChannel))
+	buildVersion := strings.ToLower(strings.TrimSpace(version))
+	return channel == "beta" ||
+		strings.Contains(buildVersion, "beta") ||
+		strings.Contains(buildVersion, "dev")
+}
+
 func clashControlServiceURL(cfg *config.BotConfig) string {
 	if raw := embeddedControlServiceURL(); raw != "" {
 		return raw
 	}
-	if cfg != nil {
+	if betaControlOverrideAllowed() && cfg != nil {
 		if raw := strings.TrimSpace(cfg.Account.ControlURL); raw != "" {
 			return strings.TrimRight(raw, "/")
 		}
@@ -2317,7 +2331,7 @@ func clashControlServiceConfigured(cfg *config.BotConfig) bool {
 	if embeddedControlServiceURL() != "" {
 		return true
 	}
-	return cfg != nil && strings.TrimSpace(cfg.Account.ControlURL) != ""
+	return betaControlOverrideAllowed() && cfg != nil && strings.TrimSpace(cfg.Account.ControlURL) != ""
 }
 
 // GetAccountConfig returns safe account metadata only. End users never see,
