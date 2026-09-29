@@ -374,3 +374,43 @@ func TestIncidentMachineAuthorized(t *testing.T) {
 		})
 	}
 }
+
+
+func TestTrimStoredSupportIncidents(t *testing.T) {
+	now := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
+	items := []supportIncident{
+		{ID: "old", ReceivedAt: now.Add(-31 * 24 * time.Hour)},
+		{ID: "edge", ReceivedAt: now.Add(-29 * 24 * time.Hour)},
+		{ID: "new", ReceivedAt: now.Add(-time.Hour)},
+	}
+
+	got := trimStoredSupportIncidents(items, now)
+	if len(got) != 2 {
+		t.Fatalf("trimmed incident count = %d, want 2", len(got))
+	}
+	if got[0].ID != "edge" || got[1].ID != "new" {
+		t.Fatalf("unexpected retained incidents: %+v", got)
+	}
+}
+
+func TestTrimStoredSupportIncidentsKeepsNewestCap(t *testing.T) {
+	now := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
+	items := make([]supportIncident, 0, maxStoredSupportIncidents+7)
+	for i := 0; i < maxStoredSupportIncidents+7; i++ {
+		items = append(items, supportIncident{
+			ID:         fmt.Sprintf("incident-%04d", i),
+			ReceivedAt: now.Add(time.Duration(i) * time.Second),
+		})
+	}
+
+	got := trimStoredSupportIncidents(items, now.Add(time.Duration(len(items))*time.Second))
+	if len(got) != maxStoredSupportIncidents {
+		t.Fatalf("trimmed incident count = %d, want %d", len(got), maxStoredSupportIncidents)
+	}
+	if got[0].ID != "incident-0007" {
+		t.Fatalf("oldest retained incident = %q, want incident-0007", got[0].ID)
+	}
+	if got[len(got)-1].ID != fmt.Sprintf("incident-%04d", len(items)-1) {
+		t.Fatalf("newest retained incident = %q", got[len(got)-1].ID)
+	}
+}
