@@ -767,6 +767,36 @@ func main() {
 		writeJSON(w, http.StatusOK, payload)
 	})
 
+
+	mux.HandleFunc("POST /v1/developer/licenses/set-role", func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
+		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
+		if !control.authorizeAdmin(key, machineID) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"message": "admin license required"})
+			return
+		}
+		var in struct {
+			LicenseID string `json:"license_id"`
+			Role      string `json:"role"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil || strings.TrimSpace(in.LicenseID) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
+			return
+		}
+		role := validRole(in.Role)
+		control.mu.Lock()
+		rec := findLicenseRecordByIDLocked(control, in.LicenseID)
+		if rec == nil {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "license not found"})
+			return
+		}
+		rec.Role = role
+		_ = control.saveLocked()
+		control.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "role": role})
+	})
+
 	mux.HandleFunc("POST /v1/admin/licenses", func(w http.ResponseWriter, r *http.Request) {
 		if !adminAuthorized(r, adminKey) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "admin authorization required"})
