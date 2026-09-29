@@ -65,7 +65,8 @@ jobs:
           $files = @(
             "build/windows/install_update.ps1",
             "tools/run-control-local.ps1",
-            "tools/create-local-admin-license.ps1"
+            "tools/create-local-admin-license.ps1",
+            "tools/start-local-license-test.ps1"
           )
           foreach ($file in $files) {
             $errors = $null
