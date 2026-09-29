@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberPresets, GetMemberSettings, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, UndoMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, UndoMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
@@ -520,7 +520,12 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       if (typed.role === 'developer' || typed.role === 'admin') {
         onInterfaceLevelChange('developer');
       } else {
-        onInterfaceLevelChange('simple');
+        try {
+          const savedLevel = await GetMemberInterfaceLevel();
+          onInterfaceLevelChange(savedLevel === 'advanced' ? 'advanced' : 'simple');
+        } catch {
+          onInterfaceLevelChange('simple');
+        }
       }
     } catch (e) {
       setLicenseError(e instanceof Error ? e.message : String(e));
