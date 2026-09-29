@@ -3877,6 +3877,7 @@ func (b *Bot) Stats() BotStats {
 	if healthScore > 100 { healthScore = 100 }
 	return BotStats{
 		AttacksCompleted: b.attackCount.Load(),
+		SessionAttacks:   b.attackCount.Load(),
 		SessionAttackCap: b.cfg.Attack.MaxAttackPerSession,
 		SearchSkips:      b.skipsCount.Load(),
 		TotalGold:        b.totalGold.Load(),
@@ -3946,6 +3947,7 @@ func (b *Bot) Stats() BotStats {
 
 type BotStats struct {
 	AttacksCompleted int32         `json:"attacks_completed"`
+	SessionAttacks   int32         `json:"session_attacks"`
 	SessionAttackCap int           `json:"session_attack_cap"`
 	SearchSkips      int32         `json:"search_skips"`
 	TotalGold        int64         `json:"total_gold"`
