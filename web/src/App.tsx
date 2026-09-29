@@ -19,6 +19,7 @@ import {
   SaveConfig,
   StartBot,
   StopBot,
+  StopAfterCurrentAttack,
   IsRunning,
   ResetStats,
   GetConfig,
@@ -265,6 +266,7 @@ function App() {
   const [stats, setStats] = useState<BotStats>(() => createEmptyStats());
   const [isRunning, setIsRunning] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
+  const [gracefulStopPending, setGracefulStopPending] = useState(false);
   const [history, setHistory] = useState<AttackReport[]>([]);
   const [resourceHistory, setResourceHistory] = useState<VillageResourceSnapshot[]>([]);
   const [currentArmy, setCurrentArmy] = useState<CurrentArmyStatus | null>(null);
@@ -836,6 +838,7 @@ function App() {
     };
 
     const unsubBotError = safeEventsOn("bot_error", (payload: unknown) => {
+      setGracefulStopPending(false);
       setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(false);
@@ -843,6 +846,7 @@ function App() {
       refreshBootReport();
     });
     const unsubBotInitFailed = safeEventsOn("bot_init_failed", (payload: unknown) => {
+      setGracefulStopPending(false);
       setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(false);
@@ -850,12 +854,14 @@ function App() {
       refreshBootReport();
     });
     const unsubBotStarted = safeEventsOn("bot_started", () => {
+      setGracefulStopPending(false);
       setIsStarting(false);
       setIsRunning(true);
       setBotError('');
       refreshBootReport();
     });
     const unsubBotStopped = safeEventsOn("bot_stopped", (payload: unknown) => {
+      setGracefulStopPending(false);
       setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(false);
@@ -881,6 +887,7 @@ function App() {
     });
 
     const unsubBotBootCancelled = safeEventsOn("bot_boot_cancelled", (payload: unknown) => {
+      setGracefulStopPending(false);
       setIsStarting(false);
       setIsRunning(false);
       setBotError(normalizeBotErrorMessage(payload, 'Le démarrage du bot a été annulé.'));
@@ -900,6 +907,18 @@ function App() {
       if (payload && typeof payload === 'object') {
         setStats(payload as unknown as BotStats);
       }
+    });
+
+    const unsubGracefulScheduled = safeEventsOn("graceful_stop_scheduled", (payload: unknown) => {
+      setGracefulStopPending(true);
+      const message = normalizeBotErrorMessage(payload, 'Arrêt programmé après l’attaque en cours.');
+      setMemberNotice(message);
+    });
+    const unsubGracefulCompleted = safeEventsOn("graceful_stop_completed", (payload: unknown) => {
+      setGracefulStopPending(false);
+      const message = normalizeBotErrorMessage(payload, 'Attaque terminée · arrêt propre de ClashGO.');
+      setMemberNotice(message);
+      window.setTimeout(() => setMemberNotice(''), 6000);
     });
 
     return () => {
@@ -922,6 +941,8 @@ function App() {
       unsubBotBootCancelled();
       unsubAttackHistory();
       unsubStatsUpdated();
+      unsubGracefulScheduled();
+      unsubGracefulCompleted();
     };
   }, [syncMemberScopedView]);
 
@@ -1237,12 +1258,31 @@ function App() {
 
   const handleStop = async () => {
     try {
+      setGracefulStopPending(false);
       const res = await StopBot();
       setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(res.running);
     } catch (err) {
       console.error('Stop failed:', err);
+    }
+  };
+
+  const handleStopAfterAttack = async () => {
+    if (!isRunning || gracefulStopPending) return;
+    try {
+      const res = await StopAfterCurrentAttack();
+      if (res.running) {
+        setGracefulStopPending(true);
+        setMemberNotice(res.message || 'Arrêt programmé après l’attaque en cours.');
+        window.setTimeout(() => setMemberNotice(''), 5000);
+      } else {
+        setGracefulStopPending(false);
+        setIsRunning(false);
+      }
+    } catch (err) {
+      console.error('Graceful stop failed:', err);
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
     }
   };
 
@@ -1715,6 +1755,8 @@ function App() {
               onStartTestSession={handleStartTestSession}
               onStartQuickTestSession={handleStartQuickTestSession}
               onStop={handleStop}
+              onStopAfterAttack={handleStopAfterAttack}
+              gracefulStopPending={gracefulStopPending}
               onOpenAutomation={() => setTab('config')}
               onOpenAccount={() => {
                 setAccountPage('account');
