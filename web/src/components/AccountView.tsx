@@ -218,6 +218,7 @@ interface AccountViewProps {
   interfaceLevel: InterfaceLevel;
   initialPage?: 'account' | 'settings' | 'village';
   testSessionActive?: boolean;
+  automationActive?: boolean;
   onInterfaceLevelChange: (level: InterfaceLevel) => void;
   onAccountChanged: (tag: string) => void;
   onReadinessChanged?: () => void;
@@ -228,6 +229,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   interfaceLevel,
   initialPage = 'account',
   testSessionActive = false,
+  automationActive = false,
   onInterfaceLevelChange,
   onAccountChanged,
   onReadinessChanged,
@@ -640,7 +642,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   }, [profile, busy, playerTag, serviceConfigured, refresh]);
 
   const linkClashAccount = async () => {
-    if (accountLinkBusy) return;
+    if (accountLinkBusy || automationActive) return;
     let tag = accountTagInput.trim().toUpperCase().replace(/\s+/g, '');
     if (!tag) {
       setAccountLinkMessage('Entre ton tag joueur Clash of Clans.');
@@ -683,6 +685,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   };
 
   const unlink = async () => {
+    if (automationActive) return;
     setBusy(true);
     try {
       await ClearAccount();
@@ -1491,7 +1494,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 <button
                   type="button"
                   onClick={() => setConfirmUnlink(true)}
-                  disabled={busy}
+                  disabled={busy || automationActive}
                   className="w-full px-3 py-2.5 rounded-lg text-left text-xs font-black text-rose-500 hover:bg-rose-500/5 disabled:opacity-40"
                 >
                   Délier le compte
@@ -1505,7 +1508,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     <button
                       type="button"
                       onClick={() => void unlink()}
-                      disabled={busy}
+                      disabled={busy || automationActive}
                       className="flex-1 rounded-lg bg-rose-500 px-2 py-2 text-[9px] font-black uppercase tracking-wider text-white disabled:opacity-40"
                     >
                       {busy ? 'Déliage…' : 'Confirmer'}
@@ -1513,7 +1516,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     <button
                       type="button"
                       onClick={() => setConfirmUnlink(false)}
-                      disabled={busy}
+                      disabled={busy || automationActive}
                       className="rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-2 text-[9px] font-black uppercase tracking-wider text-zinc-500 disabled:opacity-40"
                     >
                       Annuler
@@ -1591,7 +1594,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 <button
                   type="button"
                   onClick={() => void linkClashAccount()}
-                  disabled={accountLinkBusy || !accountTagInput.trim()}
+                  disabled={accountLinkBusy || automationActive || !accountTagInput.trim()}
                   className="rounded-xl bg-zinc-950 dark:bg-white px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950 disabled:opacity-40"
                 >
                   {accountLinkBusy ? 'Enregistrement…' : 'Lier ce compte'}
@@ -1600,6 +1603,11 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               <div className="mt-2 text-[10px] font-semibold text-zinc-400">
                 Le tag est visible dans ton profil Clash of Clans. Aucun mot de passe Supercell n’est demandé.
               </div>
+              {automationActive && (
+                <div className="mt-3 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 px-4 py-3 text-[11px] font-bold text-amber-700 dark:text-amber-300">
+                  Arrête ClashGO avant de changer ou délier le compte joueur.
+                </div>
+              )}
               {accountLinkMessage && (
                 <div className="mt-3 rounded-xl bg-zinc-100 dark:bg-zinc-800 px-4 py-3 text-xs font-bold text-zinc-600 dark:text-zinc-300">
                   {accountLinkMessage}
