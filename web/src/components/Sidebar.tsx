@@ -16,6 +16,8 @@ interface SidebarProps {
   licenseRole: 'member' | 'developer' | 'admin' | '';
   memberName?: string;
   licensePlan?: string;
+  licenseExpiresAt?: string;
+  speedProfile?: string;
   startReady: boolean;
   startBlockedReason?: string;
 }
@@ -34,6 +36,8 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
   licenseRole,
   memberName,
   licensePlan,
+  licenseExpiresAt,
+  speedProfile,
   startReady,
   startBlockedReason,
 }) => {
@@ -58,6 +62,25 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
     developer: 2,
   };
   const visibleItems = menuItems.filter((item) => levelRank[interfaceLevel] >= levelRank[item.minLevel]);
+
+  const licenseRemaining = React.useMemo(() => {
+    if (!licenseActivated) return '';
+    if (!licenseExpiresAt) return 'À vie';
+    const expiry = new Date(licenseExpiresAt).getTime();
+    if (!Number.isFinite(expiry)) return '';
+    const remaining = expiry - Date.now();
+    if (remaining <= 0) return 'Expirée';
+    const days = Math.ceil(remaining / 86_400_000);
+    if (days <= 1) return 'Expire aujourd’hui';
+    return days + ' j';
+  }, [licenseActivated, licenseExpiresAt]);
+
+  const speedLabel = React.useMemo(() => {
+    const raw = String(speedProfile || '').trim().toLowerCase();
+    if (raw === 'fast') return 'Rapide';
+    if (raw === 'safe' || raw === 'cautious') return 'Prudente';
+    return 'Normale';
+  }, [speedProfile]);
 
   return (
     <aside
@@ -145,6 +168,11 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
                   <span>{licenseActivated ? (licenseRole || 'member') : 'Non activé'}</span>
                   {licenseActivated && licensePlan && <span>· {licensePlan === 'free_2d' ? 'Free 2J' : licensePlan === 'week_1' ? '1 sem.' : licensePlan === 'month_1' ? '1 mois' : 'À vie'}</span>}
                 </div>
+                {licenseActivated && (
+                  <div className="mt-1 truncate text-[8px] font-bold text-zinc-500">
+                    {licenseRemaining ? licenseRemaining + ' · ' : ''}Cadence {speedLabel}
+                  </div>
+                )}
               </div>
             </div>
           </button>
