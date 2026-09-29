@@ -368,3 +368,30 @@ func TestSetBlueStacksInstanceRejectsInFlightStartup(t *testing.T) {
 		t.Fatal("expected BlueStacks instance change to be rejected during startup")
 	}
 }
+
+
+func TestAutonomousStopDetailsReportsAttackCap(t *testing.T) {
+	reason, message := autonomousStopDetails(bot.BotStats{
+		SessionAttacks:   50,
+		SessionAttackCap: 50,
+	})
+	if reason != "attack_cap" {
+		t.Fatalf("reason=%q want attack_cap", reason)
+	}
+	if message != "Session terminée · limite de 50 attaques atteinte." {
+		t.Fatalf("message=%q", message)
+	}
+}
+
+func TestAutonomousStopDetailsKeepsGenericRuntimeStop(t *testing.T) {
+	reason, message := autonomousStopDetails(bot.BotStats{
+		SessionAttacks:   12,
+		SessionAttackCap: 50,
+	})
+	if reason != "runtime_ended" {
+		t.Fatalf("reason=%q want runtime_ended", reason)
+	}
+	if message != "La session ClashGO est terminée." {
+		t.Fatalf("message=%q", message)
+	}
+}
