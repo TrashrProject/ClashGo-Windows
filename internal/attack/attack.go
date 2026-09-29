@@ -30,6 +30,7 @@ type Executor struct {
 	client        *adb.Client
 	cal           *game.Calibration
 	cfg           *config.AttackConfig
+	armyGuardEnabled bool
 	logger        zerolog.Logger
 	classify      func(gocv.Mat) (game.GameState, int)
 	tappedSiegeXs map[int]bool
@@ -419,6 +420,60 @@ func (e *Executor) SetActiveStrategy(s *strategy.DynamicStrategy) {
 
 func (e *Executor) UpdateConfig(cfg *config.AttackConfig) {
 	e.cfg = cfg
+}
+
+func (e *Executor) SetArmyGuardEnabled(enabled bool) {
+	e.armyGuardEnabled = enabled
+}
+
+// InspectArmyGuard performs a read-only pre-deploy inspection of the live
+// battle bar. It never taps the screen. A proven mismatch can therefore be
+// treated by the search loop exactly like any other rejected target and moved
+// past with the already-verified Next flow.
+func (e *Executor) InspectArmyGuard(screen gocv.Mat) (ArmyInspectionSnapshot, error) {
+	snapshot := ArmyInspectionSnapshot{Timestamp: time.Now(), Ready: true}
+	if !e.armyGuardEnabled {
+		return snapshot, nil
+	}
+	if e.cfg == nil {
+		return snapshot, fmt.Errorf("army guard: attack config unavailable")
+	}
+	profile, ok := e.cfg.Farm.ActiveProfile()
+	if !ok {
+		return snapshot, nil
+	}
+	if screen.Empty() || screen.Cols() < 2 || screen.Rows() < 2 {
+		return snapshot, fmt.Errorf("army guard: battle frame unavailable")
+	}
+
+	var pCfg PrecisionConfig
+	pData, ok := readConfigJSON("precision_config.json")
+	if !ok || json.Unmarshal(pData, &pCfg) != nil || pCfg.Width <= 0 || pCfg.Height <= 0 {
+		return snapshot, fmt.Errorf("army guard: precision config unavailable")
+	}
+
+	w, h := screen.Cols(), screen.Rows()
+	mBarY := int(float64(h) * 0.78)
+	if pCfg.BarY > 0 {
+		mBarY = int(float64(pCfg.BarY) * float64(h) / float64(pCfg.Height))
+	}
+	if mBarY > int(float64(h)*0.92) {
+		mBarY = int(float64(h) * 0.92)
+	}
+
+	slotMgr := NewSlotManager(screen, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+	slots := slotMgr.GetAllSlots()
+	if len(slots) == 0 {
+		return snapshot, fmt.Errorf("army guard: no active troop slots detected")
+	}
+
+	counter := NewTroopCounter(pCfg.Width, pCfg.Height, e.logger)
+	defer counter.Close()
+	counts := counter.DetectCounts(screen, slots, slotMgr.GetBarY())
+
+	snapshot = buildArmyInspection(slots, counts, &profile)
+	writeArmyInspectionSnapshot(snapshot)
+	return snapshot, nil
 }
 
 // Validate ensures all required templates for the strategy exist or are covered by manual labels
