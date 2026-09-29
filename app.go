@@ -1,6 +1,6 @@
 package main
 
-// Build marker: beta pipeline validation after matchmaking/BlueStacks stability fixes.
+// Build marker: beta pipeline validation after spell-ring test stabilization.
 import (
 	"bytes"
 	"context"
