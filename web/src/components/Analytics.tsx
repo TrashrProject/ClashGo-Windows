@@ -1044,7 +1044,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         return {
           attacks: 0, avgStars: 0, threeStarRate: 0, fullDeployRate: 0,
           avgSearchMs: 0, avgDeployMs: 0, avgCycleMs: 0,
-          avgOr: 0, avgElixir: 0, avgDE: 0,
+          avgGold: 0, avgElixir: 0, avgDE: 0,
         };
       }
       let stars = 0, triples = 0, complete = 0;
@@ -1069,7 +1069,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         avgSearchMs: searchMs / n,
         avgDeployMs: deployMs / n,
         avgCycleMs: cycleMs / n,
-        avgOr: gold / n,
+        avgGold: gold / n,
         avgElixir: elixir / n,
         avgDE: de / n,
       };
@@ -2329,7 +2329,7 @@ Best optimization target: {pipeline.dominantTunable.label}
             { label: 'Recherche', value: `${(recentPerformance.current.avgSearchMs / 1000).toFixed(1)}s`, delta: perfDelta(recentPerformance.current.avgSearchMs, recentPerformance.previous.avgSearchMs, true) },
             { label: 'Deploy', value: `${(recentPerformance.current.avgDeployMs / 1000).toFixed(1)}s`, delta: perfDelta(recentPerformance.current.avgDeployMs, recentPerformance.previous.avgDeployMs, true) },
             { label: 'Cycle', value: `${(recentPerformance.current.avgCycleMs / 1000).toFixed(0)}s`, delta: perfDelta(recentPerformance.current.avgCycleMs, recentPerformance.previous.avgCycleMs, true) },
-            { label: 'Avg G+E', value: compact(recentPerformance.current.avgOr + recentPerformance.current.avgElixir), delta: perfDelta(recentPerformance.current.avgOr + recentPerformance.current.avgElixir, recentPerformance.previous.avgOr + recentPerformance.previous.avgElixir) },
+            { label: 'Avg G+E', value: compact(recentPerformance.current.avgGold + recentPerformance.current.avgElixir), delta: perfDelta(recentPerformance.current.avgGold + recentPerformance.current.avgElixir, recentPerformance.previous.avgGold + recentPerformance.previous.avgElixir) },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/30 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
