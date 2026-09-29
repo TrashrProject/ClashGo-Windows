@@ -76,3 +76,19 @@ func TestCloudflareProtectsActiveAdminFromSelfLockout(t *testing.T) {
 		}
 	}
 }
+
+func TestDeveloperRoleCannotReceiveCommercialCustomerData(t *testing.T) {
+	workerBytes, err := os.ReadFile("cloudflare/worker/src/index.js")
+	if err != nil { t.Fatal(err) }
+	worker := string(workerBytes)
+	for _, field := range []string{"customer_notes,", "payment_status,", "total_paid_cents,", "next_due_at,"} {
+		if !strings.Contains(worker, field) { t.Errorf("worker developer redaction no longer strips %s", field) }
+	}
+
+	goBytes, err := os.ReadFile("cmd/account_proxy/main.go")
+	if err != nil { t.Fatal(err) }
+	goSrc := string(goBytes)
+	for _, assignment := range []string{"cp.CustomerNotes = \"\"", "cp.PaymentStatus = \"\"", "cp.TotalPaidCents = 0", "cp.NextDueAt = time.Time{}"} {
+		if !strings.Contains(goSrc, assignment) { t.Errorf("Go fallback developer redaction missing %q", assignment) }
+	}
+}
