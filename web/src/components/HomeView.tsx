@@ -21,7 +21,7 @@ interface HomeViewProps {
   readinessIssues: string[];
   startupCheck: {
     ready: boolean;
-    checks: Array<{ id: string; label: string; ok: boolean; message: string }>;
+    checks: Array<{ id: string; label: string; ok: boolean; message: string; action?: string; action_label?: string }>;
   } | null;
   startupCheckRunning: boolean;
   onRunStartupCheck: () => void;
@@ -145,6 +145,25 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const sessionProgress = sessionCap > 0
     ? Math.max(0, Math.min(100, Math.round((sessionAttacks / sessionCap) * 100)))
     : 0;
+
+  const runCheckAction = React.useCallback((action?: string) => {
+    switch (action) {
+      case 'account':
+        onOpenAccount();
+        break;
+      case 'automation':
+        onOpenAutomation();
+        break;
+      case 'member_settings':
+        onOpenMemberSettings();
+        break;
+      case 'settings':
+        onOpenSettings();
+        break;
+      default:
+        break;
+    }
+  }, [onOpenAccount, onOpenAutomation, onOpenMemberSettings, onOpenSettings]);
 
   const botLabel = starting ? 'Démarrage…' : running ? 'Bot en cours' : 'Bot arrêté';
   const botSub = starting
@@ -412,9 +431,18 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                     }>
                       {check.ok ? 'check_circle' : 'cancel'}
                     </span>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="text-xs font-black text-zinc-950 dark:text-white">{check.label}</div>
                       <div className="mt-0.5 text-[10px] font-semibold text-zinc-500">{check.message}</div>
+                      {!check.ok && check.action && (
+                        <button
+                          type="button"
+                          onClick={() => runCheckAction(check.action)}
+                          className="mt-2 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-500 transition hover:border-zinc-400 hover:text-zinc-950 dark:hover:text-white"
+                        >
+                          {check.action_label || 'Corriger'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
