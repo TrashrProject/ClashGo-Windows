@@ -33,6 +33,7 @@ const friendlyBootAction = (value?: string): string => {
 interface SettingsViewProps {
   stats: BotStats;
   isRunning: boolean;
+  isStarting: boolean;
   adbPort: number;
   darkMode: boolean;
   setDarkMode: (val: boolean) => void;
@@ -47,7 +48,7 @@ interface SettingsViewProps {
 }
 
 const SettingsView: React.FC<SettingsViewProps> = React.memo(({
-  stats, isRunning, adbPort, darkMode, setDarkMode, onResetStats,
+  stats, isRunning, isStarting, adbPort, darkMode, setDarkMode, onResetStats,
   appVersion, updateStatus, onCheckUpdates, onClearSkip, systemDiagnostics, onExportDiagnostics, onSetBlueStacksInstance,
 }) => {
   // Destructive action protection: the first click only ARMS the reset
@@ -87,7 +88,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   }, []);
 
   const handleInstanceChange = async (instance: string) => {
-    if (instanceBusy) return;
+    if (instanceBusy || isRunning || isStarting) return;
     setInstanceBusy(true);
     setInstanceMessage('');
     try {
@@ -213,7 +214,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
                 </div>
                 <select
                   value={systemDiagnostics?.configured_instance || ''}
-                  disabled={instanceBusy || !systemDiagnostics}
+                  disabled={instanceBusy || isRunning || isStarting || !systemDiagnostics}
                   onChange={(e) => handleInstanceChange(e.target.value)}
                   className="max-w-[220px] rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-bold text-white outline-none focus:border-emerald-500 disabled:opacity-50"
                   aria-label="Sélection de l’instance BlueStacks"
@@ -226,7 +227,12 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
                   ))}
                 </select>
               </div>
-              {instanceMessage && (
+              {(isRunning || isStarting) && (
+                <div className="mt-2 text-[9px] font-medium text-amber-400">
+                  Arrête ClashGO avant de changer d’instance BlueStacks.
+                </div>
+              )}
+              {instanceMessage && !(isRunning || isStarting) && (
                 <div className="mt-2 text-[9px] font-medium text-zinc-400">{instanceMessage}</div>
               )}
             </div>
