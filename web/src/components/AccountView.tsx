@@ -254,6 +254,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       const typed = state as LicenseState;
       setLicenseState(typed);
       setLicenseKey('');
+      await refreshMemberSettings();
       if (typed.role === 'developer' || typed.role === 'admin') {
         onInterfaceLevelChange('developer');
       } else {
@@ -293,6 +294,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     try {
       await DeactivateLicense();
       setConfirmDeactivate(false);
+      setMemberSettings(null);
       await refreshLicense();
       onInterfaceLevelChange('simple');
     } catch (e) {
@@ -346,6 +348,11 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     const off = safeLicenseEventsOn('license_state', (payload) => {
       if (!payload || typeof payload !== 'object') return;
       setLicenseState(payload);
+      if (payload.activated) {
+        void refreshMemberSettings();
+      } else {
+        setMemberSettings(null);
+      }
       if (payload.activated && (payload.role === 'developer' || payload.role === 'admin')) {
         onInterfaceLevelChange('developer');
       } else if (interfaceLevel === 'developer') {
@@ -353,7 +360,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       }
     });
     return off;
-  }, [interfaceLevel, onInterfaceLevelChange]);
+  }, [interfaceLevel, onInterfaceLevelChange, refreshMemberSettings]);
 
   // The local/proxied account service may start a few seconds after ClashGO.
   // Retry automatically while no profile is available so users never have to
