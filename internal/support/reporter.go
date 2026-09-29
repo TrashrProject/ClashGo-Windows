@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -23,6 +25,7 @@ type IdentityProvider interface {
 
 type incident struct {
 	At         string         `json:"at"`
+	QueueOwner string         `json:"_queue_owner,omitempty"`
 	Level      string         `json:"level"`
 	Message    string         `json:"message"`
 	AppVersion string         `json:"app_version"`
@@ -36,6 +39,15 @@ const (
 	maxIncidentMessageBytes = 4000
 	maxIncidentFieldBytes   = 8000
 )
+
+func queueOwnerHash(licenseKey string) string {
+	key := strings.ToUpper(strings.TrimSpace(licenseKey))
+	if key == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
+}
 
 func truncateText(value string, max int) string {
 	if max <= 0 || len(value) <= max {
@@ -97,15 +109,24 @@ func (r *Reporter) Write(p []byte) (int, error) {
 	delete(raw, "password")
 	delete(raw, "authorization")
 
+	if r.identity == nil {
+		return len(p), nil
+	}
+	licenseKey := strings.TrimSpace(r.identity.LicenseKey())
+	machineID := strings.TrimSpace(r.identity.MachineID())
+	if licenseKey == "" || machineID == "" {
+		// Pre-activation errors cannot be attributed safely later.
+		return len(p), nil
+	}
+
 	ev := incident{
 		At: time.Now().UTC().Format(time.RFC3339Nano),
+		QueueOwner: queueOwnerHash(licenseKey),
 		Level: level,
 		Message: truncateText(message, maxIncidentMessageBytes),
 		AppVersion: r.appVersion,
+		MachineID: machineID,
 		Fields: sanitizeFields(raw),
-	}
-	if r.identity != nil {
-		ev.MachineID = r.identity.MachineID()
 	}
 	if !r.shouldQueue(ev) {
 		return len(p), nil
@@ -261,9 +282,16 @@ func (r *Reporter) flushLoop() {
 }
 
 func (r *Reporter) Flush(ctx context.Context) {
-	if r.baseURL == "" || r.identity == nil || r.identity.LicenseKey() == "" {
+	if r.baseURL == "" || r.identity == nil {
 		return
 	}
+	licenseKey := strings.TrimSpace(r.identity.LicenseKey())
+	machineID := strings.TrimSpace(r.identity.MachineID())
+	if licenseKey == "" || machineID == "" {
+		return
+	}
+	currentOwner := queueOwnerHash(licenseKey)
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -275,23 +303,40 @@ func (r *Reporter) Flush(ctx context.Context) {
 
 	keep := make([]incident, 0)
 	for i, ev := range pending {
-		body, _ := json.Marshal(ev)
+		// Queue routing metadata binds the incident to the licence that owned it
+		// when the error occurred. Never send an old member's error under a
+		// newly active licence. Legacy unowned rows are discarded because their
+		// original owner cannot be proven safely.
+		if ev.QueueOwner == "" {
+			continue
+		}
+		if ev.QueueOwner != currentOwner || strings.TrimSpace(ev.MachineID) != machineID {
+			keep = append(keep, ev)
+			continue
+		}
+
+		send := ev
+		send.QueueOwner = "" // local routing metadata must never leave the PC.
+		body, _ := json.Marshal(send)
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.baseURL+"/v1/support/incidents", bytes.NewReader(body))
 		if err != nil {
-			keep = append(keep, pending[i:]...)
+			keep = append(keep, ev)
+			keep = append(keep, pending[i+1:]...)
 			break
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-ClashGO-License", r.identity.LicenseKey())
+		req.Header.Set("X-ClashGO-License", licenseKey)
 		resp, err := r.client.Do(req)
 		if err != nil {
-			keep = append(keep, pending[i:]...)
+			keep = append(keep, ev)
+			keep = append(keep, pending[i+1:]...)
 			break
 		}
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		_ = resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			keep = append(keep, pending[i:]...)
+			keep = append(keep, ev)
+			keep = append(keep, pending[i+1:]...)
 			break
 		}
 	}
