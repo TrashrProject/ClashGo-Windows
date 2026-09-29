@@ -70,6 +70,15 @@ const formatLicenseRemaining = (expiresAt?: string): string => {
   return days === 1 ? 'Reste 1 jour' : `Reste ${days} jours`;
 };
 
+const licenseExpiryState = (expiresAt?: string): 'none' | 'soon' | 'expired' => {
+  if (!expiresAt) return 'none';
+  const expiry = new Date(expiresAt).getTime();
+  if (!Number.isFinite(expiry)) return 'none';
+  const remaining = expiry - Date.now();
+  if (remaining <= 0) return 'expired';
+  return remaining <= 3 * 24 * 60 * 60 * 1000 ? 'soon' : 'none';
+};
+
 const isOfflineGrace = (state: LicenseState | null): boolean =>
   Boolean(state?.error && state.error.toLowerCase().includes('offline'));
 
@@ -553,6 +562,18 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
           <div className="mt-4 flex items-center gap-3 rounded-xl bg-amber-500/10 px-4 py-3 text-xs font-bold text-amber-500">
             <span className="material-symbols-outlined text-base">cloud_off</span>
             Connexion au serveur de licence indisponible · accès temporaire hors ligne actif.
+          </div>
+        )}
+        {licenseState?.activated && licenseExpiryState(licenseState.expires_at) === 'soon' && (
+          <div className="mt-4 flex items-center gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs font-bold text-amber-500">
+            <span className="material-symbols-outlined text-base">schedule</span>
+            Ta licence expire bientôt. Tu peux la renouveler avec la même clé, sans refaire l’activation.
+          </div>
+        )}
+        {licenseExpiryState(licenseState?.expires_at) === 'expired' && (
+          <div className="mt-4 flex items-center gap-3 rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-xs font-bold text-rose-500">
+            <span className="material-symbols-outlined text-base">event_busy</span>
+            Cette licence est expirée. Après renouvellement, clique sur « Actualiser la licence ».
           </div>
         )}
       </section>
