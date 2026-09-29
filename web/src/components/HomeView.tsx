@@ -65,6 +65,14 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
         detail: 'ClashGO prépare le prochain cycle.',
         icon: 'home',
       };
+    case 'session_complete':
+      return {
+        title: 'Session terminée',
+        detail: event.fields?.reason === 'attack_cap'
+          ? `Limite atteinte · ${n('attacks')} / ${n('cap')} attaques.`
+          : 'ClashGO a terminé la session.',
+        icon: 'task_alt',
+      };
     case 'recovery':
       return {
         title: event.fields?.stage === 'success' ? 'Récupération terminée' : 'Récupération automatique',
