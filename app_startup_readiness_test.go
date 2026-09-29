@@ -89,21 +89,39 @@ func TestMemberRuntimeConfigReadyRejectsInvalidBounds(t *testing.T) {
 	}
 }
 
-func TestStartupCheckItemClearsActionsWhenReady(t *testing.T) {
-	item := StartupCheckItem{
-		ID:          "license",
-		Label:       "Licence",
-		OK:          true,
-		Message:     "Licence valide",
-		Action:      "account",
-		ActionLabel: "Ouvrir Mon ClashGO",
-	}
 
-	// Ready checks are expected to be emitted without remediation buttons.
-	if item.OK && (item.Action == "" || item.ActionLabel == "") {
-		// The constructor helper inside GetStartupReadiness strips these values.
-		// This assertion documents the DTO's intended semantics without invoking
-		// platform diagnostics in a unit test.
-		return
+
+
+func TestNewStartupCheckItemClearsRemediationWhenReady(t *testing.T) {
+	item := newStartupCheckItem(
+		"license",
+		"Licence",
+		true,
+		"Licence valide",
+		"account",
+		"Ouvrir Mon ClashGO",
+	)
+	if !item.OK {
+		t.Fatal("ready check unexpectedly marked as blocked")
+	}
+	if item.Action != "" || item.ActionLabel != "" {
+		t.Fatalf("ready check leaked remediation action: %+v", item)
+	}
+}
+
+func TestNewStartupCheckItemKeepsRemediationWhenBlocked(t *testing.T) {
+	item := newStartupCheckItem(
+		"adb",
+		"ADB",
+		false,
+		"ADB n’est pas détecté",
+		"settings",
+		"Configurer ADB",
+	)
+	if item.OK {
+		t.Fatal("blocked check unexpectedly marked ready")
+	}
+	if item.Action != "settings" || item.ActionLabel != "Configurer ADB" {
+		t.Fatalf("blocked check lost remediation action: %+v", item)
 	}
 }
