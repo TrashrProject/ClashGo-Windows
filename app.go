@@ -2647,6 +2647,7 @@ func saveMemberPresetStore(path string, store memberPresetStore) error {
 		return err
 	}
 	tmp := path + ".tmp"
+	backup := path + ".bak"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
@@ -2654,10 +2655,24 @@ func saveMemberPresetStore(path string, store memberPresetStore) error {
 		_ = f.Sync()
 		_ = f.Close()
 	}
+
+	_ = os.Remove(backup)
+	hadOriginal := false
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Rename(path, backup); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+		hadOriginal = true
+	}
 	if err := os.Rename(tmp, path); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backup, path)
+		}
 		_ = os.Remove(tmp)
 		return err
 	}
+	_ = os.Remove(backup)
 	return nil
 }
 
