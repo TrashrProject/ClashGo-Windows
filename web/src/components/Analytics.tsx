@@ -12,10 +12,10 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   // (Tailwind class names are NOT valid CSS color values — using them
   // inside the gradient string would silently drop the donut).
   const starData = [
-    { label: '3 Stars', count: stats.stars_3, color: 'bg-emerald-500', hex: '#10b981', bg: 'bg-emerald-500/10' },
-    { label: '2 Stars', count: stats.stars_2, color: 'bg-zinc-800', hex: '#27272a', bg: 'bg-zinc-800/10' },
-    { label: '1 Star', count: stats.stars_1, color: 'bg-zinc-400', hex: '#a1a1aa', bg: 'bg-zinc-400/10' },
-    { label: '0 Stars', count: stats.stars_0, color: 'bg-rose-500', hex: '#f43f5e', bg: 'bg-rose-500/10' },
+    { label: '3 étoiles', count: stats.stars_3, color: 'bg-emerald-500', hex: '#10b981', bg: 'bg-emerald-500/10' },
+    { label: '2 étoiles', count: stats.stars_2, color: 'bg-zinc-800', hex: '#27272a', bg: 'bg-zinc-800/10' },
+    { label: '1 étoile', count: stats.stars_1, color: 'bg-zinc-400', hex: '#a1a1aa', bg: 'bg-zinc-400/10' },
+    { label: '0 étoile', count: stats.stars_0, color: 'bg-rose-500', hex: '#f43f5e', bg: 'bg-rose-500/10' },
   ];
 
   const validResourceHistory = resourceHistory.filter((s) => s.valid);
@@ -161,7 +161,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const recent = (history ?? []).slice(0, 5);
     const baseline = (history ?? []).slice(5, 20);
     if (recent.length < 3 || baseline.length < 5) {
-      return { status: 'Learning', reasons: ['Need more attacks for a stable baseline'] };
+      return { status: 'Apprentissage', reasons: ['Need more attacks for a stable baseline'] };
     }
 
     const summarize = (rows: AttackReport[]) => {
@@ -282,10 +282,10 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       previous,
       metrics: current ? [
         { label: 'G+E / h', value: compact(current.gePerHour), delta: previous ? delta(current.gePerHour, previous.gePerHour) : null },
-        { label: 'Attacks / h', value: current.attacksPerHour.toFixed(2), delta: previous ? delta(current.attacksPerHour, previous.attacksPerHour) : null },
-        { label: 'Avg stars', value: current.avgStars.toFixed(2), delta: previous ? delta(current.avgStars, previous.avgStars) : null },
-        { label: 'Full deploy', value: `${current.fullDeployRate.toFixed(0)}%`, delta: previous ? delta(current.fullDeployRate, previous.fullDeployRate) : null },
-        { label: 'True loop', value: `${current.avgLoopSeconds.toFixed(0)}s`, delta: previous ? delta(current.avgLoopSeconds, previous.avgLoopSeconds, true) : null },
+        { label: 'Attaques / h', value: current.attacksPerHour.toFixed(2), delta: previous ? delta(current.attacksPerHour, previous.attacksPerHour) : null },
+        { label: 'Étoiles moy.', value: current.avgStars.toFixed(2), delta: previous ? delta(current.avgStars, previous.avgStars) : null },
+        { label: 'Déploiement complet', value: `${current.fullDeployRate.toFixed(0)}%`, delta: previous ? delta(current.fullDeployRate, previous.fullDeployRate) : null },
+        { label: 'Cycle réel', value: `${current.avgLoopSeconds.toFixed(0)}s`, delta: previous ? delta(current.avgLoopSeconds, previous.avgLoopSeconds, true) : null },
       ] : [],
     };
   }, [sessionStats]);
@@ -495,7 +495,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     if (n.n < 5 || e.n < 3) {
       return {
         status: 'learning',
-        message: 'Need 5 natural results and 3 early exits before comparing safely.',
+        message: 'Il faut 5 fins naturelles et 3 sorties anticipées avant de comparer correctement.',
         natural: n,
         early: e,
         deltaYieldPct: 0,
@@ -640,13 +640,13 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
 
   const deployBottleneck = React.useMemo(() => {
     const candidates = [
-      { key: 'detect', label: 'Position detection', ms: deployHotPath.avgDetectMs },
+      { key: 'detect', label: 'Détection position', ms: deployHotPath.avgDetectMs },
       { key: 'classify', label: 'Classification', ms: deployHotPath.avgClassifyMs },
-      { key: 'ocr', label: 'Selected-card OCR', ms: deployHotPath.avgCardOCRMs },
+      { key: 'ocr', label: 'OCR carte sélectionnée', ms: deployHotPath.avgCardOCRMs },
     ];
     const measured = candidates.filter((x) => Number.isFinite(x.ms) && x.ms > 0);
     if (measured.length === 0) {
-      return { label: 'Learning', ms: 0, share: 0 };
+      return { label: 'Apprentissage', ms: 0, share: 0 };
     }
     const total = measured.reduce((sum, x) => sum + x.ms, 0);
     const dominant = measured.reduce((best, x) => x.ms > best.ms ? x : best, measured[0]);
@@ -723,10 +723,10 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
 
   const pipeline = React.useMemo(() => {
     const rows = [
-      { label: 'Cooldown (intentional)', seconds: avgCooldownSeconds, tunable: false },
-      { label: 'Preparation', seconds: avgPreparationSeconds, tunable: true },
-      { label: 'Search', seconds: avgSearchSeconds, tunable: true },
-      { label: 'Deployment', seconds: avgDeploySeconds, tunable: false },
+      { label: 'Pause volontaire', seconds: avgCooldownSeconds, tunable: false },
+      { label: 'Préparation', seconds: avgPreparationSeconds, tunable: true },
+      { label: 'Recherche', seconds: avgSearchSeconds, tunable: true },
+      { label: 'Déploiement', seconds: avgDeploySeconds, tunable: false },
       { label: 'Combat', seconds: avgCombatSeconds, tunable: true },
     ];
     const total = rows.reduce((sum, row) => sum + row.seconds, 0);
@@ -818,12 +818,12 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   const preparationBreakdown = React.useMemo(() => {
     const rows = (history ?? []).filter((r) => (r.preparation_duration_ms || 0) > 0);
     const definitions = [
-      { key: 'attack', label: 'Attack button', read: (r: AttackReport) => r.prep_attack_button_ms || 0 },
-      { key: 'find', label: 'Find Match', read: (r: AttackReport) => r.prep_find_match_ms || 0 },
-      { key: 'armyMenu', label: 'Army menu', read: (r: AttackReport) => r.prep_army_menu_ms || 0 },
-      { key: 'armySlot', label: 'Army slot', read: (r: AttackReport) => r.prep_army_slot_ms || 0 },
-      { key: 'battle', label: 'Battle button', read: (r: AttackReport) => r.prep_battle_button_ms || 0 },
-      { key: 'ready', label: 'Matchmaking ready', read: (r: AttackReport) => r.prep_matchmaking_ready_ms || 0 },
+      { key: 'attack', label: 'Bouton Attaquer', read: (r: AttackReport) => r.prep_attack_button_ms || 0 },
+      { key: 'find', label: 'Trouver une partie', read: (r: AttackReport) => r.prep_find_match_ms || 0 },
+      { key: 'armyMenu', label: 'Menu armée', read: (r: AttackReport) => r.prep_army_menu_ms || 0 },
+      { key: 'armySlot', label: 'Emplacement armée', read: (r: AttackReport) => r.prep_army_slot_ms || 0 },
+      { key: 'battle', label: 'Bouton Combat', read: (r: AttackReport) => r.prep_battle_button_ms || 0 },
+      { key: 'ready', label: 'Matchmaking prêt', read: (r: AttackReport) => r.prep_matchmaking_ready_ms || 0 },
     ];
 
     const measured = definitions.map((d) => ({
@@ -837,11 +837,11 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       : 0;
     const residual = Math.max(0, avgTotal - measuredTotal);
     const all = residual > 1
-      ? [...measured, { key: 'other', label: 'Other overhead', ms: residual }]
+      ? [...measured, { key: 'other', label: 'Autres délais', ms: residual }]
       : measured;
     const dominant = all.reduce(
       (best, row) => row.ms > best.ms ? row : best,
-      all[0] ?? { key: 'none', label: 'Learning', ms: 0 },
+      all[0] ?? { key: 'none', label: 'Apprentissage', ms: 0 },
     );
     return {
       attacks: rows.length,
@@ -969,7 +969,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         gold30: 0, elixir30: 0, de30: 0,
         gold60: 0, elixir60: 0, de60: 0,
         lowGE60: 0, highGE60: 0,
-        confidence: 'Learning', cv,
+        confidence: 'Apprentissage', cv,
         rows: [1, 8, 24].map((hours) => ({
           hours, gold: gph * hours, elixir: eph * hours, de: dph * hours,
         })),
@@ -1009,7 +1009,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       return sorted[lo] * (1 - weight) + sorted[hi] * weight;
     };
 
-    let confidence = 'Learning';
+    let confidence = 'Apprentissage';
     if (measured.length >= 20 && cv <= 0.25 && (stats.health_score ?? 0) >= 90) confidence = 'High';
     else if (measured.length >= 10 && cv <= 0.45 && (stats.health_score ?? 0) >= 75) confidence = 'Medium';
 
@@ -1111,7 +1111,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       total,
       pipeRate: total > 0 ? pipe * 100 / total : 0,
       legacyRate: total > 0 ? legacy * 100 / total : 0,
-      label: total === 0 ? 'Learning' : legacy >= pipe ? 'Legacy' : 'Pipe',
+      label: total === 0 ? 'Apprentissage' : legacy >= pipe ? 'Legacy' : 'Pipe',
     };
   }, [stats.adb_health?.pipe_taps_total, stats.adb_health?.legacy_taps_total]);
 
@@ -1138,7 +1138,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
 
     return [
       {
-        label: 'Full deployment',
+        label: 'Déploiement complet',
         value: fullDeploy,
         display: count > 0 ? `${fullDeploy.toFixed(1)}%` : '—',
         threshold: 98,
@@ -1146,7 +1146,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         detail: `${rows.filter((r) => r.deploy_success).length}/${count} attacks`,
       },
       {
-        label: 'Return Home',
+        label: 'Retour village',
         value: returnHome,
         display: returnRows.length > 0 ? `${returnHome.toFixed(1)}%` : '—',
         threshold: 98,
@@ -1154,7 +1154,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         detail: `${returnRows.filter((r) => r.return_home_success).length}/${returnRows.length} measured`,
       },
       {
-        label: 'Result trusted',
+        label: 'Résultat fiable',
         value: trusted,
         display: count > 0 ? `${trusted.toFixed(1)}%` : '—',
         threshold: 95,
@@ -1162,7 +1162,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         detail: count > 0 ? `OCR parse ${parsed.toFixed(1)}%` : 'OCR / live outcome',
       },
       {
-        label: 'Next first-pass',
+        label: 'Premier passage suivant',
         value: nextFirstPass,
         display: stats.next_transitions > 0 ? `${nextFirstPass.toFixed(1)}%` : '—',
         threshold: 90,
@@ -1170,7 +1170,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         detail: `${stats.next_transitions || 0} transitions`,
       },
       {
-        label: 'Safety certified',
+        label: 'Sécurité certifiée',
         value: certifiedSafety,
         display: safetyRows.length > 0 ? `${certifiedSafety.toFixed(1)}%` : '—',
         threshold: 95,
@@ -1178,7 +1178,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         detail: 'Live red zone + corridor + HUD',
       },
       {
-        label: 'Recovery success',
+        label: 'Récupération réussie',
         value: recovery,
         display: stats.recovery_attempts > 0 ? `${recovery.toFixed(1)}%` : '—',
         threshold: 90,
@@ -1211,7 +1211,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       legacy,
       pipe,
       legacyRate: tapTotal > 0 ? legacy * 100 / tapTotal : 0,
-      captureHealth: adbEvents === 0 ? 'Learning' : adbErrorRate <= 0.5 ? 'Excellent' : adbErrorRate <= 2 ? 'Watch' : 'Degraded',
+      captureHealth: adbEvents === 0 ? 'Apprentissage' : adbErrorRate <= 0.5 ? 'Excellent' : adbErrorRate <= 2 ? 'Watch' : 'Degraded',
     };
   }, [stats, history]);
 
@@ -1256,11 +1256,11 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const health = Math.max(0, Math.min(100, stats.health_score ?? 0));
 
     const samples = [
-      { key: 'reliability', label: 'Reliability', value: reliability, weight: 0.30, sampled: sampledReliability.length >= 3 },
-      { key: 'safety', label: 'Red-zone safety', value: safety, weight: 0.25, sampled: deploymentSafety.attacks >= 3 },
-      { key: 'clean', label: 'Zero-touch routines', value: cleanRoutine, weight: 0.20, sampled: autonomyReliability.total >= 3 },
-      { key: 'health', label: 'Runtime health', value: health, weight: 0.15, sampled: (stats.telemetry_events || 0) > 0 },
-      { key: 'results', label: 'Result confidence', value: resultTrustScore, weight: 0.10, sampled: resultTrust.total >= 3 },
+      { key: 'reliability', label: 'Fiabilité', value: reliability, weight: 0.30, sampled: sampledReliability.length >= 3 },
+      { key: 'safety', label: 'Sécurité zone rouge', value: safety, weight: 0.25, sampled: deploymentSafety.attacks >= 3 },
+      { key: 'clean', label: 'Cycles sans intervention', value: cleanRoutine, weight: 0.20, sampled: autonomyReliability.total >= 3 },
+      { key: 'health', label: 'Santé du runtime', value: health, weight: 0.15, sampled: (stats.telemetry_events || 0) > 0 },
+      { key: 'results', label: 'Confiance résultat', value: resultTrustScore, weight: 0.10, sampled: resultTrust.total >= 3 },
     ];
 
     const usable = samples.filter((row) => row.sampled);
@@ -1273,7 +1273,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       : score >= 95 ? 'Excellent'
       : score >= 90 ? 'Strong'
       : score >= 80 ? 'Watch'
-      : 'Learning';
+      : 'Apprentissage';
 
     return {
       score,
@@ -1302,7 +1302,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     if (reactiveTap > 0) {
       opportunities.push({
         key: 'tap',
-        label: 'Windows tap transport',
+        label: 'Transport clic Windows',
         evidence: `${reactiveTap.toFixed(0)}ms reactive · ${tapTransport.total > 0 ? `${tapTransport.legacyRate.toFixed(0)}% legacy` : 'route learning'}`,
         next: reactiveTap >= 100
           ? 'High enough to justify a Windows-safe transport experiment with instant fallback.'
@@ -1315,7 +1315,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       opportunities.push({
         key: 'prep',
         label: `Preparation · ${preparationBreakdown.dominant.label}`,
-        evidence: `${(preparationBreakdown.dominant.ms / 1000).toFixed(2)}s average · ${preparationBreakdown.totalMS > 0 ? (preparationBreakdown.dominant.ms * 100 / preparationBreakdown.totalMS).toFixed(0) : '0'}% of prep`,
+        evidence: `${(preparationBreakdown.dominant.ms / 1000).toFixed(2)}s average · ${preparationBreakdown.totalMS > 0 ? (preparationBreakdown.dominant.ms * 100 / preparationBreakdown.totalMS).toFixed(0) : '0'}% de la préparation`,
         next: 'Optimize the verified UI transition only; do not replace state confirmation with blind coordinates.',
         score: preparationBreakdown.dominant.ms,
       });
@@ -1325,7 +1325,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       const retryShare = Math.max(0, 100 - nextRate);
       opportunities.push({
         key: 'next',
-        label: 'Next transition verification',
+        label: 'Vérification transition suivante',
         evidence: `${nextRate.toFixed(1)}% first-pass · ${(stats.avg_next_verify_probes || 0).toFixed(2)} probes`,
         next: retryShare >= 10
           ? 'Investigate why Clash ignores first taps before shortening any settle delay.'
@@ -1347,7 +1347,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     if ((stats.average_target_scan_ms || 0) > 0) {
       opportunities.push({
         key: 'loot',
-        label: 'Loot OCR',
+        label: 'OCR butin',
         evidence: `${(stats.average_target_scan_ms || 0).toFixed(0)}ms average target scan`,
         next: 'Only optimize if it materially exceeds capture latency; target thresholds remain authoritative.',
         score: stats.average_target_scan_ms || 0,
@@ -1357,7 +1357,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     if (reactiveCapture > 0) {
       opportunities.push({
         key: 'capture',
-        label: 'ADB capture',
+        label: 'Capture ADB',
         evidence: `${reactiveCapture.toFixed(0)}ms reactive capture latency`,
         next: reactiveCapture >= 700
           ? 'BlueStacks/ADB is under pressure; preserve capture gating and investigate transport health.'
@@ -1369,7 +1369,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     if ((stats.ui_anchor_attempts || 0) >= 3) {
       opportunities.push({
         key: 'anchors',
-        label: 'Verified UI anchors',
+        label: 'Repères UI vérifiés',
         evidence: `${(stats.ui_anchor_hit_rate || 0).toFixed(1)}% local hit-rate · ${stats.ui_anchor_fallbacks || 0} fallbacks`,
         next: (stats.ui_anchor_hit_rate || 0) >= 85
           ? 'Anchor cache is healthy; keep local verification ahead of full-screen button scans.'
@@ -1415,7 +1415,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5 mb-6">
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Intelligence V2</div>
-            <h3 className="mt-2 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Farm Velocity</h3>
+            <h3 className="mt-2 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Vitesse de farm</h3>
             <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">The numbers that show whether ClashGO is farming fast, not just staying busy.</p>
           </div>
           <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-zinc-500">
@@ -1430,22 +1430,22 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
           {[
-            { label: 'Gold / h', value: compact(stats.gold_per_hour || 0) },
-            { label: 'Elixir / h', value: compact(stats.elixir_per_hour || 0) },
-            { label: 'DE / h', value: compact(stats.de_per_hour || 0) },
-            { label: 'Avg search', value: `${avgSearchSeconds.toFixed(1)}s` },
-            { label: 'Loot scan', value: `${(stats.average_target_scan_ms || 0).toFixed(0)}ms` },
-            { label: 'Avg deploy', value: `${avgDeploySeconds.toFixed(1)}s` },
-            { label: 'Avg cycle', value: `${avgCycleSeconds.toFixed(1)}s` },
+            { label: 'Or / h', value: compact(stats.gold_per_hour || 0) },
+            { label: 'Élixir / h', value: compact(stats.elixir_per_hour || 0) },
+            { label: 'Élixir noir / h', value: compact(stats.de_per_hour || 0) },
+            { label: 'Recherche moy.', value: `${avgSearchSeconds.toFixed(1)}s` },
+            { label: 'Scan butin', value: `${(stats.average_target_scan_ms || 0).toFixed(0)}ms` },
+            { label: 'Déploiement moy.', value: `${avgDeploySeconds.toFixed(1)}s` },
+            { label: 'Cycle moy.', value: `${avgCycleSeconds.toFixed(1)}s` },
             { label: 'Capture', value: `${(stats.average_capture_ms || 0).toFixed(0)}ms` },
-            { label: 'Reactive capture', value: `${(stats.adb_health?.fast_capture_ms || stats.adb_health?.avg_capture_ms || 0).toFixed(0)}ms` },
-            { label: 'Avg tap', value: `${(stats.adb_health?.avg_tap_ms || 0).toFixed(0)}ms` },
-            { label: 'Reactive tap', value: `${(stats.adb_health?.fast_tap_ms || stats.adb_health?.avg_tap_ms || 0).toFixed(0)}ms` },
-            { label: 'Battle OCR', value: battleOCR.avgSamples.toFixed(1) + 'x' },
-            { label: 'Battle OCR cost', value: battleOCR.avgMS.toFixed(0) + 'ms' },
-            { label: 'Tap route', value: tapTransport.total > 0 ? `${tapTransport.legacyRate.toFixed(0)}% legacy` : '—' },
-            { label: 'Return home', value: `${((stats.average_return_home_ms || 0) / 1000).toFixed(1)}s` },
-            { label: 'Next transition', value: `${(stats.average_next_transition_ms || 0).toFixed(0)}ms` },
+            { label: 'Capture réactive', value: `${(stats.adb_health?.fast_capture_ms || stats.adb_health?.avg_capture_ms || 0).toFixed(0)}ms` },
+            { label: 'Clic moy.', value: `${(stats.adb_health?.avg_tap_ms || 0).toFixed(0)}ms` },
+            { label: 'Clic réactif', value: `${(stats.adb_health?.fast_tap_ms || stats.adb_health?.avg_tap_ms || 0).toFixed(0)}ms` },
+            { label: 'OCR combat', value: battleOCR.avgSamples.toFixed(1) + 'x' },
+            { label: 'Coût OCR combat', value: battleOCR.avgMS.toFixed(0) + 'ms' },
+            { label: 'Route clic', value: tapTransport.total > 0 ? `${tapTransport.legacyRate.toFixed(0)}% legacy` : '—' },
+            { label: 'Retour village', value: `${((stats.average_return_home_ms || 0) / 1000).toFixed(1)}s` },
+            { label: 'Transition suivante', value: `${(stats.average_next_transition_ms || 0).toFixed(0)}ms` },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">{metric.label}</div>
@@ -1458,8 +1458,8 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Farm Forecast</div>
-            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Projected resource yield</h3>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Prévision de farm</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Rendement de ressources estimé</h3>
             <p className="text-sm text-zinc-500 mt-1">Projection from measured session throughput; confidence falls when recent routine times are unstable.</p>
           </div>
           <div className="px-3 py-2 rounded-full bg-zinc-50 dark:bg-zinc-950/40 text-[9px] font-black uppercase tracking-widest text-zinc-500">
@@ -1470,14 +1470,14 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {farmForecast.rows.map((row) => (
             <div key={row.hours} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-5">
-              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">{row.hours}h projection</div>
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">{row.hours}h de projection</div>
               <div className="mt-4 grid grid-cols-3 gap-3">
                 <div>
-                  <div className="text-[8px] font-black uppercase tracking-wider text-zinc-400">Gold</div>
+                  <div className="text-[8px] font-black uppercase tracking-wider text-zinc-400">Or</div>
                   <div className="mt-1 text-lg font-black text-amber-500 tabular-nums">{compact(row.gold)}</div>
                 </div>
                 <div>
-                  <div className="text-[8px] font-black uppercase tracking-wider text-zinc-400">Elixir</div>
+                  <div className="text-[8px] font-black uppercase tracking-wider text-zinc-400">Élixir</div>
                   <div className="mt-1 text-lg font-black text-fuchsia-500 tabular-nums">{compact(row.elixir)}</div>
                 </div>
                 <div>
@@ -1494,19 +1494,19 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Endurance</div>
-            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Long-run stability</h3>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Stabilité sur longue durée</h3>
             <p className="text-sm text-zinc-500 mt-1">Transport and recovery pressure normalized so a long session can be compared with a short one.</p>
           </div>
           <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{enduranceStats.captureHealth}</div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           {[
-            { label: 'ADB error rate', value: enduranceStats.captures + enduranceStats.errors > 0 ? `${enduranceStats.adbErrorRate.toFixed(2)}%` : '—', detail: `${enduranceStats.errors} errors / ${enduranceStats.captures} captures` },
+            { label: 'Taux d’erreurs ADB', value: enduranceStats.captures + enduranceStats.errors > 0 ? `${enduranceStats.adbErrorRate.toFixed(2)}%` : '—', detail: `${enduranceStats.errors} errors / ${enduranceStats.captures} captures` },
             { label: 'Anomalies / 100', value: enduranceStats.attacks > 0 ? enduranceStats.anomalyRate.toFixed(1) : '—', detail: `${stats.anomalies || 0} total anomalies` },
-            { label: 'Restarts / 100', value: enduranceStats.attacks > 0 ? enduranceStats.restartRate.toFixed(1) : '—', detail: `${stats.bluestacks_restarts || 0} BlueStacks restarts` },
-            { label: 'Consecutive fails', value: (stats.adb_health?.consecutive_fails || 0).toString(), detail: 'Current ADB pressure' },
-            { label: 'Tap transport', value: enduranceStats.tapTotal > 0 ? `${enduranceStats.legacyRate.toFixed(0)}% legacy` : '—', detail: `${enduranceStats.tapTotal} routed taps` },
-            { label: 'Health score', value: `${stats.health_score ?? 100}/100`, detail: stats.speed_profile ? `${stats.speed_profile} pacing` : 'Adaptive pacing' },
+            { label: 'Redémarrages / 100', value: enduranceStats.attacks > 0 ? enduranceStats.restartRate.toFixed(1) : '—', detail: `${stats.bluestacks_restarts || 0} BlueStacks restarts` },
+            { label: 'Échecs consécutifs', value: (stats.adb_health?.consecutive_fails || 0).toString(), detail: 'Current ADB pressure' },
+            { label: 'Transport clic', value: enduranceStats.tapTotal > 0 ? `${enduranceStats.legacyRate.toFixed(0)}% legacy` : '—', detail: `${enduranceStats.tapTotal} routed taps` },
+            { label: 'Score de santé', value: `${stats.health_score ?? 100}/100`, detail: stats.speed_profile ? `${stats.speed_profile} pacing` : 'Adaptive pacing' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
@@ -1520,8 +1520,8 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Result Provenance</div>
-            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Where battle numbers come from</h3>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Origine des résultats</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Origine des données de combat</h3>
             <p className="text-sm text-zinc-500 mt-1">Live outcome can supersede themed result-screen OCR when the live signal is more reliable.</p>
           </div>
           <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{resultProvenance.total} attacks</div>
@@ -1529,12 +1529,12 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
 
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           {[
-            { label: 'Loot · live delta', value: resultProvenance.total ? `${resultProvenance.lootLiveRate.toFixed(1)}%` : '—', detail: `${resultProvenance.lootLive} attacks` },
-            { label: 'Loot · result OCR', value: resultProvenance.total ? `${resultProvenance.lootOCRRate.toFixed(1)}%` : '—', detail: `${resultProvenance.lootOCR} attacks` },
-            { label: 'Stars · outcome', value: resultProvenance.total ? `${resultProvenance.starsOutcomeRate.toFixed(1)}%` : '—', detail: `${resultProvenance.starsOutcome} reconciled/live` },
-            { label: 'Stars · OCR', value: resultProvenance.total ? `${resultProvenance.starsOCRRate.toFixed(1)}%` : '—', detail: `${resultProvenance.starsOCR} attacks` },
-            { label: 'High confidence', value: resultProvenance.total ? `${resultProvenance.highRate.toFixed(1)}%` : '—', detail: `${resultProvenance.high} attacks` },
-            { label: 'Low confidence', value: resultProvenance.total ? `${resultProvenance.lowRate.toFixed(1)}%` : '—', detail: `${resultProvenance.low} attacks · medium ${resultProvenance.mediumRate.toFixed(1)}%` },
+            { label: 'Butin · delta direct', value: resultProvenance.total ? `${resultProvenance.lootLiveRate.toFixed(1)}%` : '—', detail: `${resultProvenance.lootLive} attacks` },
+            { label: 'Butin · OCR résultat', value: resultProvenance.total ? `${resultProvenance.lootOCRRate.toFixed(1)}%` : '—', detail: `${resultProvenance.lootOCR} attacks` },
+            { label: 'Étoiles · résultat', value: resultProvenance.total ? `${resultProvenance.starsOutcomeRate.toFixed(1)}%` : '—', detail: `${resultProvenance.starsOutcome} reconciled/live` },
+            { label: 'Étoiles · OCR', value: resultProvenance.total ? `${resultProvenance.starsOCRRate.toFixed(1)}%` : '—', detail: `${resultProvenance.starsOCR} attacks` },
+            { label: 'Confiance élevée', value: resultProvenance.total ? `${resultProvenance.highRate.toFixed(1)}%` : '—', detail: `${resultProvenance.high} attacks` },
+            { label: 'Confiance faible', value: resultProvenance.total ? `${resultProvenance.lowRate.toFixed(1)}%` : '—', detail: `${resultProvenance.low} attacks · medium ${resultProvenance.mediumRate.toFixed(1)}%` },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
@@ -1555,7 +1555,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
               <div className="text-[8px] font-black uppercase tracking-[0.2em] text-zinc-500">/100</div>
             </div>
             <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Autonomy Index</div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Indice d’autonomie</div>
               <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">
                 {autonomyIndex.ready ? autonomyIndex.grade : 'Building confidence'}
               </h3>
@@ -1577,7 +1577,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
                 <div className="text-[8px] font-black uppercase tracking-wider text-zinc-500">{Math.round(row.weight * 100)}%</div>
               </div>
               <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">
-                {row.sampled ? `${row.value.toFixed(1)}%` : 'Learning'}
+                {row.sampled ? `${row.value.toFixed(1)}%` : 'Apprentissage'}
               </div>
             </div>
           ))}
@@ -1587,8 +1587,8 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Reliability Scorecard</div>
-            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Fast is useless if it is not repeatable</h3>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Score de fiabilité</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">La vitesse ne sert à rien sans fiabilité</h3>
             <p className="text-sm text-zinc-500 mt-1">Explicit technical gates. “Watch” means the measured rate is below the shown reliability target — no automatic behavior changes.</p>
           </div>
           <span className="material-symbols-outlined text-zinc-400">verified_user</span>
@@ -1601,12 +1601,12 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
                   <div className={`text-[8px] font-black uppercase tracking-wider ${!metric.sampled ? 'text-zinc-400' : pass ? 'text-emerald-500' : 'text-amber-500'}`}>
-                    {!metric.sampled ? 'Learning' : pass ? 'Pass' : 'Watch'}
+                    {!metric.sampled ? 'Apprentissage' : pass ? 'Pass' : 'Watch'}
                   </div>
                 </div>
                 <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.display}</div>
                 <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
-                <div className="mt-2 text-[8px] font-bold uppercase tracking-wider text-zinc-400">Target ≥ {metric.threshold}%</div>
+                <div className="mt-2 text-[8px] font-bold uppercase tracking-wider text-zinc-400">Cible ≥ {metric.threshold}%</div>
               </div>
             );
           })}
@@ -1616,19 +1616,19 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Verified UI Anchors</div>
-            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Local vision first, full scan on doubt</h3>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Repères UI vérifiés</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Vision locale d’abord, scan complet en cas de doute</h3>
             <p className="text-sm text-zinc-500 mt-1">Attack / Find Match / Battle centers are learned only after two stable detections. Cached locations never bypass color verification.</p>
           </div>
           <span className="material-symbols-outlined text-zinc-400">my_location</span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {[
-            { label: 'Anchor attempts', value: (stats.ui_anchor_attempts || 0).toLocaleString(), detail: 'Verified local probes' },
-            { label: 'Anchor hits', value: (stats.ui_anchor_hits || 0).toLocaleString(), detail: 'Local verification success' },
-            { label: 'Fallback scans', value: (stats.ui_anchor_fallbacks || 0).toLocaleString(), detail: 'Full locator preserved' },
-            { label: 'Hit rate', value: (stats.ui_anchor_attempts || 0) > 0 ? `${(stats.ui_anchor_hit_rate || 0).toFixed(1)}%` : 'Learning', detail: 'Higher = less vision work' },
-            { label: 'Circuit breaker', value: stats.ui_anchor_enabled === false ? 'FULL SCAN' : 'ACTIVE', detail: stats.ui_anchor_enabled === false ? 'Cache paused · full locator only' : 'Local verification enabled' },
+            { label: 'Tentatives repère', value: (stats.ui_anchor_attempts || 0).toLocaleString(), detail: 'Verified local probes' },
+            { label: 'Repères trouvés', value: (stats.ui_anchor_hits || 0).toLocaleString(), detail: 'Local verification success' },
+            { label: 'Scans de secours', value: (stats.ui_anchor_fallbacks || 0).toLocaleString(), detail: 'Full locator preserved' },
+            { label: 'Taux de réussite', value: (stats.ui_anchor_attempts || 0) > 0 ? `${(stats.ui_anchor_hit_rate || 0).toFixed(1)}%` : 'Apprentissage', detail: 'Higher = less vision work' },
+            { label: 'Coupe-circuit', value: stats.ui_anchor_enabled === false ? 'FULL SCAN' : 'ACTIVE', detail: stats.ui_anchor_enabled === false ? 'Cache paused · full locator only' : 'Local verification enabled' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
@@ -1642,7 +1642,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Optimization Advisor</div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Conseiller d’optimisation</div>
             <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">
               {optimizationAdvisor.top ? optimizationAdvisor.top.label : 'Learning the runtime'}
             </h3>
@@ -1680,8 +1680,8 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         <div className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 p-6 shadow-premium dark:shadow-none">
           <div className="flex items-end justify-between gap-4 mb-5">
             <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Cycle anatomy</div>
-              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Where farming time goes</h3>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Anatomie du cycle</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Où passe le temps de farm</h3>
             </div>
             <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
 Best optimization target: {pipeline.dominantTunable.label}
@@ -1703,8 +1703,8 @@ Best optimization target: {pipeline.dominantTunable.label}
         </div>
 
         <div className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 p-6 shadow-premium dark:shadow-none">
-          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Loot conversion</div>
-          <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Target → Collected</h3>
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Conversion du butin</div>
+          <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Cible → Récupéré</h3>
           <div className="mt-5 grid grid-cols-2 gap-3">
             <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
               <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">G+E capture</div>
@@ -1729,8 +1729,8 @@ Best optimization target: {pipeline.dominantTunable.label}
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Battle Exit Intelligence</div>
-            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">When ClashGO stops fighting</h3>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Analyse de fin de combat</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Quand ClashGO termine le combat</h3>
             <p className="text-sm text-zinc-500 mt-1">Observation only. Early exits still obey full-deployment verification and End Battle button checks.</p>
           </div>
           <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
@@ -1740,11 +1740,11 @@ Best optimization target: {pipeline.dominantTunable.label}
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
           {[
-            { label: 'Early-exit rate', value: battleExitIntelligence.attacks ? `${battleExitIntelligence.earlyRate.toFixed(1)}%` : '—', detail: `${battleExitIntelligence.early} battles` },
-            { label: 'Avg end wait', value: battleExitIntelligence.attacks ? `${(battleExitIntelligence.avgWaitMS / 1000).toFixed(1)}s` : '—', detail: 'After deployment' },
-            { label: 'Natural wait', value: battleExitIntelligence.naturalWaitMS ? `${(battleExitIntelligence.naturalWaitMS / 1000).toFixed(1)}s` : '—', detail: 'Natural results only' },
-            { label: 'Early wait', value: battleExitIntelligence.earlyWaitMS ? `${(battleExitIntelligence.earlyWaitMS / 1000).toFixed(1)}s` : '—', detail: 'Threshold/stall exits' },
-            { label: 'Loot at exit', value: battleExitIntelligence.avgLootExitPct ? `${battleExitIntelligence.avgLootExitPct.toFixed(1)}%` : '—', detail: 'Loot-threshold exits' },
+            { label: 'Taux sortie anticipée', value: battleExitIntelligence.attacks ? `${battleExitIntelligence.earlyRate.toFixed(1)}%` : '—', detail: `${battleExitIntelligence.early} battles` },
+            { label: 'Attente fin moy.', value: battleExitIntelligence.attacks ? `${(battleExitIntelligence.avgWaitMS / 1000).toFixed(1)}s` : '—', detail: 'After deployment' },
+            { label: 'Attente naturelle', value: battleExitIntelligence.naturalWaitMS ? `${(battleExitIntelligence.naturalWaitMS / 1000).toFixed(1)}s` : '—', detail: 'Natural results only' },
+            { label: 'Attente anticipée', value: battleExitIntelligence.earlyWaitMS ? `${(battleExitIntelligence.earlyWaitMS / 1000).toFixed(1)}s` : '—', detail: 'Threshold/stall exits' },
+            { label: 'Butin à la sortie', value: battleExitIntelligence.avgLootExitPct ? `${battleExitIntelligence.avgLootExitPct.toFixed(1)}%` : '—', detail: 'Loot-threshold exits' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
@@ -1785,7 +1785,7 @@ Best optimization target: {pipeline.dominantTunable.label}
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
           <div className="max-w-3xl">
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Early Exit Advisor</div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Conseiller de sortie anticipée</div>
             <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">
               {battleExitAdvisor.status === 'promising' ? 'Promising for faster farm' :
                battleExitAdvisor.status === 'caution' ? 'Caution: current exits hurt results' :
@@ -1818,8 +1818,8 @@ Best optimization target: {pipeline.dominantTunable.label}
       <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Autonomy Reliability</div>
-            <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Zero-touch farming streak</h3>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Fiabilité de l’autonomie</div>
+            <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Série de farm sans intervention</h3>
             <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Counts only full deployment + verified safe corridor/HUD + successful return home.</p>
           </div>
           <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
@@ -1828,10 +1828,10 @@ Best optimization target: {pipeline.dominantTunable.label}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            { label: 'Current streak', value: autonomyReliability.current.toLocaleString(), detail: 'Consecutive clean routines' },
-            { label: 'Best streak', value: autonomyReliability.best.toLocaleString(), detail: 'History record' },
-            { label: 'Clean routine rate', value: `${autonomyReliability.cleanRate.toFixed(1)}%`, detail: 'Full autonomous success' },
-            { label: 'Safe corridor rate', value: `${autonomyReliability.redZoneRate.toFixed(1)}%`, detail: 'Red-zone + HUD certified' },
+            { label: 'Série actuelle', value: autonomyReliability.current.toLocaleString(), detail: 'Consecutive clean routines' },
+            { label: 'Meilleure série', value: autonomyReliability.best.toLocaleString(), detail: 'History record' },
+            { label: 'Taux cycles propres', value: `${autonomyReliability.cleanRate.toFixed(1)}%`, detail: 'Full autonomous success' },
+            { label: 'Taux corridor sûr', value: `${autonomyReliability.redZoneRate.toFixed(1)}%`, detail: 'Red-zone + HUD certified' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
@@ -1845,12 +1845,12 @@ Best optimization target: {pipeline.dominantTunable.label}
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Preparation Breakdown</div>
-            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Before matchmaking</h3>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Détail de la préparation</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Avant le matchmaking</h3>
             <p className="text-sm text-zinc-500 mt-1">Measures verified UI steps before search. No delay is shortened until live data proves where time is actually lost.</p>
           </div>
           <div className="text-right">
-            <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{preparationBreakdown.attacks} measured attacks</div>
+            <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{preparationBreakdown.attacks} attaques mesurées</div>
             <div className="mt-1 text-[9px] font-black uppercase tracking-wider text-zinc-500">
               Bottleneck: {preparationBreakdown.dominant.label}{preparationBreakdown.dominant.ms > 0 ? ` · ${(preparationBreakdown.dominant.ms / 1000).toFixed(2)}s` : ''}
             </div>
@@ -1861,13 +1861,13 @@ Best optimization target: {pipeline.dominantTunable.label}
             <div key={row.key} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{row.label}</div>
               <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{(row.ms / 1000).toFixed(2)}s</div>
-              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{row.share.toFixed(0)}% of prep</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{row.share.toFixed(0)}% de la préparation</div>
             </div>
           ))}
           <div className="rounded-2xl bg-zinc-950 dark:bg-white p-4">
-            <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">Total prep</div>
+            <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">Préparation totale</div>
             <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{(preparationBreakdown.totalMS / 1000).toFixed(2)}s</div>
-            <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">Verified path</div>
+            <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">Parcours vérifié</div>
           </div>
         </div>
       </div>
@@ -1875,19 +1875,19 @@ Best optimization target: {pipeline.dominantTunable.label}
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Farm Efficiency</div>
-            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Real throughput</h3>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Efficacité du farm</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Débit réel</h3>
             <p className="text-sm text-zinc-500 mt-1">Uses true routine time when available, including return-home and preparation overhead.</p>
           </div>
           <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">History-weighted</div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {[
-            { label: 'Attacks / h', value: farmEfficiency.attacksPerHour.toFixed(2), detail: 'True loop rate' },
-            { label: 'G+E / active min', value: compact(farmEfficiency.gePerActiveMinute), detail: 'Search + deploy + combat' },
-            { label: 'G+E / true min', value: compact(farmEfficiency.gePerTrueMinute), detail: 'Includes overhead' },
-            { label: 'Overhead share', value: `${farmEfficiency.overheadShare.toFixed(1)}%`, detail: 'Outside active farming' },
-            { label: 'Avg true loop', value: `${farmEfficiency.avgTrueLoopSeconds.toFixed(0)}s`, detail: 'Ready-to-ready' },
+            { label: 'Attaques / h', value: farmEfficiency.attacksPerHour.toFixed(2), detail: 'True loop rate' },
+            { label: 'O+E / min active', value: compact(farmEfficiency.gePerActiveMinute), detail: 'Search + deploy + combat' },
+            { label: 'O+E / min réelle', value: compact(farmEfficiency.gePerTrueMinute), detail: 'Includes overhead' },
+            { label: 'Part hors action', value: `${farmEfficiency.overheadShare.toFixed(1)}%`, detail: 'Outside active farming' },
+            { label: 'Cycle réel moy.', value: `${farmEfficiency.avgTrueLoopSeconds.toFixed(0)}s`, detail: 'Ready-to-ready' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
@@ -1901,21 +1901,21 @@ Best optimization target: {pipeline.dominantTunable.label}
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Deployment Safety Contract</div>
-            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Red-zone / HUD compliance</h3>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Sécurité du déploiement</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Respect zone rouge / HUD</h3>
             <p className="text-sm text-zinc-500 mt-1">Passive proof of the safety checks already used by the Windows deployment path.</p>
           </div>
           <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
-            {deploymentSafety.attacks > 0 ? `${deploymentSafety.attacks} measured attacks` : 'Learning'}
+            {deploymentSafety.attacks > 0 ? `${deploymentSafety.attacks} attaques mesurées` : 'Apprentissage'}
           </div>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            { label: 'Live certified', value: deploymentSafety.attacks ? `${deploymentSafety.liveCertified.toFixed(1)}%` : '—', detail: 'Red zone + corridor + HUD' },
-            { label: 'Corridor verified', value: deploymentSafety.attacks ? `${deploymentSafety.corridorRate.toFixed(1)}%` : '—', detail: 'Strictly outside red bbox' },
-            { label: 'HUD safe', value: deploymentSafety.attacks ? `${deploymentSafety.hudSafeRate.toFixed(1)}%` : '—', detail: 'Endpoints above UI cutoff' },
-            { label: 'Fallback paths', value: deploymentSafety.fallbacks.toLocaleString(), detail: deploymentSafety.modes.slice(0, 2).map((m) => `${m.mode}: ${m.count}`).join(' · ') || 'No samples' },
+            { label: 'Direct certifié', value: deploymentSafety.attacks ? `${deploymentSafety.liveCertified.toFixed(1)}%` : '—', detail: 'Red zone + corridor + HUD' },
+            { label: 'Corridor vérifié', value: deploymentSafety.attacks ? `${deploymentSafety.corridorRate.toFixed(1)}%` : '—', detail: 'Strictly outside red bbox' },
+            { label: 'HUD sécurisé', value: deploymentSafety.attacks ? `${deploymentSafety.hudSafeRate.toFixed(1)}%` : '—', detail: 'Endpoints above UI cutoff' },
+            { label: 'Chemins de secours', value: deploymentSafety.fallbacks.toLocaleString(), detail: deploymentSafety.modes.slice(0, 2).map((m) => `${m.mode}: ${m.count}`).join(' · ') || 'No samples' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
@@ -1929,12 +1929,12 @@ Best optimization target: {pipeline.dominantTunable.label}
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Deployment Hot Path</div>
-            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Live-bar cost per attack</h3>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Chemin critique du déploiement</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Coût de la barre en direct par attaque</h3>
             <p className="text-sm text-zinc-500 mt-1">Positions are still rescanned after every card; OCR is now limited to the selected card.</p>
           </div>
           <div className="text-right">
-            <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{deployHotPath.attacks} measured attacks</div>
+            <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{deployHotPath.attacks} attaques mesurées</div>
             <div className="mt-1 text-[9px] font-black uppercase tracking-wider text-zinc-500">
               Bottleneck: {deployBottleneck.label}{deployBottleneck.ms > 0 ? ` · ${deployBottleneck.ms.toFixed(1)}ms / ${deployBottleneck.share.toFixed(0)}%` : ''}
             </div>
@@ -1942,16 +1942,16 @@ Best optimization target: {pipeline.dominantTunable.label}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-10 gap-3">
           {[
-            { label: 'Rescans / attack', value: deployHotPath.avgRescans.toFixed(1), detail: 'Safety re-indexing kept' },
-            { label: 'Total rescan', value: `${deployHotPath.avgRescanMs.toFixed(1)}ms`, detail: 'Per live-bar refresh' },
-            { label: 'Position detect', value: `${deployHotPath.avgDetectMs.toFixed(1)}ms`, detail: 'Shared mask scan' },
+            { label: 'Rescans / attaque', value: deployHotPath.avgRescans.toFixed(1), detail: 'Safety re-indexing kept' },
+            { label: 'Rescan total', value: `${deployHotPath.avgRescanMs.toFixed(1)}ms`, detail: 'Per live-bar refresh' },
+            { label: 'Détection position', value: `${deployHotPath.avgDetectMs.toFixed(1)}ms`, detail: 'Shared mask scan' },
             { label: 'Classification', value: `${deployHotPath.avgClassifyMs.toFixed(1)}ms`, detail: 'Identity/category matching' },
-            { label: 'Templates tried', value: deployHotPath.avgTemplatesTried.toFixed(1), detail: 'Per attack average' },
-            { label: 'Templates matched', value: deployHotPath.avgTemplatesMatched.toFixed(1), detail: 'Semantic cards found' },
+            { label: 'Templates testés', value: deployHotPath.avgTemplatesTried.toFixed(1), detail: 'Per attack average' },
+            { label: 'Templates trouvés', value: deployHotPath.avgTemplatesMatched.toFixed(1), detail: 'Semantic cards found' },
             { label: 'Scale fast-path', value: stats.preferred_scale_enabled === false ? 'DISABLED' : `${(stats.preferred_scale_hit_rate || 0).toFixed(1)}%`, detail: stats.preferred_scale_enabled === false ? 'Circuit breaker → full scan' : `${stats.preferred_scale_hits || 0}/${stats.preferred_scale_attempts || 0} hits` },
-            { label: 'Scale fallbacks', value: (stats.preferred_scale_fallbacks || 0).toLocaleString(), detail: 'Full 20-scale scan kept' },
-            { label: 'Selected OCR', value: `${deployHotPath.avgCardOCRMs.toFixed(1)}ms`, detail: 'One chosen card only' },
-            { label: 'Estimated scan work', value: `${(deployHotPath.avgRescans * (deployHotPath.avgRescanMs + deployHotPath.avgCardOCRMs)).toFixed(0)}ms`, detail: 'Measured hot-path work' },
+            { label: 'Secours d’échelle', value: (stats.preferred_scale_fallbacks || 0).toLocaleString(), detail: 'Full 20-scale scan kept' },
+            { label: 'OCR sélectionné', value: `${deployHotPath.avgCardOCRMs.toFixed(1)}ms`, detail: 'One chosen card only' },
+            { label: 'Travail scan estimé', value: `${(deployHotPath.avgRescans * (deployHotPath.avgRescanMs + deployHotPath.avgCardOCRMs)).toFixed(0)}ms`, detail: 'Measured hot-path work' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
@@ -1964,14 +1964,14 @@ Best optimization target: {pipeline.dominantTunable.label}
 
       <div className="xl:col-span-2 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-4">
         {[
-          { label: 'Targets seen', value: (stats.targets_seen || 0).toLocaleString(), detail: 'This session' },
-          { label: 'Accept rate', value: `${(stats.target_acceptance_rate || 0).toFixed(1)}%`, detail: 'Accepted / scanned' },
-          { label: 'Skips / attack', value: (stats.avg_skips_per_attack || 0).toFixed(1), detail: 'Lower is faster' },
-          { label: 'Next first-pass', value: stats.next_transitions > 0 ? `${(stats.next_first_pass_rate || 0).toFixed(1)}%` : '—', detail: 'No controlled retry' },
-          { label: 'Next retries', value: (stats.next_retries || 0).toLocaleString(), detail: `${stats.next_transitions || 0} transitions` },
-          { label: 'Verify probes', value: (stats.avg_next_verify_probes || 0).toFixed(2), detail: 'Captures / transition' },
-          { label: 'Next latency', value: `${(stats.average_next_transition_ms || 0).toFixed(0)}ms`, detail: 'Tap → transition' },
-          { label: 'Recovery success', value: stats.recovery_attempts > 0 ? `${(stats.recovery_success_rate || 0).toFixed(0)}%` : '—', detail: stats.recovery_attempts > 0 ? `${stats.recovery_successes}/${stats.recovery_attempts}` : 'No recoveries' },
+          { label: 'Villages vus', value: (stats.targets_seen || 0).toLocaleString(), detail: 'This session' },
+          { label: 'Taux d’acceptation', value: `${(stats.target_acceptance_rate || 0).toFixed(1)}%`, detail: 'Accepted / scanned' },
+          { label: 'Villages ignorés / attaque', value: (stats.avg_skips_per_attack || 0).toFixed(1), detail: 'Lower is faster' },
+          { label: 'Premier passage suivant', value: stats.next_transitions > 0 ? `${(stats.next_first_pass_rate || 0).toFixed(1)}%` : '—', detail: 'No controlled retry' },
+          { label: 'Nouveaux essais', value: (stats.next_retries || 0).toLocaleString(), detail: `${stats.next_transitions || 0} transitions` },
+          { label: 'Vérifications', value: (stats.avg_next_verify_probes || 0).toFixed(2), detail: 'Captures / transition' },
+          { label: 'Latence suivante', value: `${(stats.average_next_transition_ms || 0).toFixed(0)}ms`, detail: 'Tap → transition' },
+          { label: 'Récupération réussie', value: stats.recovery_attempts > 0 ? `${(stats.recovery_success_rate || 0).toFixed(0)}%` : '—', detail: stats.recovery_attempts > 0 ? `${stats.recovery_successes}/${stats.recovery_attempts}` : 'No recoveries' },
         ].map((metric) => (
           <div key={metric.label} className="bg-white dark:bg-zinc-900 rounded-[2rem] border border-zinc-100/70 dark:border-zinc-800/70 p-5 shadow-premium dark:shadow-none">
             <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-400">{metric.label}</div>
@@ -2116,11 +2116,11 @@ Best optimization target: {pipeline.dominantTunable.label}
           <p className="text-sm text-zinc-500 mt-1">P95 exposes rare slow attacks that averages hide.</p>
           <div className="mt-5 space-y-3">
             {[
-              { label: 'Search', p50: latencyDistribution.searchP50, p95: latencyDistribution.searchP95, ms: false },
+              { label: 'Recherche', p50: latencyDistribution.searchP50, p95: latencyDistribution.searchP95, ms: false },
               { label: 'Deploy', p50: latencyDistribution.deployP50, p95: latencyDistribution.deployP95, ms: false },
-              { label: 'True loop', p50: latencyDistribution.routineP50, p95: latencyDistribution.routineP95, ms: false },
-              { label: 'ADB capture', p50: latencyDistribution.captureP50, p95: latencyDistribution.captureP95, ms: true },
-              { label: 'Loot OCR', p50: latencyDistribution.scanP50, p95: latencyDistribution.scanP95, ms: true },
+              { label: 'Cycle réel', p50: latencyDistribution.routineP50, p95: latencyDistribution.routineP95, ms: false },
+              { label: 'Capture ADB', p50: latencyDistribution.captureP50, p95: latencyDistribution.captureP95, ms: true },
+              { label: 'OCR butin', p50: latencyDistribution.scanP50, p95: latencyDistribution.scanP95, ms: true },
             ].map((row) => (
               <div key={row.label} className="grid grid-cols-[1fr_auto_auto] gap-4 items-center rounded-xl bg-zinc-50 dark:bg-zinc-950/40 px-4 py-3">
                 <div className="text-[10px] font-black uppercase tracking-wider text-zinc-500">{row.label}</div>
@@ -2163,7 +2163,7 @@ Best optimization target: {pipeline.dominantTunable.label}
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Best Farming Windows</div>
             <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Observed performance by hour</h3>
-            <p className="text-sm text-zinc-500 mt-1">Only hours with at least 3 measured attacks are ranked. Local clock from saved attack timestamps.</p>
+            <p className="text-sm text-zinc-500 mt-1">Only hours with at least 3 attaques mesurées are ranked. Local clock from saved attack timestamps.</p>
           </div>
           <span className="material-symbols-outlined text-zinc-400">schedule</span>
         </div>
@@ -2209,14 +2209,14 @@ Best optimization target: {pipeline.dominantTunable.label}
       <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Farm Forecast</div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Prévision de farm</div>
             <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">What the next hour should produce</h3>
             <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">
               Projection from the last {farmForecast.samples} measured ready-to-ready routines. Observational only; no target rules are changed.
             </p>
           </div>
           <div className="text-[9px] font-black uppercase tracking-wider text-zinc-500">
-            {farmForecast.ready ? `${farmForecast.attacksPerHour.toFixed(2)} attacks/h` : 'Learning'}
+            {farmForecast.ready ? `${farmForecast.attacksPerHour.toFixed(2)} attacks/h` : 'Apprentissage'}
           </div>
         </div>
 
@@ -2263,10 +2263,10 @@ Best optimization target: {pipeline.dominantTunable.label}
 
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
           {[
-            { label: 'Avg stars', value: recentPerformance.current.avgStars.toFixed(2), delta: perfDelta(recentPerformance.current.avgStars, recentPerformance.previous.avgStars) },
+            { label: 'Étoiles moy.', value: recentPerformance.current.avgStars.toFixed(2), delta: perfDelta(recentPerformance.current.avgStars, recentPerformance.previous.avgStars) },
             { label: '3★ rate', value: `${recentPerformance.current.threeStarRate.toFixed(0)}%`, delta: perfDelta(recentPerformance.current.threeStarRate, recentPerformance.previous.threeStarRate) },
-            { label: 'Full deploy', value: `${recentPerformance.current.fullDeployRate.toFixed(0)}%`, delta: perfDelta(recentPerformance.current.fullDeployRate, recentPerformance.previous.fullDeployRate) },
-            { label: 'Search', value: `${(recentPerformance.current.avgSearchMs / 1000).toFixed(1)}s`, delta: perfDelta(recentPerformance.current.avgSearchMs, recentPerformance.previous.avgSearchMs, true) },
+            { label: 'Déploiement complet', value: `${recentPerformance.current.fullDeployRate.toFixed(0)}%`, delta: perfDelta(recentPerformance.current.fullDeployRate, recentPerformance.previous.fullDeployRate) },
+            { label: 'Recherche', value: `${(recentPerformance.current.avgSearchMs / 1000).toFixed(1)}s`, delta: perfDelta(recentPerformance.current.avgSearchMs, recentPerformance.previous.avgSearchMs, true) },
             { label: 'Deploy', value: `${(recentPerformance.current.avgDeployMs / 1000).toFixed(1)}s`, delta: perfDelta(recentPerformance.current.avgDeployMs, recentPerformance.previous.avgDeployMs, true) },
             { label: 'Cycle', value: `${(recentPerformance.current.avgCycleMs / 1000).toFixed(0)}s`, delta: perfDelta(recentPerformance.current.avgCycleMs, recentPerformance.previous.avgCycleMs, true) },
             { label: 'Avg G+E', value: compact(recentPerformance.current.avgGold + recentPerformance.current.avgElixir), delta: perfDelta(recentPerformance.current.avgGold + recentPerformance.current.avgElixir, recentPerformance.previous.avgGold + recentPerformance.previous.avgElixir) },
@@ -2488,7 +2488,7 @@ Best optimization target: {pipeline.dominantTunable.label}
           </div>
           <div className="grid grid-cols-3 gap-3">
             {[
-              { label: 'Search', p50: latencyPercentiles.searchP50, p90: latencyPercentiles.searchP90 },
+              { label: 'Recherche', p50: latencyPercentiles.searchP50, p90: latencyPercentiles.searchP90 },
               { label: 'Deploy', p50: latencyPercentiles.deployP50, p90: latencyPercentiles.deployP90 },
               { label: 'Cycle', p50: latencyPercentiles.cycleP50, p90: latencyPercentiles.cycleP90 },
             ].map((row) => (
@@ -2688,7 +2688,7 @@ Best optimization target: {pipeline.dominantTunable.label}
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Result Trust</div>
-            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Where battle numbers come from</h3>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Origine des données de combat</h3>
             <p className="text-sm text-zinc-500 mt-1">ClashGO records whether stars and loot came from result OCR, measured battle outcome or stable live-loot deltas.</p>
           </div>
           <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
@@ -2697,7 +2697,7 @@ Best optimization target: {pipeline.dominantTunable.label}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
           {[
-            { label: 'High confidence', value: resultTrust.confidence.high.toLocaleString(), detail: 'Outcome + live delta' },
+            { label: 'Confiance élevée', value: resultTrust.confidence.high.toLocaleString(), detail: 'Outcome + live delta' },
             { label: 'Medium', value: resultTrust.confidence.medium.toLocaleString(), detail: 'Reliable single source' },
             { label: 'Low / unknown', value: (resultTrust.confidence.low + resultTrust.confidence.unknown).toLocaleString(), detail: 'Fallback / legacy rows' },
             { label: 'Stars via OCR', value: resultTrust.ocrStars.toLocaleString(), detail: 'Result screen' },
