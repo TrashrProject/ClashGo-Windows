@@ -1694,10 +1694,9 @@ func (a *App) CancelScheduledSessionStop() {
 		a.sessionStopTimer.Stop()
 		a.sessionStopTimer = nil
 	}
+	// The time-based stop and loot goal are independent controls.
+	// Cancelling the timer must not silently erase an active loot target.
 	a.sessionStopAt = time.Time{}
-	a.sessionGoldGoal = 0
-	a.sessionElixirGoal = 0
-	a.sessionDarkGoal = 0
 	a.mu.Unlock()
 
 	if a.ctx != nil {
