@@ -559,7 +559,9 @@ function App() {
       setTab('dashboard');
       return;
     }
-    if (interfaceLevel === 'simple' && (tab === 'activity' || tab === 'analytics' || tab === 'settings' || tab === 'developer')) {
+    // Settings stays hidden from the Simple sidebar, but may be opened
+    // contextually from Home when ClashGO detects a Windows/ADB problem.
+    if (interfaceLevel === 'simple' && (tab === 'activity' || tab === 'analytics' || tab === 'developer')) {
       setTab('dashboard');
     }
   }, [interfaceLevel, tab, licenseRole]);
