@@ -23,6 +23,7 @@ type Incident = {
   message?: string;
   customer_name?: string;
   customer_contact?: string;
+  customer_notes?: string;
 };
 
 type LicenseRow = {
@@ -133,6 +134,7 @@ const DeveloperView: React.FC = () => {
   const [newPlan, setNewPlan] = React.useState<'free_2d' | 'week_1' | 'month_1' | 'lifetime'>('month_1');
   const [customerName, setCustomerName] = React.useState('');
   const [customerContact, setCustomerContact] = React.useState('');
+  const [customerNotes, setCustomerNotes] = React.useState('');
   const [generatedKey, setGeneratedKey] = React.useState('');
   const [copied, setCopied] = React.useState(false);
   const [search, setSearch] = React.useState('');
@@ -141,6 +143,7 @@ const DeveloperView: React.FC = () => {
   const [editingCustomerID, setEditingCustomerID] = React.useState('');
   const [editCustomerName, setEditCustomerName] = React.useState('');
   const [editCustomerContact, setEditCustomerContact] = React.useState('');
+  const [editCustomerNotes, setEditCustomerNotes] = React.useState('');
   const generatedKeyTimerRef = React.useRef<number | null>(null);
 
   const isAdmin = role === 'admin';
@@ -192,6 +195,7 @@ const DeveloperView: React.FC = () => {
         plan: newPlan,
         customer_name: customerName.trim(),
         customer_contact: customerContact.trim(),
+        customer_notes: customerNotes.trim(),
       } as any);
       const keys = (result as { licenses?: string[] })?.licenses || [];
       if (keys.length === 0) throw new Error('Aucune clé retournée par le serveur.');
@@ -207,6 +211,7 @@ const DeveloperView: React.FC = () => {
       }, 120000);
       setCustomerName('');
       setCustomerContact('');
+      setCustomerNotes('');
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -275,6 +280,7 @@ const DeveloperView: React.FC = () => {
     setEditingCustomerID(id);
     setEditCustomerName(item.customer_name || '');
     setEditCustomerContact(item.customer_contact || '');
+    setEditCustomerNotes(item.customer_notes || '');
     setError('');
     setNotice('');
   };
@@ -283,6 +289,7 @@ const DeveloperView: React.FC = () => {
     setEditingCustomerID('');
     setEditCustomerName('');
     setEditCustomerContact('');
+    setEditCustomerNotes('');
   };
 
   const saveCustomerEdit = async (item: LicenseRow) => {
@@ -294,7 +301,7 @@ const DeveloperView: React.FC = () => {
     }
     await runLicenseAction(
       id,
-      () => AdminUpdateLicenseCustomer(id, name, editCustomerContact.trim()),
+      () => AdminUpdateLicenseCustomer(id, name, editCustomerContact.trim(), editCustomerNotes.trim()),
       'Informations client mises à jour.'
     );
     cancelCustomerEdit();
@@ -351,6 +358,7 @@ const DeveloperView: React.FC = () => {
     return [
       item.customer_name,
       item.customer_contact,
+      item.customer_notes,
       item.hint,
       item.id,
       item.machine_id,
@@ -531,6 +539,18 @@ const DeveloperView: React.FC = () => {
               </select>
             </label>
           </div>
+
+          <label className="mt-3 block">
+            <div className="mb-2 text-[9px] font-black uppercase tracking-widest text-zinc-400">Note interne</div>
+            <textarea
+              value={customerNotes}
+              onChange={(e) => setCustomerNotes(e.target.value)}
+              placeholder="Optionnel · ex. testeur, ami de…, à rappeler…"
+              maxLength={1000}
+              rows={2}
+              className="w-full resize-none rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-4 py-3 text-sm font-semibold outline-none focus:border-zinc-400"
+            />
+          </label>
 
           <button
             type="button"
@@ -733,9 +753,14 @@ const DeveloperView: React.FC = () => {
                   {item.customer_contact && (
                     <div className="mt-1 text-[10px] font-semibold text-zinc-400">{item.customer_contact}</div>
                   )}
+                  {item.customer_notes && (
+                    <div className="mt-2 max-w-2xl text-[10px] font-semibold text-zinc-500 line-clamp-2" title={item.customer_notes}>
+                      Note · {item.customer_notes}
+                    </div>
+                  )}
 
                   {isAdmin && item.id && editingCustomerID === String(item.id) && (
-                    <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2 max-w-2xl">
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 max-w-2xl">
                       <input
                         value={editCustomerName}
                         onChange={(e) => setEditCustomerName(e.target.value)}
@@ -751,7 +776,15 @@ const DeveloperView: React.FC = () => {
                         maxLength={180}
                         className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 text-xs font-semibold outline-none focus:border-zinc-400"
                       />
-                      <div className="flex gap-2">
+                      <textarea
+                        value={editCustomerNotes}
+                        onChange={(e) => setEditCustomerNotes(e.target.value)}
+                        placeholder="Note interne"
+                        maxLength={1000}
+                        rows={2}
+                        className="md:col-span-2 resize-none rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-semibold outline-none focus:border-zinc-400"
+                      />
+                      <div className="md:col-span-2 flex gap-2">
                         <button
                           type="button"
                           disabled={actionID === item.id || !editCustomerName.trim()}
