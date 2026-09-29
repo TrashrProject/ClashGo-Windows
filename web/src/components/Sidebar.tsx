@@ -1,8 +1,6 @@
 import React from 'react';
-import { TabType } from '../types';
+import { InterfaceLevel, TabType } from '../types';
 import logo from '../assets/images/clashgo-logo.png';
-
-export type InterfaceLevel = 'simple' | 'advanced' | 'developer';
 
 interface SidebarProps {
   tab: TabType;
