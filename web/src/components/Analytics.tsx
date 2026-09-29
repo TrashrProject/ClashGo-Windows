@@ -1143,7 +1143,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         value: fullDeploy,
         display: count > 0 ? `${fullDeploy.toFixed(1)}%` : '—',
         threshold: 98,
-        analysées: count > 0,
+        sampled: count > 0,
         detail: `${rows.filter((r) => r.deploy_success).length}/${count} attacks`,
       },
       {
@@ -1151,7 +1151,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         value: returnHome,
         display: returnRows.length > 0 ? `${returnHome.toFixed(1)}%` : '—',
         threshold: 98,
-        analysées: returnRows.length > 0,
+        sampled: returnRows.length > 0,
         detail: `${returnRows.filter((r) => r.return_home_success).length}/${returnRows.length} measured`,
       },
       {
@@ -1159,7 +1159,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         value: trusted,
         display: count > 0 ? `${trusted.toFixed(1)}%` : '—',
         threshold: 95,
-        analysées: count > 0,
+        sampled: count > 0,
         detail: count > 0 ? `OCR parse ${parsed.toFixed(1)}%` : 'OCR / live outcome',
       },
       {
@@ -1167,7 +1167,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         value: nextFirstPass,
         display: stats.next_transitions > 0 ? `${nextFirstPass.toFixed(1)}%` : '—',
         threshold: 90,
-        analysées: stats.next_transitions >= 3,
+        sampled: stats.next_transitions >= 3,
         detail: `${stats.next_transitions || 0} transitions`,
       },
       {
@@ -1175,7 +1175,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         value: certifiedSafety,
         display: safetyRows.length > 0 ? `${certifiedSafety.toFixed(1)}%` : '—',
         threshold: 95,
-        analysées: safetyRows.length > 0,
+        sampled: safetyRows.length > 0,
         detail: 'Live red zone + corridor + HUD',
       },
       {
@@ -1183,7 +1183,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         value: recovery,
         display: stats.recovery_attempts > 0 ? `${recovery.toFixed(1)}%` : '—',
         threshold: 90,
-        analysées: stats.recovery_attempts > 0,
+        sampled: stats.recovery_attempts > 0,
         detail: stats.recovery_attempts > 0 ? `${stats.recovery_successes}/${stats.recovery_attempts}` : 'No recovery needed',
       },
     ];
@@ -1244,9 +1244,9 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   }, [history]);
 
   const autonomyIndex = React.useMemo(() => {
-    const analyséesReliability = reliabilityScorecard.filter((row) => row.sampled);
-    const reliability = analyséesReliability.length > 0
-      ? analyséesReliability.reduce((sum, row) => sum + Math.max(0, Math.min(100, row.value)), 0) / analyséesReliability.length
+    const sampledReliability = reliabilityScorecard.filter((row) => row.sampled);
+    const reliability = sampledReliability.length > 0
+      ? sampledReliability.reduce((sum, row) => sum + Math.max(0, Math.min(100, row.value)), 0) / sampledReliability.length
       : 0;
 
     const cleanRoutine = autonomyReliability.total > 0 ? autonomyReliability.cleanRate : 0;
@@ -1257,11 +1257,11 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const health = Math.max(0, Math.min(100, stats.health_score ?? 0));
 
     const samples = [
-      { key: 'reliability', label: 'Fiabilité', value: reliability, weight: 0.30, analysées: analyséesReliability.length >= 3 },
-      { key: 'safety', label: 'Sécurité zone rouge', value: safety, weight: 0.25, analysées: deploymentSafety.attacks >= 3 },
-      { key: 'clean', label: 'Cycles sans intervention', value: cleanRoutine, weight: 0.20, analysées: autonomyReliability.total >= 3 },
-      { key: 'health', label: 'Santé du runtime', value: health, weight: 0.15, analysées: (stats.telemetry_events || 0) > 0 },
-      { key: 'results', label: 'Confiance résultat', value: resultTrustScore, weight: 0.10, analysées: resultTrust.total >= 3 },
+      { key: 'reliability', label: 'Fiabilité', value: reliability, weight: 0.30, sampled: sampledReliability.length >= 3 },
+      { key: 'safety', label: 'Sécurité zone rouge', value: safety, weight: 0.25, sampled: deploymentSafety.attacks >= 3 },
+      { key: 'clean', label: 'Cycles sans intervention', value: cleanRoutine, weight: 0.20, sampled: autonomyReliability.total >= 3 },
+      { key: 'health', label: 'Santé du runtime', value: health, weight: 0.15, sampled: (stats.telemetry_events || 0) > 0 },
+      { key: 'results', label: 'Confiance résultat', value: resultTrustScore, weight: 0.10, sampled: resultTrust.total >= 3 },
     ];
 
     const usable = samples.filter((row) => row.sampled);
@@ -1281,7 +1281,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       grade,
       ready: usable.length >= 3,
       components: samples,
-      analyséesComponents: usable.length,
+      sampledComponents: usable.length,
     };
   }, [reliabilityScorecard, autonomyReliability, deploymentSafety, resultTrust, stats.health_score, stats.telemetry_events]);
 
@@ -1625,7 +1625,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             </div>
           </div>
           <div className="text-[9px] font-black uppercase tracking-wider text-zinc-500">
-            {autonomyIndex.sampledComponents}/5 components analysées
+            {autonomyIndex.sampledComponents}/5 components sampled
           </div>
         </div>
 
@@ -2317,7 +2317,7 @@ Best optimization target: {pipeline.dominantTunable.label}
             <p className="text-sm text-zinc-500 mt-1">Comparaison avec les 10 attaques précédentes quand l’historique est suffisant.</p>
           </div>
           <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-            {recentPerformance.current.attacks}/10 analysées
+            {recentPerformance.current.attacks}/10 sampled
           </div>
         </div>
 
