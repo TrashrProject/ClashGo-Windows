@@ -15,7 +15,7 @@ interface HomeViewProps {
   onStartWithPreset: (preset: 'short' | 'balanced' | 'fast') => void;
   onSpeedChange: (profile: 'cautious' | 'normal' | 'fast') => void;
   onExtendSession: (extra: 10 | 25) => void;
-  onScheduleStop: (minutes: 30 | 60 | 120) => void;
+  onScheduleStop: (minutes: number) => void;
   onCancelScheduledStop: () => void;
   scheduledStopAt: string;
   sessionLootGoal: { gold: number; elixir: number; dark_elixir: number; active: boolean };
@@ -266,6 +266,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const [customGoldM, setCustomGoldM] = React.useState('');
   const [customElixirM, setCustomElixirM] = React.useState('');
   const [customDarkK, setCustomDarkK] = React.useState('');
+  const [customStopMinutes, setCustomStopMinutes] = React.useState('');
 
   React.useEffect(() => {
     if (!starting) {
@@ -937,7 +938,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                 ANNULER LE MINUTEUR
               </button>
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {([
                   [30, '30 MIN'],
                   [60, '1 H'],
@@ -952,6 +953,28 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                     {label}
                   </button>
                 ))}
+                <div className="flex overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
+                  <input
+                    type="number"
+                    min="5"
+                    max="480"
+                    value={customStopMinutes}
+                    onChange={(e) => setCustomStopMinutes(e.target.value)}
+                    placeholder="Minutes"
+                    className="h-10 w-20 bg-zinc-50 px-3 text-xs font-black outline-none dark:bg-zinc-950"
+                  />
+                  <button
+                    type="button"
+                    disabled={!customStopMinutes}
+                    onClick={() => {
+                      const minutes = Math.max(5, Math.min(480, Math.round(Number(customStopMinutes) || 0)));
+                      if (minutes >= 5) onScheduleStop(minutes);
+                    }}
+                    className="h-10 border-l border-zinc-200 bg-zinc-950 px-3 text-[9px] font-black uppercase tracking-wider text-white disabled:opacity-30 dark:border-zinc-700 dark:bg-white dark:text-zinc-950"
+                  >
+                    OK
+                  </button>
+                </div>
               </div>
             )}
           </div>
