@@ -172,6 +172,133 @@ func (a *App) startup(ctx context.Context) {
 	}
 }
 
+var memberRuntimeStateFiles = []string{
+	"stats.json",
+	"attack_history.json",
+	"last_attack_report.json",
+	"village_resources.json",
+	"village_resource_history.json",
+	"current_army.json",
+	filepath.Join("output", "session_reports", "latest.json"),
+}
+
+func (a *App) memberRuntimeStateDir() string {
+	if a == nil || a.license == nil {
+		return ""
+	}
+	id := strings.TrimSpace(a.license.ProfileID())
+	if id == "" {
+		return ""
+	}
+	return paths.ResolveConfig(filepath.Join("members", id, "state"))
+}
+
+func copyRuntimeStateFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func (a *App) archiveMemberRuntimeState(clearShared bool) error {
+	dir := a.memberRuntimeStateDir()
+	if dir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	for _, rel := range memberRuntimeStateFiles {
+		src := paths.ResolveConfig(rel)
+		dst := filepath.Join(dir, rel)
+		if err := copyRuntimeStateFile(src, dst); err != nil {
+			return fmt.Errorf("archive member state %s: %w", rel, err)
+		}
+		if clearShared {
+			_ = os.Remove(src)
+		}
+	}
+	marker := filepath.Join(dir, ".initialized")
+	if err := os.WriteFile(marker, []byte("1"), 0o600); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *App) restoreMemberRuntimeState(adoptLegacy bool) error {
+	dir := a.memberRuntimeStateDir()
+	if dir == "" {
+		return nil
+	}
+	marker := filepath.Join(dir, ".initialized")
+	if _, err := os.Stat(marker); os.IsNotExist(err) {
+		if adoptLegacy {
+			// Upgrade migration: the locally active license owns the existing
+			// pre-profile runtime data. Snapshot it without clearing the shared
+			// files so the current UI keeps working during startup.
+			return a.archiveMemberRuntimeState(false)
+		}
+		// Brand-new member profile: never inherit another user's shared state.
+		for _, rel := range memberRuntimeStateFiles {
+			_ = os.Remove(paths.ResolveConfig(rel))
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(marker, []byte("1"), 0o600)
+	}
+
+	for _, rel := range memberRuntimeStateFiles {
+		src := filepath.Join(dir, rel)
+		dst := paths.ResolveConfig(rel)
+		_ = os.Remove(dst)
+		if err := copyRuntimeStateFile(src, dst); err != nil {
+			return fmt.Errorf("restore member state %s: %w", rel, err)
+		}
+	}
+	return nil
+}
+
+func (a *App) clearInMemoryMemberRuntimeState() {
+	a.mu.Lock()
+	a.lastStats = bot.BotStats{}
+	a.mu.Unlock()
+	a.cachedHistoryMu.Lock()
+	a.cachedHistory = nil
+	a.cachedHistoryMu.Unlock()
+}
+
+func (a *App) waitForBotTeardown(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		a.mu.Lock()
+		stopping := a.stopping
+		a.mu.Unlock()
+		if !stopping {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("bot teardown did not finish within %s", timeout)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func (a *App) loadPersistedStats() {
 	data, err := os.ReadFile(paths.ResolveConfig("stats.json"))
 	if err != nil {
