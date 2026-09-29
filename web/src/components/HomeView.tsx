@@ -24,6 +24,64 @@ const formatLoot = (value: number): string => {
   return Math.round(value).toLocaleString();
 };
 
+const activityLabel = (event: ActivityEvent): { title: string; detail: string; icon: string } => {
+  const n = (key: string): number => {
+    const value = event.fields?.[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  };
+
+  switch (event.type) {
+    case 'search_started':
+      return { title: 'Recherche lancée', detail: 'ClashGO cherche un village rentable.', icon: 'search' };
+    case 'target_found':
+      return {
+        title: event.fields?.accept === true ? 'Village accepté' : 'Village analysé',
+        detail: event.fields?.accept === true
+          ? formatLoot(n('gold')) + ' or · ' + formatLoot(n('elixir')) + ' élixir'
+          : 'Analyse des ressources terminée.',
+        icon: 'target',
+      };
+    case 'attack_started':
+      return { title: 'Attaque lancée', detail: 'Déploiement automatique en cours.', icon: 'swords' };
+    case 'attack_finished':
+      return {
+        title: 'Attaque terminée · ' + n('stars') + '★',
+        detail: formatLoot(n('gold')) + ' or récupéré.',
+        icon: 'military_tech',
+      };
+    case 'return_home':
+      return {
+        title: event.fields?.success === true ? 'Retour au village' : 'Retour au village en cours',
+        detail: 'ClashGO prépare le prochain cycle.',
+        icon: 'home',
+      };
+    case 'recovery':
+      return {
+        title: event.fields?.stage === 'success' ? 'Récupération terminée' : 'Récupération automatique',
+        detail: 'ClashGO stabilise automatiquement la session.',
+        icon: 'healing',
+      };
+    case 'speed_profile':
+      return {
+        title: 'Cadence ajustée',
+        detail: 'Le rythme du bot a été adapté automatiquement.',
+        icon: 'speed',
+      };
+    case 'anomaly':
+      return {
+        title: 'Correction automatique',
+        detail: 'Une anomalie a été détectée et prise en charge.',
+        icon: 'monitor_heart',
+      };
+    default:
+      return {
+        title: event.type.split('_').join(' '),
+        detail: 'Activité ClashGO',
+        icon: 'bolt',
+      };
+  }
+};
+
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, running, starting,
@@ -199,12 +257,26 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
         <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
           <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Activité récente</div>
           <div className="mt-4 grid md:grid-cols-3 gap-3">
-            {recentActivity.map((event, index) => (
-              <div key={event.at + '-' + index} className="rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 px-4 py-3">
-                <div className="text-xs font-black text-zinc-800 dark:text-zinc-100">{event.type.split('_').join(' ')}</div>
-                <div className="mt-1 text-[10px] font-semibold text-zinc-400">{event.at}</div>
-              </div>
-            ))}
+            {recentActivity.map((event, index) => {
+              const item = activityLabel(event);
+              const at = new Date(event.at);
+              return (
+                <div key={event.at + '-' + index} className="rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white dark:bg-zinc-900">
+                      <span className="material-symbols-outlined text-base text-zinc-400">{item.icon}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-black text-zinc-800 dark:text-zinc-100">{item.title}</div>
+                      <div className="mt-0.5 truncate text-[10px] font-semibold text-zinc-500">{item.detail}</div>
+                      <div className="mt-1 text-[9px] font-bold text-zinc-400">
+                        {Number.isNaN(at.getTime()) ? event.at : at.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
       )}
