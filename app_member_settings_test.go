@@ -1769,3 +1769,80 @@ func TestBuildTemporaryTestSettingsClampsInvalidLimit(t *testing.T) {
 		t.Fatalf("MaxAttacksPerSession=%d want 1", got.MaxAttacksPerSession)
 	}
 }
+
+
+func TestTemporaryValidationSessionDoesNotReplaceUndoSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	previousPath := filepath.Join(dir, "member.previous")
+	originalPath := filepath.Join(dir, "member.json")
+
+	undoBefore := sanitizeMemberSettings(MemberSettings{
+		InterfaceLevel:       "advanced",
+		SpeedProfile:         "cautious",
+		MaxAttacksPerHour:    8,
+		MaxAttacksPerSession: 25,
+		BreakEveryAttacks:    4,
+		BreakMinutes:         4,
+		AdaptiveSearch:       true,
+	})
+	current := sanitizeMemberSettings(MemberSettings{
+		InterfaceLevel:       "advanced",
+		SpeedProfile:         "normal",
+		MaxAttacksPerHour:    12,
+		MaxAttacksPerSession: 50,
+		BreakEveryAttacks:    5,
+		BreakMinutes:         3,
+		AdaptiveSearch:       true,
+	})
+
+	if err := saveMemberProfileFile(previousPath, undoBefore); err != nil {
+		t.Fatalf("save previous profile: %v", err)
+	}
+	if err := saveMemberProfileFile(originalPath, current); err != nil {
+		t.Fatalf("save current profile: %v", err)
+	}
+
+	temporary, err := buildTemporaryTestSettings(current, 3)
+	if err != nil {
+		t.Fatalf("build temporary settings: %v", err)
+	}
+	if temporary.MaxAttacksPerSession != 3 {
+		t.Fatalf("temporary attack limit = %d, want 3", temporary.MaxAttacksPerSession)
+	}
+
+	// Temporary validation settings are intentionally stored separately from
+	// the one-step undo snapshot. Simulate the test write + restoration and
+	// confirm the user's previous-edit history survives untouched.
+	testPath := filepath.Join(dir, "test.restore.json")
+	if err := saveMemberProfileFile(testPath, current); err != nil {
+		t.Fatalf("save test restore profile: %v", err)
+	}
+	if err := saveMemberProfileFile(originalPath, temporary); err != nil {
+		t.Fatalf("save temporary profile: %v", err)
+	}
+	if restore, ok := loadMemberProfileFile(testPath); !ok {
+		t.Fatal("test restore snapshot missing")
+	} else if err := saveMemberProfileFile(originalPath, restore); err != nil {
+		t.Fatalf("restore original profile: %v", err)
+	}
+
+	gotUndo, ok := loadMemberProfileFile(previousPath)
+	if !ok {
+		t.Fatal("undo snapshot missing after temporary session")
+	}
+	if gotUndo.SpeedProfile != undoBefore.SpeedProfile ||
+		gotUndo.MaxAttacksPerHour != undoBefore.MaxAttacksPerHour ||
+		gotUndo.MaxAttacksPerSession != undoBefore.MaxAttacksPerSession {
+		t.Fatalf("temporary session changed undo snapshot: got %+v want %+v", gotUndo, undoBefore)
+	}
+
+	gotCurrent, ok := loadMemberProfileFile(originalPath)
+	if !ok {
+		t.Fatal("restored current profile missing")
+	}
+	if gotCurrent.SpeedProfile != current.SpeedProfile ||
+		gotCurrent.MaxAttacksPerHour != current.MaxAttacksPerHour ||
+		gotCurrent.MaxAttacksPerSession != current.MaxAttacksPerSession {
+		t.Fatalf("temporary session did not restore current profile: got %+v want %+v", gotCurrent, current)
+	}
+}
