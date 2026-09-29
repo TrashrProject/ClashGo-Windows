@@ -48,6 +48,7 @@ import {
   GetVillageResourceHistory,
   GetCurrentArmy,
   SaveMemberInterfaceLevel,
+  SetMemberSpeedProfile,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
 import { InterfaceLevel, TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent, AttackReplayView, SessionReportView, BotStats, AttackReport } from './types';
@@ -1051,6 +1052,15 @@ function App() {
     }
   }, []);
 
+  const handleLiveSpeedChange = async (profile: 'cautious' | 'normal' | 'fast') => {
+    try {
+      await SetMemberSpeedProfile(profile);
+      await syncMemberScopedView(true);
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
   const handleStartWithPreset = async (preset: 'short' | 'balanced' | 'fast') => {
     if (startInFlightRef.current || isRunning || isStarting) return;
     if (updateInstallBusy) {
@@ -1698,6 +1708,7 @@ function App() {
               starting={isStarting}
               onStart={handleStart}
               onStartWithPreset={(preset) => void handleStartWithPreset(preset)}
+              onSpeedChange={(profile) => void handleLiveSpeedChange(profile)}
               onStartTestSession={handleStartTestSession}
               onStartQuickTestSession={handleStartQuickTestSession}
               onStop={handleStop}
