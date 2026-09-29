@@ -44,6 +44,7 @@ import {
   StartQuickTestSession,
   GetPlayerProfile,
   GetVillageResourceHistory,
+  GetCurrentArmy,
   SaveMemberInterfaceLevel,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
@@ -88,6 +89,16 @@ function safeEventsOn(
     return () => {};
   }
 }
+
+type CurrentArmyStatus = {
+  timestamp?: string;
+  ready: boolean;
+  uncertain: boolean;
+  warnings?: string[];
+  units?: Array<{ name: string; category: string; count: number; confidence: number; slot_x: number }>;
+  target_town_hall?: number;
+  target_label?: string;
+};
 
 const friendlyBotErrorMessage = (value: string): string => {
   const raw = value.trim();
@@ -221,6 +232,7 @@ function App() {
   const [isStarting, setIsStarting] = useState(false);
   const [history, setHistory] = useState<AttackReport[]>([]);
   const [resourceHistory, setResourceHistory] = useState<VillageResourceSnapshot[]>([]);
+  const [currentArmy, setCurrentArmy] = useState<CurrentArmyStatus | null>(null);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [replay, setReplay] = useState<AttackReplayView>({ available: false, complete: false, events: [] });
   const [sessionReport, setSessionReport] = useState<SessionReportView | null>(null);
@@ -291,6 +303,7 @@ function App() {
       setStats(createEmptyStats());
       setHistory([]);
       setResourceHistory([]);
+      setCurrentArmy(null);
       setActivity([]);
       setReplay({ available: false, complete: false, events: [] });
       setSessionReport(null);
@@ -303,12 +316,13 @@ function App() {
       return;
     }
 
-    const [configResult, accountResult, statsResult, historyResult, resourceResult, activityResult, replayResult, reportResult, bootResult] = await Promise.allSettled([
+    const [configResult, accountResult, statsResult, historyResult, resourceResult, armyResult, activityResult, replayResult, reportResult, bootResult] = await Promise.allSettled([
       GetConfig(),
       GetAccountConfig(),
       GetStats(),
       GetAttackHistory(),
       GetVillageResourceHistory(),
+      GetCurrentArmy(),
       GetActivity(),
       GetLatestAttackReplay(),
       GetSessionReport(),
@@ -339,6 +353,9 @@ function App() {
     }
     if (resourceResult.status === 'fulfilled') {
       setResourceHistory((resourceResult.value ?? []) as VillageResourceSnapshot[]);
+    }
+    if (armyResult.status === 'fulfilled') {
+      setCurrentArmy((armyResult.value || null) as unknown as CurrentArmyStatus | null);
     }
     if (activityResult.status === 'fulfilled') {
       setActivity((activityResult.value ?? []) as unknown as ActivityEvent[]);
@@ -546,6 +563,15 @@ function App() {
       }
     };
 
+    const fetchCurrentArmy = async () => {
+      try {
+        const army = await GetCurrentArmy();
+        setCurrentArmy((army || null) as unknown as CurrentArmyStatus | null);
+      } catch (err) {
+        console.warn('Current army refresh failed:', err);
+      }
+    };
+
     const fetchSessionReport = async () => {
       try {
         const report = await GetSessionReport();
@@ -560,6 +586,7 @@ function App() {
     void fetchHistory();
     void fetchLogs();
     void fetchResourceHistory();
+    void fetchCurrentArmy();
     void fetchReplay();
     void fetchSessionReport();
 
@@ -571,6 +598,7 @@ function App() {
     const logInterval = setInterval(fetchLogs, 4000);
     const historyInterval = setInterval(fetchHistory, 30000); // recovery fallback
     const resourceInterval = setInterval(fetchResourceHistory, 15000);
+    const armyInterval = setInterval(fetchCurrentArmy, 7000);
     const replayInterval = setInterval(fetchReplay, 30000); // recovery fallback
     const sessionReportInterval = setInterval(fetchSessionReport, 30000); // cold-start/stop fallback
 
@@ -726,6 +754,7 @@ function App() {
       clearInterval(logInterval);
       clearInterval(historyInterval);
       clearInterval(resourceInterval);
+      clearInterval(armyInterval);
       clearInterval(replayInterval);
       clearInterval(sessionReportInterval);
       clearInterval(diagnosticsInterval);
@@ -1463,6 +1492,7 @@ function App() {
               startupCheckRunning={startupCheckRunning}
               onRunStartupCheck={() => void handleStartupCheck()}
               latestBootReport={latestBootReport}
+              currentArmy={currentArmy}
             />
           )}
           {tab === 'activity' && <Dashboard {...dashboardProps} />}
