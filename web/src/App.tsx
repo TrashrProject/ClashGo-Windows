@@ -342,7 +342,7 @@ function App() {
       setInterfaceLevel('developer');
     } else if (state?.activated) {
       void GetMemberInterfaceLevel()
-        .then((saved) => {
+        .then((saved: unknown) => {
           const level: InterfaceLevel = saved === 'advanced' ? 'advanced' : 'simple';
           setInterfaceLevel(level);
         })
@@ -365,7 +365,7 @@ function App() {
   const handleInterfaceLevelChange = useCallback((level: InterfaceLevel) => {
     setInterfaceLevel(level);
     if (level !== 'developer') {
-      void SaveMemberInterfaceLevel(level).catch((err) => {
+      void SaveMemberInterfaceLevel(level).catch((err: unknown) => {
         console.warn('Failed to save member interface level:', err);
       });
     }
@@ -407,7 +407,7 @@ function App() {
         // the Go backend auto-select the matching farm HDV before the user
         // ever opens the Account page.
         if (account?.player_tag) {
-          void GetPlayerProfile().catch((err) => {
+          void GetPlayerProfile().catch((err: unknown) => {
             console.warn('Background account sync failed:', err);
           });
         }
@@ -591,7 +591,7 @@ function App() {
       void syncMemberScopedView(Boolean(payload?.activated));
       if (payload?.activated) {
         void GetStartupReadiness()
-          .then((result) => {
+          .then((result: unknown) => {
             setStartupCheck(result as unknown as {
               ready: boolean;
               checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
@@ -607,7 +607,7 @@ function App() {
         setInterfaceLevel('developer');
       } else if (payload?.activated) {
         void GetMemberInterfaceLevel()
-          .then((saved) => setInterfaceLevel(saved === 'advanced' ? 'advanced' : 'simple'))
+          .then((saved: unknown) => setInterfaceLevel(saved === 'advanced' ? 'advanced' : 'simple'))
           .catch(() => setInterfaceLevel('simple'));
         setTab((current) => current === 'developer' ? 'dashboard' : current);
       } else {
@@ -626,7 +626,7 @@ function App() {
     const refreshBootReport = () => {
       window.setTimeout(() => {
         void GetLatestBootReport()
-          .then((report) => setLatestBootReport((report || null) as typeof latestBootReport))
+          .then((report: unknown) => setLatestBootReport((report || null) as typeof latestBootReport))
           .catch(() => {});
       }, 250);
     };
