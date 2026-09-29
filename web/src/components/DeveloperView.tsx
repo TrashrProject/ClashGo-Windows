@@ -272,6 +272,17 @@ const DeveloperView: React.FC = () => {
     item.hint === currentLicenseHint &&
     item.machine_id === currentMachineID;
   const normalizedSearch = search.trim().toLowerCase();
+  const licensePriority = (item: LicenseRow): number => {
+    if (item.active === false) return 50;
+    if (isLicenseExpired(item, now)) return 0;
+    if (item.expires_at) {
+      const expiry = new Date(item.expires_at).getTime();
+      if (Number.isFinite(expiry) && expiry > now && expiry - now <= sevenDaysMs) return 10;
+    }
+    if (!item.machine_id && !item.activated_at) return 20;
+    return 30;
+  };
+
   const filteredLicenses = licenses.filter((item) => {
     if (licenseFilter === 'active' && !isLicenseUsable(item, now)) return false;
     if (licenseFilter === 'revoked' && item.active !== false) return false;
@@ -292,6 +303,13 @@ const DeveloperView: React.FC = () => {
       item.role,
       planLabel(item.plan),
     ].some((value) => String(value || '').toLowerCase().includes(normalizedSearch));
+  }).sort((a, b) => {
+    const priority = licensePriority(a) - licensePriority(b);
+    if (priority !== 0) return priority;
+    const aExpiry = a.expires_at ? new Date(a.expires_at).getTime() : Number.POSITIVE_INFINITY;
+    const bExpiry = b.expires_at ? new Date(b.expires_at).getTime() : Number.POSITIVE_INFINITY;
+    if (aExpiry !== bExpiry) return aExpiry - bExpiry;
+    return String(a.customer_name || a.hint || '').localeCompare(String(b.customer_name || b.hint || ''), 'fr');
   });
   const filteredIncidents = incidents.filter((item) => {
     if (!normalizedSearch) return true;
