@@ -9,6 +9,7 @@ import (
 	"github.com/Ducky705/ClashGO/internal/bot"
 	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/paths"
+	"github.com/Ducky705/ClashGO/internal/telemetry"
 )
 
 func TestApp_GetConfig(t *testing.T) {
@@ -32,6 +33,24 @@ func TestApp_GetAttackHistory(t *testing.T) {
 	history := a.GetAttackHistory()
 	if history == nil {
 		t.Error("GetAttackHistory returned nil")
+	}
+}
+
+func TestApp_GetActivityUsesStoppedSessionCache(t *testing.T) {
+	a := &App{
+		lastActivity: []telemetry.Event{
+			{Type: telemetry.EventSessionComplete},
+		},
+	}
+
+	got := a.GetActivity()
+	if len(got) != 1 || got[0].Type != telemetry.EventSessionComplete {
+		t.Fatalf("cached stopped activity=%+v", got)
+	}
+
+	a.clearInMemoryMemberRuntimeState()
+	if got := a.GetActivity(); len(got) != 0 {
+		t.Fatalf("member switch should clear cached activity, got=%+v", got)
 	}
 }
 
