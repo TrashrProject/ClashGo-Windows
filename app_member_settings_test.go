@@ -992,3 +992,51 @@ func TestActivationRestoresMemberArchiveOverResidualSharedState(t *testing.T) {
 		t.Fatalf("activation did not restore member archive: %s", shared)
 	}
 }
+
+
+func TestMemberAutomationSimpleModeIsIndependent(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Automation.SimpleMode = true
+
+	profile := memberAutomationFromConfig(cfg)
+	if profile.SimpleMode == nil || !*profile.SimpleMode {
+		t.Fatal("member automation profile did not capture automatic mode")
+	}
+
+	cfg.Automation.SimpleMode = false
+	applyMemberAutomationToConfig(cfg, profile)
+	if !cfg.Automation.SimpleMode {
+		t.Fatal("member automation profile did not restore automatic mode")
+	}
+
+	manual := false
+	profile.SimpleMode = &manual
+	applyMemberAutomationToConfig(cfg, profile)
+	if cfg.Automation.SimpleMode {
+		t.Fatal("member automation profile did not restore manual mode")
+	}
+}
+
+func TestLegacyAutomationProfileWithoutSimpleModePreservesCurrentMode(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Automation.SimpleMode = true
+
+	legacy := MemberAutomationProfile{
+		SimpleMode:          nil,
+		SearchEnabled:       false,
+		MinLootGold:         600000,
+		MinLootElixir:       600000,
+		MinLootDarkElixir:   3000,
+		StallTimerSeconds:   20,
+		LootExitPercent:     100,
+		FarmTownHall:        17,
+	}
+	applyMemberAutomationToConfig(cfg, legacy)
+
+	if !cfg.Automation.SimpleMode {
+		t.Fatal("legacy automation profile unexpectedly changed automatic mode")
+	}
+	if cfg.Search.Enabled {
+		t.Fatal("legacy automation profile did not apply its supported settings")
+	}
+}
