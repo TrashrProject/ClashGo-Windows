@@ -6,6 +6,7 @@ type ControlServiceView = {
   service_url?: string;
   configured?: boolean;
   embedded?: boolean;
+  override_allowed?: boolean;
   requires_restart?: boolean;
 };
 
@@ -406,16 +407,20 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
                   ? 'Serveur de licences intégré à cette version'
                   : controlService?.configured
                     ? 'Serveur bêta configuré'
-                    : 'Mode bêta local'}
+                    : controlService?.override_allowed
+                      ? 'Mode bêta local'
+                      : 'Serveur de licences non intégré'}
               </div>
               <div className="mt-1 text-[10px] font-semibold text-zinc-400">
                 {controlService?.embedded
                   ? 'Cette adresse est verrouillée par la build et ne peut pas être remplacée localement.'
-                  : 'À utiliser uniquement pour relier une bêta à ton serveur de licences. HTTPS obligatoire hors localhost.'}
+                  : controlService?.override_allowed
+                    ? 'À utiliser uniquement pour relier une bêta à ton serveur de licences. HTTPS obligatoire hors localhost.'
+                    : 'Les versions stables acceptent uniquement le serveur intégré au build.'}
               </div>
             </div>
 
-            {!controlService?.embedded && (
+            {!controlService?.embedded && controlService?.override_allowed && (
               <div className="flex w-full lg:w-auto flex-col sm:flex-row gap-2">
                 <input
                   value={controlURLInput}
@@ -444,7 +449,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           {controlURLMessage && (
             <div className="mt-3 text-[10px] font-bold text-amber-600 dark:text-amber-300">{controlURLMessage}</div>
           )}
-          {(isRunning || isStarting) && !controlService?.embedded && (
+          {(isRunning || isStarting) && !controlService?.embedded && controlService?.override_allowed && (
             <div className="mt-3 text-[9px] font-semibold text-amber-500">Arrête le bot avant de modifier le serveur.</div>
           )}
           </div>
