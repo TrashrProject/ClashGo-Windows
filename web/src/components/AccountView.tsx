@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ApplyMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, RefreshLicense, SaveAccountConfig, SaveMemberSettings, UndoMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberPresets, GetMemberSettings, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, UndoMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
@@ -66,6 +66,13 @@ type MemberSettings = {
   auto_profile_sync: boolean;
   auto_army_guard: boolean;
   auto_resource_tracking: boolean;
+};
+
+type MemberPresetSlot = {
+  slot: number;
+  name: string;
+  updated_at?: string;
+  settings: MemberSettings;
 };
 
 const formatLicenseRemaining = (expiresAt?: string): string => {
@@ -245,6 +252,9 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [memberSaveError, setMemberSaveError] = React.useState('');
   const [memberUndoAvailable, setMemberUndoAvailable] = React.useState(false);
   const [memberUndoBusy, setMemberUndoBusy] = React.useState(false);
+  const [memberPresets, setMemberPresets] = React.useState<MemberPresetSlot[]>([]);
+  const [memberPresetBusy, setMemberPresetBusy] = React.useState<number | null>(null);
+  const [memberPresetNames, setMemberPresetNames] = React.useState<Record<number, string>>({});
   const [memberPage, setMemberPage] = React.useState<'account' | 'settings' | 'village'>(initialPage);
 
   React.useEffect(() => {
@@ -307,12 +317,21 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
 
   const refreshMemberSettings = React.useCallback(async () => {
     try {
-      const [settings, canUndo] = await Promise.all([
+      const [settings, canUndo, presets] = await Promise.all([
         GetMemberSettings(),
         HasPreviousMemberSettings().catch(() => false),
+        GetMemberPresets().catch(() => []),
       ]);
       setMemberSettings(settings as MemberSettings);
       setMemberUndoAvailable(Boolean(canUndo));
+      setMemberPresets((presets || []) as MemberPresetSlot[]);
+      setMemberPresetNames((current) => {
+        const next = { ...current };
+        for (const preset of (presets || []) as MemberPresetSlot[]) {
+          if (!next[preset.slot]) next[preset.slot] = preset.name || `Profil ${preset.slot}`;
+        }
+        return next;
+      });
     } catch {
       // Member preferences are best-effort while the Wails bridge initializes.
     }
@@ -388,6 +407,56 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       setMemberUndoAvailable(false);
     } finally {
       setMemberUndoBusy(false);
+    }
+  };
+
+  const savePersonalPreset = async (slot: number) => {
+    if (memberPresetBusy !== null || memberSaving || testSessionActive) return;
+    setMemberPresetBusy(slot);
+    setMemberMessage('');
+    setMemberSaveError('');
+    try {
+      const presets = await SaveMemberPreset(slot, memberPresetNames[slot] || `Profil ${slot}`);
+      setMemberPresets((presets || []) as MemberPresetSlot[]);
+      setMemberMessage(`Profil personnel ${slot} enregistré.`);
+    } catch (e) {
+      setMemberSaveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMemberPresetBusy(null);
+    }
+  };
+
+  const applyPersonalPreset = async (slot: number) => {
+    if (memberPresetBusy !== null || memberSaving || testSessionActive) return;
+    setMemberPresetBusy(slot);
+    setMemberMessage('');
+    setMemberSaveError('');
+    try {
+      const saved = await ApplySavedMemberPreset(slot);
+      setMemberSettings(saved as MemberSettings);
+      setMemberUndoAvailable(true);
+      setMemberMessage(`Profil personnel ${slot} appliqué.`);
+      onReadinessChanged?.();
+    } catch (e) {
+      setMemberSaveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMemberPresetBusy(null);
+    }
+  };
+
+  const deletePersonalPreset = async (slot: number) => {
+    if (memberPresetBusy !== null || memberSaving || testSessionActive) return;
+    setMemberPresetBusy(slot);
+    setMemberMessage('');
+    setMemberSaveError('');
+    try {
+      const presets = await DeleteMemberPreset(slot);
+      setMemberPresets((presets || []) as MemberPresetSlot[]);
+      setMemberMessage(`Profil personnel ${slot} supprimé.`);
+    } catch (e) {
+      setMemberSaveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMemberPresetBusy(null);
     }
   };
 
@@ -1052,6 +1121,65 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     <div className="mt-1 text-[11px] font-semibold text-zinc-500">{description}</div>
                   </button>
                 ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-end justify-between gap-4 mb-3">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">Mes profils</div>
+                  <div className="mt-1 text-xs font-semibold text-zinc-500">3 emplacements personnels liés à ta licence.</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {[1, 2, 3].map((slot) => {
+                  const preset = memberPresets.find((item) => item.slot === slot);
+                  return (
+                    <div key={slot} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-400">Emplacement {slot}</span>
+                        {preset && <span className="material-symbols-outlined text-base text-emerald-500">bookmark_added</span>}
+                      </div>
+                      <input
+                        value={memberPresetNames[slot] ?? preset?.name ?? `Profil ${slot}`}
+                        onChange={(e) => setMemberPresetNames((current) => ({ ...current, [slot]: e.target.value }))}
+                        maxLength={32}
+                        disabled={testSessionActive}
+                        className="mt-3 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-black text-zinc-950 dark:text-white outline-none focus:border-zinc-400"
+                      />
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={memberPresetBusy !== null || memberSaving || testSessionActive}
+                          onClick={() => void savePersonalPreset(slot)}
+                          className="rounded-lg bg-zinc-950 dark:bg-white px-3 py-2 text-[9px] font-black uppercase tracking-wider text-white dark:text-zinc-950 disabled:opacity-30"
+                        >
+                          {memberPresetBusy === slot ? '…' : preset ? 'Mettre à jour' : 'Enregistrer'}
+                        </button>
+                        {preset && (
+                          <>
+                            <button
+                              type="button"
+                              disabled={memberPresetBusy !== null || memberSaving || testSessionActive}
+                              onClick={() => void applyPersonalPreset(slot)}
+                              className="rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-zinc-500 hover:text-zinc-950 dark:hover:text-white disabled:opacity-30"
+                            >
+                              Appliquer
+                            </button>
+                            <button
+                              type="button"
+                              disabled={memberPresetBusy !== null || memberSaving || testSessionActive}
+                              onClick={() => void deletePersonalPreset(slot)}
+                              className="rounded-lg border border-rose-200 dark:border-rose-900/50 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-rose-500 disabled:opacity-30"
+                            >
+                              Supprimer
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
