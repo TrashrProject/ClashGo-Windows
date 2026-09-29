@@ -1,6 +1,6 @@
 package main
 
-// Build marker: beta pipeline validation after admin UI redesign.
+// Build marker: beta pipeline validation after Windows runtime fixes.
 import (
 	"bytes"
 	"context"
