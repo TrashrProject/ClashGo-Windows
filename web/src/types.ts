@@ -291,6 +291,7 @@ export interface BotConfig {
 }
 
 export type TabType = 'dashboard' | 'activity' | 'account' | 'analytics' | 'config' | 'settings';
+export type InterfaceLevel = 'simple' | 'advanced' | 'developer';
 
 // UpdateStatus mirrors internal/updater.Status (Go side).
 // Casing follows Wails JSON convention (snake_case). Keep field names
