@@ -16,6 +16,7 @@ interface HomeViewProps {
   licenseReady: boolean;
   accountLinked: boolean;
   windowsReady: boolean | null;
+  readinessIssues: string[];
   memberName?: string;
   licensePlan?: string;
 }
@@ -89,7 +90,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, running, starting,
     onStart, onStop, onOpenAutomation, onOpenAccount, onOpenSettings,
-    licenseReady, accountLinked, windowsReady, memberName, licensePlan,
+    licenseReady, accountLinked, windowsReady, readinessIssues, memberName, licensePlan,
   } = props;
 
   const lastAttack = history && history.length > 0 ? history[0] : undefined;
@@ -238,13 +239,20 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
               </button>
             </div>
           ) : windowsReady === false ? (
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <div>
-                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">Étape suivante</div>
-                <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">Vérifier BlueStacks</div>
-                <div className="mt-1 text-xs font-semibold text-zinc-500">ClashGO a détecté un élément Windows ou ADB à vérifier avant le lancement.</div>
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">À corriger avant de démarrer</div>
+                <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">Environnement Windows incomplet</div>
+                <div className="mt-3 grid gap-2">
+                  {(readinessIssues.length ? readinessIssues : ['Un élément Windows ou ADB doit être vérifié.']).slice(0, 4).map((issue) => (
+                    <div key={issue} className="flex items-start gap-2 text-xs font-semibold text-zinc-500">
+                      <span className="material-symbols-outlined mt-[-1px] text-sm text-amber-500">warning</span>
+                      <span>{issue}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <button type="button" onClick={onOpenSettings} className="rounded-xl bg-zinc-950 dark:bg-white px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950">
+              <button type="button" onClick={onOpenSettings} className="shrink-0 rounded-xl bg-zinc-950 dark:bg-white px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950">
                 Voir le diagnostic
               </button>
             </div>
