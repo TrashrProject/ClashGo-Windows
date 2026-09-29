@@ -7,7 +7,7 @@
   <title>ClashGO Control Center</title>
   <link rel="stylesheet" href="../style.css" />
   <style>
-    .control{max-width:1180px;margin:0 auto;padding:88px 24px 80px}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:28px}.top h1{font-size:44px;letter-spacing:-.055em;margin:8px 0}.top p{color:#8b8b95;max-width:650px;line-height:1.6}.card{border:1px solid #27272a;background:#111113;border-radius:24px;padding:22px}.connect{display:grid;grid-template-columns:1.2fr 1fr auto;gap:10px}.input,.select{width:100%;height:44px;background:#0b0b0d;border:1px solid #303036;color:#e4e4e7;border-radius:12px;padding:0 13px;outline:none}.input:focus,.select:focus{border-color:#71717a}.button{height:44px;border:0;border-radius:12px;padding:0 16px;background:#f4f4f5;color:#09090b;font-weight:900;cursor:pointer}.button.secondary{background:#18181b;color:#d4d4d8;border:1px solid #303036}.button.danger{background:#2b1114;color:#fb7185;border:1px solid #4c1d24}.button:disabled{opacity:.4;cursor:not-allowed}.tabs{display:flex;gap:8px;margin:22px 0}.tab{background:#111113;border:1px solid #27272a;color:#71717a;border-radius:11px;padding:10px 14px;font-size:11px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}.tab.active{background:#f4f4f5;color:#09090b}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.stat{background:#111113;border:1px solid #27272a;border-radius:18px;padding:18px}.stat strong{display:block;font-size:28px}.stat span{font-size:9px;letter-spacing:.16em;color:#71717a;font-weight:900}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.searchbar{margin:18px 0}.customer-row{grid-template-columns:1.2fr 1fr .6fr .8fr}.toolbar h2{font-size:18px;margin:0}.create{display:flex;gap:8px;flex-wrap:wrap}.rows{border:1px solid #27272a;border-radius:20px;overflow:hidden}.row{display:grid;grid-template-columns:1.2fr .8fr .8fr 1.3fr auto;gap:12px;align-items:center;padding:15px 17px;background:#111113;border-bottom:1px solid #27272a}.row:last-child{border-bottom:0}.row .title{font-weight:800;font-size:13px}.row .sub{font-size:10px;color:#71717a;margin-top:4px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.badge{display:inline-block;padding:6px 8px;border-radius:8px;background:#18181b;color:#a1a1aa;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.12em}.ok{color:#4ade80}.bad{color:#fb7185}.actions2{display:flex;gap:6px;justify-content:flex-end}.mini{height:34px;padding:0 10px;border-radius:9px;font-size:9px}.incident{grid-template-columns:.85fr .65fr 1fr 2.2fr}.message{font-size:12px;font-weight:700;color:#d4d4d8;word-break:break-word}.empty{padding:28px;text-align:center;color:#52525b;background:#111113}.error{margin-top:12px;border:1px solid #4c1d24;background:#2b1114;color:#fb7185;padding:12px 14px;border-radius:12px;font-size:12px;font-weight:700}.success{margin-top:12px;border:1px solid #14532d;background:#052e16;color:#4ade80;padding:12px 14px;border-radius:12px;font-size:12px;font-weight:700}.generated{margin-top:12px;background:#0b0b0d;border:1px solid #27272a;border-radius:14px;padding:14px}.generated code{display:block;padding:7px 0;color:#e4e4e7;font-size:12px;word-break:break-all}@media(max-width:850px){.connect{grid-template-columns:1fr}.stats{grid-template-columns:1fr}.row,.incident{grid-template-columns:1fr}.actions2{justify-content:flex-start}.top{flex-direction:column}}
+    .control{max-width:1180px;margin:0 auto;padding:88px 24px 80px}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:28px}.top h1{font-size:44px;letter-spacing:-.055em;margin:8px 0}.top p{color:#8b8b95;max-width:650px;line-height:1.6}.card{border:1px solid #27272a;background:#111113;border-radius:24px;padding:22px}.connect{display:grid;grid-template-columns:1.2fr 1fr auto;gap:10px}.input,.select{width:100%;height:44px;background:#0b0b0d;border:1px solid #303036;color:#e4e4e7;border-radius:12px;padding:0 13px;outline:none}.input:focus,.select:focus{border-color:#71717a}.button{height:44px;border:0;border-radius:12px;padding:0 16px;background:#f4f4f5;color:#09090b;font-weight:900;cursor:pointer}.button.secondary{background:#18181b;color:#d4d4d8;border:1px solid #303036}.button.danger{background:#2b1114;color:#fb7185;border:1px solid #4c1d24}.button:disabled{opacity:.4;cursor:not-allowed}.tabs{display:flex;gap:8px;margin:22px 0}.tab{background:#111113;border:1px solid #27272a;color:#71717a;border-radius:11px;padding:10px 14px;font-size:11px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}.tab.active{background:#f4f4f5;color:#09090b}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.stat{background:#111113;border:1px solid #27272a;border-radius:18px;padding:18px}.stat strong{display:block;font-size:28px}.stat span{font-size:9px;letter-spacing:.16em;color:#71717a;font-weight:900}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.searchbar{margin:18px 0}.customer-row{grid-template-columns:1.2fr 1fr .6fr .8fr}.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{background:#111113;border:1px solid #27272a;border-radius:18px;padding:18px}.metric strong{font-size:24px;display:block}.metric span{font-size:9px;color:#71717a;font-weight:900;letter-spacing:.14em}.history-row{grid-template-columns:1fr .9fr .8fr .8fr 1.4fr}.top-errors{margin-top:16px}.error-row{display:grid;grid-template-columns:.6fr .8fr .5fr 2fr;gap:12px;padding:12px 14px;border-bottom:1px solid #27272a}.error-row:last-child{border-bottom:0}@media(max-width:850px){.metric-grid{grid-template-columns:1fr 1fr}.history-row,.error-row{grid-template-columns:1fr}}.toolbar h2{font-size:18px;margin:0}.create{display:flex;gap:8px;flex-wrap:wrap}.rows{border:1px solid #27272a;border-radius:20px;overflow:hidden}.row{display:grid;grid-template-columns:1.2fr .8fr .8fr 1.3fr auto;gap:12px;align-items:center;padding:15px 17px;background:#111113;border-bottom:1px solid #27272a}.row:last-child{border-bottom:0}.row .title{font-weight:800;font-size:13px}.row .sub{font-size:10px;color:#71717a;margin-top:4px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.badge{display:inline-block;padding:6px 8px;border-radius:8px;background:#18181b;color:#a1a1aa;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.12em}.ok{color:#4ade80}.bad{color:#fb7185}.actions2{display:flex;gap:6px;justify-content:flex-end}.mini{height:34px;padding:0 10px;border-radius:9px;font-size:9px}.incident{grid-template-columns:.85fr .65fr 1fr 2.2fr}.message{font-size:12px;font-weight:700;color:#d4d4d8;word-break:break-word}.empty{padding:28px;text-align:center;color:#52525b;background:#111113}.error{margin-top:12px;border:1px solid #4c1d24;background:#2b1114;color:#fb7185;padding:12px 14px;border-radius:12px;font-size:12px;font-weight:700}.success{margin-top:12px;border:1px solid #14532d;background:#052e16;color:#4ade80;padding:12px 14px;border-radius:12px;font-size:12px;font-weight:700}.generated{margin-top:12px;background:#0b0b0d;border:1px solid #27272a;border-radius:14px;padding:14px}.generated code{display:block;padding:7px 0;color:#e4e4e7;font-size:12px;word-break:break-all}@media(max-width:850px){.connect{grid-template-columns:1fr}.stats{grid-template-columns:1fr}.row,.incident{grid-template-columns:1fr}.actions2{justify-content:flex-start}.top{flex-direction:column}}
   </style>
 </head>
 <body>
@@ -44,12 +44,32 @@
     </div>
 
     <div class="tabs">
-      <button class="tab active" data-tab="licenses">Licences</button>
+      <button class="tab active" data-tab="overview">Vue d’ensemble</button>
+      <button class="tab" data-tab="licenses">Licences</button>
       <button class="tab" data-tab="customers">Clients</button>
+      <button class="tab" data-tab="history">Historique</button>
       <button class="tab" data-tab="incidents">Incidents</button>
     </div>
 
-    <section id="licensesPanel">
+    <section id="overviewPanel">
+      <div class="toolbar"><h2>Vue d’ensemble</h2><button id="overviewRefreshBtn" class="button secondary">Actualiser</button></div>
+      <div class="metric-grid">
+        <div class="metric"><strong id="mExpiring">—</strong><span>EXPIRENT SOUS 7 JOURS</span></div>
+        <div class="metric"><strong id="mExpired">—</strong><span>EXPIRÉES</span></div>
+        <div class="metric"><strong id="mNever">—</strong><span>JAMAIS ACTIVÉES</span></div>
+        <div class="metric"><strong id="mPaid">—</strong><span>CLIENTS PAYÉS</span></div>
+        <div class="metric"><strong id="mFreePaid">—</strong><span>FREE → PAYANT</span></div>
+        <div class="metric"><strong id="mActive">—</strong><span>LICENCES ACTIVES</span></div>
+        <div class="metric"><strong id="mCustomers">—</strong><span>CLIENTS</span></div>
+        <div class="metric"><strong id="mIncidents">—</strong><span>INCIDENTS</span></div>
+      </div>
+      <div class="top-errors">
+        <div class="toolbar"><h2>Erreurs les plus fréquentes</h2></div>
+        <div id="topErrors" class="rows"><div class="empty">Aucune donnée.</div></div>
+      </div>
+    </section>
+
+    <section id="licensesPanel" hidden>
       <div class="toolbar">
         <h2>Licences</h2>
         <div class="create">
@@ -81,6 +101,11 @@
       <div id="customers" class="rows"><div class="empty">Aucun client chargé.</div></div>
     </section>
 
+    <section id="historyPanel" hidden>
+      <div class="toolbar"><h2>Historique des renouvellements</h2></div>
+      <div id="history" class="rows"><div class="empty">Aucun historique chargé.</div></div>
+    </section>
+
     <section id="incidentsPanel" hidden>
       <div class="toolbar">
         <h2>Incidents automatiques</h2>
@@ -92,7 +117,7 @@
 
   <script>
     const $ = (id) => document.getElementById(id);
-    const state = { api: sessionStorage.getItem('clashgo_api') || '', admin: '', licenses: [], customers: [], incidents: [], search: '' };
+    const state = { api: sessionStorage.getItem('clashgo_api') || '', admin: '', licenses: [], customers: [], incidents: [], history: [], summary: {}, search: '' };
 
     $('apiUrl').value = state.api;
 
@@ -132,14 +157,18 @@
     }
     async function loadAll() {
       flash('');
-      const [l, c, i] = await Promise.all([
+      const [l, c, i, h, summary] = await Promise.all([
         request('/v1/admin/licenses'),
         request('/v1/admin/customers'),
-        request('/v1/admin/incidents')
+        request('/v1/admin/incidents'),
+        request('/v1/admin/history'),
+        request('/v1/admin/summary')
       ]);
       state.licenses = l.licenses || [];
       state.customers = c.customers || [];
       state.incidents = i.incidents || [];
+      state.history = h.events || [];
+      state.summary = summary || {};
       render();
     }
     function render() {
@@ -147,6 +176,25 @@
       $('activeCount').textContent = state.licenses.filter(x => x.active).length;
       $('incidentCount').textContent = state.incidents.length;
       $('customerCount').textContent = state.customers.length;
+      $('mExpiring').textContent = state.summary.expiring_7d ?? 0;
+      $('mExpired').textContent = state.summary.expired_licenses ?? 0;
+      $('mNever').textContent = state.summary.never_activated ?? 0;
+      $('mPaid').textContent = state.summary.paid_customers ?? 0;
+      $('mFreePaid').textContent = state.summary.free_to_paid_customers ?? 0;
+      $('mActive').textContent = state.summary.active_licenses ?? 0;
+      $('mCustomers').textContent = state.summary.customers ?? 0;
+      $('mIncidents').textContent = state.summary.incidents ?? 0;
+
+      $('topErrors').innerHTML = (state.summary.top_errors || []).length
+        ? (state.summary.top_errors || []).map(x => `
+          <div class="error-row">
+            <div><span class="badge">${escapeHtml(x.level || 'error')}</span></div>
+            <div class="sub">${escapeHtml(x.app_version || 'version ?')}</div>
+            <div class="title">${escapeHtml(x.count || 0)}×</div>
+            <div class="message">${escapeHtml(x.message || 'Sans message')}</div>
+          </div>
+        `).join('')
+        : '<div class="empty">Aucune erreur regroupée.</div>';
 
       const q = state.search.trim().toLowerCase();
       const filteredLicenses = state.licenses.filter(x => !q || [
@@ -157,6 +205,9 @@
       ].some(v => String(v || '').toLowerCase().includes(q)));
       const filteredIncidents = state.incidents.filter(x => !q || [
         x.customer_name, x.customer_contact, x.license_hint, x.machine_id, x.app_version, x.message, x.level
+      ].some(v => String(v || '').toLowerCase().includes(q)));
+      const filteredHistory = state.history.filter(x => !q || [
+        x.customer_name, x.customer_contact, x.license_hint, x.plan, x.payment_status, x.note, x.event_type
       ].some(v => String(v || '').toLowerCase().includes(q)));
 
       $('licenses').innerHTML = filteredLicenses.length ? filteredLicenses.map(x => `
@@ -198,6 +249,16 @@
           <div><div class="sub">Dernière activité</div><div class="title">${escapeHtml(date(x.last_seen_at))}</div></div>
         </div>
       `).join('') : '<div class="empty">Aucun client trouvé.</div>';
+
+      $('history').innerHTML = filteredHistory.length ? filteredHistory.map(x => `
+        <div class="row history-row">
+          <div><div class="title">${escapeHtml(x.customer_name || x.license_hint || 'Client')}</div><div class="sub">${escapeHtml(x.customer_contact || '')}</div></div>
+          <div><span class="badge">${escapeHtml(x.event_type || 'event')}</span><div class="sub">${escapeHtml(planLabel(x.plan))}</div></div>
+          <div><div class="title">${x.amount_cents == null ? '—' : (Number(x.amount_cents)/100).toFixed(2) + ' €'}</div><div class="sub">${escapeHtml(x.payment_status || '—')}</div></div>
+          <div><div class="sub">${escapeHtml(date(x.created_at))}</div><div class="sub">${x.expires_at ? 'Expire ' + escapeHtml(date(x.expires_at)) : ''}</div></div>
+          <div class="message">${escapeHtml(x.note || '')}</div>
+        </div>
+      `).join('') : '<div class="empty">Aucun historique.</div>';
 
       $('incidents').innerHTML = filteredIncidents.length ? [...filteredIncidents].reverse().map(x => `
         <div class="row incident">
@@ -278,10 +339,22 @@
       if (!id) return;
       const label = planLabel(currentPlan);
       if (!confirm('Renouveler cette licence pour ' + label + ' supplémentaire ?')) return;
+      const amountRaw = prompt('Montant encaissé en € (laisser vide si aucun) :', '');
+      const amount = amountRaw && !Number.isNaN(Number(amountRaw.replace(',', '.')))
+        ? Math.round(Number(amountRaw.replace(',', '.')) * 100)
+        : null;
+      const paymentStatus = prompt('Statut : paid / pending / offered / free', 'paid') || 'paid';
+      const note = prompt('Note interne (optionnel) :', '') || '';
       try {
         const out = await request('/v1/admin/licenses/renew',{
           method:'POST',
-          body:JSON.stringify({license_id:id,plan:currentPlan})
+          body:JSON.stringify({
+            license_id:id,
+            plan:currentPlan,
+            amount_cents:amount,
+            payment_status:paymentStatus,
+            note
+          })
         });
         await loadAll();
         flash('Licence renouvelée jusqu’au ' + (out.expires_at ? date(out.expires_at) : 'à vie') + '.', 'success');
@@ -322,12 +395,15 @@
     };
 
     $('refreshBtn').addEventListener('click', () => loadAll().catch(e => flash(e.message)));
+    $('overviewRefreshBtn').addEventListener('click', () => loadAll().catch(e => flash(e.message)));
 
     document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => {
       document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === btn));
       const tab = btn.dataset.tab;
+      $('overviewPanel').hidden = tab !== 'overview';
       $('licensesPanel').hidden = tab !== 'licenses';
       $('customersPanel').hidden = tab !== 'customers';
+      $('historyPanel').hidden = tab !== 'history';
       $('incidentsPanel').hidden = tab !== 'incidents';
     }));
   </script>
