@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import HomeView from './components/HomeView';
+import DeveloperView from './components/DeveloperView';
 import Analytics from './components/Analytics';
 import ConfigView from './components/ConfigView';
 import SettingsView from './components/SettingsView';
@@ -467,7 +468,7 @@ function App() {
     } catch (e) {
       console.warn('Failed to save interface level:', e);
     }
-    if (interfaceLevel === 'simple' && (tab === 'activity' || tab === 'analytics' || tab === 'settings')) {
+    if (interfaceLevel === 'simple' && (tab === 'activity' || tab === 'analytics' || tab === 'settings' || tab === 'developer')) {
       setTab('dashboard');
     }
   }, [interfaceLevel, tab]);
@@ -793,6 +794,7 @@ function App() {
           )}
           {tab === 'analytics' && <Analytics stats={stats} resourceHistory={resourceHistory} history={history as any} />}
           {tab === 'config' && <ConfigView {...configProps} />}
+          {tab === 'developer' && <DeveloperView />}
           {tab === 'settings' && (
             <SettingsView
               stats={stats}
