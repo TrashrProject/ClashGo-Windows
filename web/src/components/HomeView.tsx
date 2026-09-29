@@ -629,13 +629,23 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                 )}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="shrink-0 rounded-xl border border-amber-300 dark:border-amber-800 px-4 py-2.5 text-[9px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300"
-            >
-              Voir le diagnostic
-            </button>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={startupCheckRunning}
+                onClick={onRunStartupCheck}
+                className="rounded-xl bg-amber-500 px-4 py-2.5 text-[9px] font-black uppercase tracking-widest text-zinc-950 disabled:opacity-40"
+              >
+                {startupCheckRunning ? 'Vérification…' : 'Re-tester maintenant'}
+              </button>
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="rounded-xl border border-amber-300 dark:border-amber-800 px-4 py-2.5 text-[9px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300"
+              >
+                Voir le diagnostic
+              </button>
+            </div>
           </div>
         </section>
       )}
