@@ -50,6 +50,7 @@ type licenseRecord struct {
 	Role       string    `json:"role"`
 	Active     bool      `json:"active"`
 	MachineID  string    `json:"machine_id,omitempty"`
+	MachineName string   `json:"machine_name,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	LastSeenAt time.Time `json:"last_seen_at,omitempty"`
 	AppVersion  string    `json:"app_version,omitempty"`
@@ -620,9 +621,10 @@ func main() {
 
 	mux.HandleFunc("POST /v1/license/activate", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			LicenseKey string `json:"license_key"`
-			MachineID  string `json:"machine_id"`
-			AppVersion string `json:"app_version"`
+			LicenseKey  string `json:"license_key"`
+			MachineID   string `json:"machine_id"`
+			MachineName string `json:"machine_name,omitempty"`
+			AppVersion  string `json:"app_version"`
 		}
 		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
@@ -668,6 +670,10 @@ func main() {
 			}
 		}
 		rec.MachineID = in.MachineID
+		rec.MachineName = strings.TrimSpace(in.MachineName)
+		if len(rec.MachineName) > 80 {
+			rec.MachineName = rec.MachineName[:80]
+		}
 		rec.LastSeenAt = now
 		rec.AppVersion = strings.TrimSpace(in.AppVersion)
 		_ = control.saveLocked()
@@ -909,6 +915,7 @@ func main() {
 			return
 		}
 		rec.MachineID = ""
+		rec.MachineName = ""
 		rec.LastSeenAt = time.Time{}
 		rec.AppVersion = ""
 		control.appendEventLocked(licenseEvent{
@@ -1284,6 +1291,7 @@ func main() {
 			return
 		}
 		rec.MachineID = ""
+		rec.MachineName = ""
 		rec.LastSeenAt = time.Time{}
 		rec.AppVersion = ""
 		_ = control.saveLocked()
