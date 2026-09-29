@@ -284,6 +284,37 @@ func TestAppendEventLockedFillsMetadata(t *testing.T) {
 	}
 }
 
+func TestControlStorePersistsLicenseAuditHistory(t *testing.T) {
+	path := t.TempDir() + "/control.json"
+	store := newControlStore(path)
+
+	store.mu.Lock()
+	store.appendEventLocked(licenseEvent{
+		ID:          "audit-1",
+		LicenseID:   "license-1",
+		LicenseHint: "••••-TEST",
+		EventType:   "machine_reset",
+		Note:        "Liaison PC réinitialisée",
+		CreatedAt:   time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC),
+	})
+	if err := store.saveLocked(); err != nil {
+		store.mu.Unlock()
+		t.Fatal(err)
+	}
+	store.mu.Unlock()
+
+	reloaded := newControlStore(path)
+	reloaded.mu.RLock()
+	defer reloaded.mu.RUnlock()
+	if len(reloaded.data.Events) != 1 {
+		t.Fatalf("reloaded events len = %d, want 1", len(reloaded.data.Events))
+	}
+	got := reloaded.data.Events[0]
+	if got.ID != "audit-1" || got.EventType != "machine_reset" || got.LicenseID != "license-1" {
+		t.Fatalf("reloaded audit event mismatch: %+v", got)
+	}
+}
+
 
 func TestApplyLicenseRenewalExtendsFutureExpiry(t *testing.T) {
 	now := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
