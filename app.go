@@ -707,6 +707,35 @@ type StartupReadiness struct {
 	Checks []StartupCheckItem `json:"checks"`
 }
 
+func memberRuntimeConfigReady(cfg *config.BotConfig) (bool, string) {
+	if cfg == nil {
+		return false, "Configuration membre indisponible"
+	}
+	speed := strings.ToLower(strings.TrimSpace(cfg.Automation.SpeedProfile))
+	if speed != "cautious" && speed != "normal" && speed != "fast" {
+		return false, "Profil de vitesse invalide"
+	}
+	if cfg.Automation.MaxAttacksPerHour < 1 || cfg.Automation.MaxAttacksPerHour > 24 {
+		return false, "La limite d’attaques par heure doit être comprise entre 1 et 24"
+	}
+	if cfg.Attack.MaxAttackPerSession < 1 || cfg.Attack.MaxAttackPerSession > 500 {
+		return false, "La limite d’attaques par session doit être comprise entre 1 et 500"
+	}
+	if cfg.Automation.BreakEveryAttacks < 0 || cfg.Automation.BreakEveryAttacks > 20 {
+		return false, "La fréquence des pauses doit être comprise entre 0 et 20 attaques"
+	}
+	breakMinutes := int(cfg.Automation.BreakDuration.Duration / time.Minute)
+	if breakMinutes < 0 || breakMinutes > 30 {
+		return false, "La durée des pauses doit être comprise entre 0 et 30 minutes"
+	}
+	return true, fmt.Sprintf(
+		"%s · %d attaques/h · %d/session",
+		map[string]string{"cautious": "Prudente", "normal": "Normale", "fast": "Rapide"}[speed],
+		cfg.Automation.MaxAttacksPerHour,
+		cfg.Attack.MaxAttackPerSession,
+	)
+}
+
 func (a *App) GetStartupReadiness() StartupReadiness {
 	checks := make([]StartupCheckItem, 0, 7)
 	add := func(id, label string, ok bool, message string) {
@@ -788,6 +817,9 @@ func (a *App) GetStartupReadiness() StartupReadiness {
 		}
 	}
 	add("strategy", "Stratégie", strategyOK, strategyMessage)
+
+	pacingOK, pacingMessage := memberRuntimeConfigReady(cfg)
+	add("member_pacing", "Cadence membre", pacingOK, pacingMessage)
 
 	ready := true
 	for _, check := range checks {
@@ -913,6 +945,11 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			}
 			return BotStatus{Running: false, Message: msg}
 		}
+	}
+
+	cfgForPacing := config.LoadOrDefault("config.json")
+	if pacingOK, pacingMessage := memberRuntimeConfigReady(cfgForPacing); !pacingOK {
+		return BotStatus{Running: false, Message: "Réglage membre invalide : " + pacingMessage}
 	}
 
 	diag := collectSystemDiagnostics()
