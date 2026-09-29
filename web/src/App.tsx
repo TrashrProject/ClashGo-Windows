@@ -674,9 +674,9 @@ function App() {
       refreshBootReport();
     });
 
-    const unsubAttackHistory = safeEventsOn("attack_history_updated", (payload: bot.AttackReport[]) => {
+    const unsubAttackHistory = safeEventsOn("attack_history_updated", (payload: unknown) => {
       if (Array.isArray(payload)) {
-        setHistory(payload);
+        setHistory(payload as unknown as AttackReport[]);
       }
       // Deployment traces and session aggregates are ready at the attack
       // boundary, so refresh them event-driven instead of adding hot polling.
