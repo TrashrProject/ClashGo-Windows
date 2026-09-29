@@ -2771,6 +2771,23 @@ func (a *App) testSessionRestorePath() string {
 	return paths.ResolveConfig("test-session-restore.json")
 }
 
+func (a *App) testSessionRestorePending() bool {
+	if a == nil {
+		return false
+	}
+	path := a.testSessionRestorePath()
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+	if _, err := os.Stat(path + ".bak"); err == nil {
+		return true
+	}
+	return false
+}
+
 func removeTestSessionRestoreFiles(path string) {
 	if strings.TrimSpace(path) == "" {
 		return
@@ -2852,6 +2869,13 @@ func (a *App) ApplyMemberPreset(preset string) (MemberSettings, error) {
 func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	// A temporary 10-attack test owns the pacing profile until it finishes.
+	// Reject concurrent member edits instead of accepting changes that would
+	// then be overwritten by the crash-safe restoration snapshot.
+	if a.testSessionRestorePending() && (a.bot != nil || a.cancel != nil || a.stopping) {
+		return MemberSettings{}, fmt.Errorf("session test active: wait for it to finish before changing member settings")
+	}
 
 	oldProfile, hadOldProfile := a.loadMemberProfile()
 	if strings.TrimSpace(settings.InterfaceLevel) == "" && hadOldProfile {
