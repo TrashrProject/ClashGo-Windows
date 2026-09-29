@@ -121,6 +121,9 @@ func (a *App) startup(ctx context.Context) {
 		if err := a.applyMemberAccountForCurrentLicense(); err != nil {
 			log.Warn().Err(err).Msg("failed to restore member Clash account")
 		}
+		if err := a.restoreMemberRuntimeState(true); err != nil {
+			log.Warn().Err(err).Msg("failed to restore member runtime state")
+		}
 	}
 	cfg := config.LoadOrDefault("config.json")
 	a.supportReporter = support.New(clashControlServiceURL(cfg), version, a.license)
@@ -1170,6 +1173,11 @@ func (a *App) ActivateLicense(key string) (licensing.State, error) {
 	if err := a.applyMemberAccountForCurrentLicense(); err != nil {
 		log.Warn().Err(err).Msg("license activated but member Clash account could not be restored")
 	}
+	a.clearInMemoryMemberRuntimeState()
+	if err := a.restoreMemberRuntimeState(false); err != nil {
+		log.Warn().Err(err).Msg("license activated but member runtime state could not be restored")
+	}
+	a.loadPersistedStats()
 	if a.supportReporter != nil {
 		a.supportReporter.Flush(context.Background())
 	}
@@ -1190,10 +1198,19 @@ func (a *App) DeactivateLicense() error {
 	// Otherwise the bot could keep running until the next periodic license
 	// validation even though the member removed the entitlement locally.
 	if a.IsRunning() {
-		if err := a.StopBot(); err != nil {
-			return fmt.Errorf("stop bot before deactivating license: %w", err)
-		}
+		_ = a.StopBot()
 	}
+	if err := a.waitForBotTeardown(20 * time.Second); err != nil {
+		return err
+	}
+
+	// The teardown has flushed the final stats/history by this point. Archive
+	// them under the current license before removing the entitlement.
+	a.saveStats()
+	if err := a.archiveMemberRuntimeState(true); err != nil {
+		return err
+	}
+	a.clearInMemoryMemberRuntimeState()
 
 	cfg := config.LoadOrDefault("config.json")
 	if err := a.persistMemberAccountTag(cfg.Account.PlayerTag); err != nil {
