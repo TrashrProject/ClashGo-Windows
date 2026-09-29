@@ -121,6 +121,9 @@ func (a *App) startup(ctx context.Context) {
 		if err := a.applyMemberAccountForCurrentLicense(); err != nil {
 			log.Warn().Err(err).Msg("failed to restore member Clash account")
 		}
+		if err := a.applyMemberAutomationForCurrentLicense(); err != nil {
+			log.Warn().Err(err).Msg("failed to restore member automation preferences")
+		}
 		if err := a.restoreMemberRuntimeState(true); err != nil {
 			log.Warn().Err(err).Msg("failed to restore member runtime state")
 		}
@@ -1303,6 +1306,9 @@ func (a *App) ActivateLicense(key string) (licensing.State, error) {
 	}
 	if err := a.applyMemberAccountForCurrentLicense(); err != nil {
 		log.Warn().Err(err).Msg("license activated but member Clash account could not be restored")
+	}
+	if err := a.applyMemberAutomationForCurrentLicense(); err != nil {
+		log.Warn().Err(err).Msg("license activated but member automation preferences could not be restored")
 	}
 	a.clearInMemoryMemberRuntimeState()
 	if err := a.restoreMemberRuntimeState(false); err != nil {
@@ -2932,8 +2938,12 @@ func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strat
 	cfg.Search.Enabled = searchEnabled
 	cfg.Attack.StallTimerSeconds = stall
 	cfg.Attack.LootExitEnabled = lootExitEnabled
-	if lootExitPercent < 0 { lootExitPercent = 0 }
-	if lootExitPercent > 100 { lootExitPercent = 100 }
+	if lootExitPercent < 0 {
+		lootExitPercent = 0
+	}
+	if lootExitPercent > 100 {
+		lootExitPercent = 100
+	}
 	cfg.Attack.LootExitPercent = lootExitPercent
 	if strategyFile != "" {
 		name := filepath.Base(filepath.Clean(strategyFile))
@@ -2949,12 +2959,23 @@ func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strat
 		cfg.Attack.StrategyFile = resolved
 	}
 
+	automationPath := a.memberAutomationPath()
+	oldAutomation, hadOldAutomation := loadMemberAutomationFile(automationPath)
+	if err := a.persistMemberAutomation(cfg); err != nil {
+		return err
+	}
 	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldAutomation {
+			_ = saveMemberAutomationFile(automationPath, oldAutomation)
+		} else if automationPath != "" {
+			_ = os.Remove(automationPath)
+			_ = os.Remove(automationPath + ".bak")
+			_ = os.Remove(automationPath + ".tmp")
+		}
 		return err
 	}
 
-	// Apply live only after persistence succeeds so memory and disk cannot
-	// diverge when Windows rejects a write.
+	// Apply live only after both durable copies succeeded.
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
 	}
@@ -3014,7 +3035,19 @@ func (a *App) SaveFarmComposition(enabled bool, townHall int, profileJSON string
 	cfg.Attack.Farm.TownHall = townHall
 	cfg.Attack.Farm.Profiles[fmt.Sprintf("%d", townHall)] = profile
 
+	automationPath := a.memberAutomationPath()
+	oldAutomation, hadOldAutomation := loadMemberAutomationFile(automationPath)
+	if err := a.persistMemberAutomation(cfg); err != nil {
+		return err
+	}
 	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldAutomation {
+			_ = saveMemberAutomationFile(automationPath, oldAutomation)
+		} else if automationPath != "" {
+			_ = os.Remove(automationPath)
+			_ = os.Remove(automationPath + ".bak")
+			_ = os.Remove(automationPath + ".tmp")
+		}
 		return err
 	}
 	if a.bot != nil {
