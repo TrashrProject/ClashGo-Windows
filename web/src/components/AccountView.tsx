@@ -327,6 +327,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
             ? 'Farm rapide appliqué.'
             : 'Farm équilibré appliqué.'
       );
+      onReadinessChanged?.();
     } catch (e) {
       setMemberSaveError(e instanceof Error ? e.message : String(e));
       try {
