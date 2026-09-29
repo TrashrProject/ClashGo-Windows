@@ -44,6 +44,8 @@ type profileCache struct {
 type licenseRecord struct {
 	ID         string    `json:"id"`
 	Hint       string    `json:"hint"`
+	CustomerName    string `json:"customer_name,omitempty"`
+	CustomerContact string `json:"customer_contact,omitempty"`
 	Role       string    `json:"role"`
 	Active     bool      `json:"active"`
 	MachineID  string    `json:"machine_id,omitempty"`
@@ -582,9 +584,11 @@ func main() {
 			return
 		}
 		var in struct {
-			Role  string `json:"role"`
-			Plan  string `json:"plan"`
-			Count int    `json:"count"`
+			Role            string `json:"role"`
+			Plan            string `json:"plan"`
+			Count           int    `json:"count"`
+			CustomerName    string `json:"customer_name,omitempty"`
+			CustomerContact string `json:"customer_contact,omitempty"`
 		}
 		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
@@ -610,9 +614,11 @@ func main() {
 			}
 			hash := hashLicense(generated)
 			control.data.Licenses[hash] = &licenseRecord{
-				ID:           licenseIDFromHash(hash),
-				Hint:         licenseHint(generated),
-				Role:         role,
+				ID:              licenseIDFromHash(hash),
+				Hint:            licenseHint(generated),
+				CustomerName:    strings.TrimSpace(in.CustomerName),
+				CustomerContact: strings.TrimSpace(in.CustomerContact),
+				Role:            role,
 				Active:       true,
 				CreatedAt:    time.Now().UTC(),
 				Plan:         plan,
