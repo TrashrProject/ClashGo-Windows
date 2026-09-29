@@ -352,6 +352,32 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
         ))}
       </section>
 
+      {(running || (stats.attacks_completed || 0) > 0) && (
+        <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-premium dark:shadow-none">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Performance</div>
+              <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white">
+                Résumé de la session
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:min-w-[560px]">
+              {[
+                ['Or / h', formatLoot(Math.round(stats.gold_per_hour || 0))],
+                ['Élixir / h', formatLoot(Math.round(stats.elixir_per_hour || 0))],
+                ['Taux 3★', `${Math.round(stats.three_star_rate || 0)} %`],
+                ['Skips / attaque', (stats.avg_skips_per_attack || 0).toFixed(1)],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 px-3 py-3">
+                  <div className="text-sm font-black text-zinc-950 dark:text-white tabular-nums">{value}</div>
+                  <div className="mt-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">{label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="grid lg:grid-cols-2 gap-6">
         <div className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
           <div className="flex items-center justify-between gap-4">
