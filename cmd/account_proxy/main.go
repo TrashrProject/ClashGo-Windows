@@ -830,6 +830,82 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "active": in.Active})
 	})
 
+
+	mux.HandleFunc("POST /v1/admin/licenses/renew", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminKey) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "admin authorization required"})
+			return
+		}
+		var in struct {
+			LicenseID string `json:"license_id"`
+			Plan      string `json:"plan,omitempty"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
+			return
+		}
+		id := strings.TrimSpace(in.LicenseID)
+		if id == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "license_id is required"})
+			return
+		}
+
+		control.mu.Lock()
+		var rec *licenseRecord
+		for hash, candidate := range control.data.Licenses {
+			if candidate == nil {
+				continue
+			}
+			candidateID := candidate.ID
+			if candidateID == "" {
+				candidateID = licenseIDFromHash(hash)
+			}
+			if candidateID == id {
+				rec = candidate
+				break
+			}
+		}
+		if rec == nil {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "license not found"})
+			return
+		}
+
+		plan := strings.TrimSpace(in.Plan)
+		if plan == "" {
+			plan = rec.Plan
+		}
+		plan, durationDays := validPlan(plan)
+		rec.Plan = plan
+		rec.DurationDays = durationDays
+		rec.Active = true
+
+		if durationDays == 0 {
+			rec.ExpiresAt = time.Time{}
+		} else {
+			now := time.Now().UTC()
+			base := now
+			if !rec.ExpiresAt.IsZero() && rec.ExpiresAt.After(now) {
+				base = rec.ExpiresAt
+			}
+			rec.ExpiresAt = base.Add(time.Duration(durationDays) * 24 * time.Hour)
+		}
+
+		expiresAt := rec.ExpiresAt
+		_ = control.saveLocked()
+		control.mu.Unlock()
+
+		payload := map[string]any{
+			"ok": true,
+			"plan": plan,
+			"duration_days": durationDays,
+		}
+		if !expiresAt.IsZero() {
+			payload["expires_at"] = expiresAt.Format(time.RFC3339)
+		}
+		writeJSON(w, http.StatusOK, payload)
+	})
+
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           corsMiddleware(mux, webOrigin),
