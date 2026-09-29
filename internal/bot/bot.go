@@ -72,6 +72,7 @@ type Bot struct {
 	stars2      atomic.Int32
 	stars3      atomic.Int32
 	seqRunning        atomic.Bool
+	paused            atomic.Bool
 	zoomedOut         atomic.Bool
 	recoveryAttempts  atomic.Int32
 	recoverySuccesses atomic.Int32
@@ -1237,6 +1238,13 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		b.logger.Info().Str("state", gc.State.String()).Msg("detected terminal state without active sequence, returning home...")
 		go b.attackExec.ReturnHome()
 		b.recordActivity()
+		return
+	}
+
+	if b.paused.Load() {
+		// A pause requested during an attack takes effect naturally once the
+		// active sequence returns home. Keep the observer alive, but never
+		// start another farming cycle until ResumeAutomation is called.
 		return
 	}
 
@@ -3849,6 +3857,28 @@ func (b *Bot) IsSequenceRunning() bool {
 		return false
 	}
 	return b.seqRunning.Load()
+}
+
+func (b *Bot) PauseAutomation() {
+	if b == nil {
+		return
+	}
+	b.paused.Store(true)
+	b.logger.Info().Bool("sequence_running", b.seqRunning.Load()).Msg("automation pause requested")
+}
+
+func (b *Bot) ResumeAutomation() {
+	if b == nil {
+		return
+	}
+	if b.paused.Swap(false) {
+		b.recordActivity()
+		b.logger.Info().Msg("automation resumed")
+	}
+}
+
+func (b *Bot) IsPaused() bool {
+	return b != nil && b.paused.Load()
 }
 
 // HistorySnapshot returns an immutable copy of the bot's authoritative
