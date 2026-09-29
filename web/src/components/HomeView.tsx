@@ -8,6 +8,7 @@ interface HomeViewProps {
   activity: ActivityEvent[];
   sessionReport: SessionReportView | null;
   testSessionActive: boolean;
+  showValidationTools: boolean;
   running: boolean;
   starting: boolean;
   onStart: () => void;
@@ -252,7 +253,7 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
 
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
-    stats, history, activity, sessionReport, testSessionActive, running, starting,
+    stats, history, activity, sessionReport, testSessionActive, showValidationTools, running, starting,
     onStart, onStartWithPreset, onSpeedChange, onExtendSession, onScheduleStop, onCancelScheduledStop, scheduledStopAt, sessionLootGoal, onSetLootGoal, onClearLootGoal, onStartTestSession, onStartQuickTestSession, onStop, onPause, onResume, paused, onStopAfterAttack, gracefulStopPending, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
     licenseReady, licenseRequired, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
