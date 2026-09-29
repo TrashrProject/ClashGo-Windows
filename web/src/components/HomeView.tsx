@@ -11,6 +11,7 @@ interface HomeViewProps {
   running: boolean;
   starting: boolean;
   onStart: () => void;
+  onStartWithPreset: (preset: 'short' | 'balanced' | 'fast') => void;
   onStartTestSession: () => void;
   onStartQuickTestSession: () => void;
   onStop: () => void;
@@ -239,7 +240,7 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, sessionReport, testSessionActive, running, starting,
-    onStart, onStartTestSession, onStartQuickTestSession, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
+    onStart, onStartWithPreset, onStartTestSession, onStartQuickTestSession, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
     licenseReady, licenseRequired, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
     memberName, licensePlan, licenseExpiresAt, latestBootReport, currentArmy,
@@ -1157,6 +1158,66 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           </div>
         </div>
       </section>
+
+      {!running && !starting && startupCheck?.ready && windowsReady === true && (!licenseRequired || licenseReady) && (
+        <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Démarrage rapide</div>
+              <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Choisis ta session et lance directement</h3>
+              <p className="mt-1 text-xs font-semibold text-zinc-500">Le profil est appliqué au vrai moteur avant le pré-contrôle et le démarrage.</p>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenMemberSettings}
+              className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-950 dark:hover:text-white"
+            >
+              Personnaliser
+            </button>
+          </div>
+
+          <div className="mt-5 grid md:grid-cols-3 gap-3">
+            {[
+              {
+                id: 'short' as const,
+                title: 'Courte',
+                icon: 'timer',
+                detail: '10 attaques · rythme normal · pauses sûres',
+                accent: 'text-sky-500',
+              },
+              {
+                id: 'balanced' as const,
+                title: 'Équilibrée',
+                icon: 'balance',
+                detail: '50 attaques · rythme normal · session standard',
+                accent: 'text-emerald-500',
+              },
+              {
+                id: 'fast' as const,
+                title: 'Rapide',
+                icon: 'bolt',
+                detail: '100 attaques · cadence rapide · pauses adaptées',
+                accent: 'text-amber-500',
+              },
+            ].map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => onStartWithPreset(preset.id)}
+                disabled={startupCheckRunning}
+                className="group rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50 p-5 text-left transition hover:-translate-y-0.5 hover:border-zinc-300 dark:hover:border-zinc-700 disabled:opacity-50"
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <span className={'material-symbols-outlined text-2xl ' + preset.accent}>{preset.icon}</span>
+                  <span className="material-symbols-outlined text-zinc-300 dark:text-zinc-700 transition-transform group-hover:translate-x-1">arrow_forward</span>
+                </div>
+                <div className="mt-4 text-base font-black text-zinc-950 dark:text-white">{preset.title}</div>
+                <div className="mt-1 text-xs font-semibold text-zinc-500">{preset.detail}</div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {recentActivity.length > 0 && (
         <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
