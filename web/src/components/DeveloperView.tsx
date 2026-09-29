@@ -107,6 +107,17 @@ const paymentLabel = (value?: string): string => {
   return 'Non renseigné';
 };
 
+const eventLabel = (value?: string): string => {
+  if (value === 'created') return 'Création';
+  if (value === 'renewal') return 'Renouvellement';
+  if (value === 'machine_reset') return 'Reset PC';
+  if (value === 'revoked') return 'Révocation';
+  if (value === 'reactivated') return 'Réactivation';
+  if (value === 'role_changed') return 'Changement de rôle';
+  if (value === 'customer_updated') return 'Fiche client';
+  return value || 'Événement';
+};
+
 const euroLabel = (cents?: number): string => {
   const value = Number(cents || 0) / 100;
   return value.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
@@ -1011,7 +1022,7 @@ const DeveloperView: React.FC = () => {
                 </div>
                 <div>
                   <span className="rounded-lg bg-zinc-100 dark:bg-zinc-800 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-zinc-500">
-                    {item.event_type === 'renewal' ? 'Renouvellement' : item.event_type === 'created' ? 'Création' : item.event_type || 'Événement'}
+                    {eventLabel(item.event_type)}
                   </span>
                   <div className="mt-2 text-xs font-black text-zinc-700 dark:text-zinc-200">{planLabel(item.plan)}</div>
                 </div>
