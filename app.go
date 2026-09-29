@@ -2573,6 +2573,47 @@ func (a *App) loadMemberProfile() (MemberSettings, bool) {
 	return loadMemberProfileFile(a.memberProfilePath())
 }
 
+func (a *App) memberPreviousProfilePath() string {
+	path := a.memberProfilePath()
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	return path + ".previous"
+}
+
+func (a *App) HasPreviousMemberSettings() bool {
+	_, ok := loadMemberProfileFile(a.memberPreviousProfilePath())
+	return ok
+}
+
+func (a *App) UndoMemberSettings() (MemberSettings, error) {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return MemberSettings{}, fmt.Errorf("active ClashGO license required")
+	}
+	if a.testSessionRestorePending() {
+		return MemberSettings{}, fmt.Errorf("session test active: wait for it to finish before restoring member settings")
+	}
+
+	previousPath := a.memberPreviousProfilePath()
+	previous, ok := loadMemberProfileFile(previousPath)
+	if !ok {
+		return MemberSettings{}, fmt.Errorf("no previous member settings are available")
+	}
+	current := a.GetMemberSettings()
+
+	restored, err := a.saveMemberSettings(previous, true)
+	if err != nil {
+		return MemberSettings{}, err
+	}
+
+	// Swap the snapshot instead of deleting it: the same button can undo an
+	// accidental undo without maintaining an unbounded local history.
+	if err := saveMemberProfileFile(previousPath, current); err != nil {
+		log.Warn().Err(err).Msg("member settings restored but previous snapshot could not be swapped")
+	}
+	return restored, nil
+}
+
 func (a *App) applyMemberProfileForCurrentLicense() error {
 	if a == nil || a.license == nil || !a.license.GetState().Activated {
 		return nil
@@ -3211,6 +3252,12 @@ func (a *App) saveMemberSettings(settings MemberSettings, internalRestore bool) 
 			_ = os.Remove(profilePath + ".tmp")
 		}
 		return MemberSettings{}, err
+	}
+
+	if !internalRestore && hadOldProfile {
+		if err := saveMemberProfileFile(a.memberPreviousProfilePath(), oldProfile); err != nil {
+			log.Warn().Err(err).Msg("member settings saved but previous snapshot could not be persisted")
+		}
 	}
 
 	if a.bot != nil {
