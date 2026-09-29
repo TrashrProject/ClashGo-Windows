@@ -27,6 +27,7 @@ jobs:
       RELEASE_VERSION: ${{ inputs.version }}
       RELEASE_NOTES: ${{ inputs.notes }}
       CLASHGO_ACCOUNT_API_URL: ${{ vars.CLASHGO_ACCOUNT_API_URL }}
+      CLASHGO_CONTROL_API_URL: ${{ vars.CLASHGO_CONTROL_API_URL }}
       CGO_CXXFLAGS: --std=c++11 -DNDEBUG
       CGO_CPPFLAGS: -IC:/opencv/build/install/include
       CGO_LDFLAGS: -LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -lopencv_imgproc4130 -lopencv_imgcodecs4130
@@ -120,7 +121,7 @@ jobs:
 
       - name: Build portable bundle
         shell: powershell
-        run: .\tools\build-windows.ps1 -Version "$env:RELEASE_VERSION" -AccountServiceURL "$env:CLASHGO_ACCOUNT_API_URL" -SkipSync -SkipTests
+        run: .\tools\build-windows.ps1 -Version "$env:RELEASE_VERSION" -AccountServiceURL "$env:CLASHGO_ACCOUNT_API_URL" -ControlServiceURL "$env:CLASHGO_CONTROL_API_URL" -SkipSync -SkipTests
 
       - name: Build NSIS installer
         shell: powershell
