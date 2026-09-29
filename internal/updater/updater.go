@@ -661,6 +661,13 @@ func (s *Service) Download(ctx context.Context) (string, error) {
 		}
 	}
 
+	// Windows does not reliably replace an existing destination with
+	// os.Rename. A retry/re-download of the same beta may already have a
+	// verified file at finalPath, so remove it immediately before the swap.
+	if err := os.Remove(finalPath); err != nil && !os.IsNotExist(err) {
+		s.recordDownloadError(fmt.Errorf("replace previous download: %w", err))
+		return "", err
+	}
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		s.recordDownloadError(err)
 		return "", err
