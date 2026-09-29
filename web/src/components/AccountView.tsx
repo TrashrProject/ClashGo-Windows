@@ -135,6 +135,29 @@ const isCustomPacing = (settings: MemberSettings): boolean => {
     || preset.break_minutes !== settings.break_minutes;
 };
 
+type UsagePreset = 'short' | 'balanced' | 'fast';
+
+const activeUsagePreset = (settings: MemberSettings): UsagePreset | null => {
+  const matches = (
+    speed: MemberSettings['speed_profile'],
+    perHour: number,
+    perSession: number,
+    breakEvery: number,
+    breakMinutes: number,
+  ) =>
+    settings.speed_profile === speed
+    && settings.max_attacks_per_hour === perHour
+    && settings.max_attacks_per_session === perSession
+    && settings.break_every_attacks === breakEvery
+    && settings.break_minutes === breakMinutes
+    && settings.adaptive_search;
+
+  if (matches('normal', 12, 10, 5, 3)) return 'short';
+  if (matches('normal', 12, 50, 5, 3)) return 'balanced';
+  if (matches('fast', 16, 100, 6, 2)) return 'fast';
+  return null;
+};
+
 type LicensePolicy = {
   enforced: boolean;
   service_configured: boolean;
@@ -853,7 +876,11 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               <div className="flex items-end justify-between gap-4 mb-3">
                 <div>
                   <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">Profils rapides</div>
-                  <div className="mt-1 text-xs font-semibold text-zinc-500">Un clic pour préparer une session cohérente.</div>
+                  <div className="mt-1 text-xs font-semibold text-zinc-500">
+                    {activeUsagePreset(memberSettings)
+                      ? 'Le profil actif est mis en évidence.'
+                      : 'Configuration personnalisée · choisis un profil pour revenir à un preset cohérent.'}
+                  </div>
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -867,11 +894,24 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     type="button"
                     disabled={memberSaving}
                     onClick={() => void applyUsagePreset(preset)}
-                    className="group rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-4 text-left transition hover:-translate-y-0.5 hover:border-zinc-400 dark:hover:border-zinc-600 disabled:opacity-40"
+                    className={
+                      'group rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 disabled:opacity-40 ' +
+                      (activeUsagePreset(memberSettings) === preset
+                        ? 'border-zinc-950 bg-zinc-950 text-white dark:border-white dark:bg-white dark:text-zinc-950'
+                        : 'border-zinc-200 bg-zinc-50 text-zinc-950 hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-white dark:hover:border-zinc-600')
+                    }
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <span className="material-symbols-outlined text-lg text-zinc-400 group-hover:text-zinc-950 dark:group-hover:text-white">{icon}</span>
-                      <span className="text-[8px] font-black uppercase tracking-[0.16em] text-zinc-400">1 clic</span>
+                      <span className={
+                        'material-symbols-outlined text-lg ' +
+                        (activeUsagePreset(memberSettings) === preset ? 'opacity-80' : 'text-zinc-400 group-hover:text-zinc-950 dark:group-hover:text-white')
+                      }>{icon}</span>
+                      <span className={
+                        'text-[8px] font-black uppercase tracking-[0.16em] ' +
+                        (activeUsagePreset(memberSettings) === preset ? 'opacity-70' : 'text-zinc-400')
+                      }>
+                        {activeUsagePreset(memberSettings) === preset ? 'Actif' : '1 clic'}
+                      </span>
                     </div>
                     <div className="mt-4 text-sm font-black text-zinc-950 dark:text-white">{label}</div>
                     <div className="mt-1 text-[11px] font-semibold text-zinc-500">{description}</div>
