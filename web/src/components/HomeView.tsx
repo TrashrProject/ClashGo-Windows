@@ -12,6 +12,7 @@ interface HomeViewProps {
   onStop: () => void;
   onOpenAutomation: () => void;
   onOpenAccount: () => void;
+  onOpenMemberSettings: () => void;
   onOpenSettings: () => void;
   licenseReady: boolean;
   accountLinked: boolean;
@@ -116,7 +117,7 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, running, starting,
-    onStart, onStop, onOpenAutomation, onOpenAccount, onOpenSettings,
+    onStart, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenSettings,
     licenseReady, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
     memberName, licensePlan, licenseExpiresAt,
@@ -193,9 +194,14 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                   </span>
                 );
               })()}
-              <span className="rounded-full border border-white/10 dark:border-zinc-200 bg-white/5 dark:bg-zinc-100 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600">
+              <button
+                type="button"
+                onClick={onOpenMemberSettings}
+                className="rounded-full border border-white/10 dark:border-zinc-200 bg-white/5 dark:bg-zinc-100 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600 transition hover:border-white/30 dark:hover:border-zinc-400"
+                title="Ouvrir les réglages de cadence"
+              >
                 Cadence · {stats.speed_profile === 'fast' ? 'Rapide' : stats.speed_profile === 'cautious' ? 'Prudente' : 'Normale'}
-              </span>
+              </button>
               <span className={
                 'rounded-full border px-3 py-1.5 text-[9px] font-black uppercase tracking-widest ' +
                 ((stats.health_score ?? 100) >= 85
