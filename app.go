@@ -55,6 +55,8 @@ type App struct {
 	lastStats   bot.BotStats
 	lastActivity []telemetry.Event
 	gracefulStopRequested bool
+	sessionStopTimer       *time.Timer
+	sessionStopAt          time.Time
 	gracefulStopSequenceStartUnix int64
 
 	// Logs are high-frequency and unrelated to bot lifecycle ownership.
@@ -1557,6 +1559,68 @@ func (a *App) clearStartStateLocked() {
 // the next NewAsyncWriter — acceptable, since the previous code path
 // had the same constraint and the new behaviour is strictly an
 // improvement on the slow path.
+func (a *App) ScheduleSessionStop(minutes int) (string, error) {
+	if minutes < 5 {
+		minutes = 5
+	}
+	if minutes > 8*60 {
+		minutes = 8 * 60
+	}
+
+	a.mu.Lock()
+	if a.bot == nil {
+		a.mu.Unlock()
+		return "", fmt.Errorf("bot is not running")
+	}
+	if a.sessionStopTimer != nil {
+		a.sessionStopTimer.Stop()
+	}
+	stopAt := time.Now().Add(time.Duration(minutes) * time.Minute)
+	a.sessionStopAt = stopAt
+	a.sessionStopTimer = time.AfterFunc(time.Until(stopAt), func() {
+		status := a.StopAfterCurrentAttack()
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "scheduled_session_stop_triggered", map[string]any{
+				"message": status.Message,
+			})
+		}
+	})
+	a.mu.Unlock()
+
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "scheduled_session_stop", map[string]any{
+			"at": stopAt.UTC().Format(time.RFC3339),
+			"minutes": minutes,
+		})
+	}
+	return stopAt.UTC().Format(time.RFC3339), nil
+}
+
+func (a *App) CancelScheduledSessionStop() {
+	a.mu.Lock()
+	if a.sessionStopTimer != nil {
+		a.sessionStopTimer.Stop()
+		a.sessionStopTimer = nil
+	}
+	a.sessionStopAt = time.Time{}
+	a.mu.Unlock()
+
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "scheduled_session_stop_cancelled", map[string]any{
+			"message": "Arrêt programmé annulé.",
+		})
+	}
+}
+
+func (a *App) GetScheduledSessionStop() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sessionStopAt.IsZero() || time.Now().After(a.sessionStopAt) {
+		return ""
+	}
+	return a.sessionStopAt.UTC().Format(time.RFC3339)
+}
+
 func (a *App) PauseBot() BotStatus {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1636,6 +1700,11 @@ func (a *App) StopAfterCurrentAttack() BotStatus {
 func (a *App) StopBot() BotStatus {
 	a.mu.Lock()
 	a.gracefulStopRequested = false
+	if a.sessionStopTimer != nil {
+		a.sessionStopTimer.Stop()
+		a.sessionStopTimer = nil
+	}
+	a.sessionStopAt = time.Time{}
 	a.gracefulStopSequenceStartUnix = 0
 
 	if a.stopping {
