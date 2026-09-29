@@ -132,3 +132,44 @@ func TestValidateAllowsOfflineGraceBeforeExpiry(t *testing.T) {
 		t.Fatalf("member metadata lost during offline grace: %+v", state)
 	}
 }
+
+
+func TestStateFromStoredRejectsExpiredEntitlementImmediately(t *testing.T) {
+	svc := &Service{}
+	st := storedLicense{
+		Key:          "CGO-ABCDEF-GHIJKL-MNOPQR-STUVWX",
+		Role:         RoleMember,
+		MemberName:   "Nathan",
+		MachineID:    "machine-hash",
+		Plan:         "month_1",
+		ExpiresAt:    time.Now().UTC().Add(-time.Minute).Format(time.RFC3339),
+		OfflineUntil: time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+	}
+
+	got := svc.stateFromStored(st)
+	if got.Activated {
+		t.Fatal("expired stored entitlement must never restore as active")
+	}
+	if got.Error != "license has expired" {
+		t.Fatalf("unexpected expiry error %q", got.Error)
+	}
+}
+
+func TestStateFromStoredKeepsFutureEntitlementActive(t *testing.T) {
+	svc := &Service{}
+	st := storedLicense{
+		Key:          "CGO-ABCDEF-GHIJKL-MNOPQR-STUVWX",
+		Role:         RoleMember,
+		Plan:         "week_1",
+		ExpiresAt:    time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+		OfflineUntil: time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+	}
+
+	got := svc.stateFromStored(st)
+	if !got.Activated {
+		t.Fatalf("future entitlement should restore active, error=%q", got.Error)
+	}
+	if got.Error != "" {
+		t.Fatalf("future entitlement restored with unexpected error %q", got.Error)
+	}
+}
