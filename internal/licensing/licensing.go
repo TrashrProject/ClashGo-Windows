@@ -29,6 +29,7 @@ const (
 type State struct {
 	Activated     bool   `json:"activated"`
 	Role          Role   `json:"role"`
+	MemberName    string `json:"member_name,omitempty"`
 	LicenseHint   string `json:"license_hint,omitempty"`
 	MachineID     string `json:"machine_id,omitempty"`
 	LastValidated string `json:"last_validated,omitempty"`
@@ -57,6 +58,7 @@ type activateRequest struct {
 type activateResponse struct {
 	OK           bool   `json:"ok"`
 	Role         Role   `json:"role"`
+	MemberName   string `json:"member_name,omitempty"`
 	OfflineUntil string `json:"offline_until"`
 	Plan         string `json:"plan,omitempty"`
 	ExpiresAt    string `json:"expires_at,omitempty"`
