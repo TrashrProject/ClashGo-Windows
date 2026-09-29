@@ -3788,6 +3788,20 @@ func (b *Bot) HistorySnapshot() []AttackReport {
 	return out
 }
 
+// RecordMemberSettingsChange adds one low-volume, user-initiated settings
+// event to the activity feed. It does not affect the farming state machine.
+func (b *Bot) RecordMemberSettingsChange(profile string, maxAttacks, breakEvery, breakMinutes int) {
+	if b == nil || b.telemetry == nil {
+		return
+	}
+	b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
+		"profile":              profile,
+		"max_attacks_per_hour": maxAttacks,
+		"break_every_attacks":  breakEvery,
+		"break_minutes":        breakMinutes,
+	})
+}
+
 // RecentActivity returns a compact high-level activity feed for the UI.
 // It deliberately excludes per-frame telemetry and verbose diagnostic logs.
 func (b *Bot) RecentActivity(limit int) []telemetry.Event {
