@@ -86,3 +86,73 @@ func TestDefaultAutomationIsSimpleAndAutomatic(t *testing.T) {
 		t.Fatal("expected default TH18 farm profile")
 	}
 }
+
+
+func TestSaveAndLoadRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "config.json")
+	cfg := DefaultConfig()
+	cfg.Search.MinLootGold = 1234567
+	cfg.Automation.SpeedProfile = "fast"
+	cfg.Automation.MaxAttacksPerHour = 16
+
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Search.MinLootGold != 1234567 {
+		t.Fatalf("MinLootGold=%d", got.Search.MinLootGold)
+	}
+	if got.Automation.SpeedProfile != "fast" || got.Automation.MaxAttacksPerHour != 16 {
+		t.Fatalf("automation round trip mismatch: %+v", got.Automation)
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("temporary config file survived successful save: %v", err)
+	}
+	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+		t.Fatalf("backup config file survived successful save: %v", err)
+	}
+}
+
+func TestLoadRecoversValidBackupWhenPrimaryIsCorrupt(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "config.json")
+
+	cfg := DefaultConfig()
+	cfg.Search.MinLootElixir = 765432
+	backup, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{broken-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".bak", backup, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load should recover backup: %v", err)
+	}
+	if got.Search.MinLootElixir != 765432 {
+		t.Fatalf("recovered MinLootElixir=%d", got.Search.MinLootElixir)
+	}
+}
+
+func TestLoadRejectsCorruptPrimaryAndBackup(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "config.json")
+	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".bak", []byte("{also-broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected Load to reject corrupt primary and backup")
+	}
+}
