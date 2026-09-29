@@ -207,6 +207,8 @@ function App() {
   const [accountReady, setAccountReady] = useState(false);
   const [licenseAccessReady, setLicenseAccessReady] = useState(false);
   const [licenseRole, setLicenseRole] = useState<'member' | 'developer' | 'admin' | ''>('');
+  const [licenseMemberName, setLicenseMemberName] = useState('');
+  const [licensePlan, setLicensePlan] = useState('');
 
   // Updater state — pushed via `updater_status` event from Go.
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(DEFAULT_UPDATE_STATUS);
@@ -229,7 +231,7 @@ function App() {
   const [lootExitPercent, setLootExitPercent] = useState(100);
   const [simpleMode, setSimpleMode] = useState(true);
 
-  const handleLicenseReady = useCallback((state: { activated: boolean; role?: string }, policy: { enforced: boolean }) => {
+  const handleLicenseReady = useCallback((state: { activated: boolean; role?: string; member_name?: string; plan?: string }, policy: { enforced: boolean }) => {
     const role = state?.role === 'admin'
       ? 'admin'
       : state?.role === 'developer'
@@ -238,6 +240,8 @@ function App() {
           ? 'member'
           : '';
     setLicenseRole(role);
+    setLicenseMemberName(state?.member_name || '');
+    setLicensePlan(state?.plan || '');
 
     if (role === 'developer' || role === 'admin') {
       setInterfaceLevel('developer');
@@ -324,12 +328,18 @@ function App() {
         const license = await GetLicenseState();
         if (license?.activated && (license.role === 'developer' || license.role === 'admin')) {
           setLicenseRole(license.role);
+          setLicenseMemberName(license.member_name || '');
+          setLicensePlan(license.plan || '');
           setInterfaceLevel('developer');
         } else if (license?.activated) {
           setLicenseRole('member');
+          setLicenseMemberName(license.member_name || '');
+          setLicensePlan(license.plan || '');
           setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
         } else {
           setLicenseRole('');
+          setLicenseMemberName('');
+          setLicensePlan('');
           setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
         }
       } catch (err) {
@@ -445,7 +455,7 @@ function App() {
       }
     });
 
-    const unsubLicense = safeEventsOn("license_state", (payload: { activated?: boolean; role?: string; error?: string }) => {
+    const unsubLicense = safeEventsOn("license_state", (payload: { activated?: boolean; role?: string; member_name?: string; plan?: string; error?: string }) => {
       const role = payload?.role === 'admin'
         ? 'admin'
         : payload?.role === 'developer'
@@ -454,6 +464,8 @@ function App() {
             ? 'member'
             : '';
       setLicenseRole(role);
+      setLicenseMemberName(payload?.member_name || '');
+      setLicensePlan(payload?.plan || '');
 
       if (role === 'developer' || role === 'admin') {
         setInterfaceLevel('developer');
@@ -782,6 +794,10 @@ function App() {
         starting={isStarting}
         onStart={handleStart}
         onStop={handleStop}
+        licenseActivated={licenseAccessReady}
+        licenseRole={licenseRole}
+        memberName={licenseMemberName}
+        licensePlan={licensePlan}
       />
 
       <main 
