@@ -267,6 +267,35 @@ async function revokeLicense(request, env) {
   return json({ ok: true });
 }
 
+
+async function setLicenseRole(request, env) {
+  let body;
+  try { body = await readJSON(request, 65536); }
+  catch { return json({ message: "invalid request" }, 400); }
+  const id = clean(body.license_id);
+  const role = normalizeRole(body.role);
+  if (!id) return json({ message: "license_id is required" }, 400);
+  const result = await env.DB.prepare(
+    "UPDATE licenses SET role = ?1 WHERE id = ?2"
+  ).bind(role, id).run();
+  if (!result.meta?.changes) return json({ message: "license not found" }, 404);
+  return json({ ok: true, role });
+}
+
+async function setLicenseActive(request, env) {
+  let body;
+  try { body = await readJSON(request, 65536); }
+  catch { return json({ message: "invalid request" }, 400); }
+  const id = clean(body.license_id);
+  const active = body.active === true ? 1 : 0;
+  if (!id) return json({ message: "license_id is required" }, 400);
+  const result = await env.DB.prepare(
+    "UPDATE licenses SET active = ?1 WHERE id = ?2"
+  ).bind(active, id).run();
+  if (!result.meta?.changes) return json({ message: "license not found" }, 404);
+  return json({ ok: true, active: active === 1 });
+}
+
 async function router(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -306,6 +335,12 @@ async function router(request, env) {
     }
     if (request.method === "POST" && path === "/v1/admin/licenses/revoke") {
       return revokeLicense(request, env);
+    }
+    if (request.method === "POST" && path === "/v1/admin/licenses/set-role") {
+      return setLicenseRole(request, env);
+    }
+    if (request.method === "POST" && path === "/v1/admin/licenses/set-active") {
+      return setLicenseActive(request, env);
     }
   }
 
