@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -223,5 +224,61 @@ func TestValidLicensePlans(t *testing.T) {
 		if plan != tc.plan || days != tc.days {
 			t.Fatalf("validPlan(%q)=(%q,%d), want (%q,%d)", tc.in, plan, days, tc.plan, tc.days)
 		}
+	}
+}
+
+
+func TestValidPaymentStatus(t *testing.T) {
+	tests := map[string]string{
+		" paid ":    "paid",
+		"PENDING":   "pending",
+		"offered":   "offered",
+		"free":      "free",
+		"garbage":   "unknown",
+		"":          "unknown",
+	}
+	for input, want := range tests {
+		if got := validPaymentStatus(input); got != want {
+			t.Fatalf("validPaymentStatus(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestAppendEventLockedCapsAndKeepsNewest(t *testing.T) {
+	store := &controlStore{}
+	for i := 0; i < 5005; i++ {
+		store.appendEventLocked(licenseEvent{
+			ID:        fmt.Sprintf("event-%04d", i),
+			LicenseID: "license-1",
+			EventType: "renewal",
+			CreatedAt: time.Unix(int64(i), 0).UTC(),
+		})
+	}
+	if got := len(store.data.Events); got != 5000 {
+		t.Fatalf("events len = %d, want 5000", got)
+	}
+	if got := store.data.Events[0].ID; got != "event-0005" {
+		t.Fatalf("oldest retained event = %q, want event-0005", got)
+	}
+	if got := store.data.Events[len(store.data.Events)-1].ID; got != "event-5004" {
+		t.Fatalf("newest retained event = %q, want event-5004", got)
+	}
+}
+
+func TestAppendEventLockedFillsMetadata(t *testing.T) {
+	store := &controlStore{}
+	store.appendEventLocked(licenseEvent{
+		LicenseID: "license-1",
+		EventType: "created",
+	})
+	if len(store.data.Events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(store.data.Events))
+	}
+	event := store.data.Events[0]
+	if event.ID == "" {
+		t.Fatal("expected generated event id")
+	}
+	if event.CreatedAt.IsZero() {
+		t.Fatal("expected generated event timestamp")
 	}
 }
