@@ -172,7 +172,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
         </div>
       </div>
 
-      <div className="mb-6 inline-flex rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/40 p-1.5">
+      <div className="mb-6 flex w-full overflow-x-auto rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/40 p-1.5">
         {([
           ['general', 'Général', 'settings'],
           ['windows', 'Windows', 'desktop_windows'],
@@ -183,7 +183,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             type="button"
             onClick={() => setSettingsPage(id)}
             className={
-              'flex items-center gap-2 rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] transition ' +
+              'flex flex-1 min-w-max items-center justify-center gap-2 rounded-xl px-3 sm:px-4 py-2.5 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.12em] sm:tracking-[0.16em] transition whitespace-nowrap ' +
               (settingsPage === id
                 ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950'
                 : 'text-zinc-500 hover:text-zinc-950 dark:hover:text-white')
