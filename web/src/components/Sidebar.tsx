@@ -18,6 +18,10 @@ interface SidebarProps {
   licensePlan?: string;
   licenseExpiresAt?: string;
   speedProfile?: string;
+  paused: boolean;
+  sessionAttacks: number;
+  sessionCap: number;
+  scheduledStopAt?: string;
   startReady: boolean;
   startBlockedReason?: string;
 }
@@ -38,6 +42,10 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
   licensePlan,
   licenseExpiresAt,
   speedProfile,
+  paused,
+  sessionAttacks,
+  sessionCap,
+  scheduledStopAt,
   startReady,
   startBlockedReason,
 }) => {
@@ -81,6 +89,17 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
     if (raw === 'safe' || raw === 'cautious') return 'Prudente';
     return 'Normale';
   }, [speedProfile]);
+
+  const sessionProgress = sessionCap > 0
+    ? Math.max(0, Math.min(100, Math.round((sessionAttacks / sessionCap) * 100)))
+    : 0;
+
+  const scheduledStopLabel = React.useMemo(() => {
+    if (!scheduledStopAt) return '';
+    const at = new Date(scheduledStopAt);
+    if (!Number.isFinite(at.getTime())) return '';
+    return at.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }, [scheduledStopAt]);
 
   return (
     <aside
@@ -138,6 +157,55 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
         </nav>
 
         <div className="mt-auto space-y-3">
+          {(running || starting) && (
+            <button
+              type="button"
+              onClick={() => setTab('dashboard')}
+              title={expanded ? undefined : (paused ? 'Session en pause' : 'Session en cours')}
+              className={
+                'w-full overflow-hidden rounded-2xl border text-left transition ' +
+                (paused
+                  ? 'border-amber-200 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/10'
+                  : 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/40 dark:bg-emerald-950/10')
+              }
+            >
+              <div className="flex min-h-14 items-center">
+                <div className="w-12 h-12 flex-shrink-0 grid place-items-center">
+                  <span className={
+                    'material-symbols-outlined text-[20px] ' +
+                    (paused ? 'text-amber-500' : starting ? 'text-amber-500 animate-pulse' : 'text-emerald-500')
+                  }>
+                    {paused ? 'pause_circle' : starting ? 'hourglass_top' : 'smart_toy'}
+                  </span>
+                </div>
+                <div className={
+                  'min-w-0 flex-1 pr-3 transition-[opacity,transform] duration-200 ' +
+                  (expanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 w-0 overflow-hidden')
+                }>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="truncate text-[10px] font-black text-zinc-950 dark:text-white">
+                      {starting ? 'Démarrage…' : paused ? 'Session en pause' : 'Session en cours'}
+                    </div>
+                    {sessionCap > 0 && (
+                      <div className="text-[8px] font-black tabular-nums text-zinc-400">{sessionAttacks}/{sessionCap}</div>
+                    )}
+                  </div>
+                  {sessionCap > 0 && (
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
+                      <div
+                        className={'h-full rounded-full transition-all ' + (paused ? 'bg-amber-500' : 'bg-emerald-500')}
+                        style={{ width: sessionProgress + '%' }}
+                      />
+                    </div>
+                  )}
+                  <div className="mt-1.5 truncate text-[8px] font-bold text-zinc-500">
+                    {speedLabel}{scheduledStopLabel ? ' · arrêt ' + scheduledStopLabel : ''}
+                  </div>
+                </div>
+              </div>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => setTab('account')}
