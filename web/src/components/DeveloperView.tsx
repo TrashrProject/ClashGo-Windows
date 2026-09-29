@@ -1,5 +1,9 @@
 import React from 'react';
 import {
+  AdminRenewLicense,
+  AdminResetLicenseMachine,
+  AdminSetLicenseActive,
+  AdminSetLicenseRole,
   CreateAdminLicense,
   GetDeveloperIncidents,
   GetDeveloperLicenses,
@@ -80,6 +84,7 @@ const DeveloperView: React.FC = () => {
   const [role, setRole] = React.useState<LicenseState['role']>('');
   const [busy, setBusy] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
+  const [actionID, setActionID] = React.useState('');
   const [error, setError] = React.useState('');
   const [notice, setNotice] = React.useState('');
   const [tab, setTab] = React.useState<'incidents' | 'licenses'>('licenses');
@@ -144,6 +149,59 @@ const DeveloperView: React.FC = () => {
     } finally {
       setCreating(false);
     }
+  };
+
+  const runLicenseAction = async (id: string, action: () => Promise<unknown>, success: string) => {
+    if (!isAdmin || !id || actionID) return;
+    setActionID(id);
+    setError('');
+    setNotice('');
+    try {
+      await action();
+      setNotice(success);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionID('');
+    }
+  };
+
+  const renewLicense = async (item: LicenseRow) => {
+    const id = String(item.id || '');
+    if (!id) return;
+    const plan = (item.plan === 'free_2d' || item.plan === 'week_1' || item.plan === 'month_1' || item.plan === 'lifetime')
+      ? item.plan
+      : 'month_1';
+    await runLicenseAction(
+      id,
+      () => AdminRenewLicense(id, plan),
+      'Licence renouvelée · même clé conservée.'
+    );
+  };
+
+  const resetMachine = async (item: LicenseRow) => {
+    const id = String(item.id || '');
+    if (!id || !window.confirm('Délier cette licence de son PC actuel ?')) return;
+    await runLicenseAction(id, () => AdminResetLicenseMachine(id), 'PC réinitialisé · la licence peut être activée sur une nouvelle machine.');
+  };
+
+  const setActive = async (item: LicenseRow, active: boolean) => {
+    const id = String(item.id || '');
+    if (!id) return;
+    const label = active ? 'Réactiver cette licence ?' : 'Révoquer cette licence ?';
+    if (!window.confirm(label)) return;
+    await runLicenseAction(
+      id,
+      () => AdminSetLicenseActive(id, active),
+      active ? 'Licence réactivée.' : 'Licence révoquée.'
+    );
+  };
+
+  const setLicenseRole = async (item: LicenseRow, nextRole: 'member' | 'developer' | 'admin') => {
+    const id = String(item.id || '');
+    if (!id || nextRole === item.role) return;
+    await runLicenseAction(id, () => AdminSetLicenseRole(id, nextRole), 'Rôle de la licence mis à jour.');
   };
 
   const copyGeneratedKey = async () => {
@@ -307,6 +365,12 @@ const DeveloperView: React.FC = () => {
         ))}
       </div>
 
+      {notice && !generatedKey && (
+        <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 text-sm font-bold text-emerald-600 dark:text-emerald-400">
+          {notice}
+        </div>
+      )}
+
       {error && (
         <div className="rounded-2xl bg-rose-500/10 border border-rose-500/20 px-4 py-3 text-sm font-bold text-rose-500">
           {error}
@@ -387,6 +451,55 @@ const DeveloperView: React.FC = () => {
                   </div>
                   <div className="mt-1 text-[10px] text-zinc-400">{item.app_version || 'Jamais connectée'}</div>
                 </div>
+
+                {isAdmin && item.id && (
+                  <div className="lg:w-full xl:w-auto xl:min-w-[390px] flex flex-wrap items-center gap-2 lg:justify-end">
+                    <select
+                      value={(item.role === 'developer' || item.role === 'admin') ? item.role : 'member'}
+                      disabled={actionID === item.id}
+                      onChange={(e) => void setLicenseRole(item, e.target.value as 'member' | 'developer' | 'admin')}
+                      className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-2 text-[9px] font-black uppercase tracking-wider outline-none disabled:opacity-40"
+                    >
+                      <option value="member">Membre</option>
+                      <option value="developer">Développeur</option>
+                      <option value="admin">Admin</option>
+                    </select>
+
+                    {item.plan !== 'lifetime' && (
+                      <button
+                        type="button"
+                        disabled={actionID === item.id}
+                        onClick={() => void renewLicense(item)}
+                        className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-40"
+                      >
+                        Renouveler
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={actionID === item.id || !item.machine_id}
+                      onClick={() => void resetMachine(item)}
+                      className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-30"
+                    >
+                      Reset PC
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={actionID === item.id}
+                      onClick={() => void setActive(item, item.active === false)}
+                      className={
+                        'h-9 rounded-lg border px-3 text-[9px] font-black uppercase tracking-wider disabled:opacity-40 ' +
+                        (item.active === false
+                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500'
+                          : 'border-rose-500/30 bg-rose-500/10 text-rose-500')
+                      }
+                    >
+                      {actionID === item.id ? '…' : item.active === false ? 'Réactiver' : 'Révoquer'}
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
             {!busy && licenses.length === 0 && (
