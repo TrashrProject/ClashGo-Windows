@@ -1403,3 +1403,42 @@ func TestMemberSettingsAreLockedWhileTemporaryTestSessionIsActive(t *testing.T) 
 		t.Fatal("test-session restore snapshot was unexpectedly removed")
 	}
 }
+
+
+func TestMemberRuntimeStateIsolatesBootReport(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	a := testLicensedApp(t, "CGO-BOOT01-BOOT02-BOOT03-BOOT04")
+
+	rel := filepath.Join("logs", "last_boot_report.json")
+	shared := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(shared), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte(`{"outcome":"failed","final_error":"member-specific"}`)
+	if err := os.WriteFile(shared, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.archiveMemberRuntimeState(true); err != nil {
+		t.Fatalf("archive runtime state: %v", err)
+	}
+	if _, err := os.Stat(shared); !os.IsNotExist(err) {
+		t.Fatalf("shared boot report should be cleared after archive, err=%v", err)
+	}
+
+	if err := os.WriteFile(shared, []byte(`{"outcome":"failed","final_error":"other-member"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.restoreMemberRuntimeState(false); err != nil {
+		t.Fatalf("restore runtime state: %v", err)
+	}
+
+	got, err := os.ReadFile(shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("boot report crossed member boundary: got=%s want=%s", got, want)
+	}
+}
