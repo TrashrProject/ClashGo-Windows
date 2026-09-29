@@ -303,14 +303,45 @@ function App() {
   }, [accountPage]);
 
   useEffect(() => {
-    if (tab !== 'settings' && tab !== 'developer') return;
-    void GetLogs()
-      .then((values) => setLogs(values ?? []))
-      .catch((err: unknown) => console.warn('Log refresh failed:', err));
+    // Refresh the data that becomes visible immediately when navigating,
+    // while the background recovery polls remain context-aware.
+    if (tab === 'settings' || tab === 'developer') {
+      void GetLogs()
+        .then((values) => setLogs(values ?? []))
+        .catch((err: unknown) => console.warn('Log refresh failed:', err));
+    }
     if (tab === 'settings') {
       void GetSystemDiagnostics()
         .then((value) => setSystemDiagnostics(value as SystemDiagnostics))
         .catch((err: unknown) => console.warn('GetSystemDiagnostics failed:', err));
+    }
+    if (tab === 'dashboard') {
+      void Promise.all([GetAttackHistory(), GetCurrentArmy(), GetSessionReport()])
+        .then(([h, army, report]) => {
+          setHistory((h ?? []) as unknown as AttackReport[]);
+          setCurrentArmy((army || null) as unknown as CurrentArmyStatus | null);
+          const typed = report as unknown as SessionReportView;
+          setSessionReport(typed && (typed.attacks || 0) > 0 ? typed : null);
+        })
+        .catch((err: unknown) => console.warn('Home refresh failed:', err));
+    }
+    if (tab === 'activity') {
+      void Promise.all([GetAttackHistory(), GetLatestAttackReplay(), GetSessionReport()])
+        .then(([h, latest, report]) => {
+          setHistory((h ?? []) as unknown as AttackReport[]);
+          setReplay((latest ?? { available: false, complete: false, events: [] }) as unknown as AttackReplayView);
+          const typed = report as unknown as SessionReportView;
+          setSessionReport(typed && (typed.attacks || 0) > 0 ? typed : null);
+        })
+        .catch((err: unknown) => console.warn('Activity refresh failed:', err));
+    }
+    if (tab === 'analytics') {
+      void Promise.all([GetAttackHistory(), GetVillageResourceHistory()])
+        .then(([h, rh]) => {
+          setHistory((h ?? []) as unknown as AttackReport[]);
+          setResourceHistory((rh ?? []) as VillageResourceSnapshot[]);
+        })
+        .catch((err: unknown) => console.warn('Analytics refresh failed:', err));
     }
   }, [tab]);
 
@@ -576,6 +607,7 @@ function App() {
 
     const fetchHistory = async () => {
       if (!uiVisible()) return;
+      if (!['dashboard', 'activity', 'analytics'].includes(tabRef.current)) return;
       try {
         const h = await GetAttackHistory();
         setHistory((h ?? []) as unknown as AttackReport[]);
@@ -597,6 +629,7 @@ function App() {
 
     const fetchResourceHistory = async () => {
       if (!uiVisible()) return;
+      if (tabRef.current !== 'analytics') return;
       try {
         const rh = await GetVillageResourceHistory();
         setResourceHistory((rh ?? []) as VillageResourceSnapshot[]);
@@ -607,6 +640,7 @@ function App() {
 
     const fetchReplay = async () => {
       if (!uiVisible()) return;
+      if (tabRef.current !== 'activity') return;
       try {
         const latest = await GetLatestAttackReplay();
         setReplay((latest ?? { available: false, complete: false, events: [] }) as unknown as AttackReplayView);
@@ -617,6 +651,7 @@ function App() {
 
     const fetchCurrentArmy = async () => {
       if (!uiVisible()) return;
+      if (tabRef.current !== 'dashboard') return;
       try {
         const army = await GetCurrentArmy();
         setCurrentArmy((army || null) as unknown as CurrentArmyStatus | null);
@@ -627,6 +662,7 @@ function App() {
 
     const fetchSessionReport = async () => {
       if (!uiVisible()) return;
+      if (tabRef.current !== 'dashboard' && tabRef.current !== 'activity') return;
       try {
         const report = await GetSessionReport();
         const typed = report as unknown as SessionReportView;
