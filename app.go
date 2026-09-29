@@ -926,6 +926,70 @@ func (a *App) DeactivateLicense() error {
 	return nil
 }
 
+func (a *App) developerControlGET(path string) ([]map[string]any, error) {
+	if a.license == nil {
+		return nil, fmt.Errorf("license service is not initialized")
+	}
+	state := a.license.GetState()
+	if !state.Activated || (state.Role != licensing.RoleDeveloper && state.Role != licensing.RoleAdmin) {
+		return nil, fmt.Errorf("developer license required")
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	baseURL := clashAccountServiceURL(cfg)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-ClashGO-License", a.license.LicenseKey())
+	req.Header.Set("X-ClashGO-Machine", a.license.MachineID())
+	req.Header.Set("User-Agent", "ClashGO/"+version)
+
+	resp, err := (&http.Client{Timeout: 12 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		var payload struct {
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		if payload.Message == "" {
+			payload.Message = resp.Status
+		}
+		return nil, fmt.Errorf("developer support service: %s", payload.Message)
+	}
+
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, err
+	}
+	var rows []map[string]any
+	for _, key := range []string{"incidents", "licenses"} {
+		if raw, ok := envelope[key]; ok {
+			if err := json.Unmarshal(raw, &rows); err != nil {
+				return nil, err
+			}
+			return rows, nil
+		}
+	}
+	return []map[string]any{}, nil
+}
+
+func (a *App) GetDeveloperIncidents() ([]map[string]any, error) {
+	return a.developerControlGET("/v1/developer/incidents")
+}
+
+func (a *App) GetDeveloperLicenses() ([]map[string]any, error) {
+	return a.developerControlGET("/v1/developer/licenses")
+}
+
 // GetConfig returns the current config.json settings
 func (a *App) GetConfig() *config.BotConfig {
 	cfg := config.LoadOrDefault("config.json")
