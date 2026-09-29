@@ -21,6 +21,8 @@ type Incident = {
   app_version?: string;
   level?: string;
   message?: string;
+  customer_name?: string;
+  customer_contact?: string;
 };
 
 type LicenseRow = {
@@ -367,6 +369,8 @@ const DeveloperView: React.FC = () => {
   const filteredIncidents = incidents.filter((item) => {
     if (!normalizedSearch) return true;
     return [
+      item.customer_name,
+      item.customer_contact,
       item.license_hint,
       item.machine_id,
       item.app_version,
@@ -374,6 +378,45 @@ const DeveloperView: React.FC = () => {
       item.message,
     ].some((value) => String(value || '').toLowerCase().includes(normalizedSearch));
   });
+
+  const incidentGroups = (() => {
+    const groups = new Map<string, {
+      key: string;
+      level: string;
+      version: string;
+      message: string;
+      count: number;
+      clients: Set<string>;
+      machines: Set<string>;
+    }>();
+
+    for (const item of filteredIncidents) {
+      const level = item.level || 'error';
+      const version = item.app_version || 'Version inconnue';
+      const message = item.message || 'Aucun message';
+      const key = [level, version, message].join('|');
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          key,
+          level,
+          version,
+          message,
+          count: 0,
+          clients: new Set<string>(),
+          machines: new Set<string>(),
+        };
+        groups.set(key, group);
+      }
+      group.count += 1;
+      if (item.customer_name || item.license_hint) group.clients.add(item.customer_name || item.license_hint || '');
+      if (item.machine_id) group.machines.add(item.machine_id);
+    }
+
+    return Array.from(groups.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 3);
+  })();
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
@@ -597,12 +640,41 @@ const DeveloperView: React.FC = () => {
           <div className="p-6 border-b border-zinc-100 dark:border-zinc-800">
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Erreurs automatiques</div>
             <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Derniers incidents</h3>
+
+            {incidentGroups.length > 0 && (
+              <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-3">
+                {incidentGroups.map((group) => (
+                  <div key={group.key} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/40 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={
+                        'rounded-lg px-2 py-1 text-[9px] font-black uppercase tracking-widest ' +
+                        ((group.level === 'fatal' || group.level === 'panic')
+                          ? 'bg-rose-500/10 text-rose-500'
+                          : 'bg-amber-500/10 text-amber-500')
+                      }>
+                        {group.level}
+                      </span>
+                      <span className="text-lg font-black text-zinc-950 dark:text-white">{group.count}×</span>
+                    </div>
+                    <div className="mt-3 text-xs font-black text-zinc-800 dark:text-zinc-100 line-clamp-2" title={group.message}>
+                      {group.message}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">
+                      <span>{group.version}</span>
+                      <span>{group.clients.size} client{group.clients.size > 1 ? 's' : ''}</span>
+                      <span>{group.machines.size} PC</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {filteredIncidents.slice().reverse().map((item, index) => (
               <div key={item.id || String(index)} className="p-5 flex flex-col lg:flex-row lg:items-start gap-4">
                 <div className="lg:w-44 shrink-0">
-                  <div className="text-xs font-black text-zinc-900 dark:text-white">{item.license_hint || 'Licence inconnue'}</div>
+                  <div className="text-xs font-black text-zinc-900 dark:text-white">{item.customer_name || item.license_hint || 'Licence inconnue'}</div>
+                  <div className="mt-1 text-[10px] font-semibold text-zinc-400">{item.customer_contact || item.license_hint || ''}</div>
                   <div className="mt-1 text-[10px] font-mono text-zinc-400">{item.app_version || 'Version inconnue'}</div>
                 </div>
                 <div className="min-w-0 flex-1">
