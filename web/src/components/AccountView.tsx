@@ -57,6 +57,17 @@ type MemberSettings = {
   auto_resource_tracking: boolean;
 };
 
+const applySpeedPreset = (settings: MemberSettings, profile: MemberSettings['speed_profile']): MemberSettings => {
+  switch (profile) {
+    case 'cautious':
+      return { ...settings, speed_profile: profile, max_attacks_per_hour: 8, break_every_attacks: 4, break_minutes: 4 };
+    case 'fast':
+      return { ...settings, speed_profile: profile, max_attacks_per_hour: 16, break_every_attacks: 6, break_minutes: 2 };
+    default:
+      return { ...settings, speed_profile: 'normal', max_attacks_per_hour: 12, break_every_attacks: 5, break_minutes: 3 };
+  }
+};
+
 type VillageResources = {
   timestamp: string;
   gold: number;
@@ -105,6 +116,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [memberSettings, setMemberSettings] = React.useState<MemberSettings | null>(null);
   const [memberSaving, setMemberSaving] = React.useState(false);
   const [memberMessage, setMemberMessage] = React.useState('');
+  const [memberSaveError, setMemberSaveError] = React.useState('');
 
   const refreshLicense = React.useCallback(async () => {
     try {
@@ -131,12 +143,13 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     if (memberSaving) return;
     setMemberSaving(true);
     setMemberMessage('');
+    setMemberSaveError('');
     try {
       const saved = await SaveMemberSettings(next as any);
       setMemberSettings(saved as MemberSettings);
       setMemberMessage('Réglages appliqués au bot.');
     } catch (e) {
-      setMemberMessage(e instanceof Error ? e.message : String(e));
+      setMemberSaveError(e instanceof Error ? e.message : String(e));
     } finally {
       setMemberSaving(false);
     }
@@ -382,7 +395,11 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     key={value}
                     type="button"
                     disabled={memberSaving}
-                    onClick={() => void saveMemberSettings({ ...memberSettings, speed_profile: value })}
+                    onClick={() => {
+                      const next = applySpeedPreset(memberSettings, value);
+                      setMemberSettings(next);
+                      void saveMemberSettings(next);
+                    }}
                     className={
                       'text-left rounded-2xl border p-4 transition ' +
                       (memberSettings.speed_profile === value
@@ -422,7 +439,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <div className="text-sm font-black text-zinc-950 dark:text-white">Pause automatique</div>
-                    <div className="text-[11px] font-semibold text-zinc-500">Toutes les X attaques</div>
+                    <div className="text-[11px] font-semibold text-zinc-500">Toutes les X attaques · 0 pour désactiver</div>
                   </div>
                   <input
                     type="number"
@@ -430,6 +447,24 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     max={20}
                     value={memberSettings.break_every_attacks}
                     onChange={(e) => setMemberSettings({ ...memberSettings, break_every_attacks: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })}
+                    onBlur={() => void saveMemberSettings(memberSettings)}
+                    className="w-20 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-center text-sm font-black"
+                  />
+                </div>
+              </label>
+
+              <label className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-black text-zinc-950 dark:text-white">Durée de pause</div>
+                    <div className="text-[11px] font-semibold text-zinc-500">Minutes de repos automatique</div>
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    max={30}
+                    value={memberSettings.break_minutes}
+                    onChange={(e) => setMemberSettings({ ...memberSettings, break_minutes: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })}
                     onBlur={() => void saveMemberSettings(memberSettings)}
                     className="w-20 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-center text-sm font-black"
                   />
@@ -473,7 +508,10 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
             </div>
 
             {memberMessage && (
-              <div className="text-[11px] font-bold text-emerald-500">{memberMessage}</div>
+              <div className="rounded-xl bg-emerald-500/10 px-4 py-3 text-[11px] font-bold text-emerald-500">{memberMessage}</div>
+            )}
+            {memberSaveError && (
+              <div className="rounded-xl bg-rose-500/10 px-4 py-3 text-[11px] font-bold text-rose-500">{memberSaveError}</div>
             )}
           </div>
         </section>
