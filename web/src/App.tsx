@@ -689,6 +689,16 @@ function App() {
           ? 'Disconnected'
           : 'Awaiting';
 
+  const tabTitle: Record<TabType, string> = {
+    dashboard: 'Accueil',
+    config: 'Automatisation',
+    account: 'Mon ClashGO',
+    activity: 'Activité',
+    analytics: 'Statistiques',
+    settings: 'Paramètres',
+    developer: 'Support',
+  };
+
   const configProps = useMemo(() => ({
     goldThreshold, setGoldThreshold,
     elixirThreshold, setElixirThreshold,
@@ -754,7 +764,7 @@ function App() {
                 </div>
                 <h2 className="text-[11px] text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.4em] font-black">ClashGO System</h2>
               </div>
-              <h1 className="font-headline text-5xl font-bold tracking-tight capitalize text-zinc-950 dark:text-white">{tab}</h1>
+              <h1 className="font-headline text-5xl font-bold tracking-tight text-zinc-950 dark:text-white">{tabTitle[tab]}</h1>
             </div>
             <div className="flex gap-4 items-center">
               {!updateDismissed && (
