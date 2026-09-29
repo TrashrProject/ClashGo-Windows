@@ -231,7 +231,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         const rawRegressions = ev.fields?.regressions;
         let regressionDetail = '';
         if (Array.isArray(rawRegressions) && rawRegressions.length > 0) {
-          const first = rawRegressions[0] as { metric?: inconnu; delta_pct?: inconnu };
+          const first = rawRegressions[0] as { metric?: unknown; delta_pct?: unknown };
           const metric = typeof first.metric === 'string' ? first.metric.split('_').join(' ') : 'metric';
           const delta = typeof first.delta_pct === 'number' && Number.isFinite(first.delta_pct)
             ? ` · +${first.delta_pct.toFixed(0)}%`
