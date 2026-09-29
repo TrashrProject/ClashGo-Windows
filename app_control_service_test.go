@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/Ducky705/ClashGO/internal/config"
@@ -146,4 +148,45 @@ func TestBetaBuildAllowsLocalControlOverride(t *testing.T) {
 	if got := clashControlServiceURL(cfg); got != "https://beta-control.example" {
 		t.Fatalf("beta control URL=%q", got)
 	}
+}
+
+
+func TestProbeControlServiceURL(t *testing.T) {
+	t.Run("healthy server", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/healthz" {
+				t.Fatalf("unexpected path %q", r.URL.Path)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}))
+		defer server.Close()
+
+		if err := probeControlServiceURL(server.URL); err != nil {
+			t.Fatalf("healthy server rejected: %v", err)
+		}
+	})
+
+	t.Run("unhealthy status", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "nope", http.StatusServiceUnavailable)
+		}))
+		defer server.Close()
+
+		if err := probeControlServiceURL(server.URL); err == nil {
+			t.Fatal("unhealthy server unexpectedly accepted")
+		}
+	})
+
+	t.Run("invalid health payload", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"maybe"}`))
+		}))
+		defer server.Close()
+
+		if err := probeControlServiceURL(server.URL); err == nil {
+			t.Fatal("invalid health payload unexpectedly accepted")
+		}
+	})
 }
