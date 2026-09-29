@@ -730,14 +730,15 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   // Retry automatically while no profile is available so users never have to
   // hammer "Sync profile" after launching the service.
   React.useEffect(() => {
-    // Keep public progression fresh without asking the user to press Sync.
-    // Fifteen minutes is intentionally conservative for a mostly-static
-    // profile and keeps pressure off the ClashGO account service.
+    if (memberPage !== 'village') return;
+
+    // Keep public progression fresh only while the Village surface is visible.
+    // The initial member load still hydrates the cached profile immediately.
     const id = window.setInterval(() => {
       void refresh();
     }, 15 * 60 * 1000);
     return () => window.clearInterval(id);
-  }, [refresh]);
+  }, [memberPage, refresh]);
 
   React.useEffect(() => {
     if (memberPage !== 'village') return;
@@ -761,12 +762,12 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   }, [memberPage]);
 
   React.useEffect(() => {
-    if (profile || busy || !playerTag || !serviceConfigured) return;
+    if (memberPage !== 'village' || profile || busy || !playerTag || !serviceConfigured) return;
     const id = window.setInterval(() => {
       void refresh();
     }, 4000);
     return () => window.clearInterval(id);
-  }, [profile, busy, playerTag, serviceConfigured, refresh]);
+  }, [memberPage, profile, busy, playerTag, serviceConfigured, refresh]);
 
   const linkClashAccount = async () => {
     if (accountActionLockRef.current || accountLinkBusy || automationActive) return;
