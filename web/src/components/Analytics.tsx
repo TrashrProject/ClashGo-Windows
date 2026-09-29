@@ -1853,22 +1853,22 @@ Best optimization target: {pipeline.dominantTunable.label}
             </h3>
             <p className="text-sm text-zinc-500 mt-1">{battleExitAdvisor.message}</p>
             <p className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 mt-3">
-              Advisor only — never changes LootExitPercent or strategy automatically.
+              Conseil uniquement — ne modifie jamais automatiquement la stratégie ni le seuil de sortie par butin.
             </p>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 min-w-[320px]">
             <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
-              <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Yield delta</div>
+              <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Écart de rendement</div>
               <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white tabular-nums">
                 {battleExitAdvisor.status === 'apprentissage' ? '—' : `${battleExitAdvisor.deltaYieldPct >= 0 ? '+' : ''}${battleExitAdvisor.deltaYieldPct.toFixed(1)}%`}
               </div>
             </div>
             <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
-              <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Natural wait</div>
+              <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Attente naturelle</div>
               <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{battleExitAdvisor.natural.n ? `${(battleExitAdvisor.natural.avgWaitMS / 1000).toFixed(1)}s` : '—'}</div>
             </div>
             <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
-              <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Early wait</div>
+              <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Attente anticipée</div>
               <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{battleExitAdvisor.early.n ? `${(battleExitAdvisor.early.avgWaitMS / 1000).toFixed(1)}s` : '—'}</div>
             </div>
           </div>
@@ -1888,10 +1888,10 @@ Best optimization target: {pipeline.dominantTunable.label}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            { label: 'Série actuelle', value: autonomyReliability.current.toLocaleString(), detail: 'Consecutive clean routines' },
-            { label: 'Meilleure série', value: autonomyReliability.best.toLocaleString(), detail: 'History record' },
-            { label: 'Taux cycles propres', value: `${autonomyReliability.cleanRate.toFixed(1)}%`, detail: 'Full autonomous success' },
-            { label: 'Taux corridor sûr', value: `${autonomyReliability.redZoneRate.toFixed(1)}%`, detail: 'Red-zone + HUD certified' },
+            { label: 'Série actuelle', value: autonomyReliability.current.toLocaleString(), detail: 'Routines propres consécutives' },
+            { label: 'Meilleure série', value: autonomyReliability.best.toLocaleString(), detail: 'Record historique' },
+            { label: 'Taux cycles propres', value: `${autonomyReliability.cleanRate.toFixed(1)}%`, detail: 'Succès autonome complet' },
+            { label: 'Taux corridor sûr', value: `${autonomyReliability.redZoneRate.toFixed(1)}%`, detail: 'Zone rouge + HUD validés' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
@@ -1937,17 +1937,17 @@ Best optimization target: {pipeline.dominantTunable.label}
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Efficacité du farm</div>
             <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Débit réel</h3>
-            <p className="text-sm text-zinc-500 mt-1">Uses true routine time when available, including return-home and preparation overhead.</p>
+            <p className="text-sm text-zinc-500 mt-1">Utilise le temps réel de routine quand il est disponible, retour au village et préparation inclus.</p>
           </div>
-          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">History-weighted</div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Pondéré par l’historique</div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {[
-            { label: 'Attaques / h', value: farmEfficiency.attacksPerHour.toFixed(2), detail: 'True loop rate' },
-            { label: 'O+E / min active', value: compact(farmEfficiency.gePerActiveMinute), detail: 'Search + deploy + combat' },
-            { label: 'O+E / min réelle', value: compact(farmEfficiency.gePerTrueMinute), detail: 'Includes overhead' },
-            { label: 'Part hors action', value: `${farmEfficiency.overheadShare.toFixed(1)}%`, detail: 'Outside active farming' },
-            { label: 'Cycle réel moy.', value: `${farmEfficiency.avgTrueLoopSeconds.toFixed(0)}s`, detail: 'Ready-to-ready' },
+            { label: 'Attaques / h', value: farmEfficiency.attacksPerHour.toFixed(2), detail: 'Débit réel des cycles' },
+            { label: 'O+E / min active', value: compact(farmEfficiency.gePerActiveMinute), detail: 'Recherche + déploiement + combat' },
+            { label: 'O+E / min réelle', value: compact(farmEfficiency.gePerTrueMinute), detail: 'Temps annexes inclus' },
+            { label: 'Part hors action', value: `${farmEfficiency.overheadShare.toFixed(1)}%`, detail: 'Hors farm actif' },
+            { label: 'Cycle réel moy.', value: `${farmEfficiency.avgTrueLoopSeconds.toFixed(0)}s`, detail: 'Prêt à prêt' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
@@ -2049,17 +2049,17 @@ Best optimization target: {pipeline.dominantTunable.label}
             <p className="text-sm text-zinc-500 mt-1">Session-only aggregation. Rejected bases stay off disk and never slow the matchmaking path.</p>
           </div>
           <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
-            {(stats.targets_accepted || 0).toLocaleString()} accepted · {Math.max(0, (stats.targets_seen || 0) - (stats.targets_accepted || 0)).toLocaleString()} rejected · {(stats.near_miss_targets || 0).toLocaleString()} near-miss
+            {(stats.targets_accepted || 0).toLocaleString()} acceptés · {Math.max(0, (stats.targets_seen || 0) - (stats.targets_accepted || 0)).toLocaleString()} rejetés · {(stats.near_miss_targets || 0).toLocaleString()} quasi-valides
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           {[
-            { label: 'O+E acceptés', value: compact(stats.avg_accepted_ge || 0), detail: 'Average target value' },
-            { label: 'Rejected G+E', value: compact(stats.avg_rejected_ge || 0), detail: 'What thresholds skip' },
-            { label: 'Accepted DE', value: compact(stats.avg_accepted_de || 0), detail: 'Average target DE' },
-            { label: 'Rejected DE', value: compact(stats.avg_rejected_de || 0), detail: 'Skipped target DE' },
-            { label: 'Accepted score', value: `${(stats.avg_accepted_score || 0).toFixed(0)}/100`, detail: 'Target Intelligence' },
-            { label: 'Rejected score', value: `${(stats.avg_rejected_score || 0).toFixed(0)}/100`, detail: 'Target Intelligence' },
+            { label: 'O+E acceptés', value: compact(stats.avg_accepted_ge || 0), detail: 'Valeur moyenne des cibles' },
+            { label: 'O+E rejetés', value: compact(stats.avg_rejected_ge || 0), detail: 'Ignoré par les seuils' },
+            { label: 'Élixir noir accepté', value: compact(stats.avg_accepted_de || 0), detail: 'Élixir noir moyen des cibles' },
+            { label: 'Élixir noir rejeté', value: compact(stats.avg_rejected_de || 0), detail: 'Élixir noir des cibles ignorées' },
+            { label: 'Score accepté', value: `${(stats.avg_accepted_score || 0).toFixed(0)}/100`, detail: 'Analyse de cible' },
+            { label: 'Score rejeté', value: `${(stats.avg_rejected_score || 0).toFixed(0)}/100`, detail: 'Analyse de cible' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
@@ -2270,9 +2270,9 @@ Best optimization target: {pipeline.dominantTunable.label}
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Prévision de farm</div>
-            <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">What the next hour should produce</h3>
+            <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Projection de la prochaine heure</h3>
             <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">
-              Projection from the last {farmForecast.samples} measured ready-to-ready routines. Observational only; no target rules are changed.
+              Projection basée sur les {farmForecast.samples} dernières routines complètes mesurées. Observation uniquement : aucune règle de cible n’est modifiée.
             </p>
           </div>
           <div className="text-[9px] font-black uppercase tracking-wider text-zinc-500">
@@ -2290,7 +2290,7 @@ Best optimization target: {pipeline.dominantTunable.label}
                 { label: '60m Or', value: compact(farmForecast.gold60) },
                 { label: '60m Elixir', value: compact(farmForecast.elixir60) },
                 { label: '60m DE', value: compact(farmForecast.de60) },
-                { label: '60m G+E range', value: `${compact(farmForecast.lowGE60)}–${compact(farmForecast.highGE60)}` },
+                { label: 'Plage O+E à 60 min', value: `${compact(farmForecast.lowGE60)}–${compact(farmForecast.highGE60)}` },
               ].map((metric) => (
                 <div key={metric.label} className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-4">
                   <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
@@ -2299,7 +2299,7 @@ Best optimization target: {pipeline.dominantTunable.label}
               ))}
             </div>
             <div className="mt-4 text-[9px] font-bold uppercase tracking-wider text-zinc-500">
-              Range = observed 25th–75th percentile of per-attack G+E/hour, not a guaranteed result.
+              Plage = percentile observé 25–75 % du rendement O+E/heure par attaque, pas une garantie.
             </div>
           </>
         ) : (
@@ -2695,20 +2695,20 @@ Best optimization target: {pipeline.dominantTunable.label}
             ))}
           </div>
           <p className="mt-4 text-[9px] font-bold uppercase tracking-wider text-zinc-400">
-            Observation only — never changes deployment coordinates or strategy.
+            Observation uniquement — ne modifie jamais les coordonnées de déploiement ni la stratégie.
           </p>
         </div>
 
         <div className="bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
           <div className="flex items-center justify-between gap-4 mb-5">
             <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Runtime comparison</div>
-              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Fast / Balanced / Safe</h3>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Comparaison des modes</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Rapide / Équilibré / Prudent</h3>
             </div>
             <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">{history?.length ?? 0} attaques</div>
           </div>
           {modeStats.length === 0 ? (
-            <div className="py-8 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">Waiting for runtime samples</div>
+            <div className="py-8 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">En attente de données de session</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px] text-left">
@@ -2749,21 +2749,21 @@ Best optimization target: {pipeline.dominantTunable.label}
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Result Trust</div>
             <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Origine des données de combat</h3>
-            <p className="text-sm text-zinc-500 mt-1">ClashGO records whether stars and loot came from result OCR, measured battle outcome or stable live-loot deltas.</p>
+            <p className="text-sm text-zinc-500 mt-1">ClashGO mémorise si les étoiles et le butin proviennent de l’OCR du résultat, du combat mesuré ou des variations de butin détectées en direct.</p>
           </div>
           <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
-            {resultTrust.total > 0 ? `${resultTrust.highRate.toFixed(0)}% high-confidence` : 'Waiting for V2 results'}
+            {resultTrust.total > 0 ? `${resultTrust.highRate.toFixed(0)}% confiance élevée` : 'En attente de résultats'}
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
           {[
-            { label: 'Confiance élevée', value: resultTrust.confidence.high.toLocaleString(), detail: 'Outcome + live delta' },
-            { label: 'Medium', value: resultTrust.confidence.medium.toLocaleString(), detail: 'Reliable single source' },
-            { label: 'Low / unknown', value: (resultTrust.confidence.low + resultTrust.confidence.unknown).toLocaleString(), detail: 'Fallback / legacy rows' },
-            { label: 'Stars via OCR', value: resultTrust.ocrStars.toLocaleString(), detail: 'Result screen' },
-            { label: 'Stars via outcome', value: resultTrust.outcomeStars.toLocaleString(), detail: 'Destruction / reconciliation' },
-            { label: 'Loot live delta', value: resultTrust.liveLoot.toLocaleString(), detail: 'Preferred stable source' },
-            { label: 'Loot via OCR', value: resultTrust.ocrLoot.toLocaleString(), detail: 'Result screen fallback' },
+            { label: 'Confiance élevée', value: resultTrust.confidence.high.toLocaleString(), detail: 'Combat + variation directe' },
+            { label: 'Confiance moyenne', value: resultTrust.confidence.medium.toLocaleString(), detail: 'Source unique fiable' },
+            { label: 'Faible / inconnue', value: (resultTrust.confidence.low + resultTrust.confidence.unknown).toLocaleString(), detail: 'Secours / anciennes données' },
+            { label: 'Étoiles via OCR', value: resultTrust.ocrStars.toLocaleString(), detail: 'Écran de résultat' },
+            { label: 'Étoiles via combat', value: resultTrust.outcomeStars.toLocaleString(), detail: 'Destruction / réconciliation' },
+            { label: 'Butin en direct', value: resultTrust.liveLoot.toLocaleString(), detail: 'Source stable prioritaire' },
+            { label: 'Butin via OCR', value: resultTrust.ocrLoot.toLocaleString(), detail: 'Secours écran de résultat' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
