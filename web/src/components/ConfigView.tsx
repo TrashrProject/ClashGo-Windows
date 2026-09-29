@@ -22,6 +22,7 @@ interface ConfigViewProps {
   lootExitPercent: number;
   setLootExitPercent: (v: number) => void;
   simpleMode: boolean;
+  testSessionActive?: boolean;
   onSetSimpleMode: (enabled: boolean) => Promise<void>;
   // Returns the underlying SaveConfig promise so ConfigView can own
   // the save-status indicator (green flash / red flash + inline
@@ -51,6 +52,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   lootExitEnabled, setLootExitEnabled,
   lootExitPercent, setLootExitPercent,
   simpleMode,
+  testSessionActive = false,
   onSetSimpleMode,
   onSave
 }) => {
@@ -96,7 +98,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   // swallowed by App.tsx.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (saveStatus === 'saving') return;
+    if (saveStatus === 'saving' || testSessionActive) return;
     if (savedTimerRef.current) { window.clearTimeout(savedTimerRef.current); savedTimerRef.current = null; }
     if (errorTimerRef.current) { window.clearTimeout(errorTimerRef.current); errorTimerRef.current = null; }
     setSaveStatus('saving');
@@ -160,7 +162,25 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   return (
     <div className="max-w-4xl mx-auto">
 
-      <form onSubmit={handleSubmit} className="space-y-8">
+      {testSessionActive && (
+        <div className="mb-5 rounded-2xl border border-sky-200 dark:border-sky-900/50 bg-sky-50 dark:bg-sky-950/20 px-4 py-3">
+          <div className="flex items-start gap-3">
+            <span className="material-symbols-outlined text-sky-500">science</span>
+            <div>
+              <div className="text-xs font-black text-sky-700 dark:text-sky-300">Session test en cours</div>
+              <div className="mt-1 text-[11px] font-semibold leading-5 text-sky-700/80 dark:text-sky-300/80">
+                Les réglages d’automatisation sont temporairement verrouillés. ClashGO restaurera tes paramètres à la fin du test.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <form
+        onSubmit={handleSubmit}
+        className={'space-y-8 transition-opacity ' + (testSessionActive ? 'opacity-55 pointer-events-none select-none' : '')}
+        aria-disabled={testSessionActive}
+      >
         <section className="bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
             <div className="max-w-2xl">
