@@ -396,6 +396,64 @@ func TestServiceDownloadVerifiesSHA(t *testing.T) {
 	}
 }
 
+func TestServiceDownloadReplacesExistingSameVersion(t *testing.T) {
+	payload := []byte("fresh-update-content")
+	sum := sha256.Sum256(payload)
+	sha := hex.EncodeToString(sum[:])
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/asset.zip", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
+		_, _ = w.Write(payload)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	manifest := Manifest{
+		Version: "9.9.9",
+		Platforms: map[string]PlatformSpec{
+			platformKey(runtime.GOOS): {
+				AssetName: "asset.zip",
+				AssetURL:  srv.URL + "/asset.zip",
+				Size:      int64(len(payload)),
+				SHA256:    sha,
+			},
+		},
+	}
+	svc := newServiceForTest(t, "0.0.1", srv.Client())
+	svc.absorbManifest(manifest)
+
+	targetDir := filepath.Join(svc.downloadsDir, "9.9.9")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	finalPath := filepath.Join(targetDir, "asset.zip")
+	if err := os.WriteFile(finalPath, []byte("stale-download"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gotPath, err := svc.Download(context.Background())
+	if err != nil {
+		t.Fatalf("Download replacing existing file: %v", err)
+	}
+	if gotPath != finalPath {
+		t.Fatalf("download path = %q, want %q", gotPath, finalPath)
+	}
+	got, err := os.ReadFile(finalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("existing file was not replaced: got %q", got)
+	}
+	if _, err := os.Stat(finalPath + ".part"); !os.IsNotExist(err) {
+		t.Fatalf("partial file left behind: %v", err)
+	}
+	if svc.GetStatus().Progress != 1.0 {
+		t.Fatalf("progress = %f, want 1.0", svc.GetStatus().Progress)
+	}
+}
+
 func TestServiceDownloadRejectsBadSHA(t *testing.T) {
 	payload := []byte("tampered!")
 	mux := http.NewServeMux()
