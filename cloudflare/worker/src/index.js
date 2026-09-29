@@ -818,10 +818,22 @@ async function router(request, env) {
     if (!dev) return json({ message: "developer license required" }, 403);
 
     if (request.method === "GET" && path === "/v1/developer/licenses") {
-      return json({ licenses: await listLicenses(env) });
+      const rows = await listLicenses(env);
+      if (dev.role !== "admin") {
+        return json({
+          licenses: rows.map(({ customer_id, customer_name, customer_contact, ...row }) => row),
+        });
+      }
+      return json({ licenses: rows });
     }
     if (request.method === "GET" && path === "/v1/developer/incidents") {
-      return json({ incidents: await listIncidents(env, 500) });
+      const rows = await listIncidents(env, 500);
+      if (dev.role !== "admin") {
+        return json({
+          incidents: rows.map(({ customer_id, customer_name, customer_contact, ...row }) => row),
+        });
+      }
+      return json({ incidents: rows });
     }
 
     const adminOnly = () => {
