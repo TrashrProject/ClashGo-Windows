@@ -88,6 +88,9 @@ func TestApplyMemberSpeedProfile(t *testing.T) {
 			if cfg.Attack.MaxAttackPerSession != 37 {
 				t.Fatalf("speed profile changed session attack cap: %d", cfg.Attack.MaxAttackPerSession)
 			}
+			if !cfg.Upgrade.UpgradeWalls {
+				t.Fatal("speed profile changed wall-upgrade preference")
+			}
 			if !cfg.Attack.UseQueen {
 				t.Fatal("speed profile changed hero preference")
 			}
