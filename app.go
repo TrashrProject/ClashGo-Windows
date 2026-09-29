@@ -811,7 +811,7 @@ func (a *App) GetStartupReadiness() StartupReadiness {
 			}
 		}
 	}
-	add("license", "Licence", licenseOK, licenseMessage, "account", "Ouvrir Mon ClashGO")
+	add("license", "Licence", licenseOK, licenseMessage, "license_account", "Ouvrir Mon ClashGO")
 
 	cfg := config.LoadOrDefault("config.json")
 	accountOK := strings.TrimSpace(cfg.Account.PlayerTag) != ""
@@ -820,7 +820,7 @@ func (a *App) GetStartupReadiness() StartupReadiness {
 		accountMessage = "Aucun tag joueur lié · optionnel, la configuration locale reste utilisable"
 	}
 	checks = append(checks, newStartupAdvisoryItem(
-		"account", "Compte Clash", accountOK, accountMessage, "account", "Lier le compte",
+		"account", "Compte Clash", accountOK, accountMessage, "village", "Lier le compte",
 	))
 
 	diag := collectSystemDiagnostics()
