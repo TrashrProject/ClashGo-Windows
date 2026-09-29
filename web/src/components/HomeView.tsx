@@ -191,6 +191,10 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
 
   const runCheckAction = React.useCallback((action?: string) => {
     switch (action) {
+      case 'license_account':
+        onOpenAccount();
+        break;
+      case 'village':
       case 'account':
         onOpenVillage();
         break;
@@ -206,7 +210,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
       default:
         break;
     }
-  }, [onOpenAutomation, onOpenMemberSettings, onOpenSettings, onOpenVillage]);
+  }, [onOpenAccount, onOpenAutomation, onOpenMemberSettings, onOpenSettings, onOpenVillage]);
 
   const botLabel = starting ? 'Démarrage…' : running ? 'Bot en cours' : 'Bot arrêté';
   const botSub = starting
