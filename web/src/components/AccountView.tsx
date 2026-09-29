@@ -213,6 +213,7 @@ interface AccountViewProps {
   testSessionActive?: boolean;
   onInterfaceLevelChange: (level: InterfaceLevel) => void;
   onAccountChanged: (tag: string) => void;
+  onReadinessChanged?: () => void;
 }
 
 const AccountView: React.FC<AccountViewProps> = React.memo(({
@@ -222,6 +223,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   testSessionActive = false,
   onInterfaceLevelChange,
   onAccountChanged,
+  onReadinessChanged,
 }) => {
   const [profile, setProfile] = React.useState<PlayerProfile | null>(null);
   const [resources, setResources] = React.useState<VillageResources | null>(null);
@@ -340,6 +342,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       const saved = await SaveMemberSettings(next as any);
       setMemberSettings(saved as MemberSettings);
       setMemberMessage('Réglages appliqués au bot.');
+      onReadinessChanged?.();
     } catch (e) {
       setMemberSaveError(e instanceof Error ? e.message : String(e));
       try {
