@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetVillageResources, RefreshLicense, SaveMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ApplyMemberPreset, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetVillageResources, RefreshLicense, SaveMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
@@ -222,6 +222,34 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       // Member preferences are best-effort while the Wails bridge initializes.
     }
   }, []);
+
+  const applyUsagePreset = async (preset: 'short' | 'balanced' | 'fast') => {
+    if (memberSaving) return;
+    setMemberSaving(true);
+    setMemberMessage('');
+    setMemberSaveError('');
+    try {
+      const saved = await ApplyMemberPreset(preset);
+      setMemberSettings(saved as MemberSettings);
+      setMemberMessage(
+        preset === 'short'
+          ? 'Session courte appliquée.'
+          : preset === 'fast'
+            ? 'Farm rapide appliqué.'
+            : 'Farm équilibré appliqué.'
+      );
+    } catch (e) {
+      setMemberSaveError(e instanceof Error ? e.message : String(e));
+      try {
+        const current = await GetMemberSettings();
+        setMemberSettings(current as MemberSettings);
+      } catch {
+        // Keep the last known state if the bridge is temporarily unavailable.
+      }
+    } finally {
+      setMemberSaving(false);
+    }
+  };
 
   const saveMemberSettings = async (next: MemberSettings) => {
     if (memberSaving) return;
@@ -736,6 +764,37 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               >
                 Restaurer la cadence recommandée
               </button>
+            </div>
+
+            <div>
+              <div className="flex items-end justify-between gap-4 mb-3">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">Profils rapides</div>
+                  <div className="mt-1 text-xs font-semibold text-zinc-500">Un clic pour préparer une session cohérente.</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {([
+                  ['short', 'Session courte', '10 attaques · rythme normal', 'timer'],
+                  ['balanced', 'Farm équilibré', '50 attaques · recommandé', 'balance'],
+                  ['fast', 'Farm rapide', '100 attaques · rythme rapide', 'bolt'],
+                ] as const).map(([preset, label, description, icon]) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    disabled={memberSaving}
+                    onClick={() => void applyUsagePreset(preset)}
+                    className="group rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-4 text-left transition hover:-translate-y-0.5 hover:border-zinc-400 dark:hover:border-zinc-600 disabled:opacity-40"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="material-symbols-outlined text-lg text-zinc-400 group-hover:text-zinc-950 dark:group-hover:text-white">{icon}</span>
+                      <span className="text-[8px] font-black uppercase tracking-[0.16em] text-zinc-400">1 clic</span>
+                    </div>
+                    <div className="mt-4 text-sm font-black text-zinc-950 dark:text-white">{label}</div>
+                    <div className="mt-1 text-[11px] font-semibold text-zinc-500">{description}</div>
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div>
