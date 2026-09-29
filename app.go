@@ -1635,6 +1635,118 @@ func (a *App) GetDeveloperLicenses() ([]map[string]any, error) {
 	return a.developerControlGET("/v1/developer/licenses")
 }
 
+func (a *App) adminControlPOST(path string, payload any) (map[string]any, error) {
+	if a.license == nil {
+		return nil, fmt.Errorf("license service is not initialized")
+	}
+	state := a.license.GetState()
+	if !state.Activated || state.Role != licensing.RoleAdmin {
+		return nil, fmt.Errorf("admin license required")
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	cfg := config.LoadOrDefault("config.json")
+	baseURL := clashControlServiceURL(cfg)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-ClashGO-License", a.license.LicenseKey())
+	req.Header.Set("X-ClashGO-Machine", a.license.MachineID())
+	req.Header.Set("User-Agent", "ClashGO/"+version)
+
+	resp, err := (&http.Client{Timeout: 12 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var apiErr struct {
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(responseBody, &apiErr)
+		if strings.TrimSpace(apiErr.Message) == "" {
+			apiErr.Message = resp.Status
+		}
+		return nil, fmt.Errorf("admin license service: %s", apiErr.Message)
+	}
+	if len(responseBody) == 0 {
+		return map[string]any{"ok": true}, nil
+	}
+	var result map[string]any
+	if err := json.Unmarshal(responseBody, &result); err != nil {
+		return nil, fmt.Errorf("decode admin response: %w", err)
+	}
+	return result, nil
+}
+
+func (a *App) AdminResetLicenseMachine(licenseID string) error {
+	licenseID = strings.TrimSpace(licenseID)
+	if licenseID == "" {
+		return fmt.Errorf("license id is required")
+	}
+	_, err := a.adminControlPOST("/v1/developer/licenses/reset-machine", map[string]any{
+		"license_id": licenseID,
+	})
+	return err
+}
+
+func (a *App) AdminSetLicenseActive(licenseID string, active bool) error {
+	licenseID = strings.TrimSpace(licenseID)
+	if licenseID == "" {
+		return fmt.Errorf("license id is required")
+	}
+	_, err := a.adminControlPOST("/v1/developer/licenses/set-active", map[string]any{
+		"license_id": licenseID,
+		"active":     active,
+	})
+	return err
+}
+
+func (a *App) AdminSetLicenseRole(licenseID, role string) error {
+	licenseID = strings.TrimSpace(licenseID)
+	if licenseID == "" {
+		return fmt.Errorf("license id is required")
+	}
+	role = strings.ToLower(strings.TrimSpace(role))
+	switch role {
+	case "member", "developer", "admin":
+	default:
+		return fmt.Errorf("invalid role")
+	}
+	_, err := a.adminControlPOST("/v1/developer/licenses/set-role", map[string]any{
+		"license_id": licenseID,
+		"role":       role,
+	})
+	return err
+}
+
+func (a *App) AdminRenewLicense(licenseID, plan string) (map[string]any, error) {
+	licenseID = strings.TrimSpace(licenseID)
+	if licenseID == "" {
+		return nil, fmt.Errorf("license id is required")
+	}
+	plan = strings.ToLower(strings.TrimSpace(plan))
+	switch plan {
+	case "free_2d", "week_1", "month_1", "lifetime":
+	default:
+		return nil, fmt.Errorf("invalid license plan")
+	}
+	return a.adminControlPOST("/v1/developer/licenses/renew", map[string]any{
+		"license_id": licenseID,
+		"plan":       plan,
+	})
+}
+
 type AdminLicenseRequest struct {
 	Role            string `json:"role"`
 	Plan            string `json:"plan"`
