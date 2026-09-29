@@ -476,8 +476,13 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 )}
               </div>
             )}
-            {licenseState?.offline_until && (
+            {licenseState?.last_validated && (
               <p className="mt-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                Dernière validation · {snapshotAgeLabel(licenseState.last_validated)}
+              </p>
+            )}
+            {licenseState?.offline_until && isOfflineGrace(licenseState) && (
+              <p className="mt-2 text-[10px] font-bold uppercase tracking-widest text-amber-500">
                 Accès hors ligne jusqu’au {new Date(licenseState.offline_until).toLocaleString('fr-FR')}
               </p>
             )}
