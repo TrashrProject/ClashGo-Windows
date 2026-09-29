@@ -1906,10 +1906,19 @@ func (a *App) SaveAccountConfig(playerTag string) error {
 	// Purge legacy desktop keys during the first save after upgrading.
 	cfg.Account.LegacyAPIKey = ""
 
-	if err := config.Save("config.json", cfg); err != nil {
+	oldTag, hadOldTag := a.loadMemberAccountTag()
+	accountPath := a.memberAccountPath()
+	if err := a.persistMemberAccountTag(tag); err != nil {
 		return err
 	}
-	if err := a.persistMemberAccountTag(tag); err != nil {
+	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldTag {
+			_ = saveMemberAccountFile(accountPath, oldTag)
+		} else if accountPath != "" {
+			_ = os.Remove(accountPath)
+			_ = os.Remove(accountPath + ".bak")
+			_ = os.Remove(accountPath + ".tmp")
+		}
 		return err
 	}
 	if a.bot != nil {
@@ -1928,15 +1937,24 @@ func (a *App) ClearAccount() error {
 	cfg.Account.PlayerTag = ""
 	cfg.Account.LegacyAPIKey = ""
 
-	if err := config.Save("config.json", cfg); err != nil {
-		return err
-	}
+	oldTag, hadOldTag := a.loadMemberAccountTag()
+	accountPath := a.memberAccountPath()
 	if err := a.persistMemberAccountTag(""); err != nil {
 		return err
 	}
+	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldTag {
+			_ = saveMemberAccountFile(accountPath, oldTag)
+		} else if accountPath != "" {
+			_ = os.Remove(accountPath)
+			_ = os.Remove(accountPath + ".bak")
+			_ = os.Remove(accountPath + ".tmp")
+		}
+		return err
+	}
 
-	// Remove cached public profile only after the unlink is durable. Keep the
-	// running bot synchronized with the persisted account state.
+	// Remove cached public profile only after both member identity stores are
+	// durable. Keep the running bot synchronized with the persisted account.
 	_ = os.Remove(accountProfileCachePath())
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
