@@ -190,3 +190,67 @@ func TestAttackStrategyReady(t *testing.T) {
 		t.Fatalf("strategy readiness message does not identify selected file: %q", message)
 	}
 }
+
+
+func TestStartupArmyAdvisoryReadyFresh(t *testing.T) {
+	now := time.Now().UTC()
+	item := startupArmyAdvisory(&CurrentArmySnapshot{
+		Timestamp: now.Add(-2 * time.Minute),
+		Ready: true,
+		Uncertain: false,
+		Units: []CurrentArmyUnit{{Name: "Barbarian", Count: 10}},
+	}, now)
+
+	if !item.OK {
+		t.Fatalf("fresh ready army should be OK: %+v", item)
+	}
+	if item.Blocking {
+		t.Fatalf("army advisory must never block startup: %+v", item)
+	}
+	if !strings.Contains(item.Message, "Armée prête") {
+		t.Fatalf("unexpected army message: %q", item.Message)
+	}
+}
+
+func TestStartupArmyAdvisoryStaleIsAdvisory(t *testing.T) {
+	now := time.Now().UTC()
+	item := startupArmyAdvisory(&CurrentArmySnapshot{
+		Timestamp: now.Add(-15 * time.Minute),
+		Ready: true,
+		Units: []CurrentArmyUnit{{Name: "Archer", Count: 10}},
+	}, now)
+
+	if item.OK {
+		t.Fatalf("stale army snapshot unexpectedly ready: %+v", item)
+	}
+	if item.Blocking {
+		t.Fatalf("stale army snapshot unexpectedly blocks startup: %+v", item)
+	}
+	if !strings.Contains(strings.ToLower(item.Message), "ancienne") {
+		t.Fatalf("stale army message not explicit: %q", item.Message)
+	}
+}
+
+func TestStartupResourcesAdvisoryFreshAndMissing(t *testing.T) {
+	now := time.Now().UTC()
+	fresh := startupResourcesAdvisory(&VillageResourceSnapshot{
+		Timestamp: now.Add(-time.Minute),
+		Gold: 123456,
+		Elixir: 654321,
+		Valid: true,
+	}, now)
+	if !fresh.OK || fresh.Blocking {
+		t.Fatalf("fresh resources advisory invalid: %+v", fresh)
+	}
+	if !strings.Contains(fresh.Message, "123456") || !strings.Contains(fresh.Message, "654321") {
+		t.Fatalf("resource values missing from summary: %q", fresh.Message)
+	}
+
+	missing := startupResourcesAdvisory(nil, now)
+	if missing.OK {
+		t.Fatalf("missing resources unexpectedly ready: %+v", missing)
+	}
+	if missing.Blocking {
+		t.Fatalf("missing resources unexpectedly block startup: %+v", missing)
+	}
+}
