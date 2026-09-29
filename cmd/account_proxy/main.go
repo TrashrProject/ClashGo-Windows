@@ -461,18 +461,29 @@ func corsMiddleware(next http.Handler, allowedOrigin string) http.Handler {
 	})
 }
 
-func main() {
-	apiKey := strings.TrimSpace(os.Getenv("COC_API_KEY"))
-	if apiKey == "" {
-		log.Fatal("COC_API_KEY is required")
+func normalizeCOCAPIKey(raw string) (string, bool, error) {
+	key := strings.TrimSpace(raw)
+	if key == "" {
+		return "", false, nil
 	}
-	apiKey = strings.TrimPrefix(apiKey, "Bearer ")
-	upperKey := strings.ToUpper(apiKey)
+	key = strings.TrimPrefix(key, "Bearer ")
+	upperKey := strings.ToUpper(key)
 	if strings.Contains(upperKey, "TA_VRAIE_CLE") ||
 		strings.Contains(upperKey, "TA_CLE_API") ||
 		strings.Contains(upperKey, "YOUR_API_KEY") ||
-		len(apiKey) < 40 {
-		log.Fatal("COC_API_KEY looks like a placeholder or invalid token; paste the real Clash of Clans developer API key")
+		len(key) < 40 {
+		return "", false, fmt.Errorf("COC_API_KEY looks like a placeholder or invalid token")
+	}
+	return key, true, nil
+}
+
+func main() {
+	apiKey, accountAPIConfigured, apiKeyErr := normalizeCOCAPIKey(os.Getenv("COC_API_KEY"))
+	if apiKeyErr != nil {
+		log.Fatal(apiKeyErr)
+	}
+	if !accountAPIConfigured {
+		log.Print("COC_API_KEY is not configured; starting ClashGO control/license service without player-profile proxy")
 	}
 
 	addr := strings.TrimSpace(os.Getenv("CLASHGO_ACCOUNT_LISTEN"))
@@ -497,10 +508,21 @@ func main() {
 	}
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true,
+			"account_api_configured": accountAPIConfigured,
+			"control_service": true,
+		})
 	})
 
 	mux.HandleFunc("GET /v1/player/{tag}", func(w http.ResponseWriter, r *http.Request) {
+		if !accountAPIConfigured {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"reason":  "account_service_not_configured",
+				"message": "Clash player profile service is not configured on this server.",
+			})
+			return
+		}
 		ip := r.RemoteAddr
 		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 			ip = host
