@@ -327,7 +327,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
               {isBotRunning && canOneClick && (
                 <div className="mt-4 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] font-bold text-amber-600 dark:text-amber-400 tracking-wide leading-relaxed">
                   <span className="material-symbols-outlined text-xs align-middle mr-1">info</span>
-                  Le bot est actuellement en cours. La mise à jour l’arrêtera proprement, fermera les opérations ADB puis relancera ClashGO avec la nouvelle version.
+                  Une session ClashGO est active ou en cours de démarrage. La mise à jour l’arrêtera proprement, fermera les opérations ADB puis relancera ClashGO avec la nouvelle version.
                 </div>
               )}
             </div>
