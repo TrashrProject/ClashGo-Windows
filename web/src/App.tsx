@@ -869,9 +869,9 @@ function App() {
 
       if (!typedReadiness.ready) {
         const firstBlocked = typedReadiness.checks.find((check) => !check.ok && check.blocking !== false);
-        setBotError(firstBlocked
+        setBotError(friendlyBotErrorMessage(firstBlocked
           ? `${firstBlocked.label} : ${firstBlocked.message}`
-          : 'La configuration ClashGO n’est pas prête.');
+          : 'La configuration ClashGO n’est pas prête.'));
         return;
       }
 
