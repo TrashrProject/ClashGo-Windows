@@ -805,6 +805,33 @@ function App() {
           ? 'Déconnecté'
           : 'En attente';
 
+  const readinessIssues = useMemo(() => {
+    if (!systemDiagnostics) return [] as string[];
+    const issues: string[] = [];
+    if (!systemDiagnostics.assets_ready) {
+      const missing = systemDiagnostics.missing_assets ?? [];
+      issues.push(missing.length
+        ? `Fichiers ClashGO manquants : ${missing.slice(0, 3).join(', ')}`
+        : 'Certains fichiers nécessaires à ClashGO sont manquants.');
+    }
+    if (!systemDiagnostics.emulator?.bluestacks_player_found) {
+      issues.push('BlueStacks 5 n’est pas détecté.');
+    }
+    if (!systemDiagnostics.emulator?.adb_found) {
+      issues.push('ADB n’est pas détecté.');
+    }
+    if (systemDiagnostics.emulator?.bluestacks_player_found && !systemDiagnostics.emulator?.bluestacks_running) {
+      issues.push('BlueStacks est installé mais ne semble pas démarré.');
+    }
+    if (!systemDiagnostics.emulator?.preferred_instance) {
+      issues.push('Aucune instance BlueStacks utilisable n’est sélectionnée.');
+    }
+    if (systemDiagnostics.emulator?.adb_setting_present && !systemDiagnostics.emulator?.adb_enabled) {
+      issues.push('ADB est désactivé dans la configuration BlueStacks.');
+    }
+    return issues;
+  }, [systemDiagnostics]);
+
   const tabTitle: Record<TabType, string> = {
     dashboard: 'Accueil',
     config: 'Automatisation',
@@ -985,6 +1012,7 @@ function App() {
                     systemDiagnostics.emulator?.preferred_instance
                   )
                 : null}
+              readinessIssues={readinessIssues}
             />
           )}
           {tab === 'activity' && <Dashboard {...dashboardProps} />}
