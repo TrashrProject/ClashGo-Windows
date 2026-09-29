@@ -263,6 +263,9 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const lastAttack = history && history.length > 0 ? history[0] : undefined;
   const [sessionCopyState, setSessionCopyState] = React.useState<'idle' | 'copied' | 'error'>('idle');
   const [startupElapsedSeconds, setStartupElapsedSeconds] = React.useState(0);
+  const [customGoldM, setCustomGoldM] = React.useState('');
+  const [customElixirM, setCustomElixirM] = React.useState('');
+  const [customDarkK, setCustomDarkK] = React.useState('');
 
   React.useEffect(() => {
     if (!starting) {
@@ -845,6 +848,71 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
               </div>
             )}
           </div>
+
+          {!sessionLootGoal.active && (
+            <div className="mt-4 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+              <div className="mb-2 text-[9px] font-black uppercase tracking-[0.18em] text-zinc-400">Objectif personnalisé</div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
+                <label className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.5"
+                    value={customGoldM}
+                    onChange={(e) => setCustomGoldM(e.target.value)}
+                    placeholder="Or"
+                    className="h-11 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 pr-8 text-sm font-black outline-none focus:border-amber-400 dark:border-zinc-700 dark:bg-zinc-950"
+                  />
+                  <span className="pointer-events-none absolute right-3 top-3 text-[10px] font-black text-zinc-400">M</span>
+                </label>
+                <label className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.5"
+                    value={customElixirM}
+                    onChange={(e) => setCustomElixirM(e.target.value)}
+                    placeholder="Élixir"
+                    className="h-11 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 pr-8 text-sm font-black outline-none focus:border-fuchsia-400 dark:border-zinc-700 dark:bg-zinc-950"
+                  />
+                  <span className="pointer-events-none absolute right-3 top-3 text-[10px] font-black text-zinc-400">M</span>
+                </label>
+                <label className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100000"
+                    step="5"
+                    value={customDarkK}
+                    onChange={(e) => setCustomDarkK(e.target.value)}
+                    placeholder="Noir"
+                    className="h-11 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 pr-8 text-sm font-black outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950"
+                  />
+                  <span className="pointer-events-none absolute right-3 top-3 text-[10px] font-black text-zinc-400">K</span>
+                </label>
+                <button
+                  type="button"
+                  disabled={!customGoldM && !customElixirM && !customDarkK}
+                  onClick={() => {
+                    const gold = Math.max(0, Math.round((Number(customGoldM) || 0) * 1_000_000));
+                    const elixir = Math.max(0, Math.round((Number(customElixirM) || 0) * 1_000_000));
+                    const dark = Math.max(0, Math.round((Number(customDarkK) || 0) * 1_000));
+                    if (gold || elixir || dark) {
+                      onSetLootGoal(gold, elixir, dark);
+                    }
+                  }}
+                  className="h-11 rounded-xl bg-emerald-500 px-4 text-[9px] font-black uppercase tracking-widest text-zinc-950 disabled:opacity-30"
+                >
+                  ACTIVER
+                </button>
+              </div>
+              <div className="mt-2 text-[10px] font-semibold text-zinc-400">
+                Si plusieurs valeurs sont renseignées, le premier objectif atteint arrête proprement la session.
+              </div>
+            </div>
+          )}
         </section>
       )}
 
