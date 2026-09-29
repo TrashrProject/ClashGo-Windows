@@ -111,11 +111,14 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
       ? 'bg-amber-400 animate-pulse'
       : 'bg-zinc-600';
 
+  const windowsBlocked = !running && !starting && windowsReady === false;
   const actionClass = running
     ? 'bg-rose-500 text-white hover:bg-rose-400'
     : starting
       ? 'bg-amber-400/20 text-amber-300 dark:text-amber-700'
-      : 'bg-white dark:bg-zinc-950 text-zinc-950 dark:text-white hover:scale-[1.01]';
+      : windowsBlocked
+        ? 'bg-amber-400 text-zinc-950 hover:bg-amber-300'
+        : 'bg-white dark:bg-zinc-950 text-zinc-950 dark:text-white hover:scale-[1.01]';
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
@@ -131,11 +134,11 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           </div>
           <button
             type="button"
-            onClick={starting ? undefined : (running ? onStop : onStart)}
+            onClick={starting ? undefined : (running ? onStop : windowsBlocked ? onOpenSettings : onStart)}
             disabled={starting}
             className={'h-14 px-7 rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all active:scale-[0.98] disabled:cursor-wait ' + actionClass}
           >
-            {starting ? 'DÉMARRAGE…' : running ? 'ARRÊTER LE BOT' : 'DÉMARRER LE BOT'}
+            {starting ? 'DÉMARRAGE…' : running ? 'ARRÊTER LE BOT' : windowsBlocked ? 'VÉRIFIER WINDOWS' : 'DÉMARRER LE BOT'}
           </button>
         </div>
       </section>
