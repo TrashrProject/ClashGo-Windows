@@ -12,6 +12,7 @@ interface HomeViewProps {
   starting: boolean;
   onStart: () => void;
   onStartTestSession: () => void;
+  onStartQuickTestSession: () => void;
   onStop: () => void;
   onOpenAutomation: () => void;
   onOpenAccount: () => void;
@@ -229,7 +230,7 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, sessionReport, testSessionActive, running, starting,
-    onStart, onStartTestSession, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
+    onStart, onStartTestSession, onStartQuickTestSession, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
     licenseReady, licenseRequired, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
     memberName, licensePlan, licenseExpiresAt, latestBootReport,
@@ -590,6 +591,13 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                 <div className="mt-1 text-xs font-semibold text-zinc-500">Licence, Windows et configuration du bot sont validés.</div>
               </div>
               <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={onStartQuickTestSession}
+                  className="rounded-xl border border-sky-200 dark:border-sky-900/50 bg-sky-50 dark:bg-sky-950/20 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-sky-700 dark:text-sky-300 hover:border-sky-400"
+                >
+                  Test express · 3
+                </button>
                 <button
                   type="button"
                   onClick={onStartTestSession}
