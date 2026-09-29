@@ -73,6 +73,17 @@ const formatLicenseRemaining = (expiresAt?: string): string => {
 const isOfflineGrace = (state: LicenseState | null): boolean =>
   Boolean(state?.error && state.error.toLowerCase().includes('offline'));
 
+const friendlyLicenseError = (value?: string): string => {
+  const raw = String(value || '');
+  const text = raw.toLowerCase();
+  if (text.includes('already activated on another machine') || text.includes('machine mismatch')) {
+    return 'Licence déjà liée à un autre PC · réinitialisation nécessaire.';
+  }
+  if (text.includes('expired')) return 'Licence expirée · renouvellement nécessaire.';
+  if (text.includes('invalid') || text.includes('revoked')) return 'Licence invalide ou désactivée.';
+  return raw;
+};
+
 const applySpeedPreset = (settings: MemberSettings, profile: MemberSettings['speed_profile']): MemberSettings => {
   switch (profile) {
     case 'cautious':
@@ -458,7 +469,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
         </div>
         {(licenseError || (licenseState?.error && !isOfflineGrace(licenseState))) && (
           <div className="mt-4 rounded-xl bg-rose-500/10 px-4 py-3 text-xs font-bold text-rose-400 dark:text-rose-600">
-            {licenseError || licenseState?.error}
+            {friendlyLicenseError(licenseError || licenseState?.error)}
           </div>
         )}
         {isOfflineGrace(licenseState) && (
