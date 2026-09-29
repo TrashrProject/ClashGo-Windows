@@ -48,7 +48,8 @@ func TestApplyMemberSpeedProfile(t *testing.T) {
 			cfg.Search.MinLootDark = 4321
 			cfg.Attack.StrategyFile = "keep-me.yaml"
 			cfg.Attack.MaxAttackPerSession = 37
-			cfg.Attack.UpgradeWalls = true
+			cfg.Attack.UseQueen = true
+			cfg.Attack.LootExitEnabled = true
 
 			applyMemberSpeedProfile(cfg, tc.profile)
 
@@ -87,8 +88,11 @@ func TestApplyMemberSpeedProfile(t *testing.T) {
 			if cfg.Attack.MaxAttackPerSession != 37 {
 				t.Fatalf("speed profile changed session attack cap: %d", cfg.Attack.MaxAttackPerSession)
 			}
-			if !cfg.Attack.UpgradeWalls {
-				t.Fatal("speed profile changed wall-upgrade preference")
+			if !cfg.Attack.UseQueen {
+				t.Fatal("speed profile changed hero preference")
+			}
+			if !cfg.Attack.LootExitEnabled {
+				t.Fatal("speed profile changed loot-exit preference")
 			}
 		})
 	}
