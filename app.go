@@ -1802,6 +1802,17 @@ func (a *App) ActivateLicense(key string) (licensing.State, error) {
 		cfg := config.LoadOrDefault("config.json")
 		a.license = licensing.New(clashControlServiceURL(cfg), version)
 	}
+
+	key = strings.ToUpper(strings.TrimSpace(key))
+	currentState := a.license.GetState()
+	currentKey := strings.ToUpper(strings.TrimSpace(a.license.LicenseKey()))
+	if currentState.Activated && currentKey != "" && key != currentKey {
+		return currentState, fmt.Errorf("deactivate the current ClashGO license before activating another one")
+	}
+	if a.botSessionActiveOrStarting() && key != currentKey {
+		return currentState, fmt.Errorf("stop ClashGO before changing the active license")
+	}
+
 	state, err := a.license.Activate(context.Background(), key)
 	if err != nil {
 		return state, err
