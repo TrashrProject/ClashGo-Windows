@@ -1615,3 +1615,46 @@ func TestRestoreTestSessionSettingsRestoresExactMemberProfile(t *testing.T) {
 		t.Fatalf("runtime config was not restored from member snapshot: %+v", cfgAfter.Automation)
 	}
 }
+
+
+func TestUndoMemberSettingsSwapsCurrentAndPrevious(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	a := testLicensedApp(t, "CGO-UNDO01-UNDO02-UNDO03-UNDO04")
+
+	first := defaultMemberSettings()
+	first.InterfaceLevel = "advanced"
+	first.SpeedProfile = "normal"
+	first.MaxAttacksPerHour = 12
+	first.MaxAttacksPerSession = 40
+	if _, err := a.SaveMemberSettings(first); err != nil {
+		t.Fatalf("save first settings: %v", err)
+	}
+
+	second := first
+	second.SpeedProfile = "fast"
+	second.MaxAttacksPerHour = 16
+	second.MaxAttacksPerSession = 80
+	if _, err := a.SaveMemberSettings(second); err != nil {
+		t.Fatalf("save second settings: %v", err)
+	}
+	if !a.HasPreviousMemberSettings() {
+		t.Fatal("expected previous-settings snapshot after second save")
+	}
+
+	got, err := a.UndoMemberSettings()
+	if err != nil {
+		t.Fatalf("first undo: %v", err)
+	}
+	if got.SpeedProfile != "normal" || got.MaxAttacksPerHour != 12 || got.MaxAttacksPerSession != 40 {
+		t.Fatalf("first undo restored wrong settings: %+v", got)
+	}
+
+	got, err = a.UndoMemberSettings()
+	if err != nil {
+		t.Fatalf("second undo: %v", err)
+	}
+	if got.SpeedProfile != "fast" || got.MaxAttacksPerHour != 16 || got.MaxAttacksPerSession != 80 {
+		t.Fatalf("second undo did not swap back to prior state: %+v", got)
+	}
+}
