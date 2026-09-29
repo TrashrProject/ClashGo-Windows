@@ -824,6 +824,35 @@ function App() {
     void handleStartupCheck();
   }, [accountReady, licenseAccessReady, handleStartupCheck]);
 
+  useEffect(() => {
+    if (!accountReady || !licenseAccessReady || isRunning || isStarting) return;
+
+    let cancelled = false;
+    const refreshQuietly = async () => {
+      try {
+        const result = await GetStartupReadiness();
+        if (cancelled) return;
+        setStartupCheck(result as unknown as {
+          ready: boolean;
+          checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
+        });
+        startupCheckAutoRan.current = true;
+      } catch {
+        // Keep the last known preflight state. The explicit "Tout vérifier"
+        // action still surfaces an error if the user asks for a manual check.
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void refreshQuietly();
+    }, 15_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [accountReady, licenseAccessReady, isRunning, isStarting]);
+
   const refreshStartupReadiness = useCallback(async () => {
     startupCheckAutoRan.current = true;
     setStartupCheckRunning(true);
