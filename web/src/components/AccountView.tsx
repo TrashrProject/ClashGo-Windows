@@ -1469,12 +1469,14 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                           ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
                           : 'bg-rose-500/10 border-rose-500/20 text-rose-600 dark:text-rose-400'
                     }`}>
-                      {currentArmy.uncertain ? 'Vérification vision' : currentArmy.ready ? 'Composition conforme' : 'Composition différente'}
+                      {currentArmy.uncertain ? 'Lecture incertaine' : currentArmy.ready ? 'Armée prête' : 'Armée incomplète'}
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-zinc-500">
                     Détectée automatiquement depuis la barre de troupes avant le déploiement.
                     {currentArmy.target_label ? ` Cible : ${currentArmy.target_label}.` : ''}
+                    {!currentArmy.ready && !currentArmy.uncertain ? ' ClashGO passera la base avant tout déploiement.' : ''}
+                    {currentArmy.uncertain ? ' En cas de doute OCR, ClashGO laisse l’attaque continuer.' : ''}
                   </p>
                 </div>
                 <div className="text-[10px] font-bold text-zinc-400">
