@@ -130,6 +130,12 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     [activity],
   );
 
+  const sessionCap = Math.max(0, Number(stats.session_attack_cap || 0));
+  const sessionAttacks = Math.max(0, Number(stats.attacks_completed || 0));
+  const sessionProgress = sessionCap > 0
+    ? Math.max(0, Math.min(100, Math.round((sessionAttacks / sessionCap) * 100)))
+    : 0;
+
   const botLabel = starting ? 'Démarrage…' : running ? 'Bot en cours' : 'Bot arrêté';
   const botSub = starting
     ? 'ClashGO prépare BlueStacks et l’automatisation.'
@@ -315,6 +321,29 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
               Vérification de BlueStacks et ADB…
             </div>
           )}
+        </section>
+      )}
+
+      {(running || starting) && sessionCap > 0 && (
+        <section className="rounded-[1.75rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-premium dark:shadow-none">
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+            <div>
+              <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">Session en cours</div>
+              <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white">
+                {sessionAttacks} / {sessionCap} attaques
+              </div>
+              <div className="mt-1 text-xs font-semibold text-zinc-500">
+                {Math.max(0, sessionCap - sessionAttacks)} attaque{Math.max(0, sessionCap - sessionAttacks) > 1 ? 's' : ''} restante{Math.max(0, sessionCap - sessionAttacks) > 1 ? 's' : ''} avant l’arrêt propre.
+              </div>
+            </div>
+            <div className="text-2xl font-black tabular-nums text-zinc-950 dark:text-white">{sessionProgress}%</div>
+          </div>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-[width] duration-500"
+              style={{ width: sessionProgress + '%' }}
+            />
+          </div>
         </section>
       )}
 
