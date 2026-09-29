@@ -658,6 +658,9 @@ func main() {
 			writeJSON(w, http.StatusConflict, map[string]string{"message": "license is already activated on another machine"})
 			return
 		}
+		if strings.TrimSpace(rec.ID) == "" {
+			rec.ID = licenseIDFromHash(h)
+		}
 		if rec.ActivatedAt.IsZero() {
 			rec.ActivatedAt = now
 			if rec.DurationDays > 0 {
