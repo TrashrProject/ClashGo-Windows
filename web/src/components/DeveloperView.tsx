@@ -69,6 +69,7 @@ type LicenseHistoryEvent = {
 type LicenseState = {
   activated?: boolean;
   role?: 'member' | 'developer' | 'admin' | '';
+  license_id?: string;
   license_hint?: string;
   machine_id?: string;
 };
@@ -158,6 +159,7 @@ const DeveloperView: React.FC = () => {
   const [licenses, setLicenses] = React.useState<LicenseRow[]>([]);
   const [history, setHistory] = React.useState<LicenseHistoryEvent[]>([]);
   const [role, setRole] = React.useState<LicenseState['role']>('');
+  const [currentLicenseID, setCurrentLicenseID] = React.useState('');
   const [currentLicenseHint, setCurrentLicenseHint] = React.useState('');
   const [currentMachineID, setCurrentMachineID] = React.useState('');
   const [busy, setBusy] = React.useState(false);
@@ -218,6 +220,7 @@ const DeveloperView: React.FC = () => {
       ]);
       const typedState = (state || {}) as LicenseState;
       setRole(typedState.role || '');
+      setCurrentLicenseID(typedState.license_id || '');
       setCurrentLicenseHint(typedState.license_hint || '');
       setCurrentMachineID(typedState.machine_id || '');
       setIncidents((i || []) as Incident[]);
@@ -467,12 +470,18 @@ const DeveloperView: React.FC = () => {
   const neverActivated = licenses.filter((item) =>
     item.active !== false && !item.machine_id && !item.activated_at
   ).length;
-  const isCurrentAdminLicense = (item: LicenseRow): boolean =>
-    isAdmin &&
-    Boolean(currentLicenseHint) &&
-    Boolean(currentMachineID) &&
-    item.hint === currentLicenseHint &&
-    item.machine_id === currentMachineID;
+  const isCurrentAdminLicense = (item: LicenseRow): boolean => {
+    if (!isAdmin) return false;
+    if (currentLicenseID && item.id) {
+      return String(item.id) === currentLicenseID;
+    }
+    // Compatibility fallback for an older control service that has not yet
+    // started returning license_id in activation responses.
+    return Boolean(currentLicenseHint) &&
+      Boolean(currentMachineID) &&
+      item.hint === currentLicenseHint &&
+      item.machine_id === currentMachineID;
+  };
   const normalizedSearch = search.trim().toLowerCase();
   const licensePriority = (item: LicenseRow): number => {
     if (item.active === false) return 50;
