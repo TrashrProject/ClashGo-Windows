@@ -537,6 +537,7 @@ const DeveloperView: React.FC = () => {
       item.hint,
       item.id,
       item.machine_id,
+      item.machine_name,
       item.last_denied_machine,
       item.app_version,
       item.role,
