@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, UndoMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetControlServiceConfig, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, SetBetaControlServiceURL, UndoMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
@@ -197,6 +197,14 @@ type LicensePolicy = {
   service_url?: string;
 };
 
+type ControlServiceView = {
+  service_url?: string;
+  configured?: boolean;
+  embedded?: boolean;
+  override_allowed?: boolean;
+  requires_restart?: boolean;
+};
+
 const safeLicenseEventsOn = (
   eventName: string,
   callback: (payload: LicenseState) => void,
@@ -276,6 +284,10 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [licenseBusy, setLicenseBusy] = React.useState(false);
   const [licenseError, setLicenseError] = React.useState('');
   const [licenseRefreshing, setLicenseRefreshing] = React.useState(false);
+  const [controlService, setControlService] = React.useState<ControlServiceView | null>(null);
+  const [controlURLInput, setControlURLInput] = React.useState('http://127.0.0.1:8787');
+  const [controlURLBusy, setControlURLBusy] = React.useState(false);
+  const [controlURLMessage, setControlURLMessage] = React.useState('');
   const [memberSettings, setMemberSettings] = React.useState<MemberSettings | null>(null);
   const [memberSaving, setMemberSaving] = React.useState(false);
   const [memberMessage, setMemberMessage] = React.useState('');
@@ -314,10 +326,19 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
 
   const refreshLicense = React.useCallback(async () => {
     try {
-      const [state, policy] = await Promise.all([GetLicenseState(), GetLicensePolicy()]);
+      const [state, policy, control] = await Promise.all([
+        GetLicenseState(),
+        GetLicensePolicy(),
+        GetControlServiceConfig().catch(() => null),
+      ]);
       setLicenseState(state as LicenseState);
       activeLicenseHintRef.current = state?.license_hint || '';
       setLicensePolicy(policy as LicensePolicy);
+      if (control) {
+        const typedControl = control as ControlServiceView;
+        setControlService(typedControl);
+        if (typedControl.service_url) setControlURLInput(typedControl.service_url);
+      }
       if (state?.activated && (state.role === 'developer' || state.role === 'admin')) {
         onInterfaceLevelChange('developer');
       }
@@ -326,6 +347,25 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       // service is not configured.
     }
   }, [onInterfaceLevelChange]);
+
+  const saveBetaControlService = async () => {
+    if (controlURLBusy || automationActive || !controlService?.override_allowed) return;
+    setControlURLBusy(true);
+    setControlURLMessage('');
+    try {
+      const value = await SetBetaControlServiceURL(controlURLInput.trim());
+      const typed = (value || {}) as ControlServiceView;
+      setControlService(typed);
+      if (typed.service_url) setControlURLInput(typed.service_url);
+      setControlURLMessage('Serveur de licences connecté. Tu peux activer ta clé immédiatement.');
+      await refreshLicense();
+      onReadinessChanged?.();
+    } catch (e) {
+      setControlURLMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setControlURLBusy(false);
+    }
+  };
 
   const refreshMemberUpdate = React.useCallback(async () => {
     try {
@@ -870,6 +910,45 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
           ))}
         </div>
       </div>
+
+      {memberPage === 'account' && !licensePolicy?.enforced && controlService?.override_allowed && (
+        <section className="rounded-[2rem] border border-sky-200 dark:border-sky-900/50 bg-sky-50 dark:bg-sky-950/20 p-5 md:p-6">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-[9px] font-black uppercase tracking-[0.2em] text-sky-500">Mode test bêta</div>
+              <h3 className="mt-1 text-lg font-black text-zinc-950 dark:text-white">Connecter le serveur de licences local</h3>
+              <p className="mt-1 text-xs font-semibold text-zinc-500">
+                Pour tester les licences sans serveur public, lance START-CLASHGO-LICENSE-TEST.cmd puis garde l’adresse locale ci-dessous.
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 lg:min-w-[420px]">
+              <input
+                value={controlURLInput}
+                onChange={(e) => setControlURLInput(e.target.value)}
+                disabled={controlURLBusy || automationActive}
+                spellCheck={false}
+                className="h-11 flex-1 rounded-xl border border-sky-200 dark:border-sky-900/60 bg-white dark:bg-zinc-950 px-3 text-xs font-mono outline-none focus:border-sky-400 disabled:opacity-50"
+                aria-label="Adresse du serveur local ClashGO"
+              />
+              <button
+                type="button"
+                onClick={() => void saveBetaControlService()}
+                disabled={controlURLBusy || automationActive || !controlURLInput.trim()}
+                className="h-11 rounded-xl bg-sky-500 px-4 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-40"
+              >
+                {controlURLBusy ? 'Connexion…' : 'Connecter'}
+              </button>
+            </div>
+          </div>
+          {automationActive && (
+            <div className="mt-3 text-[10px] font-bold text-amber-600 dark:text-amber-400">Arrête le bot avant de changer de serveur de licences.</div>
+          )}
+          {controlURLMessage && (
+            <div className="mt-3 text-[10px] font-bold text-sky-700 dark:text-sky-300">{controlURLMessage}</div>
+          )}
+        </section>
+      )}
+
       <section className={(memberPage === 'account' ? '' : 'hidden ') + "rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-zinc-950 dark:bg-white p-6 md:p-7 text-white dark:text-zinc-950 shadow-premium-lg"}>
         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6">
           <div className="min-w-0">
