@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, UndoMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, UndoMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
@@ -306,6 +306,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [appVersion, setAppVersion] = React.useState('');
   const [memberUpdate, setMemberUpdate] = React.useState<MemberUpdateStatus | null>(null);
   const [checkingUpdate, setCheckingUpdate] = React.useState(false);
+  const [installingUpdate, setInstallingUpdate] = React.useState(false);
   const [accountTagInput, setAccountTagInput] = React.useState(playerTag || '');
   const [accountLinkBusy, setAccountLinkBusy] = React.useState(false);
   const [accountLinkMessage, setAccountLinkMessage] = React.useState('');
@@ -349,6 +350,22 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       }));
     } finally {
       setCheckingUpdate(false);
+    }
+  };
+
+  const installMemberUpdate = async () => {
+    if (installingUpdate || !memberUpdate?.available) return;
+    setInstallingUpdate(true);
+    setMemberUpdate((current) => ({ ...(current || {}), state: 'downloading', error: '' }));
+    try {
+      await InstallAndRestart();
+    } catch (e) {
+      setMemberUpdate((current) => ({
+        ...(current || {}),
+        state: 'error',
+        error: e instanceof Error ? e.message : String(e),
+      }));
+      setInstallingUpdate(false);
     }
   };
 
@@ -1151,14 +1168,26 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     : 'Les mises à jour beta sont vérifiées automatiquement.'}
               </p>
             </div>
-            <button
-              type="button"
-              disabled={checkingUpdate}
-              onClick={() => void checkMemberUpdate()}
-              className="shrink-0 rounded-xl border border-zinc-200 dark:border-zinc-700 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-950 dark:hover:text-white disabled:opacity-40"
-            >
-              {checkingUpdate ? 'Vérification…' : 'Vérifier maintenant'}
-            </button>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {memberUpdate?.available && (
+                <button
+                  type="button"
+                  disabled={installingUpdate || checkingUpdate}
+                  onClick={() => void installMemberUpdate()}
+                  className="rounded-xl bg-zinc-950 dark:bg-white px-4 py-3 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950 disabled:opacity-40"
+                >
+                  {installingUpdate ? 'Préparation…' : 'Installer et redémarrer'}
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={checkingUpdate || installingUpdate}
+                onClick={() => void checkMemberUpdate()}
+                className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-950 dark:hover:text-white disabled:opacity-40"
+              >
+                {checkingUpdate ? 'Vérification…' : 'Vérifier maintenant'}
+              </button>
+            </div>
           </div>
         </section>
       )}
