@@ -222,6 +222,12 @@ func licenseExpired(rec *licenseRecord, now time.Time) bool {
 	return rec != nil && !rec.ExpiresAt.IsZero() && !now.Before(rec.ExpiresAt)
 }
 
+func incidentMachineAuthorized(boundMachineID, reportedMachineID string) bool {
+	bound := strings.TrimSpace(boundMachineID)
+	reported := strings.TrimSpace(reportedMachineID)
+	return bound != "" && reported != "" && bound == reported
+}
+
 func applyLicenseRenewal(rec *licenseRecord, requestedPlan string, now time.Time) (string, int, time.Time, error) {
 	if rec == nil {
 		return "", 0, time.Time{}, fmt.Errorf("license not found")
@@ -640,7 +646,7 @@ func main() {
 			return
 		}
 		in.MachineID = strings.TrimSpace(in.MachineID)
-		if rec.MachineID == "" || in.MachineID == "" || rec.MachineID != in.MachineID {
+		if !incidentMachineAuthorized(rec.MachineID, in.MachineID) {
 			writeJSON(w, http.StatusConflict, map[string]string{"message": "machine mismatch"})
 			return
 		}
