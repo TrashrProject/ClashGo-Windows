@@ -1276,3 +1276,87 @@ func TestShortSessionPresetPreservesFarmAndAttackPreferences(t *testing.T) {
 		t.Fatal("short preset changed hero/clan-castle preferences")
 	}
 }
+
+
+func TestTemporaryTestSessionSettingsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	a := testLicensedApp(t, "CGO-TEST01-TEST02-TEST03-TEST04")
+
+	original := MemberSettings{
+		InterfaceLevel:       "advanced",
+		SpeedProfile:         "cautious",
+		MaxAttacksPerHour:    8,
+		MaxAttacksPerSession: 37,
+		BreakEveryAttacks:    4,
+		BreakMinutes:         7,
+		AdaptiveSearch:       false,
+		AutoProfileSync:      true,
+		AutoArmyGuard:        true,
+		AutoResourceTracking: true,
+	}
+	if _, err := a.SaveMemberSettings(original); err != nil {
+		t.Fatalf("save original settings: %v", err)
+	}
+
+	restorePath := a.testSessionRestorePath()
+	if err := saveMemberProfileFile(restorePath, original); err != nil {
+		t.Fatalf("save temporary restore snapshot: %v", err)
+	}
+
+	testProfile, err := applyMemberPreset(original, "short")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SaveMemberSettings(testProfile); err != nil {
+		t.Fatalf("apply test profile: %v", err)
+	}
+
+	during := a.GetMemberSettings()
+	if during.MaxAttacksPerSession != 10 || during.SpeedProfile != "normal" {
+		t.Fatalf("test preset was not applied: %+v", during)
+	}
+
+	if err := a.restoreTestSessionSettings(); err != nil {
+		t.Fatalf("restore test settings: %v", err)
+	}
+	got := a.GetMemberSettings()
+	if got.InterfaceLevel != original.InterfaceLevel ||
+		got.SpeedProfile != original.SpeedProfile ||
+		got.MaxAttacksPerHour != original.MaxAttacksPerHour ||
+		got.MaxAttacksPerSession != original.MaxAttacksPerSession ||
+		got.BreakEveryAttacks != original.BreakEveryAttacks ||
+		got.BreakMinutes != original.BreakMinutes ||
+		got.AdaptiveSearch != original.AdaptiveSearch {
+		t.Fatalf("settings were not restored: got=%+v want=%+v", got, original)
+	}
+
+	if _, err := os.Stat(restorePath); !os.IsNotExist(err) {
+		t.Fatalf("temporary restore snapshot still exists after restoration: %v", err)
+	}
+}
+
+func TestInterruptedTestSessionRecoveryIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	a := testLicensedApp(t, "CGO-TEST11-TEST12-TEST13-TEST14")
+
+	original := defaultMemberSettings()
+	original.MaxAttacksPerSession = 73
+	original.BreakMinutes = 6
+
+	if err := saveMemberProfileFile(a.testSessionRestorePath(), original); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.restoreTestSessionSettings(); err != nil {
+		t.Fatalf("first recovery failed: %v", err)
+	}
+	if err := a.restoreTestSessionSettings(); err != nil {
+		t.Fatalf("second recovery should be a no-op: %v", err)
+	}
+
+	got := a.GetMemberSettings()
+	if got.MaxAttacksPerSession != 73 || got.BreakMinutes != 6 {
+		t.Fatalf("recovered settings changed after idempotent restore: %+v", got)
+	}
+}
