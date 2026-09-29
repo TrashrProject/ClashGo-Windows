@@ -105,13 +105,13 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         const measuredMs = row.effectiveRoutineMs;
         const hours = measuredMs > 0 ? measuredMs / 3_600_000 : 0;
         const yieldPerHour = hours > 0 ? row.goldElixir / hours : 0;
-        const de confiance = row.attacks >= 25 ? 'Strong' : row.attacks >= 10 ? 'Solid' : 'Building';
+        const confidence = row.attacks >= 25 ? 'Strong' : row.attacks >= 10 ? 'Solid' : 'Building';
         return {
           ...row,
           yieldPerHour,
           avgStars: row.stars / Math.max(1, row.attacks),
           fullDeployRate: row.complete * 100 / Math.max(1, row.attacks),
-          de confiance,
+          confidence,
         };
       })
       .sort((a, b) => {
@@ -341,15 +341,15 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
 
   const resultTrust = React.useMemo(() => {
     const rows = history ?? [];
-    const de confiance = { high: 0, medium: 0, low: 0, unknown: 0 };
+    const confidence = { high: 0, medium: 0, low: 0, unknown: 0 };
     const stars = new Map<string, number>();
     const loot = new Map<string, number>();
     for (const rep of rows) {
       const level = rep.result_confidence || 'unknown';
       if (level === 'high' || level === 'medium' || level === 'low') {
-        de confiance[level]++;
+        confidence[level]++;
       } else {
-        de confiance.unknown++;
+        confidence.unknown++;
       }
       const starSource = rep.stars_source || 'legacy';
       const lootSource = rep.loot_source || 'legacy';
@@ -359,10 +359,10 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const total = rows.length;
     return {
       total,
-      de confiance,
-      highRate: total > 0 ? de confiance.high * 100 / total : 0,
-      mediumRate: total > 0 ? de confiance.medium * 100 / total : 0,
-      lowRate: total > 0 ? (confidence.low + de confiance.unknown) * 100 / total : 0,
+      confidence,
+      highRate: total > 0 ? confidence.high * 100 / total : 0,
+      mediumRate: total > 0 ? confidence.medium * 100 / total : 0,
+      lowRate: total > 0 ? (confidence.low + confidence.unknown) * 100 / total : 0,
       ocrStars: stars.get('result_ocr') || 0,
       outcomeStars: (stars.get('battle_outcome') || 0) + (stars.get('reconciled_outcome') || 0),
       liveLoot: loot.get('live_delta') || 0,
@@ -970,7 +970,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         gold30: 0, elixir30: 0, de30: 0,
         gold60: 0, elixir60: 0, de60: 0,
         lowGE60: 0, highGE60: 0,
-        de confiance: 'Apprentissage', cv,
+        confidence: 'Apprentissage', cv,
         rows: [1, 8, 24].map((hours) => ({
           hours, gold: gph * hours, elixir: eph * hours, de: dph * hours,
         })),
@@ -1010,9 +1010,9 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       return sorted[lo] * (1 - weight) + sorted[hi] * weight;
     };
 
-    let de confiance = 'Apprentissage';
-    if (measured.length >= 20 && cv <= 0.25 && (stats.health_score ?? 0) >= 90) de confiance = 'High';
-    else if (measured.length >= 10 && cv <= 0.45 && (stats.health_score ?? 0) >= 75) de confiance = 'Medium';
+    let confidence = 'Apprentissage';
+    if (measured.length >= 20 && cv <= 0.25 && (stats.health_score ?? 0) >= 90) confidence = 'High';
+    else if (measured.length >= 10 && cv <= 0.45 && (stats.health_score ?? 0) >= 75) confidence = 'Medium';
 
     return {
       ready: true,
@@ -1026,7 +1026,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       de60: dePerHour,
       lowGE60: percentile(geRates, 0.25),
       highGE60: percentile(geRates, 0.75),
-      de confiance,
+      confidence,
       cv,
       rows: [1, 8, 24].map((forecastHours) => ({
         hours: forecastHours,
@@ -1523,7 +1523,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             <p className="text-sm text-zinc-500 mt-1">Projection basée sur le rendement mesuré. La confiance baisse si les dernières sessions sont instables.</p>
           </div>
           <div className="px-3 py-2 rounded-full bg-zinc-50 dark:bg-zinc-950/40 text-[9px] font-black uppercase tracking-widest text-zinc-500">
-            {farmForecast.confidence} de confiance
+            {farmForecast.confidence} · confiance
           </div>
         </div>
 
@@ -1617,10 +1617,10 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Indice d’autonomie</div>
               <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">
-                {autonomyIndex.ready ? autonomyIndex.grade : 'Building de confiance'}
+                {autonomyIndex.ready ? autonomyIndex.grade : 'Confiance en construction'}
               </h3>
               <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500 max-w-2xl">
-                Weighted from measured reliability, safe deployment, zero-touch routines, runtime health and result de confiance. No hidden “AI score”.
+                Calculé à partir de la fiabilité mesurée, du déploiement sûr, des routines sans intervention, de la santé du runtime et de la confiance des résultats. Aucun score « IA » caché.
               </p>
             </div>
           </div>
