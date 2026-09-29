@@ -340,6 +340,15 @@ func TestSetBaseURLSwitchesNextActivationImmediately(t *testing.T) {
 	if got := svc.baseURLSnapshot(); got != newServer.URL {
 		t.Fatalf("baseURLSnapshot=%q want %q", got, newServer.URL)
 	}
+
+	reloaded := &Service{path: svc.path}
+	reloaded.load()
+	if reloaded.state.LicenseID != "live-switch-license-id" {
+		t.Fatalf("license id was not persisted across reload: %+v", reloaded.state)
+	}
+	if reloaded.state.MemberName != "Live Switch" || !reloaded.state.Activated {
+		t.Fatalf("activation metadata was not restored across reload: %+v", reloaded.state)
+	}
 }
 
 
