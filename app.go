@@ -594,7 +594,18 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 		if a.license == nil {
 			return BotStatus{Running: false, Message: "ClashGO license service is unavailable"}
 		}
-		state := a.license.GetState()
+
+		// Revalidate at the exact moment the user starts the bot. The background
+		// validation loop runs every 15 minutes, but Start must never rely on a
+		// stale in-memory entitlement after a revoke, expiry or machine reset.
+		// A short timeout keeps Start responsive; Validate still preserves the
+		// configured offline grace when the control service is temporarily down.
+		licenseCtx, cancelLicense := context.WithTimeout(context.Background(), 4*time.Second)
+		state := a.license.Validate(licenseCtx)
+		cancelLicense()
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "license_state", state)
+		}
 		if !state.Activated {
 			msg := "A valid ClashGO license is required"
 			if strings.TrimSpace(state.Error) != "" {
