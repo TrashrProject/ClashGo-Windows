@@ -1799,21 +1799,33 @@ func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if strings.TrimSpace(settings.InterfaceLevel) == "" {
-		if existing, ok := a.loadMemberProfile(); ok {
-			settings.InterfaceLevel = existing.InterfaceLevel
-		}
+	oldProfile, hadOldProfile := a.loadMemberProfile()
+	if strings.TrimSpace(settings.InterfaceLevel) == "" && hadOldProfile {
+		settings.InterfaceLevel = oldProfile.InterfaceLevel
 	}
 	settings = sanitizeMemberSettings(settings)
 	cfg := config.LoadOrDefault("config.json")
 	applyMemberSettingsToConfig(cfg, settings)
 
-	if err := config.Save("config.json", cfg); err != nil {
-		return MemberSettings{}, err
-	}
+	// The runtime config and the per-license profile form one logical update.
+	// Persist the member copy first and restore it if config.json cannot be
+	// committed, so a failed save can never reappear as a different setting
+	// on the next launch.
+	profilePath := a.memberProfilePath()
 	if err := a.persistMemberProfile(settings); err != nil {
 		return MemberSettings{}, err
 	}
+	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldProfile {
+			_ = saveMemberProfileFile(profilePath, oldProfile)
+		} else if profilePath != "" {
+			_ = os.Remove(profilePath)
+			_ = os.Remove(profilePath + ".bak")
+			_ = os.Remove(profilePath + ".tmp")
+		}
+		return MemberSettings{}, err
+	}
+
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
 		a.bot.RecordMemberSettingsChange(
