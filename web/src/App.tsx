@@ -774,6 +774,18 @@ function App() {
     }
   };
 
+  const handleStartTestSession = async () => {
+    try {
+      setBotError('');
+      await ApplyMemberPreset('short');
+      await syncMemberScopedView(true);
+      await handleStart();
+    } catch (err) {
+      console.error('Test session start failed:', err);
+      setBotError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const handleStop = async () => {
     try {
       const res = await StopBot();
@@ -1150,6 +1162,7 @@ function App() {
               running={isRunning}
               starting={isStarting}
               onStart={handleStart}
+              onStartTestSession={handleStartTestSession}
               onStop={handleStop}
               onOpenAutomation={() => setTab('config')}
               onOpenAccount={() => {
