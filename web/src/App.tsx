@@ -1205,7 +1205,7 @@ function App() {
     }
   };
 
-  const handleExtendSession = async (extra: 10 | 25) => {
+  const handleExtendSession = async (extra: number) => {
     if (!isRunning) return;
     try {
       await ExtendSessionAttacks(extra);
