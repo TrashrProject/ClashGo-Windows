@@ -201,6 +201,7 @@ const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
             )}
 
             {(!state?.license_hint || state?.activated) && (
+              <>
             <input
               value={key}
               onChange={(e) => setKey(e.target.value.toUpperCase())}
@@ -218,6 +219,7 @@ const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
             >
               {busy ? 'Vérification…' : 'Activer ma licence'}
             </button>
+              </>
             )}
           </div>
 
