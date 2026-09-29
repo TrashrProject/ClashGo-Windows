@@ -124,9 +124,10 @@ func TestApplyMemberSpeedProfileKeepsExplicitBreakSettings(t *testing.T) {
 
 func TestSanitizeMemberSettingsClampsUnsafeValues(t *testing.T) {
 	got := sanitizeMemberSettings(MemberSettings{
-		SpeedProfile:      "turbo",
-		MaxAttacksPerHour: 999,
-		BreakEveryAttacks: -5,
+		SpeedProfile:         "turbo",
+		MaxAttacksPerHour:    999,
+		MaxAttacksPerSession: 9999,
+		BreakEveryAttacks:    -5,
 		BreakMinutes:      99,
 	})
 
@@ -135,6 +136,9 @@ func TestSanitizeMemberSettingsClampsUnsafeValues(t *testing.T) {
 	}
 	if got.MaxAttacksPerHour != 24 {
 		t.Fatalf("MaxAttacksPerHour = %d, want 24", got.MaxAttacksPerHour)
+	}
+	if got.MaxAttacksPerSession != 500 {
+		t.Fatalf("MaxAttacksPerSession = %d, want 500", got.MaxAttacksPerSession)
 	}
 	if got.BreakEveryAttacks != 0 {
 		t.Fatalf("BreakEveryAttacks = %d, want 0", got.BreakEveryAttacks)
@@ -146,9 +150,10 @@ func TestSanitizeMemberSettingsClampsUnsafeValues(t *testing.T) {
 
 func TestSanitizeMemberSettingsRaisesMinimumAttackRate(t *testing.T) {
 	got := sanitizeMemberSettings(MemberSettings{
-		SpeedProfile:      "fast",
-		MaxAttacksPerHour: 0,
-		BreakEveryAttacks: 50,
+		SpeedProfile:         "fast",
+		MaxAttacksPerHour:    0,
+		MaxAttacksPerSession: 0,
+		BreakEveryAttacks:    50,
 		BreakMinutes:      -1,
 	})
 
@@ -157,6 +162,9 @@ func TestSanitizeMemberSettingsRaisesMinimumAttackRate(t *testing.T) {
 	}
 	if got.MaxAttacksPerHour != 1 {
 		t.Fatalf("MaxAttacksPerHour = %d, want 1", got.MaxAttacksPerHour)
+	}
+	if got.MaxAttacksPerSession != 100 {
+		t.Fatalf("MaxAttacksPerSession = %d, want migration default 100", got.MaxAttacksPerSession)
 	}
 	if got.BreakEveryAttacks != 20 {
 		t.Fatalf("BreakEveryAttacks = %d, want 20", got.BreakEveryAttacks)
@@ -172,7 +180,7 @@ func TestDefaultMemberSettingsAreSafeAndUsable(t *testing.T) {
 	if got.SpeedProfile != "normal" {
 		t.Fatalf("SpeedProfile=%q want normal", got.SpeedProfile)
 	}
-	if got.MaxAttacksPerHour != 12 || got.BreakEveryAttacks != 5 || got.BreakMinutes != 3 {
+	if got.MaxAttacksPerHour != 12 || got.MaxAttacksPerSession != 100 || got.BreakEveryAttacks != 5 || got.BreakMinutes != 3 {
 		t.Fatalf("unexpected default pacing: %+v", got)
 	}
 	if !got.AdaptiveSearch || !got.AutoProfileSync || !got.AutoArmyGuard || !got.AutoResourceTracking {
@@ -193,6 +201,7 @@ func TestApplyMemberSettingsToConfigPreservesUnrelatedFarmSettings(t *testing.T)
 	settings := MemberSettings{
 		SpeedProfile:         "fast",
 		MaxAttacksPerHour:    14,
+		MaxAttacksPerSession: 42,
 		BreakEveryAttacks:    7,
 		BreakMinutes:         2,
 		AdaptiveSearch:       false,
@@ -207,6 +216,9 @@ func TestApplyMemberSettingsToConfigPreservesUnrelatedFarmSettings(t *testing.T)
 	}
 	if cfg.Automation.MaxAttacksPerHour != 14 || cfg.Automation.BreakEveryAttacks != 7 {
 		t.Fatalf("member pacing not applied: %+v", cfg.Automation)
+	}
+	if cfg.Attack.MaxAttackPerSession != 42 {
+		t.Fatalf("session attack cap=%d want 42", cfg.Attack.MaxAttackPerSession)
 	}
 	if cfg.Search.AdaptiveSearch {
 		t.Fatal("adaptive search preference was not applied")
@@ -232,6 +244,7 @@ func TestMemberProfileFileRoundTrip(t *testing.T) {
 	want := MemberSettings{
 		SpeedProfile:         "fast",
 		MaxAttacksPerHour:    16,
+		MaxAttacksPerSession: 75,
 		BreakEveryAttacks:    6,
 		BreakMinutes:         2,
 		AdaptiveSearch:       true,
@@ -263,6 +276,7 @@ func TestMemberProfileFileRecoversBackup(t *testing.T) {
 	want := MemberSettings{
 		SpeedProfile:         "cautious",
 		MaxAttacksPerHour:    8,
+		MaxAttacksPerSession: 25,
 		BreakEveryAttacks:    4,
 		BreakMinutes:         4,
 		AdaptiveSearch:       false,
@@ -301,6 +315,38 @@ func TestMemberProfileFileRecoversBackup(t *testing.T) {
 	}
 }
 
+
+func TestLegacyMemberProfileGetsSafeSessionDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "members", "legacy.json")
+	legacy := map[string]any{
+		"speed_profile": "normal",
+		"max_attacks_per_hour": 12,
+		"break_every_attacks": 5,
+		"break_minutes": 3,
+		"adaptive_search": true,
+		"auto_profile_sync": true,
+		"auto_army_guard": true,
+		"auto_resource_tracking": true,
+	}
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := loadMemberProfileFile(path)
+	if !ok {
+		t.Fatal("expected legacy member profile to load")
+	}
+	if got.MaxAttacksPerSession != 100 {
+		t.Fatalf("legacy MaxAttacksPerSession=%d want 100", got.MaxAttacksPerSession)
+	}
+}
 
 func TestClearCachedPlayerProfileIfDifferentRemovesOtherMember(t *testing.T) {
 	dir := t.TempDir()
