@@ -444,7 +444,7 @@ function App() {
     const unsubBotError = safeEventsOn("bot_error", (payload: unknown) => {
       setIsStarting(false);
       setIsRunning(false);
-      setBotError(normalizeBotErrorMessage(payload, 'The bot failed to start.'));
+      setBotError(normalizeBotErrorMessage(payload, 'Le bot n’a pas pu démarrer.'));
     });
     const unsubBotInitFailed = safeEventsOn("bot_init_failed", (payload: unknown) => {
       setIsStarting(false);
