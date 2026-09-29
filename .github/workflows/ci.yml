@@ -45,18 +45,27 @@ jobs:
       - name: Validate control API parity
         run: node tools/check-control-api-parity.mjs
 
-      - name: Validate updater PowerShell syntax
+      - name: Validate PowerShell syntax
         shell: pwsh
         run: |
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path "build/windows/install_update.ps1"),
-            [ref]$null,
-            [ref]$errors
+          $files = @(
+            "build/windows/install_update.ps1",
+            "tools/run-control-local.ps1",
+            "tools/create-local-admin-license.ps1"
           )
-          if ($errors.Count -gt 0) {
-            $errors | ForEach-Object { Write-Error $_.Message }
-            exit 1
+          foreach ($file in $files) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$null,
+              [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              Write-Host "PowerShell syntax errors in $file" -ForegroundColor Red
+              $errors | ForEach-Object { Write-Error $_.Message }
+              exit 1
+            }
+            Write-Host "PowerShell syntax OK: $file"
           }
           Write-Host "Updater PowerShell syntax OK."
 
