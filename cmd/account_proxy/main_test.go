@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -412,5 +413,45 @@ func TestTrimStoredSupportIncidentsKeepsNewestCap(t *testing.T) {
 	}
 	if got[len(got)-1].ID != fmt.Sprintf("incident-%04d", len(items)-1) {
 		t.Fatalf("newest retained incident = %q", got[len(got)-1].ID)
+	}
+}
+
+
+func TestNormalizeCOCAPIKeyAllowsControlOnlyMode(t *testing.T) {
+	key, configured, err := normalizeCOCAPIKey("   ")
+	if err != nil {
+		t.Fatalf("empty key should allow control-only mode: %v", err)
+	}
+	if configured {
+		t.Fatal("empty key must not report account API configured")
+	}
+	if key != "" {
+		t.Fatalf("empty key normalized to %q", key)
+	}
+}
+
+func TestNormalizeCOCAPIKeyAcceptsRealisticToken(t *testing.T) {
+	raw := "Bearer " + strings.Repeat("a", 48)
+	key, configured, err := normalizeCOCAPIKey(raw)
+	if err != nil {
+		t.Fatalf("valid token rejected: %v", err)
+	}
+	if !configured {
+		t.Fatal("valid token should configure account API")
+	}
+	if key != strings.Repeat("a", 48) {
+		t.Fatalf("normalized key = %q", key)
+	}
+}
+
+func TestNormalizeCOCAPIKeyRejectsPlaceholder(t *testing.T) {
+	for _, raw := range []string{
+		"TA_VRAIE_CLE",
+		"Bearer YOUR_API_KEY",
+		"short",
+	} {
+		if _, _, err := normalizeCOCAPIKey(raw); err == nil {
+			t.Fatalf("placeholder %q should be rejected", raw)
+		}
 	}
 }
