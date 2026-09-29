@@ -158,11 +158,19 @@ jobs:
             Write-Host "MinGW, CMake and NSIS already available; skipping Chocolatey install."
           }
 
+          # Chocolatey updates the machine PATH, but the current PowerShell
+          # process does not automatically pick it up.
+          $nsisDir = "${env:ProgramFiles(x86)}\NSIS"
+          if ((Test-Path "$nsisDir\makensis.exe") -and -not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            $env:PATH = "$nsisDir;$env:PATH"
+            $nsisDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
           g++ --version
           if ($LASTEXITCODE -ne 0) { throw "g++ is unavailable" }
           cmake --version
           if ($LASTEXITCODE -ne 0) { throw "cmake is unavailable" }
-          makensis /VERSION
+          & "$nsisDir\makensis.exe" /VERSION
           if ($LASTEXITCODE -ne 0) { throw "makensis is unavailable" }
 
       - name: Restore cached OpenCV
