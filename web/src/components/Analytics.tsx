@@ -2054,7 +2054,7 @@ Best optimization target: {pipeline.dominantTunable.label}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           {[
-            { label: 'Accepted G+E', value: compact(stats.avg_accepted_ge || 0), detail: 'Average target value' },
+            { label: 'O+E acceptés', value: compact(stats.avg_accepted_ge || 0), detail: 'Average target value' },
             { label: 'Rejected G+E', value: compact(stats.avg_rejected_ge || 0), detail: 'What thresholds skip' },
             { label: 'Accepted DE', value: compact(stats.avg_accepted_de || 0), detail: 'Average target DE' },
             { label: 'Rejected DE', value: compact(stats.avg_rejected_de || 0), detail: 'Skipped target DE' },
@@ -2073,10 +2073,10 @@ Best optimization target: {pipeline.dominantTunable.label}
       <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-6 rounded-[2.5rem] shadow-premium-lg">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Threshold Sensitivity</div>
-            <h3 className="mt-1 text-xl font-black text-white dark:text-zinc-950 tracking-tight">How close rejected targets were</h3>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Sensibilité des seuils</div>
+            <h3 className="mt-1 text-xl font-black text-white dark:text-zinc-950 tracking-tight">À quel point les villages refusés étaient proches</h3>
             <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">
-              Observational only. These counters do not change your configured loot thresholds.
+              Observation uniquement. Ces compteurs ne modifient jamais tes seuils de butin.
             </p>
           </div>
           <div className="text-[9px] font-black uppercase tracking-widest text-zinc-500">
@@ -2085,9 +2085,9 @@ Best optimization target: {pipeline.dominantTunable.label}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {[
-            { label: 'Within 5%', value: stats.near_miss_5_targets || 0, detail: 'Almost exact threshold match' },
-            { label: 'Within 10%', value: stats.near_miss_10_targets || 0, detail: 'Moderate near-miss' },
-            { label: 'Within 15%', value: stats.near_miss_15_targets || 0, detail: 'Broader sensitivity window' },
+            { label: 'À moins de 5 %', value: stats.near_miss_5_targets || 0, detail: 'Presque exactement au seuil' },
+            { label: 'À moins de 10 %', value: stats.near_miss_10_targets || 0, detail: 'Écart modéré' },
+            { label: 'À moins de 15 %', value: stats.near_miss_15_targets || 0, detail: 'Fenêtre de sensibilité élargie' },
           ].map((metric) => {
             const rejected = Math.max(1, (stats.targets_seen || 0) - (stats.targets_accepted || 0));
             const pct = metric.value * 100 / rejected;
@@ -2109,9 +2109,9 @@ Best optimization target: {pipeline.dominantTunable.label}
         <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
             <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Best Skipped Targets</div>
-              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">What the thresholds refused</h3>
-              <p className="text-sm text-zinc-500 mt-1">Top 5 rejected bases kept in memory only. Useful for tuning thresholds without writing every skip to disk.</p>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Meilleurs villages refusés</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Ce que les seuils ont refusé</h3>
+              <p className="text-sm text-zinc-500 mt-1">Top 5 des villages refusés conservés uniquement en mémoire. Utile pour ajuster les seuils sans enregistrer chaque refus.</p>
             </div>
             <span className="material-symbols-outlined text-zinc-400">visibility_off</span>
           </div>
@@ -2145,20 +2145,20 @@ Best optimization target: {pipeline.dominantTunable.label}
       <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-6 rounded-[2.5rem] shadow-premium-lg">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Search Efficiency</div>
-            <h3 className="mt-1 text-xl font-black text-white dark:text-zinc-950 tracking-tight">How expensive is a good target?</h3>
-            <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Derived from live session counters and attack history; no extra captures, OCR or logging.</p>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Efficacité de la recherche</div>
+            <h3 className="mt-1 text-xl font-black text-white dark:text-zinc-950 tracking-tight">Combien coûte la recherche d’un bon village ?</h3>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Calculé à partir de la session et de l’historique, sans capture, OCR ou journal supplémentaire.</p>
           </div>
           <span className="material-symbols-outlined text-zinc-500">speed</span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           {[
-            { label: 'Bases / accept', value: searchEfficiency.targetsPerAccept.toFixed(1), detail: 'Includes accepted base' },
-            { label: 'Scout overhead', value: `${(searchEfficiency.estimatedScoutOverheadMS / 1000).toFixed(2)}s`, detail: 'Scan + Next only' },
-            { label: 'G+E / search sec', value: compact(searchEfficiency.gePerSearchSecond), detail: 'Loot yield vs search time' },
-            { label: 'Search share', value: `${searchEfficiency.searchShare.toFixed(1)}%`, detail: 'Of true ready-to-ready loop' },
-            { label: 'Accepted G+E', value: compact(searchEfficiency.avgAcceptedGE), detail: 'Average selected target' },
-            { label: 'Quality premium', value: searchEfficiency.avgRejectedGE > 0 ? `${searchEfficiency.qualityPremium >= 0 ? '+' : ''}${searchEfficiency.qualityPremium.toFixed(0)}%` : '—', detail: 'Accepted vs rejected G+E' },
+            { label: 'Bases / accept', value: searchEfficiency.targetsPerAccept.toFixed(1), detail: 'Inclut le village accepté' },
+            { label: 'Coût de recherche', value: `${(searchEfficiency.estimatedScoutOverheadMS / 1000).toFixed(2)}s`, detail: 'Scan + Suivant uniquement' },
+            { label: 'G+E / search sec', value: compact(searchEfficiency.gePerSearchSecond), detail: 'Butin obtenu par temps de recherche' },
+            { label: 'Part de la recherche', value: `${searchEfficiency.searchShare.toFixed(1)}%`, detail: 'Dans le cycle complet réel' },
+            { label: 'O+E acceptés', value: compact(searchEfficiency.avgAcceptedGE), detail: 'Moyenne des villages choisis' },
+            { label: 'Prime de qualité', value: searchEfficiency.avgRejectedGE > 0 ? `${searchEfficiency.qualityPremium >= 0 ? '+' : ''}${searchEfficiency.qualityPremium.toFixed(0)}%` : '—', detail: 'Accepted vs rejected G+E' },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
