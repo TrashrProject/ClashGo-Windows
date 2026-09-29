@@ -324,7 +324,6 @@ function App() {
   const handleInterfaceLevelChange = useCallback((level: InterfaceLevel) => {
     setInterfaceLevel(level);
     if (level !== 'developer') {
-      setSimpleMode(level === 'simple');
       void SaveMemberInterfaceLevel(level).catch((err) => {
         console.warn('Failed to save member interface level:', err);
       });
@@ -352,7 +351,6 @@ function App() {
         setLootExitPercent(conf.attack.loot_exit_percent ?? 100);
         const configuredSimpleMode = conf.automation?.simple_mode ?? true;
         setSimpleMode(configuredSimpleMode);
-        setInterfaceLevel((current) => current === 'developer' ? current : (configuredSimpleMode ? 'simple' : 'advanced'));
         setIsRunning(running);
         setIsStarting(false);
         // Never let a null from the Go side reach the Config page — a
