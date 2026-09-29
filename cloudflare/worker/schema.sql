@@ -7,7 +7,11 @@ CREATE TABLE IF NOT EXISTS licenses (
   machine_id TEXT,
   created_at TEXT NOT NULL,
   last_seen_at TEXT,
-  app_version TEXT
+  app_version TEXT,
+  plan TEXT NOT NULL DEFAULT 'lifetime',
+  duration_days INTEGER,
+  activated_at TEXT,
+  expires_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_licenses_hash ON licenses(license_hash);
