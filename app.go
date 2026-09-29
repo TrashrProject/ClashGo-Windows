@@ -118,6 +118,9 @@ func (a *App) startup(ctx context.Context) {
 		if err := a.applyMemberProfileForCurrentLicense(); err != nil {
 			log.Warn().Err(err).Msg("failed to restore member settings profile")
 		}
+		if err := a.applyMemberAccountForCurrentLicense(); err != nil {
+			log.Warn().Err(err).Msg("failed to restore member Clash account")
+		}
 	}
 	cfg := config.LoadOrDefault("config.json")
 	a.supportReporter = support.New(clashControlServiceURL(cfg), version, a.license)
@@ -1037,6 +1040,9 @@ func (a *App) ActivateLicense(key string) (licensing.State, error) {
 	if err := a.applyMemberProfileForCurrentLicense(); err != nil {
 		log.Warn().Err(err).Msg("license activated but member preferences could not be restored")
 	}
+	if err := a.applyMemberAccountForCurrentLicense(); err != nil {
+		log.Warn().Err(err).Msg("license activated but member Clash account could not be restored")
+	}
 	if a.supportReporter != nil {
 		a.supportReporter.Flush(context.Background())
 	}
@@ -1061,9 +1067,24 @@ func (a *App) DeactivateLicense() error {
 			return fmt.Errorf("stop bot before deactivating license: %w", err)
 		}
 	}
+
+	cfg := config.LoadOrDefault("config.json")
+	if err := a.persistMemberAccountTag(cfg.Account.PlayerTag); err != nil {
+		return err
+	}
 	if err := a.license.DeactivateLocal(); err != nil {
 		return err
 	}
+
+	// Remove member-specific account state from the shared runtime config so
+	// the next license cannot inherit the previous user's Clash account.
+	cfg.Account.PlayerTag = ""
+	cfg.Account.LegacyAPIKey = ""
+	if err := config.Save("config.json", cfg); err != nil {
+		return err
+	}
+	_ = os.Remove(accountProfileCachePath())
+
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, "license_state", a.license.GetState())
 	}
@@ -1741,6 +1762,9 @@ func (a *App) SaveAccountConfig(playerTag string) error {
 	if err := config.Save("config.json", cfg); err != nil {
 		return err
 	}
+	if err := a.persistMemberAccountTag(tag); err != nil {
+		return err
+	}
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
 	}
@@ -1758,6 +1782,9 @@ func (a *App) ClearAccount() error {
 	cfg.Account.LegacyAPIKey = ""
 
 	if err := config.Save("config.json", cfg); err != nil {
+		return err
+	}
+	if err := a.persistMemberAccountTag(""); err != nil {
 		return err
 	}
 
