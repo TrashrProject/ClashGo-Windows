@@ -246,21 +246,31 @@ func (s *Service) Activate(ctx context.Context, key string) (State, error) {
 
 	now := time.Now().UTC()
 	s.mu.Lock()
-	s.stored = storedLicense{
-		Key: key,
-		Role: out.Role,
-		MemberName: strings.TrimSpace(out.MemberName),
-		MachineID: machineID,
+	previousStored := s.stored
+	previousState := s.state
+
+	nextStored := storedLicense{
+		Key:           key,
+		Role:          out.Role,
+		MemberName:    strings.TrimSpace(out.MemberName),
+		MachineID:     machineID,
 		LastValidated: now.Format(time.RFC3339),
-		OfflineUntil: out.OfflineUntil,
-		Plan: out.Plan,
-		ExpiresAt: out.ExpiresAt,
+		OfflineUntil:  out.OfflineUntil,
+		Plan:          out.Plan,
+		ExpiresAt:     out.ExpiresAt,
 	}
-	s.state = s.stateFromStored(s.stored)
-	err = s.saveLocked()
+	s.stored = nextStored
+	if err = s.saveLocked(); err != nil {
+		s.stored = previousStored
+		s.state = previousState
+		state := s.state
+		s.mu.Unlock()
+		return state, err
+	}
+	s.state = s.stateFromStored(nextStored)
 	state := s.state
 	s.mu.Unlock()
-	return state, err
+	return state, nil
 }
 
 func (s *Service) Validate(ctx context.Context) State {
