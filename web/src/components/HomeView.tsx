@@ -1085,20 +1085,24 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                 <div className="mt-1 text-xs font-semibold text-zinc-500">Licence, Windows et configuration du bot sont validés.</div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={onStartQuickTestSession}
-                  className="rounded-xl border border-sky-200 dark:border-sky-900/50 bg-sky-50 dark:bg-sky-950/20 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-sky-700 dark:text-sky-300 hover:border-sky-400"
-                >
-                  Test express · 3
-                </button>
-                <button
-                  type="button"
-                  onClick={onStartTestSession}
-                  className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white"
-                >
-                  Test · 10 attaques
-                </button>
+                {showValidationTools && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onStartQuickTestSession}
+                      className="rounded-xl border border-sky-200 dark:border-sky-900/50 bg-sky-50 dark:bg-sky-950/20 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-sky-700 dark:text-sky-300 hover:border-sky-400"
+                    >
+                      Test express · 3
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onStartTestSession}
+                      className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white"
+                    >
+                      Test · 10 attaques
+                    </button>
+                  </>
+                )}
                 <button type="button" onClick={onStart} className="rounded-xl bg-emerald-500 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white">
                   Démarrer maintenant
                 </button>
