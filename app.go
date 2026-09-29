@@ -600,7 +600,7 @@ func (a *App) GetLatestAttackReplay() AttackReplayView {
 func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled bool) BotStatus {
 	if a.GetLicensePolicy().Enforced {
 		if a.license == nil {
-			return BotStatus{Running: false, Message: "ClashGO license service is unavailable"}
+			return BotStatus{Running: false, Message: "Le service de licence ClashGO est indisponible"}
 		}
 
 		// Revalidate at the exact moment the user starts the bot. The background
@@ -615,7 +615,7 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			runtime.EventsEmit(a.ctx, "license_state", state)
 		}
 		if !state.Activated {
-			msg := "A valid ClashGO license is required"
+			msg := "Une licence ClashGO valide est nécessaire"
 			if strings.TrimSpace(state.Error) != "" {
 				msg += ": " + state.Error
 			}
@@ -627,19 +627,19 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 	if !diag.AssetsReady {
 		return BotStatus{
 			Running: false,
-			Message: "Runtime assets missing: " + strings.Join(diag.MissingAssets, ", "),
+			Message: "Fichiers nécessaires manquants : " + strings.Join(diag.MissingAssets, ", "),
 		}
 	}
 
 	if goruntime.GOOS == "windows" {
 		if !diag.Emulator.BlueStacksPlayerFound {
-			return BotStatus{Running: false, Message: "BlueStacks 5 was not detected. Install BlueStacks 5 or configure CLASHGO_BLUESTACKS_PLAYER."}
+			return BotStatus{Running: false, Message: "BlueStacks 5 n’a pas été détecté. Installe ou démarre BlueStacks 5 puis réessaie."}
 		}
 		if !diag.Emulator.ADBFound {
-			return BotStatus{Running: false, Message: "ADB was not detected. ClashGO can use Android platform-tools or BlueStacks HD-Adb.exe."}
+			return BotStatus{Running: false, Message: "ADB n’a pas été détecté. Redémarre BlueStacks ou vérifie son installation."}
 		}
 		if strings.TrimSpace(diag.Emulator.PreferredInstance) == "" {
-			return BotStatus{Running: false, Message: "No BlueStacks instance was detected. Start an instance once from BlueStacks Multi-instance Manager, then retry."}
+			return BotStatus{Running: false, Message: "Aucune instance BlueStacks n’a été détectée. Démarre ton instance depuis le gestionnaire multi-instance puis réessaie."}
 		}
 	}
 
@@ -647,15 +647,15 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 
 	if a.stopping {
 		a.mu.Unlock()
-		return BotStatus{Running: false, Message: "Previous bot session is still closing — retry in a moment"}
+		return BotStatus{Running: false, Message: "La session précédente est encore en cours de fermeture — réessaie dans un instant"}
 	}
 	if a.bot != nil {
 		a.mu.Unlock()
-		return BotStatus{Running: true, Message: "Bot already running"}
+		return BotStatus{Running: true, Message: "Le bot est déjà en cours"}
 	}
 	if a.cancel != nil {
 		a.mu.Unlock()
-		return BotStatus{Running: true, Message: "Bot is still starting up — wait for it to connect or press Stop first"}
+		return BotStatus{Running: true, Message: "Le bot est encore en cours de démarrage — attends la connexion ou arrête-le d’abord"}
 	}
 
 	cfg := config.LoadOrDefault("config.json")
@@ -684,7 +684,7 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 				// was intentional.
 				log.Info().Msg("bot boot cancelled during startup")
 				runtime.EventsEmit(a.ctx, "bot_boot_cancelled", map[string]interface{}{
-					"message": "Bot startup was cancelled.",
+					"message": "Le démarrage du bot a été annulé.",
 				})
 				a.mu.Lock()
 				a.clearStartStateLocked()
@@ -748,7 +748,7 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			a.mu.Unlock()
 			log.Info().Msg("bot boot finished after startup cancellation; discarding and shutting down")
 			runtime.EventsEmit(a.ctx, "bot_boot_cancelled", map[string]interface{}{
-				"message": "Bot startup was cancelled.",
+				"message": "Le démarrage du bot a été annulé.",
 			})
 			go func() {
 				defer func() {
@@ -775,7 +775,7 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 				// tear down the booted bot so the next Start is clean.
 				log.Info().Msg("bot start aborted by startup cancellation; discarding")
 				runtime.EventsEmit(a.ctx, "bot_boot_cancelled", map[string]interface{}{
-					"message": "Bot startup was cancelled.",
+					"message": "Le démarrage du bot a été annulé.",
 				})
 				a.mu.Lock()
 				a.clearStartStateLocked()
@@ -817,11 +817,11 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 		// while BlueStacks/ADB are still booting.
 		log.Info().Msg("bot startup complete; runtime active")
 		runtime.EventsEmit(a.ctx, "bot_started", map[string]interface{}{
-			"message": "Bot is running.",
+			"message": "Le bot est en cours.",
 		})
 	}(bootCtx)
 
-	return BotStatus{Running: true, Message: "Bot initialization started in background"}
+	return BotStatus{Running: true, Message: "Initialisation du bot démarrée"}
 }
 
 // clearStartStateLocked resets the start placeholder after a failed
@@ -935,7 +935,7 @@ func (a *App) StopBot() BotStatus {
 		a.cachedHistoryMu.Unlock()
 	}()
 
-	return BotStatus{Running: false, Message: "Bot stopped"}
+	return BotStatus{Running: false, Message: "Bot arrêté"}
 }
 
 // IsRunning returns if the bot is currently running
