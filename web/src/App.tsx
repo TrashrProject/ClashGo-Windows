@@ -646,7 +646,8 @@ function App() {
   return (
     <div className="app-shell bg-zinc-50 dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50 transition-colors duration-500" style={{ display: 'flex', width: '100vw', height: '100vh' }}>
       <Sidebar 
-        tab={tab} 
+        tab={tab}
+        interfaceLevel={interfaceLevel}
         setTab={setTab}
         expanded={sidebarExpanded}
         setExpanded={setSidebarExpanded}
