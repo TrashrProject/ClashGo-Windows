@@ -84,13 +84,45 @@ function safeEventsOn(
   }
 }
 
+const friendlyBotErrorMessage = (value: string): string => {
+  const raw = value.trim();
+  const text = raw.toLowerCase();
+
+  if (text.includes('bluestacks 5 was not detected') || text.includes('bluestacks player')) {
+    return 'BlueStacks 5 n’est pas détecté. Vérifie son installation puis ouvre Paramètres > État Windows.';
+  }
+  if (text.includes('adb was not detected') || text.includes('adb executable') || text.includes('adb not found')) {
+    return 'ADB n’est pas détecté. ClashGO peut utiliser Android platform-tools ou le HD-Adb de BlueStacks.';
+  }
+  if (text.includes('no bluestacks instance') || text.includes('preferred instance')) {
+    return 'Aucune instance BlueStacks n’est disponible. Lance ton instance une fois puis réessaie.';
+  }
+  if (text.includes('license has expired') || text.includes('license expired')) {
+    return 'Ta licence ClashGO est expirée. Renouvelle-la puis actualise ta licence dans Mon ClashGO.';
+  }
+  if (text.includes('license is invalid') || text.includes('license is invalid or revoked')) {
+    return 'Ta licence ClashGO est invalide ou désactivée.';
+  }
+  if (text.includes('already activated on another machine') || text.includes('machine mismatch')) {
+    return 'Cette licence est liée à un autre PC. Une réinitialisation de machine est nécessaire.';
+  }
+  if (text.includes('runtime assets missing')) {
+    return 'Des fichiers nécessaires à ClashGO sont manquants. Ouvre Paramètres > État Windows pour voir lesquels.';
+  }
+  if (text.includes('startup was cancelled') || text.includes('boot cancelled')) {
+    return 'Le démarrage du bot a été annulé.';
+  }
+
+  return raw || 'Une erreur inconnue a empêché le démarrage du bot.';
+};
+
 const normalizeBotErrorMessage = (payload: unknown, fallback: string): string => {
-  if (typeof payload === 'string' && payload.trim()) return payload.trim();
+  if (typeof payload === 'string' && payload.trim()) return friendlyBotErrorMessage(payload);
   if (payload && typeof payload === 'object' && 'message' in payload) {
     const message = (payload as { message?: unknown }).message;
-    if (typeof message === 'string' && message.trim()) return message.trim();
+    if (typeof message === 'string' && message.trim()) return friendlyBotErrorMessage(message);
   }
-  return fallback;
+  return friendlyBotErrorMessage(fallback);
 };
 
 const getInitialDarkMode = (): boolean => {
@@ -449,7 +481,7 @@ function App() {
     const unsubBotInitFailed = safeEventsOn("bot_init_failed", (payload: unknown) => {
       setIsStarting(false);
       setIsRunning(false);
-      setBotError(normalizeBotErrorMessage(payload, 'BlueStacks / ADB initialization failed.'));
+      setBotError(normalizeBotErrorMessage(payload, 'L’initialisation BlueStacks / ADB a échoué.'));
     });
     const unsubBotStarted = safeEventsOn("bot_started", () => {
       setIsStarting(false);
@@ -459,7 +491,7 @@ function App() {
     const unsubBotBootCancelled = safeEventsOn("bot_boot_cancelled", (payload: unknown) => {
       setIsStarting(false);
       setIsRunning(false);
-      setBotError(normalizeBotErrorMessage(payload, 'Bot startup was cancelled.'));
+      setBotError(normalizeBotErrorMessage(payload, 'Le démarrage du bot a été annulé.'));
     });
 
     const unsubAttackHistory = safeEventsOn("attack_history_updated", (payload: bot.AttackReport[]) => {
@@ -805,7 +837,7 @@ function App() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
                     <span className="material-symbols-outlined text-lg">error</span>
-                    <span className="text-[10px] font-black uppercase tracking-[0.22em]">Bot startup failed</span>
+                    <span className="text-[10px] font-black uppercase tracking-[0.22em]">Démarrage du bot impossible</span>
                   </div>
                   <p className="mt-1 break-words text-sm font-semibold text-zinc-800 dark:text-zinc-200">{botError}</p>
                   {botDiagnosticPath && (
