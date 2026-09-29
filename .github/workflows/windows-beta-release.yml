@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - feature/intelligence-v2
+    paths-ignore:
+      - '**/*_test.go'
+      - 'docs/**'
+      - 'site/**'
+      - '**/*.md'
   workflow_dispatch:
 
 permissions:
