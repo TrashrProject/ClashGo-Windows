@@ -26,6 +26,9 @@ const friendlyLicenseError = (value: unknown): string => {
   if (text.includes('already activated on another machine') || text.includes('machine mismatch')) {
     return 'Cette licence est déjà liée à un autre PC. Demande une réinitialisation de la machine.';
   }
+  if (text.includes('free trial already used')) {
+    return 'L’essai gratuit de 2 jours a déjà été utilisé sur ce PC.';
+  }
   if (text.includes('expired')) {
     return 'Cette licence a expiré. Elle doit être renouvelée avant de pouvoir utiliser ClashGO.';
   }
