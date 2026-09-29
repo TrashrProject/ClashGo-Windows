@@ -196,6 +196,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [memberSaveError, setMemberSaveError] = React.useState('');
   const [memberPage, setMemberPage] = React.useState<'account' | 'settings' | 'village'>('account');
   const [confirmDeactivate, setConfirmDeactivate] = React.useState(false);
+  const [supportCodeCopied, setSupportCodeCopied] = React.useState(false);
   const [confirmUnlink, setConfirmUnlink] = React.useState(false);
 
   const refreshLicense = React.useCallback(async () => {
@@ -516,6 +517,37 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+            {licenseState?.activated && licenseState.license_hint && licenseState.machine_id && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">Code support</span>
+                <code className="rounded-lg border border-white/10 dark:border-zinc-200/70 bg-white/5 dark:bg-zinc-100 px-2.5 py-1.5 text-[10px] font-black tracking-wider">
+                  {licenseState.license_hint.replace(/[^A-Z0-9]/gi, '').slice(-4)}-{licenseState.machine_id.slice(0, 8).toUpperCase()}
+                </code>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const code = `${licenseState.license_hint?.replace(/[^A-Z0-9]/gi, '').slice(-4) || 'LIC'}-${licenseState.machine_id?.slice(0, 8).toUpperCase() || 'DEVICE'}`;
+                    try {
+                      await navigator.clipboard.writeText(code);
+                    } catch {
+                      const ta = document.createElement('textarea');
+                      ta.value = code;
+                      ta.style.position = 'fixed';
+                      ta.style.opacity = '0';
+                      document.body.appendChild(ta);
+                      ta.select();
+                      document.execCommand('copy');
+                      document.body.removeChild(ta);
+                    }
+                    setSupportCodeCopied(true);
+                    window.setTimeout(() => setSupportCodeCopied(false), 1200);
+                  }}
+                  className="rounded-lg border border-white/10 dark:border-zinc-200/70 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-600 hover:text-white dark:hover:text-zinc-950"
+                >
+                  {supportCodeCopied ? 'Copié' : 'Copier'}
+                </button>
               </div>
             )}
           </div>
