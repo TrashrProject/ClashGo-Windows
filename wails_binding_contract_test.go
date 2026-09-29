@@ -120,3 +120,42 @@ func TestFrontendLiveLicenseEventRefreshesExpiry(t *testing.T) {
 		t.Fatal("live license_state event no longer updates member access state")
 	}
 }
+
+
+func TestFrontendTreatsStartingBotAsActiveForSensitiveActions(t *testing.T) {
+	appData, err := os.ReadFile(filepath.Join("web", "src", "App.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	appSrc := string(appData)
+	if !strings.Contains(appSrc, "isBotRunning={isRunning || isStarting}") {
+		t.Fatal("updater UI no longer treats bot startup as an active session")
+	}
+	if !strings.Contains(appSrc, "isStarting={isStarting}") {
+		t.Fatal("system settings no longer receive bot startup state")
+	}
+
+	settingsData, err := os.ReadFile(filepath.Join("web", "src", "components", "SettingsView.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsSrc := string(settingsData)
+	if !strings.Contains(settingsSrc, "instanceBusy || isRunning || isStarting") {
+		t.Fatal("BlueStacks instance control is not locked during startup")
+	}
+	if !strings.Contains(settingsSrc, "if (isRunning || isStarting) return") {
+		t.Fatal("destructive settings action is not guarded during startup")
+	}
+}
+
+func TestUpdaterBackendStopsActiveOrStartingBotBeforeInstall(t *testing.T) {
+	data, err := os.ReadFile("app.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(data)
+	if !strings.Contains(src, "if a.botSessionActiveOrStarting()") ||
+		!strings.Contains(src, "a.waitForBotTeardown(20 * time.Second)") {
+		t.Fatal("InstallAndRestart no longer waits for active/in-flight bot shutdown")
+	}
+}
