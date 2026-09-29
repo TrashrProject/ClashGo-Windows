@@ -13,6 +13,7 @@ interface HomeViewProps {
   onStart: () => void;
   onStartWithPreset: (preset: 'short' | 'balanced' | 'fast') => void;
   onSpeedChange: (profile: 'cautious' | 'normal' | 'fast') => void;
+  onExtendSession: (extra: 10 | 25) => void;
   onStartTestSession: () => void;
   onStartQuickTestSession: () => void;
   onStop: () => void;
@@ -246,7 +247,7 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, sessionReport, testSessionActive, running, starting,
-    onStart, onStartWithPreset, onSpeedChange, onStartTestSession, onStartQuickTestSession, onStop, onPause, onResume, paused, onStopAfterAttack, gracefulStopPending, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
+    onStart, onStartWithPreset, onSpeedChange, onExtendSession, onStartTestSession, onStartQuickTestSession, onStop, onPause, onResume, paused, onStopAfterAttack, gracefulStopPending, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
     licenseReady, licenseRequired, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
     memberName, licensePlan, licenseExpiresAt, latestBootReport, currentArmy,
@@ -635,6 +636,44 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           </button>
         </div>
       </section>
+
+      {running && !testSessionActive && sessionCap > 0 && (
+        <section className="rounded-[1.5rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-premium dark:shadow-none">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">Objectif de session</div>
+                  <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white">{sessionAttacks} / {sessionCap} attaques</div>
+                </div>
+                <div className="text-xs font-black text-zinc-500">{sessionProgress}%</div>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                <div
+                  className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+                  style={{ width: sessionProgress + '%' }}
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => onExtendSession(10)}
+                className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 text-[9px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+              >
+                +10 ATTAQUES
+              </button>
+              <button
+                type="button"
+                onClick={() => onExtendSession(25)}
+                className="rounded-xl bg-zinc-950 dark:bg-white px-4 py-2.5 text-[9px] font-black uppercase tracking-widest text-white dark:text-zinc-950"
+              >
+                +25 ATTAQUES
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       {(running || starting) && !testSessionActive && (
         <section className="rounded-[1.5rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-premium dark:shadow-none">
