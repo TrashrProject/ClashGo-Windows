@@ -781,6 +781,24 @@ func memberRuntimeConfigReady(cfg *config.BotConfig) (bool, string) {
 	)
 }
 
+func attackStrategyReady(cfg *config.BotConfig) (bool, string) {
+	if cfg == nil {
+		return false, "Configuration d’attaque indisponible"
+	}
+	strategyPath := strings.TrimSpace(cfg.Attack.StrategyFile)
+	if strategyPath == "" {
+		return false, "Aucune stratégie d’attaque configurée"
+	}
+	if !filepath.IsAbs(strategyPath) {
+		strategyPath = paths.Resolve(filepath.Join("strategies", filepath.Base(strategyPath)))
+	}
+	info, err := os.Stat(strategyPath)
+	if err != nil || info.IsDir() {
+		return false, "Fichier de stratégie introuvable : " + filepath.Base(strategyPath)
+	}
+	return true, "Stratégie disponible : " + filepath.Base(strategyPath)
+}
+
 func (a *App) GetStartupReadiness() StartupReadiness {
 	checks := make([]StartupCheckItem, 0, 7)
 	add := func(id, label string, ok bool, message, action, actionLabel string) {
@@ -859,20 +877,7 @@ func (a *App) GetStartupReadiness() StartupReadiness {
 		}(), "settings", "Choisir l’instance")
 	}
 
-	strategyPath := strings.TrimSpace(cfg.Attack.StrategyFile)
-	strategyOK := false
-	strategyMessage := "Aucune stratégie d’attaque configurée"
-	if strategyPath != "" {
-		if !filepath.IsAbs(strategyPath) {
-			strategyPath = paths.Resolve(filepath.Join("strategies", filepath.Base(strategyPath)))
-		}
-		if info, err := os.Stat(strategyPath); err == nil && !info.IsDir() {
-			strategyOK = true
-			strategyMessage = "Stratégie disponible : " + filepath.Base(strategyPath)
-		} else {
-			strategyMessage = "Fichier de stratégie introuvable : " + filepath.Base(strategyPath)
-		}
-	}
+	strategyOK, strategyMessage := attackStrategyReady(cfg)
 	add("strategy", "Stratégie", strategyOK, strategyMessage, "automation", "Ouvrir Automatisation")
 
 	pacingOK, pacingMessage := memberRuntimeConfigReady(cfg)
@@ -1007,6 +1012,9 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 	cfgForPacing := config.LoadOrDefault("config.json")
 	if pacingOK, pacingMessage := memberRuntimeConfigReady(cfgForPacing); !pacingOK {
 		return BotStatus{Running: false, Message: "Réglage membre invalide : " + pacingMessage}
+	}
+	if strategyOK, strategyMessage := attackStrategyReady(cfgForPacing); !strategyOK {
+		return BotStatus{Running: false, Message: "Stratégie invalide : " + strategyMessage}
 	}
 
 	diag := collectSystemDiagnostics()
