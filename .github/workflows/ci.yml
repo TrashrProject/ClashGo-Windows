@@ -38,11 +38,12 @@ jobs:
           mkdir -p .syntax-check
           find src -type f \( -name '*.ts' -o -name '*.tsx' \) -print0 | while IFS= read -r -d '' file; do
             out=".syntax-check/${file//\//_}.js"
-            npx --no-install esbuild "$file" --format=esm --platform=browser --external:* --outfile="$out" >/dev/null
+            npx --no-install esbuild "$file" --format=esm --platform=browser --outfile="$out" >/dev/null
           done
           rm -rf .syntax-check
 
       # The Windows Beta workflow remains authoritative for generated Wails
       # bindings, full TypeScript/Vite type checking, GoCV/OpenCV and packaging.
-      # The esbuild pass above deliberately marks imports external: it is a fast
-      # syntax guard that catches malformed TS/TSX before waiting for Windows.
+      # The esbuild pass above compiles each file independently without bundling:
+      # it is a fast syntax guard that catches malformed TS/TSX before waiting
+      # for Windows.
