@@ -820,6 +820,22 @@ async function router(request, env) {
       }
       return createLicenses(request, env);
     }
+    if (request.method === "POST" && path === "/v1/developer/licenses/reset-machine") {
+      if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
+      return resetMachine(request, env);
+    }
+    if (request.method === "POST" && path === "/v1/developer/licenses/set-active") {
+      if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
+      return setLicenseActive(request, env);
+    }
+    if (request.method === "POST" && path === "/v1/developer/licenses/set-role") {
+      if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
+      return setLicenseRole(request, env);
+    }
+    if (request.method === "POST" && path === "/v1/developer/licenses/renew") {
+      if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
+      return renewLicense(request, env);
+    }
   }
 
   return json({ message: "not found" }, 404);
