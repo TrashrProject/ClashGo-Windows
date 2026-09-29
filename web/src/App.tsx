@@ -902,7 +902,7 @@ function App() {
         <AccountOnboarding
           onLinked={(tag) => {
             setPlayerTag(tag);
-            setTab('account');
+            setTab('dashboard');
           }}
         />
       )}
