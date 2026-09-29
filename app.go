@@ -1438,6 +1438,12 @@ func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error
 	}
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
+		a.bot.RecordMemberSettingsChange(
+			settings.SpeedProfile,
+			settings.MaxAttacksPerHour,
+			settings.BreakEveryAttacks,
+			settings.BreakMinutes,
+		)
 	}
 	return a.GetMemberSettings(), nil
 }
