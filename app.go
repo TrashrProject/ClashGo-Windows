@@ -838,6 +838,36 @@ func attackStrategyReady(cfg *config.BotConfig) (bool, string) {
 	return true, "Stratégie disponible : " + filepath.Base(strategyPath)
 }
 
+func precisionConfigReady() (bool, string) {
+	path := paths.Resolve("precision_config.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, "Calibration de déploiement absente : precision_config.json"
+	}
+	var precision attack.PrecisionConfig
+	if err := json.Unmarshal(data, &precision); err != nil {
+		return false, "Calibration de déploiement illisible"
+	}
+	if precision.Width <= 0 || precision.Height <= 0 || precision.BarY <= 0 || len(precision.Edges) == 0 {
+		return false, "Calibration de déploiement incomplète"
+	}
+	return true, fmt.Sprintf("Calibration prête · %dx%d", precision.Width, precision.Height)
+}
+
+func farmProfileStatus(cfg *config.BotConfig) (bool, string) {
+	if cfg == nil {
+		return false, "Profil farm indisponible"
+	}
+	if !cfg.Attack.Farm.Enabled {
+		return false, "Aucun profil farm actif · la stratégie manuelle reste utilisable"
+	}
+	profile, ok := cfg.Attack.Farm.ActiveProfile()
+	if !ok {
+		return false, fmt.Sprintf("Aucun profil farm disponible pour HDV %d", cfg.Attack.Farm.TownHall)
+	}
+	return true, profile.Label
+}
+
 func (a *App) GetStartupReadiness() StartupReadiness {
 	checks := make([]StartupCheckItem, 0, 7)
 	add := func(id, label string, ok bool, message, action, actionLabel string) {
@@ -918,6 +948,14 @@ func (a *App) GetStartupReadiness() StartupReadiness {
 
 	strategyOK, strategyMessage := attackStrategyReady(cfg)
 	add("strategy", "Stratégie", strategyOK, strategyMessage, "automation", "Ouvrir Automatisation")
+
+	precisionOK, precisionMessage := precisionConfigReady()
+	add("precision", "Calibration attaque", precisionOK, precisionMessage, "settings", "Voir le diagnostic")
+
+	farmOK, farmMessage := farmProfileStatus(cfg)
+	checks = append(checks, newStartupAdvisoryItem(
+		"farm_profile", "Profil farm", farmOK, farmMessage, "village", "Voir le profil",
+	))
 
 	pacingOK, pacingMessage := memberRuntimeConfigReady(cfg)
 	add("member_pacing", "Cadence membre", pacingOK, pacingMessage, "member_settings", "Ouvrir Réglages bot")
@@ -1054,6 +1092,9 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 	}
 	if strategyOK, strategyMessage := attackStrategyReady(cfgForPacing); !strategyOK {
 		return BotStatus{Running: false, Message: "Stratégie invalide : " + strategyMessage}
+	}
+	if precisionOK, precisionMessage := precisionConfigReady(); !precisionOK {
+		return BotStatus{Running: false, Message: "Calibration attaque invalide : " + precisionMessage}
 	}
 
 	diag := collectSystemDiagnostics()
