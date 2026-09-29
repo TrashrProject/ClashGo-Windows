@@ -122,9 +122,10 @@ type licenseEvent struct {
 }
 
 type controlData struct {
-	Licenses  map[string]*licenseRecord `json:"licenses"`
-	Incidents []supportIncident         `json:"incidents"`
-	Events    []licenseEvent             `json:"events,omitempty"`
+	Licenses    map[string]*licenseRecord `json:"licenses"`
+	Incidents   []supportIncident         `json:"incidents"`
+	Events      []licenseEvent            `json:"events,omitempty"`
+	TrialClaims map[string]string          `json:"trial_claims,omitempty"`
 }
 
 type controlStore struct {
@@ -136,10 +137,14 @@ type controlStore struct {
 func newControlStore(path string) *controlStore {
 	s := &controlStore{path: path}
 	s.data.Licenses = make(map[string]*licenseRecord)
+	s.data.TrialClaims = make(map[string]string)
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, &s.data)
 		if s.data.Licenses == nil {
 			s.data.Licenses = make(map[string]*licenseRecord)
+		}
+		if s.data.TrialClaims == nil {
+			s.data.TrialClaims = make(map[string]string)
 		}
 	}
 	return s
@@ -662,6 +667,16 @@ func main() {
 		}
 		if strings.TrimSpace(rec.ID) == "" {
 			rec.ID = licenseIDFromHash(h)
+		}
+		if rec.Plan == "free_2d" {
+			if claimedID, used := control.data.TrialClaims[in.MachineID]; used && claimedID != rec.ID {
+				control.mu.Unlock()
+				writeJSON(w, http.StatusForbidden, map[string]string{"message": "free trial already used on this machine"})
+				return
+			}
+			if _, used := control.data.TrialClaims[in.MachineID]; !used {
+				control.data.TrialClaims[in.MachineID] = rec.ID
+			}
 		}
 		if rec.ActivatedAt.IsZero() {
 			rec.ActivatedAt = now
