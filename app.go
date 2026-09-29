@@ -2401,15 +2401,19 @@ func (a *App) SaveMemberInterfaceLevel(level string) error {
 	if cfg.Automation.SimpleMode {
 		applySimpleAutomationDefaults(cfg)
 	}
-	if err := config.Save("config.json", cfg); err != nil {
-		return err
-	}
 
-	// Persist the UI preference only when a real member profile exists. Beta
-	// local mode still benefits from the global SimpleMode behavior above.
+	// Persist a licensed member's UI preference first, then commit config.json.
+	// If the second write fails, restore the previous member profile so the
+	// next launch cannot disagree with what this call reported.
+	var (
+		oldProfile    MemberSettings
+		hadOldProfile bool
+		profilePath   string
+	)
 	if a.license != nil && a.license.GetState().Activated {
-		settings, ok := a.loadMemberProfile()
-		if !ok {
+		oldProfile, hadOldProfile = a.loadMemberProfile()
+		settings := oldProfile
+		if !hadOldProfile {
 			settings = MemberSettings{
 				InterfaceLevel:       level,
 				SpeedProfile:         normalizeSpeedProfile(cfg.Automation.SpeedProfile),
@@ -2423,9 +2427,23 @@ func (a *App) SaveMemberInterfaceLevel(level string) error {
 			}
 		}
 		settings.InterfaceLevel = level
+		profilePath = a.memberProfilePath()
 		if err := a.persistMemberProfile(settings); err != nil {
 			return err
 		}
+	}
+
+	if err := config.Save("config.json", cfg); err != nil {
+		if profilePath != "" {
+			if hadOldProfile {
+				_ = saveMemberProfileFile(profilePath, oldProfile)
+			} else {
+				_ = os.Remove(profilePath)
+				_ = os.Remove(profilePath + ".bak")
+				_ = os.Remove(profilePath + ".tmp")
+			}
+		}
+		return err
 	}
 
 	if a.bot != nil {
