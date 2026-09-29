@@ -39,6 +39,7 @@ type LicenseRow = {
   role?: string;
   active?: boolean;
   machine_id?: string;
+  machine_name?: string;
   created_at?: string;
   last_seen_at?: string;
   app_version?: string;
@@ -1075,6 +1076,9 @@ const DeveloperView: React.FC = () => {
                         Cette licence
                       </span>
                     )}
+                  </div>
+                  <div className="mt-1 text-[10px] font-semibold text-zinc-500">
+                    {item.machine_name ? 'PC · ' + item.machine_name : 'PC non nommé'}
                   </div>
                   <div className="mt-1 text-[10px] font-mono text-zinc-400">
                     {item.hint || '••••'} · {shortMachine(item.machine_id)}
