@@ -1040,3 +1040,65 @@ func TestLegacyAutomationProfileWithoutSimpleModePreservesCurrentMode(t *testing
 		t.Fatal("legacy automation profile did not apply its supported settings")
 	}
 }
+
+
+func TestApplyMemberPresetUsesSafeProfiles(t *testing.T) {
+	base := MemberSettings{
+		InterfaceLevel:       "advanced",
+		SpeedProfile:         "cautious",
+		MaxAttacksPerHour:    8,
+		MaxAttacksPerSession: 25,
+		BreakEveryAttacks:    4,
+		BreakMinutes:         4,
+		AdaptiveSearch:       false,
+		AutoProfileSync:      true,
+		AutoArmyGuard:        true,
+		AutoResourceTracking: true,
+	}
+
+	tests := []struct {
+		name       string
+		preset     string
+		speed      string
+		perHour    int
+		perSession int
+		breakEvery int
+		breakMins  int
+	}{
+		{"short", "short", "normal", 12, 10, 5, 3},
+		{"balanced", "balanced", "normal", 12, 50, 5, 3},
+		{"fast", "fast", "fast", 16, 100, 6, 2},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := applyMemberPreset(base, tc.preset)
+			if err != nil {
+				t.Fatalf("applyMemberPreset(%q): %v", tc.preset, err)
+			}
+			if got.SpeedProfile != tc.speed ||
+				got.MaxAttacksPerHour != tc.perHour ||
+				got.MaxAttacksPerSession != tc.perSession ||
+				got.BreakEveryAttacks != tc.breakEvery ||
+				got.BreakMinutes != tc.breakMins {
+				t.Fatalf("unexpected preset result: %+v", got)
+			}
+			if !got.AdaptiveSearch {
+				t.Fatal("preset should enable adaptive search")
+			}
+			if got.InterfaceLevel != "advanced" {
+				t.Fatalf("preset changed interface level: %q", got.InterfaceLevel)
+			}
+			if !got.AutoProfileSync || !got.AutoArmyGuard || !got.AutoResourceTracking {
+				t.Fatalf("preset changed recommended automations: %+v", got)
+			}
+		})
+	}
+}
+
+func TestApplyMemberPresetRejectsUnknownPreset(t *testing.T) {
+	_, err := applyMemberPreset(defaultMemberSettings(), "turbo-plus")
+	if err == nil {
+		t.Fatal("expected unknown preset to be rejected")
+	}
+}
