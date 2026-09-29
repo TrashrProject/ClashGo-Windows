@@ -213,7 +213,10 @@ const getInitialSidebarExpanded = (): boolean => {
   try {
     const stored = localStorage.getItem('sidebarExpanded');
     if (stored !== null) return stored === 'true';
-    return true;
+    // Keep the 1024px minimum window comfortable for first-time users.
+    // Hover still expands the sidebar instantly and the explicit preference
+    // is persisted after the first interaction.
+    return typeof window !== 'undefined' ? window.innerWidth >= 1180 : true;
   } catch {
     return true;
   }
