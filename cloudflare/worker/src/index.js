@@ -727,6 +727,46 @@ async function renewLicense(request, env) {
   });
 }
 
+async function updateLicenseCustomer(request, env) {
+  let body;
+  try { body = await readJSON(request, 65536); }
+  catch { return json({ message: "invalid request" }, 400); }
+
+  const licenseId = clean(body.license_id);
+  const name = clean(body.customer_name).slice(0, 120);
+  const contact = clean(body.customer_contact).slice(0, 180);
+  if (!licenseId) return json({ message: "license_id is required" }, 400);
+  if (!name) return json({ message: "customer_name is required" }, 400);
+
+  const license = await env.DB.prepare(
+    "SELECT id, customer_id FROM licenses WHERE id = ?1"
+  ).bind(licenseId).first();
+  if (!license) return json({ message: "license not found" }, 404);
+
+  let customerId = clean(license.customer_id);
+  const now = new Date().toISOString();
+  if (customerId) {
+    await env.DB.prepare(
+      "UPDATE customers SET display_name = ?1, contact = ?2, updated_at = ?3 WHERE id = ?4"
+    ).bind(name, contact, now, customerId).run();
+  } else {
+    customerId = randomHex(8);
+    await env.DB.prepare(
+      "INSERT INTO customers (id, display_name, contact, notes, payment_status, total_paid_cents, next_due_at, created_at, updated_at) VALUES (?1, ?2, ?3, '', 'unknown', 0, NULL, ?4, ?4)"
+    ).bind(customerId, name, contact, now).run();
+    await env.DB.prepare(
+      "UPDATE licenses SET customer_id = ?1 WHERE id = ?2"
+    ).bind(customerId, licenseId).run();
+  }
+
+  return json({
+    ok: true,
+    customer_id: customerId,
+    customer_name: name,
+    customer_contact: contact,
+  });
+}
+
 async function assignCustomer(request, env) {
   let body;
   try { body = await readJSON(request, 65536); }
@@ -869,6 +909,11 @@ async function router(request, env) {
       const denied = adminOnly();
       if (denied) return denied;
       return renewLicense(request, env);
+    }
+    if (request.method === "POST" && path === "/v1/developer/licenses/update-customer") {
+      const denied = adminOnly();
+      if (denied) return denied;
+      return updateLicenseCustomer(request, env);
     }
   }
 
