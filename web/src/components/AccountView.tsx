@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicenseState, GetPlayerProfile, GetVillageResources } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetVillageResources, SaveMemberSettings } from '../../wailsjs/go/main/App';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
 type CurrentArmyUnit = {
@@ -44,6 +44,17 @@ type LicenseState = {
   plan?: string;
   expires_at?: string;
   error?: string;
+};
+
+type MemberSettings = {
+  speed_profile: 'cautious' | 'normal' | 'fast';
+  max_attacks_per_hour: number;
+  break_every_attacks: number;
+  break_minutes: number;
+  adaptive_search: boolean;
+  auto_profile_sync: boolean;
+  auto_army_guard: boolean;
+  auto_resource_tracking: boolean;
 };
 
 type VillageResources = {
@@ -91,6 +102,9 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [licenseKey, setLicenseKey] = React.useState('');
   const [licenseBusy, setLicenseBusy] = React.useState(false);
   const [licenseError, setLicenseError] = React.useState('');
+  const [memberSettings, setMemberSettings] = React.useState<MemberSettings | null>(null);
+  const [memberSaving, setMemberSaving] = React.useState(false);
+  const [memberMessage, setMemberMessage] = React.useState('');
 
   const refreshLicense = React.useCallback(async () => {
     try {
@@ -103,6 +117,30 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       // Licensing UI remains optional while the control service is unavailable.
     }
   }, [onInterfaceLevelChange]);
+
+  const refreshMemberSettings = React.useCallback(async () => {
+    try {
+      const settings = await GetMemberSettings();
+      setMemberSettings(settings as MemberSettings);
+    } catch {
+      // Member preferences are best-effort while the Wails bridge initializes.
+    }
+  }, []);
+
+  const saveMemberSettings = async (next: MemberSettings) => {
+    if (memberSaving) return;
+    setMemberSaving(true);
+    setMemberMessage('');
+    try {
+      const saved = await SaveMemberSettings(next as any);
+      setMemberSettings(saved as MemberSettings);
+      setMemberMessage('Réglages appliqués au bot.');
+    } catch (e) {
+      setMemberMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMemberSaving(false);
+    }
+  };
 
   const activateLicense = async () => {
     const key = licenseKey.trim();
@@ -178,7 +216,8 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   React.useEffect(() => {
     void refresh();
     void refreshLicense();
-  }, [refresh, refreshLicense, playerTag]);
+    void refreshMemberSettings();
+  }, [refresh, refreshLicense, refreshMemberSettings, playerTag]);
 
   // The local/proxied account service may start a few seconds after ClashGO.
   // Retry automatically while no profile is available so users never have to
@@ -320,6 +359,126 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
           </div>
         )}
       </section>
+      {licenseState?.activated && memberSettings && (
+        <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
+          <div className="flex flex-col gap-6">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Mon ClashGO</div>
+              <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Réglages membre</h3>
+              <p className="mt-2 text-sm font-semibold text-zinc-500 max-w-2xl">
+                Ces réglages modifient réellement le rythme du bot et ses automatismes. Tu peux les changer sans réactiver ta licence.
+              </p>
+            </div>
+
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400 mb-3">Vitesse du bot</div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {([
+                  ['cautious', 'Prudente', 'Plus lente et conservatrice'],
+                  ['normal', 'Normale', 'Équilibre par défaut'],
+                  ['fast', 'Rapide', 'Actions et enchaînements accélérés'],
+                ] as const).map(([value, label, description]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    disabled={memberSaving}
+                    onClick={() => void saveMemberSettings({ ...memberSettings, speed_profile: value })}
+                    className={
+                      'text-left rounded-2xl border p-4 transition ' +
+                      (memberSettings.speed_profile === value
+                        ? 'border-zinc-950 bg-zinc-950 text-white dark:border-white dark:bg-white dark:text-zinc-950'
+                        : 'border-zinc-200 bg-zinc-50 text-zinc-950 hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-white')
+                    }
+                  >
+                    <div className="text-sm font-black">{label}</div>
+                    <div className={'mt-1 text-[11px] font-semibold ' + (memberSettings.speed_profile === value ? 'opacity-70' : 'text-zinc-500')}>
+                      {description}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-black text-zinc-950 dark:text-white">Attaques / heure</div>
+                    <div className="text-[11px] font-semibold text-zinc-500">Limite de sécurité du cycle automatique</div>
+                  </div>
+                  <input
+                    type="number"
+                    min={1}
+                    max={24}
+                    value={memberSettings.max_attacks_per_hour}
+                    onChange={(e) => setMemberSettings({ ...memberSettings, max_attacks_per_hour: Math.max(1, Math.min(24, Number(e.target.value) || 1)) })}
+                    onBlur={() => void saveMemberSettings(memberSettings)}
+                    className="w-20 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-center text-sm font-black"
+                  />
+                </div>
+              </label>
+
+              <label className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-black text-zinc-950 dark:text-white">Pause automatique</div>
+                    <div className="text-[11px] font-semibold text-zinc-500">Toutes les X attaques</div>
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    value={memberSettings.break_every_attacks}
+                    onChange={(e) => setMemberSettings({ ...memberSettings, break_every_attacks: Math.max(0, Math.min(20, Number(e.target.value) || 0)) })}
+                    onBlur={() => void saveMemberSettings(memberSettings)}
+                    className="w-20 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-center text-sm font-black"
+                  />
+                </div>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {([
+                ['adaptive_search', 'Recherche adaptative', 'Relâche progressivement les seuils après plusieurs villages ignorés.'],
+                ['auto_profile_sync', 'Profil automatique', 'Synchronise automatiquement le profil Clash lié.'],
+                ['auto_army_guard', 'Contrôle armée', 'Vérifie que l’armée correspond au plan avant une attaque.'],
+                ['auto_resource_tracking', 'Suivi ressources', 'Suit automatiquement les ressources du village.'],
+              ] as const).map(([key, label, description]) => (
+                <button
+                  key={key}
+                  type="button"
+                  disabled={memberSaving}
+                  onClick={() => {
+                    const next = { ...memberSettings, [key]: !memberSettings[key] } as MemberSettings;
+                    setMemberSettings(next);
+                    void saveMemberSettings(next);
+                  }}
+                  className="flex items-center justify-between gap-4 rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 text-left"
+                >
+                  <div>
+                    <div className="text-sm font-black text-zinc-950 dark:text-white">{label}</div>
+                    <div className="mt-1 text-[11px] font-semibold text-zinc-500">{description}</div>
+                  </div>
+                  <span className={
+                    'shrink-0 w-10 h-6 rounded-full p-1 transition ' +
+                    (memberSettings[key] ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700')
+                  }>
+                    <span className={
+                      'block w-4 h-4 rounded-full bg-white transition-transform ' +
+                      (memberSettings[key] ? 'translate-x-4' : '')
+                    } />
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {memberMessage && (
+              <div className="text-[11px] font-bold text-emerald-500">{memberMessage}</div>
+            )}
+          </div>
+        </section>
+      )}
+
       <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
           <div>
