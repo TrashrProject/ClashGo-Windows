@@ -1222,3 +1222,57 @@ func TestMemberRuntimeConfigReady(t *testing.T) {
 		t.Fatal("out-of-range break duration should fail readiness")
 	}
 }
+
+
+func TestShortSessionPresetPreservesFarmAndAttackPreferences(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Search.MinLootGold = 888888
+	cfg.Search.MinLootElixir = 777777
+	cfg.Search.MinLootDarkElixir = 3333
+	cfg.Search.Enabled = false
+	cfg.Attack.StrategyFile = "my-working-strategy.yaml"
+	cfg.Upgrade.UpgradeWalls = true
+	cfg.Attack.LootExitEnabled = true
+	cfg.Attack.LootExitPercent = 73
+	cfg.Attack.StallTimerSeconds = 27
+	cfg.Attack.UseQueen = true
+	cfg.Attack.UseWarden = true
+	cfg.Attack.UseClanCastle = true
+
+	current := defaultMemberSettings()
+	current.InterfaceLevel = "advanced"
+	next, err := applyMemberPreset(current, "short")
+	if err != nil {
+		t.Fatalf("applyMemberPreset(short): %v", err)
+	}
+	applyMemberSettingsToConfig(cfg, next)
+
+	if cfg.Attack.MaxAttackPerSession != 10 {
+		t.Fatalf("session cap=%d want 10", cfg.Attack.MaxAttackPerSession)
+	}
+	if cfg.Automation.MaxAttacksPerHour != 12 {
+		t.Fatalf("hourly cap=%d want 12", cfg.Automation.MaxAttacksPerHour)
+	}
+
+	if cfg.Search.MinLootGold != 888888 ||
+		cfg.Search.MinLootElixir != 777777 ||
+		cfg.Search.MinLootDarkElixir != 3333 ||
+		cfg.Search.Enabled {
+		t.Fatalf("short preset changed search preferences: %+v", cfg.Search)
+	}
+	if cfg.Attack.StrategyFile != "my-working-strategy.yaml" {
+		t.Fatalf("short preset changed strategy: %q", cfg.Attack.StrategyFile)
+	}
+	if !cfg.Upgrade.UpgradeWalls {
+		t.Fatal("short preset changed wall-upgrade preference")
+	}
+	if !cfg.Attack.LootExitEnabled || cfg.Attack.LootExitPercent != 73 {
+		t.Fatalf("short preset changed loot-exit settings: %+v", cfg.Attack)
+	}
+	if cfg.Attack.StallTimerSeconds != 27 {
+		t.Fatalf("short preset changed stall timer: %d", cfg.Attack.StallTimerSeconds)
+	}
+	if !cfg.Attack.UseQueen || !cfg.Attack.UseWarden || !cfg.Attack.UseClanCastle {
+		t.Fatal("short preset changed hero/clan-castle preferences")
+	}
+}
