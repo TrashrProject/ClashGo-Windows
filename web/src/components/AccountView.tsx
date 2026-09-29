@@ -287,6 +287,8 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [memberPresetDeleteConfirm, setMemberPresetDeleteConfirm] = React.useState<number | null>(null);
   const memberSaveLockRef = React.useRef(false);
   const memberPresetLockRef = React.useRef(false);
+  const licenseActionLockRef = React.useRef(false);
+  const accountActionLockRef = React.useRef(false);
   const activeLicenseHintRef = React.useRef<string>('');
   const [memberPage, setMemberPage] = React.useState<'account' | 'settings' | 'village'>(initialPage);
 
@@ -510,7 +512,8 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
 
   const activateLicense = async () => {
     const key = licenseKey.trim();
-    if (!key || licenseBusy) return;
+    if (!key || licenseActionLockRef.current || licenseBusy) return;
+    licenseActionLockRef.current = true;
     setLicenseBusy(true);
     setLicenseError('');
     try {
@@ -532,12 +535,14 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     } catch (e) {
       setLicenseError(e instanceof Error ? e.message : String(e));
     } finally {
+      licenseActionLockRef.current = false;
       setLicenseBusy(false);
     }
   };
 
   const refreshLicenseNow = async () => {
-    if (licenseRefreshing) return;
+    if (licenseActionLockRef.current || licenseRefreshing) return;
+    licenseActionLockRef.current = true;
     setLicenseRefreshing(true);
     setLicenseError('');
     try {
@@ -557,12 +562,14 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     } catch (e) {
       setLicenseError(e instanceof Error ? e.message : String(e));
     } finally {
+      licenseActionLockRef.current = false;
       setLicenseRefreshing(false);
     }
   };
 
   const deactivateLicense = async () => {
-    if (licenseBusy) return;
+    if (licenseActionLockRef.current || licenseBusy) return;
+    licenseActionLockRef.current = true;
     setLicenseBusy(true);
     setLicenseError('');
     try {
@@ -575,6 +582,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     } catch (e) {
       setLicenseError(e instanceof Error ? e.message : String(e));
     } finally {
+      licenseActionLockRef.current = false;
       setLicenseBusy(false);
     }
   };
@@ -730,7 +738,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   }, [profile, busy, playerTag, serviceConfigured, refresh]);
 
   const linkClashAccount = async () => {
-    if (accountLinkBusy || automationActive) return;
+    if (accountActionLockRef.current || accountLinkBusy || automationActive) return;
     let tag = accountTagInput.trim().toUpperCase().replace(/\s+/g, '');
     if (!tag) {
       setAccountLinkMessage('Entre ton tag joueur Clash of Clans.');
@@ -742,6 +750,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       return;
     }
 
+    accountActionLockRef.current = true;
     setAccountLinkBusy(true);
     setAccountLinkMessage('');
     setError('');
@@ -768,6 +777,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     } catch (e) {
       setAccountLinkMessage(friendlyAccountActionError(e));
     } finally {
+      accountActionLockRef.current = false;
       setAccountLinkBusy(false);
     }
   };
