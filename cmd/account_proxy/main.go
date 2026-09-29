@@ -215,6 +215,18 @@ func (s *controlStore) authorizeAdmin(key, machineID string) bool {
 	return ok && rec.Role == "admin"
 }
 
+func (s *controlStore) authorizedAdminLicenseID(key, machineID string) (string, bool) {
+	rec, ok := s.authorizeDeveloper(key, machineID)
+	if !ok || rec.Role != "admin" {
+		return "", false
+	}
+	id := strings.TrimSpace(rec.ID)
+	if id == "" {
+		id = licenseIDFromHash(hashLicense(key))
+	}
+	return id, id != ""
+}
+
 func findLicenseRecordByIDLocked(s *controlStore, id string) *licenseRecord {
 	id = strings.TrimSpace(id)
 	if s == nil || id == "" {
@@ -662,7 +674,8 @@ func main() {
 	mux.HandleFunc("POST /v1/developer/licenses/reset-machine", func(w http.ResponseWriter, r *http.Request) {
 		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
 		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
-		if !control.authorizeAdmin(key, machineID) {
+		adminLicenseID, ok := control.authorizedAdminLicenseID(key, machineID)
+		if !ok {
 			writeJSON(w, http.StatusForbidden, map[string]string{"message": "admin license required"})
 			return
 		}
@@ -671,6 +684,10 @@ func main() {
 		}
 		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil || strings.TrimSpace(in.LicenseID) == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "license_id is required"})
+			return
+		}
+		if strings.TrimSpace(in.LicenseID) == adminLicenseID {
+			writeJSON(w, http.StatusConflict, map[string]string{"message": "cannot reset the active admin license machine"})
 			return
 		}
 		control.mu.Lock()
@@ -691,7 +708,8 @@ func main() {
 	mux.HandleFunc("POST /v1/developer/licenses/set-active", func(w http.ResponseWriter, r *http.Request) {
 		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
 		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
-		if !control.authorizeAdmin(key, machineID) {
+		adminLicenseID, ok := control.authorizedAdminLicenseID(key, machineID)
+		if !ok {
 			writeJSON(w, http.StatusForbidden, map[string]string{"message": "admin license required"})
 			return
 		}
@@ -701,6 +719,10 @@ func main() {
 		}
 		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil || strings.TrimSpace(in.LicenseID) == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "license_id is required"})
+			return
+		}
+		if strings.TrimSpace(in.LicenseID) == adminLicenseID && !in.Active {
+			writeJSON(w, http.StatusConflict, map[string]string{"message": "cannot revoke the active admin license"})
 			return
 		}
 		control.mu.Lock()
@@ -771,7 +793,8 @@ func main() {
 	mux.HandleFunc("POST /v1/developer/licenses/set-role", func(w http.ResponseWriter, r *http.Request) {
 		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
 		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
-		if !control.authorizeAdmin(key, machineID) {
+		adminLicenseID, ok := control.authorizedAdminLicenseID(key, machineID)
+		if !ok {
 			writeJSON(w, http.StatusForbidden, map[string]string{"message": "admin license required"})
 			return
 		}
@@ -784,6 +807,10 @@ func main() {
 			return
 		}
 		role := validRole(in.Role)
+		if strings.TrimSpace(in.LicenseID) == adminLicenseID && role != "admin" {
+			writeJSON(w, http.StatusConflict, map[string]string{"message": "cannot remove admin role from the active admin license"})
+			return
+		}
 		control.mu.Lock()
 		rec := findLicenseRecordByIDLocked(control, in.LicenseID)
 		if rec == nil {
