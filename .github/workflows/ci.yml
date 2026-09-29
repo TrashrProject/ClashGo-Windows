@@ -29,6 +29,9 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      - name: Validate Cloudflare control API syntax
+        run: node --check cloudflare/worker/src/index.js
+
       - name: Validate frontend TSX syntax
         working-directory: web
         shell: bash
