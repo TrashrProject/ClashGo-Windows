@@ -32,8 +32,20 @@ const friendlyLicenseError = (value: unknown): string => {
   if (text.includes('invalid') || text.includes('revoked')) {
     return 'Cette licence est invalide ou a été désactivée.';
   }
-  if (text.includes('service') || text.includes('network') || text.includes('fetch') || text.includes('connection')) {
+  if (text.includes('not configured')) {
+    return 'Le service de licence ClashGO n’est pas encore configuré.';
+  }
+  if (text.includes('deadline exceeded') || text.includes('timeout') || text.includes('timed out')) {
+    return 'Le serveur de licence met trop de temps à répondre. Réessaie dans quelques secondes.';
+  }
+  if (text.includes('service') || text.includes('network') || text.includes('fetch') || text.includes('connection') || text.includes('no such host')) {
     return 'Impossible de joindre le service de licence. Vérifie ta connexion Internet puis réessaie.';
+  }
+  if (text.includes('http 5') || text.includes('internal server error')) {
+    return 'Le service de licence rencontre un problème temporaire. Réessaie dans quelques instants.';
+  }
+  if (text.includes('decode license response')) {
+    return 'Réponse du service de licence invalide. Réessaie dans quelques instants.';
   }
   return raw || 'Impossible de vérifier la licence pour le moment.';
 };
