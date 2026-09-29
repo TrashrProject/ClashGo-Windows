@@ -6,6 +6,7 @@ import {
   AdminSetLicenseRole,
   AdminUpdateLicenseCustomer,
   CreateAdminLicense,
+  GetAdminLicenseHistory,
   GetDeveloperIncidents,
   GetDeveloperLicenses,
   GetLicenseState,
@@ -44,6 +45,21 @@ type LicenseRow = {
   expires_at?: string;
   customer_name?: string;
   customer_contact?: string;
+};
+
+type LicenseHistoryEvent = {
+  id?: string;
+  license_id?: string;
+  license_hint?: string;
+  customer_name?: string;
+  customer_contact?: string;
+  event_type?: string;
+  plan?: string;
+  amount_cents?: number;
+  payment_status?: string;
+  note?: string;
+  created_at?: string;
+  expires_at?: string;
 };
 
 type LicenseState = {
@@ -136,6 +152,7 @@ const licenseStatusLabel = (item: LicenseRow, now = Date.now()): string => {
 const DeveloperView: React.FC = () => {
   const [incidents, setIncidents] = React.useState<Incident[]>([]);
   const [licenses, setLicenses] = React.useState<LicenseRow[]>([]);
+  const [history, setHistory] = React.useState<LicenseHistoryEvent[]>([]);
   const [role, setRole] = React.useState<LicenseState['role']>('');
   const [currentLicenseHint, setCurrentLicenseHint] = React.useState('');
   const [currentMachineID, setCurrentMachineID] = React.useState('');
@@ -144,7 +161,7 @@ const DeveloperView: React.FC = () => {
   const [actionID, setActionID] = React.useState('');
   const [error, setError] = React.useState('');
   const [notice, setNotice] = React.useState('');
-  const [tab, setTab] = React.useState<'incidents' | 'licenses'>('licenses');
+  const [tab, setTab] = React.useState<'incidents' | 'licenses' | 'history'>('licenses');
 
   const [newRole, setNewRole] = React.useState<'member' | 'developer' | 'admin'>('member');
   const [newPlan, setNewPlan] = React.useState<'free_2d' | 'week_1' | 'month_1' | 'lifetime'>('month_1');
@@ -168,6 +185,10 @@ const DeveloperView: React.FC = () => {
 
   const isAdmin = role === 'admin';
 
+  React.useEffect(() => {
+    if (!isAdmin && tab === 'history') setTab('licenses');
+  }, [isAdmin, tab]);
+
   const refresh = React.useCallback(async () => {
     setBusy(true);
     setError('');
@@ -177,11 +198,18 @@ const DeveloperView: React.FC = () => {
         GetDeveloperIncidents(),
         GetDeveloperLicenses(),
       ]);
-      setRole((state as LicenseState)?.role || '');
-      setCurrentLicenseHint((state as LicenseState)?.license_hint || '');
-      setCurrentMachineID((state as LicenseState)?.machine_id || '');
+      const typedState = (state || {}) as LicenseState;
+      setRole(typedState.role || '');
+      setCurrentLicenseHint(typedState.license_hint || '');
+      setCurrentMachineID(typedState.machine_id || '');
       setIncidents((i || []) as Incident[]);
       setLicenses((l || []) as LicenseRow[]);
+      if (typedState.role === 'admin') {
+        const rows = await GetAdminLicenseHistory();
+        setHistory((rows || []) as LicenseHistoryEvent[]);
+      } else {
+        setHistory([]);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -442,6 +470,19 @@ const DeveloperView: React.FC = () => {
     ].some((value) => String(value || '').toLowerCase().includes(normalizedSearch));
   });
 
+  const filteredHistory = history.filter((item) => {
+    if (!normalizedSearch) return true;
+    return [
+      item.customer_name,
+      item.customer_contact,
+      item.license_hint,
+      item.event_type,
+      item.plan,
+      item.payment_status,
+      item.note,
+    ].some((value) => String(value || '').toLowerCase().includes(normalizedSearch));
+  });
+
   const incidentGroups = (() => {
     const groups = new Map<string, {
       key: string;
@@ -653,6 +694,7 @@ const DeveloperView: React.FC = () => {
         <div className="flex items-center gap-2">
         {([
           ['licenses', 'Licences'],
+          ...(isAdmin ? [['history', 'Historique'] as const] : []),
           ['incidents', 'Incidents'],
         ] as const).map(([item, label]) => (
           <button
@@ -677,7 +719,13 @@ const DeveloperView: React.FC = () => {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={tab === 'licenses' ? 'Client, contact, licence, PC…' : 'Licence, version, erreur…'}
+              placeholder={
+                tab === 'licenses'
+                  ? 'Client, contact, licence, PC…'
+                  : tab === 'history'
+                    ? 'Client, licence, note, formule…'
+                    : 'Licence, version, erreur…'
+              }
               className="h-10 w-full sm:w-72 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pl-9 pr-3 text-xs font-semibold outline-none focus:border-zinc-400"
             />
           </div>
@@ -773,6 +821,48 @@ const DeveloperView: React.FC = () => {
             ))}
             {!busy && filteredIncidents.length === 0 && (
               <div className="p-8 text-center text-sm font-semibold text-zinc-400">Aucun incident reçu.</div>
+            )}
+          </div>
+        </section>
+      ) : tab === 'history' && isAdmin ? (
+        <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-premium dark:shadow-none overflow-hidden">
+          <div className="p-6 border-b border-zinc-100 dark:border-zinc-800">
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Suivi manuel</div>
+            <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Historique licences & renouvellements</h3>
+            <p className="mt-2 text-xs font-semibold text-zinc-500">
+              Les montants sont uniquement des informations saisies manuellement. Aucun paiement n’est traité par ClashGO.
+            </p>
+          </div>
+          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            {filteredHistory.map((item, index) => (
+              <div key={item.id || String(index)} className="p-5 grid grid-cols-1 lg:grid-cols-[1.2fr_.8fr_.8fr_1.5fr] gap-4 lg:items-center">
+                <div>
+                  <div className="text-sm font-black text-zinc-900 dark:text-white">
+                    {item.customer_name || item.license_hint || 'Licence'}
+                  </div>
+                  <div className="mt-1 text-[10px] font-semibold text-zinc-400">
+                    {item.customer_contact || item.license_hint || ''}
+                  </div>
+                  <div className="mt-1 text-[10px] font-mono text-zinc-400">{dateLabel(item.created_at)}</div>
+                </div>
+                <div>
+                  <span className="rounded-lg bg-zinc-100 dark:bg-zinc-800 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-zinc-500">
+                    {item.event_type === 'renewal' ? 'Renouvellement' : item.event_type === 'created' ? 'Création' : item.event_type || 'Événement'}
+                  </span>
+                  <div className="mt-2 text-xs font-black text-zinc-700 dark:text-zinc-200">{planLabel(item.plan)}</div>
+                </div>
+                <div>
+                  <div className="text-sm font-black text-zinc-900 dark:text-white">{euroLabel(item.amount_cents)}</div>
+                  <div className="mt-1 text-[10px] font-bold text-zinc-400">{paymentLabel(item.payment_status)}</div>
+                  {item.expires_at && <div className="mt-1 text-[10px] text-zinc-400">{expiryLabel(item.expires_at)}</div>}
+                </div>
+                <div className="text-xs font-semibold text-zinc-500 break-words">
+                  {item.note || 'Aucune note'}
+                </div>
+              </div>
+            ))}
+            {!busy && filteredHistory.length === 0 && (
+              <div className="p-8 text-center text-sm font-semibold text-zinc-400">Aucun événement trouvé.</div>
             )}
           </div>
         </section>
