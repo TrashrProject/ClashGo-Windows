@@ -207,6 +207,8 @@ const DeveloperView: React.FC = () => {
   const [editCustomerContact, setEditCustomerContact] = React.useState('');
   const [editCustomerNotes, setEditCustomerNotes] = React.useState('');
   const generatedKeyTimerRef = React.useRef<number | null>(null);
+  const createActionLockRef = React.useRef(false);
+  const licenseActionLockRef = React.useRef(false);
 
   const isAdmin = role === 'admin';
 
@@ -265,8 +267,9 @@ const DeveloperView: React.FC = () => {
   }, [refresh]);
 
   const createLicense = async () => {
-    if (!isAdmin || creating) return;
+    if (!isAdmin || createActionLockRef.current || creating) return;
     if (newRole === 'admin' && !window.confirm('Créer une nouvelle licence ADMIN ? Elle pourra gérer toutes les licences ClashGO.')) return;
+    createActionLockRef.current = true;
     setCreating(true);
     setError('');
     setNotice('');
@@ -313,12 +316,14 @@ const DeveloperView: React.FC = () => {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      createActionLockRef.current = false;
       setCreating(false);
     }
   };
 
   const runLicenseAction = async (id: string, action: () => Promise<unknown>, success: string): Promise<boolean> => {
-    if (!isAdmin || !id || actionID) return false;
+    if (!isAdmin || !id || licenseActionLockRef.current || actionID) return false;
+    licenseActionLockRef.current = true;
     setActionID(id);
     setError('');
     setNotice('');
@@ -331,6 +336,7 @@ const DeveloperView: React.FC = () => {
       setError(e instanceof Error ? e.message : String(e));
       return false;
     } finally {
+      licenseActionLockRef.current = false;
       setActionID('');
     }
   };
