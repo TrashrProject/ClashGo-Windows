@@ -8,6 +8,7 @@ interface AnalyticsProps {
 }
 
 const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory, history }) => {
+  const [advancedOpen, setAdvancedOpen] = React.useState(false);
   // `color` drives Tailwind bar classes; `hex` feeds the conic-gradient
   // (Tailwind class names are NOT valid CSS color values — using them
   // inside the gradient string would silently drop the donut).
@@ -104,13 +105,13 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         const measuredMs = row.effectiveRoutineMs;
         const hours = measuredMs > 0 ? measuredMs / 3_600_000 : 0;
         const yieldPerHour = hours > 0 ? row.goldElixir / hours : 0;
-        const confidence = row.attacks >= 25 ? 'Strong' : row.attacks >= 10 ? 'Solid' : 'Building';
+        const de confiance = row.attacks >= 25 ? 'Strong' : row.attacks >= 10 ? 'Solid' : 'Building';
         return {
           ...row,
           yieldPerHour,
           avgStars: row.stars / Math.max(1, row.attacks),
           fullDeployRate: row.complete * 100 / Math.max(1, row.attacks),
-          confidence,
+          de confiance,
         };
       })
       .sort((a, b) => {
@@ -340,15 +341,15 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
 
   const resultTrust = React.useMemo(() => {
     const rows = history ?? [];
-    const confidence = { high: 0, medium: 0, low: 0, unknown: 0 };
+    const de confiance = { high: 0, medium: 0, low: 0, unknown: 0 };
     const stars = new Map<string, number>();
     const loot = new Map<string, number>();
     for (const rep of rows) {
       const level = rep.result_confidence || 'unknown';
       if (level === 'high' || level === 'medium' || level === 'low') {
-        confidence[level]++;
+        de confiance[level]++;
       } else {
-        confidence.unknown++;
+        de confiance.unknown++;
       }
       const starSource = rep.stars_source || 'legacy';
       const lootSource = rep.loot_source || 'legacy';
@@ -358,10 +359,10 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const total = rows.length;
     return {
       total,
-      confidence,
-      highRate: total > 0 ? confidence.high * 100 / total : 0,
-      mediumRate: total > 0 ? confidence.medium * 100 / total : 0,
-      lowRate: total > 0 ? (confidence.low + confidence.unknown) * 100 / total : 0,
+      de confiance,
+      highRate: total > 0 ? de confiance.high * 100 / total : 0,
+      mediumRate: total > 0 ? de confiance.medium * 100 / total : 0,
+      lowRate: total > 0 ? (confidence.low + de confiance.unknown) * 100 / total : 0,
       ocrStars: stars.get('result_ocr') || 0,
       outcomeStars: (stars.get('battle_outcome') || 0) + (stars.get('reconciled_outcome') || 0),
       liveLoot: loot.get('live_delta') || 0,
@@ -969,7 +970,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         gold30: 0, elixir30: 0, de30: 0,
         gold60: 0, elixir60: 0, de60: 0,
         lowGE60: 0, highGE60: 0,
-        confidence: 'Apprentissage', cv,
+        de confiance: 'Apprentissage', cv,
         rows: [1, 8, 24].map((hours) => ({
           hours, gold: gph * hours, elixir: eph * hours, de: dph * hours,
         })),
@@ -1009,9 +1010,9 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       return sorted[lo] * (1 - weight) + sorted[hi] * weight;
     };
 
-    let confidence = 'Apprentissage';
-    if (measured.length >= 20 && cv <= 0.25 && (stats.health_score ?? 0) >= 90) confidence = 'High';
-    else if (measured.length >= 10 && cv <= 0.45 && (stats.health_score ?? 0) >= 75) confidence = 'Medium';
+    let de confiance = 'Apprentissage';
+    if (measured.length >= 20 && cv <= 0.25 && (stats.health_score ?? 0) >= 90) de confiance = 'High';
+    else if (measured.length >= 10 && cv <= 0.45 && (stats.health_score ?? 0) >= 75) de confiance = 'Medium';
 
     return {
       ready: true,
@@ -1025,7 +1026,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       de60: dePerHour,
       lowGE60: percentile(geRates, 0.25),
       highGE60: percentile(geRates, 0.75),
-      confidence,
+      de confiance,
       cv,
       rows: [1, 8, 24].map((forecastHours) => ({
         hours: forecastHours,
@@ -1043,7 +1044,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         return {
           attacks: 0, avgStars: 0, threeStarRate: 0, fullDeployRate: 0,
           avgSearchMs: 0, avgDeployMs: 0, avgCycleMs: 0,
-          avgGold: 0, avgElixir: 0, avgDE: 0,
+          avgOr: 0, avgElixir: 0, avgDE: 0,
         };
       }
       let stars = 0, triples = 0, complete = 0;
@@ -1068,7 +1069,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         avgSearchMs: searchMs / n,
         avgDeployMs: deployMs / n,
         avgCycleMs: cycleMs / n,
-        avgGold: gold / n,
+        avgOr: gold / n,
         avgElixir: elixir / n,
         avgDE: de / n,
       };
@@ -1142,7 +1143,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         value: fullDeploy,
         display: count > 0 ? `${fullDeploy.toFixed(1)}%` : '—',
         threshold: 98,
-        sampled: count > 0,
+        analysées: count > 0,
         detail: `${rows.filter((r) => r.deploy_success).length}/${count} attacks`,
       },
       {
@@ -1150,7 +1151,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         value: returnHome,
         display: returnRows.length > 0 ? `${returnHome.toFixed(1)}%` : '—',
         threshold: 98,
-        sampled: returnRows.length > 0,
+        analysées: returnRows.length > 0,
         detail: `${returnRows.filter((r) => r.return_home_success).length}/${returnRows.length} measured`,
       },
       {
@@ -1158,7 +1159,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         value: trusted,
         display: count > 0 ? `${trusted.toFixed(1)}%` : '—',
         threshold: 95,
-        sampled: count > 0,
+        analysées: count > 0,
         detail: count > 0 ? `OCR parse ${parsed.toFixed(1)}%` : 'OCR / live outcome',
       },
       {
@@ -1166,7 +1167,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         value: nextFirstPass,
         display: stats.next_transitions > 0 ? `${nextFirstPass.toFixed(1)}%` : '—',
         threshold: 90,
-        sampled: stats.next_transitions >= 3,
+        analysées: stats.next_transitions >= 3,
         detail: `${stats.next_transitions || 0} transitions`,
       },
       {
@@ -1174,7 +1175,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         value: certifiedSafety,
         display: safetyRows.length > 0 ? `${certifiedSafety.toFixed(1)}%` : '—',
         threshold: 95,
-        sampled: safetyRows.length > 0,
+        analysées: safetyRows.length > 0,
         detail: 'Live red zone + corridor + HUD',
       },
       {
@@ -1182,7 +1183,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         value: recovery,
         display: stats.recovery_attempts > 0 ? `${recovery.toFixed(1)}%` : '—',
         threshold: 90,
-        sampled: stats.recovery_attempts > 0,
+        analysées: stats.recovery_attempts > 0,
         detail: stats.recovery_attempts > 0 ? `${stats.recovery_successes}/${stats.recovery_attempts}` : 'No recovery needed',
       },
     ];
@@ -1243,9 +1244,9 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   }, [history]);
 
   const autonomyIndex = React.useMemo(() => {
-    const sampledReliability = reliabilityScorecard.filter((row) => row.sampled);
-    const reliability = sampledReliability.length > 0
-      ? sampledReliability.reduce((sum, row) => sum + Math.max(0, Math.min(100, row.value)), 0) / sampledReliability.length
+    const analyséesReliability = reliabilityScorecard.filter((row) => row.sampled);
+    const reliability = analyséesReliability.length > 0
+      ? analyséesReliability.reduce((sum, row) => sum + Math.max(0, Math.min(100, row.value)), 0) / analyséesReliability.length
       : 0;
 
     const cleanRoutine = autonomyReliability.total > 0 ? autonomyReliability.cleanRate : 0;
@@ -1256,11 +1257,11 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const health = Math.max(0, Math.min(100, stats.health_score ?? 0));
 
     const samples = [
-      { key: 'reliability', label: 'Fiabilité', value: reliability, weight: 0.30, sampled: sampledReliability.length >= 3 },
-      { key: 'safety', label: 'Sécurité zone rouge', value: safety, weight: 0.25, sampled: deploymentSafety.attacks >= 3 },
-      { key: 'clean', label: 'Cycles sans intervention', value: cleanRoutine, weight: 0.20, sampled: autonomyReliability.total >= 3 },
-      { key: 'health', label: 'Santé du runtime', value: health, weight: 0.15, sampled: (stats.telemetry_events || 0) > 0 },
-      { key: 'results', label: 'Confiance résultat', value: resultTrustScore, weight: 0.10, sampled: resultTrust.total >= 3 },
+      { key: 'reliability', label: 'Fiabilité', value: reliability, weight: 0.30, analysées: analyséesReliability.length >= 3 },
+      { key: 'safety', label: 'Sécurité zone rouge', value: safety, weight: 0.25, analysées: deploymentSafety.attacks >= 3 },
+      { key: 'clean', label: 'Cycles sans intervention', value: cleanRoutine, weight: 0.20, analysées: autonomyReliability.total >= 3 },
+      { key: 'health', label: 'Santé du runtime', value: health, weight: 0.15, analysées: (stats.telemetry_events || 0) > 0 },
+      { key: 'results', label: 'Confiance résultat', value: resultTrustScore, weight: 0.10, analysées: resultTrust.total >= 3 },
     ];
 
     const usable = samples.filter((row) => row.sampled);
@@ -1280,7 +1281,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       grade,
       ready: usable.length >= 3,
       components: samples,
-      sampledComponents: usable.length,
+      analyséesComponents: usable.length,
     };
   }, [reliabilityScorecard, autonomyReliability, deploymentSafety, resultTrust, stats.health_score, stats.telemetry_events]);
 
@@ -1409,23 +1410,82 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   const donutBg = `conic-gradient(${gradientStops.join(', ')})`;
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 max-w-6xl mx-auto">
+    <div className="space-y-6 max-w-6xl mx-auto">
+      <section className="rounded-[2.25rem] bg-zinc-950 dark:bg-white p-6 md:p-7 shadow-premium-lg">
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Vue rapide</div>
+            <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Tes performances en un coup d’œil</h3>
+            <p className="mt-1 text-sm font-semibold text-zinc-400 dark:text-zinc-500">
+              Les chiffres utiles restent visibles ici. L’analyse technique complète est rangée plus bas.
+            </p>
+          </div>
+          <div className={
+            'rounded-full px-3 py-2 text-[9px] font-black uppercase tracking-widest ' +
+            (performanceGuard.status === 'À surveiller'
+              ? 'bg-amber-400/10 text-amber-400'
+              : 'bg-emerald-400/10 text-emerald-400')
+          }>
+            {performanceGuard.status === 'Healthy' ? 'Stable' : performanceGuard.status}
+          </div>
+        </div>
+
+        <div className="mt-6 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {[
+            { label: 'Attaques', value: (stats.attacks_completed || 0).toLocaleString('fr-FR') },
+            { label: 'Or / h', value: compact(stats.gold_per_hour || 0) },
+            { label: 'Élixir / h', value: compact(stats.elixir_per_hour || 0) },
+            { label: 'Élixir noir / h', value: compact(stats.de_per_hour || 0) },
+            { label: 'Étoiles moy.', value: (stats.average_stars || 0).toFixed(2) },
+            { label: 'Santé', value: `${Math.max(0, Math.min(100, stats.health_score ?? 100))}/100` },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-4">
+              <div className="text-[8px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-4">
+          <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">Lecture ClashGO</div>
+          <div className="mt-2 text-sm font-bold text-zinc-300 dark:text-zinc-600">
+            {performanceGuard.reasons?.[0] || 'Les performances sont en cours d’apprentissage.'}
+          </div>
+        </div>
+      </section>
+
+      <button
+        type="button"
+        onClick={() => setAdvancedOpen((value) => !value)}
+        className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-5 py-4 flex items-center justify-between gap-4 text-left shadow-sm"
+      >
+        <div>
+          <div className="text-sm font-black text-zinc-950 dark:text-white">Analyse avancée</div>
+          <div className="mt-1 text-[11px] font-semibold text-zinc-500">
+            Sessions, stratégies, latences, fiabilité, OCR et diagnostics de performance.
+          </div>
+        </div>
+        <span className={`material-symbols-outlined text-zinc-400 transition-transform ${advancedOpen ? 'rotate-180' : ''}`}>expand_more</span>
+      </button>
+
+      {advancedOpen && (
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
 
       <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5 mb-6">
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Intelligence V2</div>
             <h3 className="mt-2 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Vitesse de farm</h3>
-            <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">The numbers that show whether ClashGO is farming fast, not just staying busy.</p>
+            <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">Les chiffres qui montrent si ClashGO farm réellement vite, pas seulement s’il reste actif.</p>
           </div>
           <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-zinc-500">
             <span className="px-3 py-2 rounded-full bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10">
               {stats.speed_profile || 'Balanced'} mode
             </span>
             <span className="px-3 py-2 rounded-full bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10">
-              Health {stats.health_score ?? 100}/100
+              Santé {stats.health_score ?? 100}/100
             </span>
-            <span>{stats.telemetry_events?.toLocaleString?.() ?? 0} events</span>
+            <span>{stats.telemetry_events?.toLocaleString?.() ?? 0} événements</span>
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
@@ -1460,10 +1520,10 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Prévision de farm</div>
             <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Rendement de ressources estimé</h3>
-            <p className="text-sm text-zinc-500 mt-1">Projection from measured session throughput; confidence falls when recent routine times are unstable.</p>
+            <p className="text-sm text-zinc-500 mt-1">Projection basée sur le rendement mesuré. La confiance baisse si les dernières sessions sont instables.</p>
           </div>
           <div className="px-3 py-2 rounded-full bg-zinc-50 dark:bg-zinc-950/40 text-[9px] font-black uppercase tracking-widest text-zinc-500">
-            {farmForecast.confidence} confidence
+            {farmForecast.confidence} de confiance
           </div>
         </div>
 
@@ -1557,15 +1617,15 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Indice d’autonomie</div>
               <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">
-                {autonomyIndex.ready ? autonomyIndex.grade : 'Building confidence'}
+                {autonomyIndex.ready ? autonomyIndex.grade : 'Building de confiance'}
               </h3>
               <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500 max-w-2xl">
-                Weighted from measured reliability, safe deployment, zero-touch routines, runtime health and result confidence. No hidden “AI score”.
+                Weighted from measured reliability, safe deployment, zero-touch routines, runtime health and result de confiance. No hidden “AI score”.
               </p>
             </div>
           </div>
           <div className="text-[9px] font-black uppercase tracking-wider text-zinc-500">
-            {autonomyIndex.sampledComponents}/5 components sampled
+            {autonomyIndex.sampledComponents}/5 components analysées
           </div>
         </div>
 
@@ -1618,7 +1678,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Repères UI vérifiés</div>
             <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Vision locale d’abord, scan complet en cas de doute</h3>
-            <p className="text-sm text-zinc-500 mt-1">Attack / Find Match / Battle centers are learned only after two stable detections. Cached locations never bypass color verification.</p>
+            <p className="text-sm text-zinc-500 mt-1">Les repères Attaquer / Rechercher / Combat ne sont mémorisés qu’après deux détections stables. La vérification visuelle reste toujours prioritaire.</p>
           </div>
           <span className="material-symbols-outlined text-zinc-400">my_location</span>
         </div>
@@ -1647,7 +1707,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
               {optimizationAdvisor.top ? optimizationAdvisor.top.label : 'Analyse du fonctionnement en cours'}
             </h3>
             <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">
-              Measured technical bottlenecks only. Never changes red-zone geometry, troop order, strategy or tap cadence automatically.
+              Analyse uniquement les ralentissements mesurés. Ne modifie jamais automatiquement la zone rouge, l’ordre des troupes, la stratégie ou la cadence des clics.
             </p>
           </div>
           <span className="material-symbols-outlined text-zinc-500 text-3xl">query_stats</span>
@@ -1655,7 +1715,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
 
         {optimizationAdvisor.learning ? (
           <div className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-5 text-sm font-bold text-zinc-400 dark:text-zinc-500">
-            Run a few attacks to build enough latency and transition evidence.
+            Lance quelques attaques pour construire une base de comparaison fiable.
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
@@ -2224,10 +2284,10 @@ Best optimization target: {pipeline.dominantTunable.label}
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
               {[
-                { label: '30m Gold', value: compact(farmForecast.gold30) },
+                { label: '30m Or', value: compact(farmForecast.gold30) },
                 { label: '30m Elixir', value: compact(farmForecast.elixir30) },
                 { label: '30m DE', value: compact(farmForecast.de30) },
-                { label: '60m Gold', value: compact(farmForecast.gold60) },
+                { label: '60m Or', value: compact(farmForecast.gold60) },
                 { label: '60m Elixir', value: compact(farmForecast.elixir60) },
                 { label: '60m DE', value: compact(farmForecast.de60) },
                 { label: '60m G+E range', value: `${compact(farmForecast.lowGE60)}–${compact(farmForecast.highGE60)}` },
@@ -2252,12 +2312,12 @@ Best optimization target: {pipeline.dominantTunable.label}
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Recent form</div>
-            <h3 className="mt-1 text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Last 10 Attacks</h3>
-            <p className="text-sm text-zinc-500 mt-1">Compared with the previous 10 attacks when enough history exists.</p>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Forme récente</div>
+            <h3 className="mt-1 text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">10 dernières attaques</h3>
+            <p className="text-sm text-zinc-500 mt-1">Comparaison avec les 10 attaques précédentes quand l’historique est suffisant.</p>
           </div>
           <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-            {recentPerformance.current.attacks}/10 sampled
+            {recentPerformance.current.attacks}/10 analysées
           </div>
         </div>
 
@@ -2269,7 +2329,7 @@ Best optimization target: {pipeline.dominantTunable.label}
             { label: 'Recherche', value: `${(recentPerformance.current.avgSearchMs / 1000).toFixed(1)}s`, delta: perfDelta(recentPerformance.current.avgSearchMs, recentPerformance.previous.avgSearchMs, true) },
             { label: 'Deploy', value: `${(recentPerformance.current.avgDeployMs / 1000).toFixed(1)}s`, delta: perfDelta(recentPerformance.current.avgDeployMs, recentPerformance.previous.avgDeployMs, true) },
             { label: 'Cycle', value: `${(recentPerformance.current.avgCycleMs / 1000).toFixed(0)}s`, delta: perfDelta(recentPerformance.current.avgCycleMs, recentPerformance.previous.avgCycleMs, true) },
-            { label: 'Avg G+E', value: compact(recentPerformance.current.avgGold + recentPerformance.current.avgElixir), delta: perfDelta(recentPerformance.current.avgGold + recentPerformance.current.avgElixir, recentPerformance.previous.avgGold + recentPerformance.previous.avgElixir) },
+            { label: 'Avg G+E', value: compact(recentPerformance.current.avgOr + recentPerformance.current.avgElixir), delta: perfDelta(recentPerformance.current.avgOr + recentPerformance.current.avgElixir, recentPerformance.previous.avgOr + recentPerformance.previous.avgElixir) },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/30 p-4">
               <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
@@ -2277,7 +2337,7 @@ Best optimization target: {pipeline.dominantTunable.label}
               <div className={`mt-1 text-[9px] font-black uppercase tracking-wider ${
                 metric.delta == null ? 'text-zinc-400' : metric.delta >= 0 ? 'text-emerald-500' : 'text-rose-500'
               }`}>
-                {metric.delta == null ? 'No baseline' : `${metric.delta >= 0 ? '+' : ''}${metric.delta.toFixed(0)}% vs prev`}
+                {metric.delta == null ? 'Pas de référence' : `${metric.delta >= 0 ? '+' : ''}${metric.delta.toFixed(0)}% vs avant`}
               </div>
             </div>
           ))}
@@ -2286,7 +2346,7 @@ Best optimization target: {pipeline.dominantTunable.label}
         <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 flex items-center justify-between gap-4">
             <div>
-              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Best G+E attack</div>
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Meilleure attaque O+E</div>
               <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">
                 {bestRecords.bestLoot ? compact(
                   (bestRecords.bestLoot.gold_stolen || 0) + (bestRecords.bestLoot.bonus_gold || 0) +
@@ -2298,7 +2358,7 @@ Best optimization target: {pipeline.dominantTunable.label}
           </div>
           <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 flex items-center justify-between gap-4">
             <div>
-              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Fastest clean deploy</div>
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Déploiement propre le plus rapide</div>
               <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">
                 {bestRecords.fastestClean ? `${(bestRecords.fastestClean.deploy_duration_ms / 1000).toFixed(1)}s` : '—'}
               </div>
@@ -2311,20 +2371,20 @@ Best optimization target: {pipeline.dominantTunable.label}
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
           <div>
-            <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Village Resource Tracking</h3>
-            <p className="text-sm text-zinc-500 mt-1">Automatic BlueStacks snapshots. No manual entry required.</p>
+            <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Suivi des ressources du village</h3>
+            <p className="text-sm text-zinc-500 mt-1">Mesures automatiques depuis BlueStacks. Aucune saisie manuelle.</p>
           </div>
           <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-            {validResourceHistory.length} snapshots
+            {validResourceHistory.length} mesures
           </div>
         </div>
 
         {lastResource ? (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
-              { label: 'Gold', current: lastResource.gold, delta: resourceDelta.gold, icon: 'monetization_on' },
+              { label: 'Or', current: lastResource.gold, delta: resourceDelta.gold, icon: 'monetization_on' },
               { label: 'Elixir', current: lastResource.elixir, delta: resourceDelta.elixir, icon: 'water_drop' },
-              { label: 'Dark Elixir', current: lastResource.dark_elixir, delta: resourceDelta.dark, icon: 'opacity' },
+              { label: 'Élixir noir', current: lastResource.dark_elixir, delta: resourceDelta.dark, icon: 'opacity' },
             ].map((item) => (
               <div key={item.label} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/30 p-5">
                 <div className="flex items-center justify-between gap-4">
@@ -2356,7 +2416,7 @@ Best optimization target: {pipeline.dominantTunable.label}
         </div>
         {totalAttacks === 0 ? (
           <div className="py-12 text-center text-zinc-400 dark:text-zinc-700 text-[11px] font-black uppercase tracking-[0.3em] italic">
-            No attacks recorded yet // Run the bot to populate analytics
+            Aucune attaque enregistrée · lance le bot pour alimenter les statistiques
           </div>
         ) : (
         <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-10 items-center">
@@ -2364,7 +2424,7 @@ Best optimization target: {pipeline.dominantTunable.label}
           <div className="relative w-36 h-36 mx-auto rounded-full transition-transform duration-500 group-hover:scale-[1.03]" style={{ background: donutBg }}>
             <div className="absolute inset-[16px] bg-white dark:bg-zinc-900 rounded-full flex flex-col items-center justify-center border border-zinc-100 dark:border-zinc-800/60 shadow-sm">
               <span className="text-3xl font-bold text-zinc-950 dark:text-white tabular-nums tracking-tight leading-none">{threeStarRate}%</span>
-              <span className="mt-1.5 text-[9px] font-black text-zinc-400 dark:text-zinc-600 uppercase tracking-[0.2em]">3★ Rate</span>
+              <span className="mt-1.5 text-[9px] font-black text-zinc-400 dark:text-zinc-600 uppercase tracking-[0.2em]">Taux 3★</span>
             </div>
           </div>
           <div className="space-y-6">
@@ -2558,7 +2618,7 @@ Best optimization target: {pipeline.dominantTunable.label}
                   <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
                   <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
                   <div className={`mt-1 text-[9px] font-black uppercase tracking-wider ${metric.delta == null ? 'text-zinc-400' : metric.delta >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                    {metric.delta == null ? 'No previous session' : `${metric.delta >= 0 ? '+' : ''}${metric.delta.toFixed(0)}% vs previous`}
+                    {metric.delta == null ? 'No previous session' : `${metric.delta >= 0 ? '+' : ''}${metric.delta.toFixed(0)}% vs avantious`}
                   </div>
                 </div>
               ))}
@@ -2850,22 +2910,22 @@ Best optimization target: {pipeline.dominantTunable.label}
 
       <div className="bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none transition-all duration-500">
         <div className="flex justify-between items-center mb-8">
-          <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Financial Performance</h3>
+          <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Performance des ressources</h3>
           <div className="w-12 h-12 rounded-2xl bg-zinc-50 dark:bg-zinc-800 flex items-center justify-center border border-zinc-100 dark:border-zinc-700 shadow-sm">
             <span className="material-symbols-outlined text-zinc-500 dark:text-zinc-500">insights</span>
           </div>
         </div>
         {stats.attacks_completed === 0 ? (
           <div className="py-12 text-center text-zinc-400 dark:text-zinc-700 text-[11px] font-black uppercase tracking-[0.3em] italic">
-            No revenue recorded yet // Run the bot to populate metrics
+            Aucune ressource enregistrée · lance le bot pour alimenter les mesures
           </div>
         ) : (
         <div className="space-y-8">
           {[
-            { label: 'Total Revenue', value: (stats.total_gold + stats.total_elixir).toLocaleString(), icon: 'account_balance_wallet', color: 'text-zinc-950 dark:text-zinc-100' },
-            { label: 'Avg Gold / Attack', value: stats.attacks_completed > 0 ? Math.round(stats.total_gold / stats.attacks_completed).toLocaleString() : '0', icon: 'monetization_on', color: 'text-amber-500' },
-            { label: 'Avg Elixir / Attack', value: stats.attacks_completed > 0 ? Math.round(stats.total_elixir / stats.attacks_completed).toLocaleString() : '0', icon: 'water_drop', color: 'text-fuchsia-500' },
-            { label: 'Avg Dark Elixir / Attack', value: stats.attacks_completed > 0 ? Math.round(stats.total_de / stats.attacks_completed).toLocaleString() : '0', icon: 'water_drop', color: 'text-zinc-950 dark:text-zinc-100' }
+            { label: 'Ressources totales', value: (stats.total_gold + stats.total_elixir).toLocaleString(), icon: 'account_balance_wallet', color: 'text-zinc-950 dark:text-zinc-100' },
+            { label: 'Avg Or / Attack', value: stats.attacks_completed > 0 ? Math.round(stats.total_gold / stats.attacks_completed).toLocaleString() : '0', icon: 'monetization_on', color: 'text-amber-500' },
+            { label: 'Élixir moyen / attaque', value: stats.attacks_completed > 0 ? Math.round(stats.total_elixir / stats.attacks_completed).toLocaleString() : '0', icon: 'water_drop', color: 'text-fuchsia-500' },
+            { label: 'Avg Élixir noir / Attack', value: stats.attacks_completed > 0 ? Math.round(stats.total_de / stats.attacks_completed).toLocaleString() : '0', icon: 'water_drop', color: 'text-zinc-950 dark:text-zinc-100' }
           ].map((m, i) => (
             <div key={i} className="flex justify-between items-center group">
               <div className="flex items-center gap-6">
@@ -2874,7 +2934,7 @@ Best optimization target: {pipeline.dominantTunable.label}
                 </div>
                 <div>
                   <span className="block text-[10px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.2em] mb-1">{m.label}</span>
-                  <div className="text-xs text-zinc-400 dark:text-zinc-700 font-bold uppercase tracking-widest">Calculated Average</div>
+                  <div className="text-xs text-zinc-400 dark:text-zinc-700 font-bold uppercase tracking-widest">Moyenne calculée</div>
                 </div>
               </div>
               <span className="text-3xl font-bold text-zinc-950 dark:text-white tracking-tight tabular-nums">{m.value}</span>
@@ -2884,6 +2944,8 @@ Best optimization target: {pipeline.dominantTunable.label}
         )}
       </div>
 
+      </div>
+      )}
     </div>
   );
 });
