@@ -628,16 +628,29 @@ func (a *App) ResetStats() error {
 	a.cachedHistory = nil
 	a.cachedHistoryMu.Unlock()
 
-	if err := os.Remove(paths.ResolveConfig("stats.json")); err != nil && !os.IsNotExist(err) {
-		return err
+	// Remove every persisted runtime artifact that belongs to the active
+	// member, including the latest session report. Using the same canonical
+	// list as archive/restore prevents new state files from being forgotten
+	// when ResetStats evolves.
+	for _, rel := range memberRuntimeStateFiles {
+		path := paths.ResolveConfig(rel)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
-	if err := os.Remove(paths.ResolveConfig("attack_history.json")); err != nil && !os.IsNotExist(err) {
-		return err
+
+	// Purge the per-license snapshot immediately as well. Otherwise a crash
+	// between ResetStats and the next archive could restore stale statistics
+	// on the following launch.
+	if stateDir := a.memberRuntimeStateDir(); stateDir != "" {
+		for _, rel := range memberRuntimeStateFiles {
+			path := filepath.Join(stateDir, rel)
+			_ = os.Remove(path)
+			_ = os.Remove(path + ".bak")
+			_ = os.Remove(path + ".tmp")
+		}
 	}
-	_ = os.Remove(paths.ResolveConfig("last_attack_report.json"))
-	_ = os.Remove(paths.ResolveConfig("village_resources.json"))
-	_ = os.Remove(paths.ResolveConfig("village_resource_history.json"))
-	_ = os.Remove(paths.ResolveConfig("current_army.json"))
+
 	if traces, globErr := filepath.Glob(paths.ResolveConfig("output/attack_traces/*.json")); globErr == nil {
 		for _, trace := range traces {
 			_ = os.Remove(trace)
