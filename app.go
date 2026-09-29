@@ -114,6 +114,11 @@ func (a *App) startup(ctx context.Context) {
 		cfg := config.LoadOrDefault("config.json")
 		a.license = licensing.New(clashControlServiceURL(cfg), version)
 	}
+	if a.license.GetState().Activated {
+		if err := a.applyMemberProfileForCurrentLicense(); err != nil {
+			log.Warn().Err(err).Msg("failed to restore member settings profile")
+		}
+	}
 	cfg := config.LoadOrDefault("config.json")
 	a.supportReporter = support.New(clashControlServiceURL(cfg), version, a.license)
 
@@ -1029,6 +1034,9 @@ func (a *App) ActivateLicense(key string) (licensing.State, error) {
 	if err != nil {
 		return state, err
 	}
+	if err := a.applyMemberProfileForCurrentLicense(); err != nil {
+		return state, fmt.Errorf("restore member profile: %w", err)
+	}
 	if a.supportReporter != nil {
 		a.supportReporter.Flush(context.Background())
 	}
@@ -1043,6 +1051,15 @@ func (a *App) ActivateLicense(key string) (licensing.State, error) {
 func (a *App) DeactivateLicense() error {
 	if a.license == nil {
 		return nil
+	}
+
+	// A local deactivation must immediately end an active automation session.
+	// Otherwise the bot could keep running until the next periodic license
+	// validation even though the member removed the entitlement locally.
+	if a.IsRunning() {
+		if err := a.StopBot(); err != nil {
+			return fmt.Errorf("stop bot before deactivating license: %w", err)
+		}
 	}
 	if err := a.license.DeactivateLocal(); err != nil {
 		return err
