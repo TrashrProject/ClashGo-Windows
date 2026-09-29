@@ -679,6 +679,7 @@ func main() {
 		}
 		payload := map[string]any{
 			"ok": true,
+			"license_id": rec.ID,
 			"role": role,
 			"plan": plan,
 			"offline_until": offlineUntil.Format(time.RFC3339),
