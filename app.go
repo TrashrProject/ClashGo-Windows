@@ -1719,10 +1719,21 @@ func (a *App) SetBetaControlServiceURL(raw string) (ControlServiceConfig, error)
 	if err := config.Save("config.json", cfg); err != nil {
 		return a.GetControlServiceConfig(), err
 	}
+
+	// Switch the existing services in place so the logger keeps the same
+	// reporter writer and the member can activate immediately without a
+	// process restart.
+	if a.license != nil {
+		a.license.SetBaseURL(normalized)
+	}
+	if a.supportReporter != nil {
+		a.supportReporter.SetBaseURL(normalized)
+	}
+
 	return ControlServiceConfig{
 		ServiceURL: normalized,
 		Configured: true,
-		RequiresRestart: true,
+		RequiresRestart: false,
 	}, nil
 }
 
