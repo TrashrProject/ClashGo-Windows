@@ -93,12 +93,20 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
         detail: 'ClashGO stabilise automatiquement la session.',
         icon: 'healing',
       };
-    case 'speed_profile':
+    case 'speed_profile': {
+      const profile = String(event.fields?.profile || '');
+      const perHour = n('max_attacks_per_hour');
+      const perSession = n('max_attacks_per_session');
+      const label = profile === 'fast' ? 'Rapide' : profile === 'cautious' ? 'Prudente' : 'Normale';
       return {
-        title: 'Cadence ajustée',
-        detail: 'Le rythme du bot a été adapté automatiquement.',
+        title: 'Cadence ajustée · ' + label,
+        detail: [
+          perHour > 0 ? perHour + ' attaques/h' : '',
+          perSession > 0 ? 'session ' + perSession : '',
+        ].filter(Boolean).join(' · ') || 'Les réglages membre ont été appliqués.',
         icon: 'speed',
       };
+    }
     case 'anomaly':
       return {
         title: 'Correction automatique',
