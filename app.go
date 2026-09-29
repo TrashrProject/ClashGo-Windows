@@ -963,6 +963,18 @@ func (a *App) ReportUIError(message string, componentStack string) {
 		Msg("ClashGO UI crash")
 }
 
+func (a *App) GetLatestBootReport() *bot.BootReportView {
+	data, err := os.ReadFile(paths.ResolveConfig("logs/last_boot_report.json"))
+	if err != nil {
+		return nil
+	}
+	var report bot.BootReportView
+	if json.Unmarshal(data, &report) != nil || report.StartedAt.IsZero() {
+		return nil
+	}
+	return &report
+}
+
 func (a *App) GetLicensePolicy() LicensePolicy {
 	cfg := config.LoadOrDefault("config.json")
 	serviceURL := clashControlServiceURL(cfg)
