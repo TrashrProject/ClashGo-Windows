@@ -581,6 +581,14 @@ function App() {
       setIsRunning(true);
       setBotError('');
     });
+    const unsubBotStopped = safeEventsOn("bot_stopped", () => {
+      setIsStarting(false);
+      setIsRunning(false);
+      setBotError('');
+      void fetchFastData();
+      void fetchHistory();
+      void fetchSessionReport();
+    });
     const unsubBotBootCancelled = safeEventsOn("bot_boot_cancelled", (payload: unknown) => {
       setIsStarting(false);
       setIsRunning(false);
@@ -615,6 +623,7 @@ function App() {
       unsubBotError();
       unsubBotInitFailed();
       unsubBotStarted();
+      unsubBotStopped();
       unsubBotBootCancelled();
       unsubAttackHistory();
       unsubStatsUpdated();
