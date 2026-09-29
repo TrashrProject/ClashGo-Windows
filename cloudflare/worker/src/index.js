@@ -613,10 +613,23 @@ async function resetMachine(request, env, protectedLicenseId = "") {
   if (protectedLicenseId && id === protectedLicenseId) {
     return json({ message: "cannot reset the active admin license machine" }, 409);
   }
+  const current = await env.DB.prepare(
+    "SELECT id, customer_id, plan FROM licenses WHERE id = ?1"
+  ).bind(id).first();
+  if (!current) return json({ message: "license not found" }, 404);
+
   const result = await env.DB.prepare(
     "UPDATE licenses SET machine_id = NULL, last_seen_at = NULL, app_version = NULL WHERE id = ?1"
   ).bind(id).run();
   if (!result.meta?.changes) return json({ message: "license not found" }, 404);
+
+  await recordLicenseEvent(env, {
+    licenseId: id,
+    customerId: current.customer_id || null,
+    eventType: "machine_reset",
+    plan: current.plan || null,
+    note: "Liaison PC réinitialisée",
+  });
   return json({ ok: true });
 }
 
@@ -644,10 +657,23 @@ async function setLicenseRole(request, env, protectedLicenseId = "") {
   if (protectedLicenseId && id === protectedLicenseId && role !== "admin") {
     return json({ message: "cannot remove admin role from the active admin license" }, 409);
   }
+  const current = await env.DB.prepare(
+    "SELECT id, customer_id, plan, role FROM licenses WHERE id = ?1"
+  ).bind(id).first();
+  if (!current) return json({ message: "license not found" }, 404);
+
   const result = await env.DB.prepare(
     "UPDATE licenses SET role = ?1 WHERE id = ?2"
   ).bind(role, id).run();
   if (!result.meta?.changes) return json({ message: "license not found" }, 404);
+
+  await recordLicenseEvent(env, {
+    licenseId: id,
+    customerId: current.customer_id || null,
+    eventType: "role_changed",
+    plan: current.plan || null,
+    note: String(current.role || "member") + " → " + role,
+  });
   return json({ ok: true, role });
 }
 
@@ -661,10 +687,23 @@ async function setLicenseActive(request, env, protectedLicenseId = "") {
   if (protectedLicenseId && id === protectedLicenseId && active === 0) {
     return json({ message: "cannot revoke the active admin license" }, 409);
   }
+  const current = await env.DB.prepare(
+    "SELECT id, customer_id, plan FROM licenses WHERE id = ?1"
+  ).bind(id).first();
+  if (!current) return json({ message: "license not found" }, 404);
+
   const result = await env.DB.prepare(
     "UPDATE licenses SET active = ?1 WHERE id = ?2"
   ).bind(active, id).run();
   if (!result.meta?.changes) return json({ message: "license not found" }, 404);
+
+  await recordLicenseEvent(env, {
+    licenseId: id,
+    customerId: current.customer_id || null,
+    eventType: active === 1 ? "reactivated" : "revoked",
+    plan: current.plan || null,
+    note: active === 1 ? "Licence réactivée" : "Licence révoquée",
+  });
   return json({ ok: true, active: active === 1 });
 }
 
@@ -797,7 +836,7 @@ async function updateLicenseCustomer(request, env) {
   if (!name) return json({ message: "customer_name is required" }, 400);
 
   const license = await env.DB.prepare(
-    "SELECT id, customer_id FROM licenses WHERE id = ?1"
+    "SELECT id, customer_id, plan FROM licenses WHERE id = ?1"
   ).bind(licenseId).first();
   if (!license) return json({ message: "license not found" }, 404);
 
@@ -816,6 +855,14 @@ async function updateLicenseCustomer(request, env) {
       "UPDATE licenses SET customer_id = ?1 WHERE id = ?2"
     ).bind(customerId, licenseId).run();
   }
+
+  await recordLicenseEvent(env, {
+    licenseId,
+    customerId,
+    eventType: "customer_updated",
+    plan: license.plan || null,
+    note: "Fiche client mise à jour",
+  });
 
   return json({
     ok: true,
