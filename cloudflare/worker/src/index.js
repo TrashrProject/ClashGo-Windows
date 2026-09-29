@@ -892,7 +892,16 @@ async function router(request, env) {
       const rows = await listLicenses(env);
       if (dev.role !== "admin") {
         return json({
-          licenses: rows.map(({ customer_id, customer_name, customer_contact, ...row }) => row),
+          licenses: rows.map(({
+            customer_id,
+            customer_name,
+            customer_contact,
+            customer_notes,
+            payment_status,
+            total_paid_cents,
+            next_due_at,
+            ...row
+          }) => row),
         });
       }
       return json({ licenses: rows });
