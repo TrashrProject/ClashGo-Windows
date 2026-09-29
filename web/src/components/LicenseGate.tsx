@@ -1,5 +1,6 @@
 import React from 'react';
 import { ActivateLicense, GetLicensePolicy, GetLicenseState } from '../../wailsjs/go/main/App';
+import logo from '../assets/images/clashgo-logo.png';
 
 type LicenseState = {
   activated: boolean;
@@ -73,7 +74,7 @@ const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
       <div className="w-screen h-screen bg-zinc-950 text-white grid place-items-center">
         <div className="text-center">
           <div className="w-10 h-10 rounded-2xl border-2 border-zinc-700 border-t-white animate-spin mx-auto" />
-          <div className="mt-4 text-[10px] font-black uppercase tracking-[0.25em] text-zinc-500">Checking ClashGO license</div>
+          <div className="mt-4 text-[10px] font-black uppercase tracking-[0.25em] text-zinc-500">Vérification de la licence</div>
         </div>
       </div>
     );
@@ -87,11 +88,31 @@ const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
     <div className="w-screen h-screen bg-zinc-950 text-white flex items-center justify-center px-5">
       <div className="w-full max-w-xl">
         <div className="rounded-[2.5rem] border border-zinc-800 bg-zinc-900/80 p-7 md:p-9 shadow-2xl">
-          <div className="text-[10px] font-black uppercase tracking-[0.28em] text-zinc-500">ClashGO License</div>
-          <h1 className="mt-3 text-4xl font-black tracking-tight">Activate ClashGO</h1>
+          <div className="flex items-center gap-4">
+            <div className="grid h-14 w-14 place-items-center rounded-2xl border border-zinc-800 bg-zinc-950">
+              <img src={logo} alt="ClashGO" className="h-9 w-9 object-contain invert" />
+            </div>
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.28em] text-zinc-500">CLASHGO</div>
+              <div className="text-sm font-bold text-zinc-300">Espace membre</div>
+            </div>
+          </div>
+          <h1 className="mt-6 text-4xl font-black tracking-tight">Activer ClashGO</h1>
           <p className="mt-3 text-sm font-semibold leading-6 text-zinc-400">
-            Enter the license supplied by ClashGO. This activation is linked to one machine.
+            Entre la clé qui t’a été fournie. Une licence est liée à un seul PC à la fois.
           </p>
+          <div className="mt-5 grid grid-cols-3 gap-2">
+            {[
+              ['bolt', 'Activation rapide'],
+              ['computer', 'Liée à ce PC'],
+              ['shield', 'Accès sécurisé'],
+            ].map(([icon, label]) => (
+              <div key={label} className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-3 text-center">
+                <span className="material-symbols-outlined text-base text-zinc-400">{icon}</span>
+                <div className="mt-1 text-[9px] font-black uppercase tracking-wider text-zinc-500">{label}</div>
+              </div>
+            ))}
+          </div>
 
           <div className="mt-7 space-y-3">
             <input
@@ -109,7 +130,7 @@ const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
               disabled={busy || !key.trim()}
               className="w-full h-14 rounded-2xl bg-white text-zinc-950 text-xs font-black uppercase tracking-[0.2em] transition active:scale-[0.99] disabled:opacity-30"
             >
-              {busy ? 'Checking…' : 'Activate license'}
+              {busy ? 'Vérification…' : 'Activer ma licence'}
             </button>
           </div>
 
@@ -121,13 +142,13 @@ const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
 
           {!policy?.service_configured && (
             <div className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs font-bold text-amber-400">
-              ClashGO licensing service is not configured.
+              Le service de licence ClashGO n’est pas encore configuré.
             </div>
           )}
 
           <div className="mt-6 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
             <span className="material-symbols-outlined text-sm">lock</span>
-            One license · one machine
+            1 licence · 1 PC
           </div>
         </div>
       </div>
