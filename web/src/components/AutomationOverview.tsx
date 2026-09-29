@@ -1,5 +1,5 @@
 import React from 'react';
-import { GetCompteConfig, GetCachedPlayerProfile, GetConfig, GetVillageRessources } from '../../wailsjs/go/main/App';
+import { GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetVillageResources } from '../../wailsjs/go/main/App';
 
 type OverviewState = {
   tag: string;
@@ -41,10 +41,10 @@ const AutomationOverview: React.FC = React.memo(() => {
     const load = async () => {
       try {
         const [account, profile, cfg, resources] = await Promise.all([
-          GetCompteConfig(),
+          GetAccountConfig(),
           GetCachedPlayerProfile(),
           GetConfig(),
-          GetVillageRessources(),
+          GetVillageResources(),
         ]);
         if (!active) return;
 
