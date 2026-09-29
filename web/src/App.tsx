@@ -850,11 +850,20 @@ function App() {
       setBotError('');
       refreshBootReport();
     });
-    const unsubBotStopped = safeEventsOn("bot_stopped", () => {
+    const unsubBotStopped = safeEventsOn("bot_stopped", (payload: unknown) => {
       setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(false);
       setBotError('');
+
+      if (payload && typeof payload === 'object') {
+        const value = payload as { automatic?: boolean; reason?: string; message?: string };
+        if (value.automatic && value.message) {
+          setMemberNotice(value.message);
+          window.setTimeout(() => setMemberNotice(''), 8000);
+        }
+      }
+
       void fetchFastData();
       void fetchHistory();
       void fetchSessionReport();
