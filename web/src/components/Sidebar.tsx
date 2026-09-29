@@ -12,6 +12,10 @@ interface SidebarProps {
   starting: boolean;
   onStart: () => void;
   onStop: () => void;
+  licenseActivated: boolean;
+  licenseRole: 'member' | 'developer' | 'admin' | '';
+  memberName?: string;
+  licensePlan?: string;
 }
 
 const Sidebar: React.FC<SidebarProps> = React.memo(({
@@ -23,7 +27,11 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
   starting,
   onStart,
   onStop,
-  interfaceLevel
+  interfaceLevel,
+  licenseActivated,
+  licenseRole,
+  memberName,
+  licensePlan,
 }) => {
   const menuItems: { id: TabType; label: string; icon: string; minLevel: InterfaceLevel }[] = [
     { id: 'dashboard', label: 'Accueil', icon: 'home', minLevel: 'simple' },
@@ -98,6 +106,40 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
         </nav>
 
         <div className="mt-auto space-y-3">
+          <button
+            type="button"
+            onClick={() => setTab('account')}
+            title={expanded ? undefined : 'Mon ClashGO'}
+            className="w-full rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/30 overflow-hidden text-left hover:border-zinc-300 dark:hover:border-zinc-700 transition"
+          >
+            <div className="flex items-center min-h-14">
+              <div className="w-12 h-12 flex-shrink-0 grid place-items-center">
+                <div className={
+                  'w-8 h-8 rounded-xl grid place-items-center ' +
+                  (licenseActivated
+                    ? 'bg-emerald-500/10 text-emerald-500'
+                    : 'bg-zinc-200 text-zinc-500 dark:bg-zinc-800')
+                }>
+                  <span className="material-symbols-outlined text-[18px]">
+                    {licenseActivated ? 'verified_user' : 'person'}
+                  </span>
+                </div>
+              </div>
+              <div className={
+                'min-w-0 pr-3 transition-[opacity,transform] duration-200 ' +
+                (expanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 w-0 overflow-hidden')
+              }>
+                <div className="truncate text-[11px] font-black text-zinc-950 dark:text-white">
+                  {memberName || (licenseActivated ? 'Membre ClashGO' : 'ClashGO')}
+                </div>
+                <div className="mt-0.5 flex items-center gap-1.5 text-[8px] font-black uppercase tracking-wider text-zinc-400">
+                  <span>{licenseActivated ? (licenseRole || 'member') : 'Non activé'}</span>
+                  {licenseActivated && licensePlan && <span>· {licensePlan === 'free_2d' ? 'Free 2J' : licensePlan === 'week_1' ? '1 sem.' : licensePlan === 'month_1' ? '1 mois' : 'À vie'}</span>}
+                </div>
+              </div>
+            </div>
+          </button>
+
           <button
             onClick={starting ? undefined : (running ? onStop : onStart)}
             disabled={starting}
