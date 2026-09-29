@@ -116,3 +116,48 @@ func TestApplyMemberSpeedProfileKeepsExplicitBreakSettings(t *testing.T) {
 		t.Fatalf("explicit BreakDuration overwritten: %s", cfg.Automation.BreakDuration.Duration)
 	}
 }
+
+
+func TestSanitizeMemberSettingsClampsUnsafeValues(t *testing.T) {
+	got := sanitizeMemberSettings(MemberSettings{
+		SpeedProfile:      "turbo",
+		MaxAttacksPerHour: 999,
+		BreakEveryAttacks: -5,
+		BreakMinutes:      99,
+	})
+
+	if got.SpeedProfile != "normal" {
+		t.Fatalf("SpeedProfile = %q, want normal", got.SpeedProfile)
+	}
+	if got.MaxAttacksPerHour != 24 {
+		t.Fatalf("MaxAttacksPerHour = %d, want 24", got.MaxAttacksPerHour)
+	}
+	if got.BreakEveryAttacks != 0 {
+		t.Fatalf("BreakEveryAttacks = %d, want 0", got.BreakEveryAttacks)
+	}
+	if got.BreakMinutes != 30 {
+		t.Fatalf("BreakMinutes = %d, want 30", got.BreakMinutes)
+	}
+}
+
+func TestSanitizeMemberSettingsRaisesMinimumAttackRate(t *testing.T) {
+	got := sanitizeMemberSettings(MemberSettings{
+		SpeedProfile:      "fast",
+		MaxAttacksPerHour: 0,
+		BreakEveryAttacks: 50,
+		BreakMinutes:      -1,
+	})
+
+	if got.SpeedProfile != "fast" {
+		t.Fatalf("SpeedProfile = %q, want fast", got.SpeedProfile)
+	}
+	if got.MaxAttacksPerHour != 1 {
+		t.Fatalf("MaxAttacksPerHour = %d, want 1", got.MaxAttacksPerHour)
+	}
+	if got.BreakEveryAttacks != 20 {
+		t.Fatalf("BreakEveryAttacks = %d, want 20", got.BreakEveryAttacks)
+	}
+	if got.BreakMinutes != 0 {
+		t.Fatalf("BreakMinutes = %d, want 0", got.BreakMinutes)
+	}
+}
