@@ -2,8 +2,11 @@ import React from 'react';
 import { TabType } from '../types';
 import logo from '../assets/images/clashgo-logo.png';
 
+export type InterfaceLevel = 'simple' | 'advanced' | 'developer';
+
 interface SidebarProps {
   tab: TabType;
+  interfaceLevel: InterfaceLevel;
   setTab: (tab: TabType) => void;
   expanded: boolean;
   setExpanded: (expanded: boolean) => void;
@@ -21,15 +24,23 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
   running,
   starting,
   onStart,
-  onStop
+  onStop,
+  interfaceLevel
 }) => {
-  const menuItems: { id: TabType; label: string; icon: string }[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
-    { id: 'account', label: 'Account', icon: 'person' },
-    { id: 'analytics', label: 'Analytics', icon: 'monitoring' },
-    { id: 'config', label: 'Automation', icon: 'auto_awesome' },
-    { id: 'settings', label: 'Settings', icon: 'settings' },
+  const menuItems: { id: TabType; label: string; icon: string; minLevel: InterfaceLevel }[] = [
+    { id: 'dashboard', label: 'Home', icon: 'home', minLevel: 'simple' },
+    { id: 'config', label: 'Automation', icon: 'auto_awesome', minLevel: 'simple' },
+    { id: 'account', label: 'Account', icon: 'person', minLevel: 'simple' },
+    { id: 'analytics', label: 'Statistics', icon: 'monitoring', minLevel: 'advanced' },
+    { id: 'settings', label: interfaceLevel === 'developer' ? 'Developer & Settings' : 'Settings', icon: 'settings', minLevel: 'advanced' },
   ];
+
+  const levelRank: Record<InterfaceLevel, number> = {
+    simple: 0,
+    advanced: 1,
+    developer: 2,
+  };
+  const visibleItems = menuItems.filter((item) => levelRank[interfaceLevel] >= levelRank[item.minLevel]);
 
   return (
     <aside
@@ -62,7 +73,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
         </div>
 
         <nav className="space-y-1.5 flex-grow">
-          {menuItems.map((item) => (
+          {visibleItems.map((item) => (
             <button
               key={item.id}
               onClick={() => setTab(item.id)}
