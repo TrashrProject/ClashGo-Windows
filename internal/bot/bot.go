@@ -3937,6 +3937,18 @@ func (b *Bot) Stats() BotStats {
 	if captureHealthMS > 1200 { healthScore -= 15 } else if captureHealthMS > 700 { healthScore -= 7 }
 	if healthScore < 0 { healthScore = 0 }
 	if healthScore > 100 { healthScore = 100 }
+
+	runtimeSearchMode := chooseSearchPacing(adbHealth).Mode
+	if b.safePacingForced() {
+		runtimeSearchMode = "Safe"
+	}
+	memberSpeedProfile := strings.ToLower(strings.TrimSpace(b.cfg.Automation.SpeedProfile))
+	switch memberSpeedProfile {
+	case "cautious", "fast":
+	default:
+		memberSpeedProfile = "normal"
+	}
+
 	return BotStats{
 		AttacksCompleted: b.attackCount.Load(),
 		SessionAttacks:   b.attackCount.Load(),
@@ -3967,7 +3979,8 @@ func (b *Bot) Stats() BotStats {
 		Anomalies:          tm.Anomalies,
 		TargetsSkipped:     tm.TargetsSkipped,
 		HealthScore:          healthScore,
-		SpeedProfile:         chooseSearchPacing(adbHealth).Mode,
+		SpeedProfile:         runtimeSearchMode,
+		MemberSpeedProfile:   memberSpeedProfile,
 		TargetsSeen:          tm.TargetsFound,
 		TargetsAccepted:      tm.TargetsAccepted,
 		TargetAcceptanceRate: targetAcceptanceRate,
@@ -4042,6 +4055,7 @@ type BotStats struct {
 	TargetsSkipped   int64   `json:"targets_skipped"`
 	HealthScore          int     `json:"health_score"`
 	SpeedProfile         string  `json:"speed_profile"`
+	MemberSpeedProfile   string  `json:"member_speed_profile"`
 	TargetsSeen          int64   `json:"targets_seen"`
 	TargetsAccepted      int64   `json:"targets_accepted"`
 	TargetAcceptanceRate float64 `json:"target_acceptance_rate"`
