@@ -2092,11 +2092,9 @@ func (a *App) applyMemberProfileForCurrentLicense() error {
 	}
 
 	cfg := config.LoadOrDefault("config.json")
+	// InterfaceLevel is presentation only. Automatic/manual bot behaviour is
+	// restored independently by the per-license automation profile.
 	applyMemberSettingsToConfig(cfg, settings)
-	cfg.Automation.SimpleMode = settings.InterfaceLevel != "advanced"
-	if cfg.Automation.SimpleMode {
-		applySimpleAutomationDefaults(cfg)
-	}
 	if err := config.Save("config.json", cfg); err != nil {
 		return err
 	}
@@ -2539,73 +2537,34 @@ func (a *App) SaveMemberInterfaceLevel(level string) error {
 		return fmt.Errorf("member interface level must be simple or advanced")
 	}
 
+	// In unenforced/local beta mode the React localStorage preference remains
+	// the fallback. A licensed member stores this presentation preference in
+	// their own profile without mutating any bot automation setting.
+	if a.license == nil || !a.license.GetState().Activated {
+		return nil
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	cfg := config.LoadOrDefault("config.json")
-	cfg.Automation.SimpleMode = level == "simple"
-	if cfg.Automation.SimpleMode {
-		applySimpleAutomationDefaults(cfg)
-	}
-
-	// Persist a licensed member's UI preference first, then commit config.json.
-	// If the second write fails, restore the previous member profile so the
-	// next launch cannot disagree with what this call reported.
-	var (
-		oldProfile    MemberSettings
-		hadOldProfile bool
-		profilePath   string
-	)
-	if a.license != nil && a.license.GetState().Activated {
-		oldProfile, hadOldProfile = a.loadMemberProfile()
-		settings := oldProfile
-		if !hadOldProfile {
-			settings = MemberSettings{
-				InterfaceLevel:       level,
-				SpeedProfile:         normalizeSpeedProfile(cfg.Automation.SpeedProfile),
-				MaxAttacksPerHour:    cfg.Automation.MaxAttacksPerHour,
-				MaxAttacksPerSession: cfg.Attack.MaxAttackPerSession,
-				BreakEveryAttacks:    cfg.Automation.BreakEveryAttacks,
-				BreakMinutes:         int(cfg.Automation.BreakDuration.Duration / time.Minute),
-				AdaptiveSearch:       cfg.Search.AdaptiveSearch,
-				AutoProfileSync:      cfg.Automation.AutoProfileSync,
-				AutoArmyGuard:        cfg.Automation.AutoArmyGuard,
-				AutoResourceTracking: cfg.Automation.AutoResourceTracking,
-			}
-		}
-		settings.InterfaceLevel = level
-		profilePath = a.memberProfilePath()
-		if err := a.persistMemberProfile(settings); err != nil {
-			return err
+	settings, ok := a.loadMemberProfile()
+	if !ok {
+		settings = MemberSettings{
+			InterfaceLevel:       level,
+			SpeedProfile:         normalizeSpeedProfile(cfg.Automation.SpeedProfile),
+			MaxAttacksPerHour:    cfg.Automation.MaxAttacksPerHour,
+			MaxAttacksPerSession: cfg.Attack.MaxAttackPerSession,
+			BreakEveryAttacks:    cfg.Automation.BreakEveryAttacks,
+			BreakMinutes:         int(cfg.Automation.BreakDuration.Duration / time.Minute),
+			AdaptiveSearch:       cfg.Search.AdaptiveSearch,
+			AutoProfileSync:      cfg.Automation.AutoProfileSync,
+			AutoArmyGuard:        cfg.Automation.AutoArmyGuard,
+			AutoResourceTracking: cfg.Automation.AutoResourceTracking,
 		}
 	}
-
-	if err := config.Save("config.json", cfg); err != nil {
-		if profilePath != "" {
-			if hadOldProfile {
-				_ = saveMemberProfileFile(profilePath, oldProfile)
-			} else {
-				_ = os.Remove(profilePath)
-				_ = os.Remove(profilePath + ".bak")
-				_ = os.Remove(profilePath + ".tmp")
-			}
-		}
-		return err
-	}
-
-	if a.bot != nil {
-		a.bot.UpdateConfig(cfg)
-	}
-	return nil
-}
-
-func (a *App) ApplyMemberPreset(preset string) (MemberSettings, error) {
-	current := a.GetMemberSettings()
-	next, err := applyMemberPreset(current, preset)
-	if err != nil {
-		return MemberSettings{}, err
-	}
-	return a.SaveMemberSettings(next)
+	settings.InterfaceLevel = level
+	return a.persistMemberProfile(settings)
 }
 
 func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error) {
