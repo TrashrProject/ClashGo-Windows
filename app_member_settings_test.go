@@ -45,7 +45,7 @@ func TestApplyMemberSpeedProfile(t *testing.T) {
 			cfg.Automation.BreakDuration = config.Duration{}
 			cfg.Search.MinLootGold = 987654
 			cfg.Search.MinLootElixir = 876543
-			cfg.Search.MinLootDark = 4321
+			cfg.Search.MinLootDarkElixir = 4321
 			cfg.Attack.StrategyFile = "keep-me.yaml"
 			cfg.Attack.MaxAttackPerSession = 37
 			cfg.Attack.UseQueen = true
@@ -82,8 +82,8 @@ func TestApplyMemberSpeedProfile(t *testing.T) {
 			if cfg.Attack.StrategyFile != "keep-me.yaml" {
 				t.Fatalf("speed profile changed strategy: %q", cfg.Attack.StrategyFile)
 			}
-			if cfg.Search.MinLootElixir != 876543 || cfg.Search.MinLootDark != 4321 {
-				t.Fatalf("speed profile changed loot thresholds: E=%d DE=%d", cfg.Search.MinLootElixir, cfg.Search.MinLootDark)
+			if cfg.Search.MinLootElixir != 876543 || cfg.Search.MinLootDarkElixir != 4321 {
+				t.Fatalf("speed profile changed loot thresholds: E=%d DE=%d", cfg.Search.MinLootElixir, cfg.Search.MinLootDarkElixir)
 			}
 			if cfg.Attack.MaxAttackPerSession != 37 {
 				t.Fatalf("speed profile changed session attack cap: %d", cfg.Attack.MaxAttackPerSession)
