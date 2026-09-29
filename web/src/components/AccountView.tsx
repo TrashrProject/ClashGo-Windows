@@ -73,6 +73,20 @@ const formatLicenseRemaining = (expiresAt?: string): string => {
 const isOfflineGrace = (state: LicenseState | null): boolean =>
   Boolean(state?.error && state.error.toLowerCase().includes('offline'));
 
+const snapshotAgeLabel = (timestamp?: string): string => {
+  if (!timestamp) return 'En attente';
+  const value = new Date(timestamp).getTime();
+  if (!Number.isFinite(value)) return 'Date inconnue';
+  const ageMs = Math.max(0, Date.now() - value);
+  const minutes = Math.floor(ageMs / 60000);
+  if (minutes < 1) return 'À l’instant';
+  if (minutes < 60) return `Il y a ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Il y a ${hours} h`;
+  const days = Math.floor(hours / 24);
+  return `Il y a ${days} j`;
+};
+
 const friendlyLicenseError = (value?: string): string => {
   const raw = String(value || '');
   const text = raw.toLowerCase();
@@ -153,6 +167,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [memberSaveError, setMemberSaveError] = React.useState('');
   const [memberPage, setMemberPage] = React.useState<'account' | 'settings' | 'village'>('account');
   const [confirmDeactivate, setConfirmDeactivate] = React.useState(false);
+  const [confirmUnlink, setConfirmUnlink] = React.useState(false);
 
   const refreshLicense = React.useCallback(async () => {
     try {
@@ -315,6 +330,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     setBusy(true);
     try {
       await ClearAccount();
+      setConfirmUnlink(false);
       setProfile(null);
       onAccountChanged('');
     } catch (e) {
@@ -778,9 +794,40 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               Options du compte
             </summary>
             <div className="absolute right-0 mt-2 z-20 min-w-[190px] rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-2 shadow-xl">
-              <button type="button" onClick={() => void unlink()} disabled={busy} className="w-full px-3 py-2.5 rounded-lg text-left text-xs font-black text-rose-500 hover:bg-rose-500/5 disabled:opacity-40">
-                Délier le compte
-              </button>
+              {!confirmUnlink ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmUnlink(true)}
+                  disabled={busy}
+                  className="w-full px-3 py-2.5 rounded-lg text-left text-xs font-black text-rose-500 hover:bg-rose-500/5 disabled:opacity-40"
+                >
+                  Délier le compte
+                </button>
+              ) : (
+                <div className="space-y-2 p-1">
+                  <div className="text-[10px] font-bold leading-relaxed text-zinc-500">
+                    Le profil Clash devra être lié à nouveau avec son tag.
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void unlink()}
+                      disabled={busy}
+                      className="flex-1 rounded-lg bg-rose-500 px-2 py-2 text-[9px] font-black uppercase tracking-wider text-white disabled:opacity-40"
+                    >
+                      {busy ? 'Déliage…' : 'Confirmer'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmUnlink(false)}
+                      disabled={busy}
+                      className="rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-2 text-[9px] font-black uppercase tracking-wider text-zinc-500 disabled:opacity-40"
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </details>
         </div>
@@ -885,7 +932,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                   </p>
                 </div>
                 <div className="text-[10px] font-bold text-zinc-400">
-                  {new Date(currentArmy.timestamp).toLocaleTimeString()}
+                  Dernière détection · {snapshotAgeLabel(currentArmy.timestamp)}
                 </div>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
@@ -1008,7 +1055,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 </div>
                 {resources?.timestamp && (
                   <div className="mt-3 text-[10px] font-bold text-zinc-400">
-                    Dernier scan : {new Date(resources.timestamp).toLocaleTimeString()}
+                    Dernier scan : {snapshotAgeLabel(resources.timestamp)}
                   </div>
                 )}
               </div>
