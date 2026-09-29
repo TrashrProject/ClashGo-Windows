@@ -113,6 +113,24 @@ const friendlyBotErrorMessage = (value: string): string => {
   if (text.includes('runtime assets missing')) {
     return 'Des fichiers nécessaires à ClashGO sont manquants. Ouvre Paramètres > État Windows pour voir lesquels.';
   }
+  if (text.includes('precision calibration') || text.includes('deployment calibration') || text.includes('calibration')) {
+    return 'La calibration de déploiement n’est pas prête. Ouvre Paramètres > État Windows puis relance le pré-contrôle.';
+  }
+  if (text.includes('strategy') && (text.includes('not found') || text.includes('missing') || text.includes('unavailable'))) {
+    return 'La stratégie d’attaque sélectionnée est introuvable. Ouvre Automatisation > Comportement et choisis une stratégie disponible.';
+  }
+  if (text.includes('army') && (text.includes('mismatch') || text.includes('not ready'))) {
+    return 'L’armée détectée ne correspond pas encore au plan de farm. ClashGO attend une composition fiable avant d’attaquer.';
+  }
+  if (text.includes('army') && (text.includes('uncertain') || text.includes('confidence'))) {
+    return 'ClashGO n’est pas assez sûr de la composition de l’armée. L’attaque est mise en attente plutôt que de prendre un risque.';
+  }
+  if (text.includes('session test active')) {
+    return 'Une session test est en cours. Attends sa fin ou arrête-la proprement avant de modifier ces réglages.';
+  }
+  if (text.includes('account service unavailable') || text.includes('clashgo account service unavailable')) {
+    return 'Le service de profil Clash est temporairement indisponible. Le bot peut continuer avec les données locales déjà enregistrées.';
+  }
   if (text.includes('startup was cancelled') || text.includes('boot cancelled')) {
     return 'Le démarrage du bot a été annulé.';
   }
