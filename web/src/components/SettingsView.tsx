@@ -63,6 +63,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   const [latestTrace, setLatestTrace] = React.useState('');
   const [traceBusy, setTraceBusy] = React.useState(false);
   const [bootReport, setBootReport] = React.useState<BootReportView | null>(null);
+  const [settingsPage, setSettingsPage] = React.useState<'general' | 'windows' | 'diagnostic'>('general');
   const resetTimerRef = React.useRef<number | null>(null);
 
   React.useEffect(() => () => {
@@ -148,7 +149,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   const overallReady = runtimeReady && playerReady && adbReady && !!preferredInstance;
 
   return (
-    <div className="bg-white dark:bg-zinc-900 p-10 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none max-w-2xl mx-auto transition-all duration-500">
+    <div className="bg-white dark:bg-zinc-900 p-6 md:p-8 rounded-[2.5rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none max-w-5xl mx-auto transition-all duration-500">
 
       <div className="flex justify-between items-center mb-12">
         <div>
@@ -160,8 +161,31 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
         </div>
       </div>
 
+      <div className="mb-6 inline-flex rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/40 p-1.5">
+        {([
+          ['general', 'Général', 'settings'],
+          ['windows', 'Windows', 'desktop_windows'],
+          ['diagnostic', 'Diagnostic', 'monitor_heart'],
+        ] as const).map(([id, label, icon]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setSettingsPage(id)}
+            className={
+              'flex items-center gap-2 rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] transition ' +
+              (settingsPage === id
+                ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950'
+                : 'text-zinc-500 hover:text-zinc-950 dark:hover:text-white')
+            }
+          >
+            <span className="material-symbols-outlined text-base">{icon}</span>
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="space-y-4">
-        <div className="bg-zinc-950 dark:bg-black text-white p-6 rounded-2xl border border-zinc-800 shadow-xl">
+        <div className={(settingsPage === 'windows' ? '' : 'hidden ') + "bg-zinc-950 dark:bg-black text-white p-6 rounded-2xl border border-zinc-800 shadow-xl"}>
           <div className="flex items-center justify-between mb-5">
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">État Windows</div>
@@ -239,7 +263,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           </details>
         </div>
 
-        {bootReport?.outcome === 'failed' && (
+        {settingsPage === 'windows' && bootReport?.outcome === 'failed' && (
           <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-5">
             <div className="flex items-start gap-4">
               <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-amber-500/10">
@@ -275,7 +299,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           role="switch"
           aria-checked={darkMode}
           onClick={() => setDarkMode(!darkMode)}
-          className="w-full flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 p-6 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 hover:bg-white dark:hover:bg-zinc-800/60 hover:shadow-premium dark:hover:shadow-none transition-all duration-300 group cursor-pointer text-left"
+          className={(settingsPage === 'general' ? '' : 'hidden ') + "w-full flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 p-6 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 hover:bg-white dark:hover:bg-zinc-800/60 hover:shadow-premium dark:hover:shadow-none transition-all duration-300 group cursor-pointer text-left"}
         >
           <div className="flex items-center gap-5">
             <div className="w-12 h-12 rounded-xl bg-white dark:bg-zinc-800 flex items-center justify-center border border-zinc-100 dark:border-zinc-700 group-hover:scale-105 transition-all duration-300 shadow-sm">
@@ -295,7 +319,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           </div>
         </button>
 
-        <details className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/20 overflow-hidden">
+        <details className={(settingsPage === 'diagnostic' ? '' : 'hidden ') + "rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/20 overflow-hidden"}>
           <summary className="cursor-pointer list-none flex items-center justify-between gap-4 p-5">
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Mesures techniques</div>
@@ -364,7 +388,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
               onCheckUpdates();
             }
           }}
-          className="w-full flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 p-6 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 hover:bg-white dark:hover:bg-zinc-800/60 hover:shadow-premium dark:hover:shadow-none transition-all duration-300 group cursor-pointer text-left"
+          className={(settingsPage === 'general' ? '' : 'hidden ') + "w-full flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 p-6 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 hover:bg-white dark:hover:bg-zinc-800/60 hover:shadow-premium dark:hover:shadow-none transition-all duration-300 group cursor-pointer text-left"}
         >
           <div className="flex items-center gap-5">
             <div className="w-12 h-12 rounded-xl bg-white dark:bg-zinc-900 flex items-center justify-center border border-zinc-100 dark:border-zinc-800 group-hover:scale-105 transition-all duration-300 shadow-sm">
@@ -399,7 +423,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
         </div>
 
 
-        <div className="rounded-2xl border border-zinc-100/60 dark:border-zinc-800/60 bg-zinc-50/40 dark:bg-zinc-950/20 overflow-hidden">
+        <div className={(settingsPage === 'diagnostic' ? '' : 'hidden ') + "rounded-2xl border border-zinc-100/60 dark:border-zinc-800/60 bg-zinc-50/40 dark:bg-zinc-950/20 overflow-hidden"}>
           <button
             type="button"
             onClick={() => setTraceOpen(v => !v)}
@@ -442,7 +466,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           type="button"
           onClick={handleExportDiagnostics}
           disabled={diagnosticsBusy}
-          className="w-full flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 p-6 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 hover:bg-white dark:hover:bg-zinc-800/60 transition-all duration-300 group disabled:opacity-60"
+          className={(settingsPage === 'diagnostic' ? '' : 'hidden ') + "w-full flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 p-6 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 hover:bg-white dark:hover:bg-zinc-800/60 transition-all duration-300 group disabled:opacity-60"}
         >
           <div className="flex items-center gap-5 min-w-0">
             <div className="w-12 h-12 rounded-xl bg-white dark:bg-zinc-900 flex items-center justify-center border border-zinc-100 dark:border-zinc-800 shadow-sm">
@@ -458,7 +482,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
         </button>
 
         {/* Reset Section — armed-confirm to protect against misclicks. */}
-        <div className="pt-8 mt-8 border-t border-zinc-50 dark:border-zinc-800/50">
+        <div className={(settingsPage === 'diagnostic' ? '' : 'hidden ') + "pt-8 mt-8 border-t border-zinc-50 dark:border-zinc-800/50"}>
            <button
              onClick={handleResetClick}
              disabled={isRunning || isStarting}
