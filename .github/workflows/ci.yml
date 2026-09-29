@@ -42,6 +42,9 @@ jobs:
       - name: Validate Wails frontend contract
         run: node tools/check-wails-contract.mjs
 
+      - name: Guard UI runtime identifiers from translation
+        run: node tools/check-ui-localization-safety.mjs
+
       - name: Validate control API parity
         run: node tools/check-control-api-parity.mjs
 
