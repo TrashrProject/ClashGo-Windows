@@ -1407,15 +1407,15 @@ func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error
 	cfg.Automation.AutoArmyGuard = settings.AutoArmyGuard
 	cfg.Automation.AutoResourceTracking = settings.AutoResourceTracking
 
-	if a.bot != nil {
-		a.bot.UpdateConfig(cfg)
-	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return MemberSettings{}, err
 	}
 	if err := os.WriteFile(paths.ResolveConfig("config.json"), data, 0600); err != nil {
 		return MemberSettings{}, err
+	}
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
 	}
 	return a.GetMemberSettings(), nil
 }
@@ -1429,14 +1429,17 @@ func (a *App) SetSimpleMode(enabled bool) error {
 	if enabled {
 		applySimpleAutomationDefaults(cfg)
 	}
-	if a.bot != nil {
-		a.bot.UpdateConfig(cfg)
-	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(paths.ResolveConfig("config.json"), data, 0600)
+	if err := os.WriteFile(paths.ResolveConfig("config.json"), data, 0600); err != nil {
+		return err
+	}
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	return nil
 }
 
 // SaveAccountConfig stores only the player's tag. The Clash API credential
@@ -1455,15 +1458,17 @@ func (a *App) SaveAccountConfig(playerTag string) error {
 	// Purge legacy desktop keys during the first save after upgrading.
 	cfg.Account.LegacyAPIKey = ""
 
-	if a.bot != nil {
-		a.bot.UpdateConfig(cfg)
-	}
-
 	bytes, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0600)
+	if err := os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0600); err != nil {
+		return err
+	}
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	return nil
 }
 
 // ClearAccount removes the local player link. No developer credential is
@@ -1837,6 +1842,20 @@ func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strat
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	const maxLootThreshold = 10_000_000
+	if minGold < 0 || minGold > maxLootThreshold {
+		return fmt.Errorf("gold threshold must be between 0 and %d", maxLootThreshold)
+	}
+	if minElixir < 0 || minElixir > maxLootThreshold {
+		return fmt.Errorf("elixir threshold must be between 0 and %d", maxLootThreshold)
+	}
+	if minDE < 0 || minDE > maxLootThreshold {
+		return fmt.Errorf("dark elixir threshold must be between 0 and %d", maxLootThreshold)
+	}
+	if stall < 0 || stall > 600 {
+		return fmt.Errorf("stall timer must be between 0 and 600 seconds")
+	}
+
 	cfg := config.LoadOrDefault("config.json")
 	cfg.Search.MinLootGold = minGold
 	cfg.Search.MinLootElixir = minElixir
@@ -1862,16 +1881,20 @@ func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strat
 		cfg.Attack.StrategyFile = resolved
 	}
 
-	// Update running bot in real-time if it exists
-	if a.bot != nil {
-		a.bot.UpdateConfig(cfg)
-	}
-
 	bytes, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644)
+	if err := os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644); err != nil {
+		return err
+	}
+
+	// Apply live only after persistence succeeds so memory and disk cannot
+	// diverge when Windows rejects a write.
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	return nil
 }
 
 // SaveFarmComposition persists the selected HDV farm profile.
@@ -1927,15 +1950,17 @@ func (a *App) SaveFarmComposition(enabled bool, townHall int, profileJSON string
 	cfg.Attack.Farm.TownHall = townHall
 	cfg.Attack.Farm.Profiles[fmt.Sprintf("%d", townHall)] = profile
 
-	if a.bot != nil {
-		a.bot.UpdateConfig(cfg)
-	}
-
 	bytes, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644)
+	if err := os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644); err != nil {
+		return err
+	}
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	return nil
 }
 
 // GetStrategies lists available strategy files
