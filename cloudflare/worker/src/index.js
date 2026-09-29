@@ -452,6 +452,62 @@ async function listLicenseEvents(env, limit = 500) {
   return result.results || [];
 }
 
+async function customerDetail(env, customerId) {
+  const id = clean(customerId);
+  if (!id) return null;
+
+  const customer = await env.DB.prepare(`
+    SELECT id, display_name, contact, notes, payment_status,
+           total_paid_cents, next_due_at, created_at, updated_at
+    FROM customers
+    WHERE id = ?1
+  `).bind(id).first();
+  if (!customer) return null;
+
+  const licenses = await env.DB.prepare(`
+    SELECT id, hint, role, active, machine_id, created_at, last_seen_at,
+           app_version, plan, duration_days, activated_at, expires_at
+    FROM licenses
+    WHERE customer_id = ?1
+    ORDER BY created_at DESC
+  `).bind(id).all();
+
+  const history = await env.DB.prepare(`
+    SELECT id, license_id, event_type, plan, amount_cents, payment_status,
+           note, created_at, expires_at
+    FROM license_events
+    WHERE customer_id = ?1
+    ORDER BY created_at DESC
+    LIMIT 200
+  `).bind(id).all();
+
+  const incidents = await env.DB.prepare(`
+    SELECT i.id, i.at, i.received_at, i.license_hint, i.role, i.machine_id,
+           i.app_version, i.level, i.message
+    FROM incidents i
+    INNER JOIN licenses l ON l.id = i.license_id
+    WHERE l.customer_id = ?1
+    ORDER BY i.received_at DESC
+    LIMIT 100
+  `).bind(id).all();
+
+  return {
+    customer,
+    licenses: licenses.results || [],
+    history: history.results || [],
+    incidents: incidents.results || [],
+  };
+}
+
+async function customerDetailRequest(request, env) {
+  const url = new URL(request.url);
+  const id = clean(url.searchParams.get("id"));
+  if (!id) return json({ message: "customer id is required" }, 400);
+  const detail = await customerDetail(env, id);
+  if (!detail) return json({ message: "customer not found" }, 404);
+  return json(detail);
+}
+
 async function dashboardSummary(env) {
   const now = new Date();
   const in7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -704,6 +760,9 @@ async function router(request, env) {
     }
     if (request.method === "GET" && path === "/v1/admin/customers") {
       return json({ customers: await listCustomers(env) });
+    }
+    if (request.method === "GET" && path === "/v1/admin/customer") {
+      return customerDetailRequest(request, env);
     }
     if (request.method === "GET" && path === "/v1/admin/history") {
       return json({ events: await listLicenseEvents(env, 500) });
