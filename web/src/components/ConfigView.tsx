@@ -495,7 +495,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
         </div>
         )}
 
-        <div className="flex flex-col items-end gap-3 pt-4">
+        <div className="sticky bottom-4 z-20 flex flex-col items-end gap-3 rounded-2xl border border-zinc-200/70 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 p-3 backdrop-blur-xl shadow-premium">
           {anyInvalid && (
             <div className="px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] font-bold text-amber-600 dark:text-amber-400 tracking-wider" role="alert">
               <span className="material-symbols-outlined text-sm align-middle mr-1">warning</span>
@@ -516,7 +516,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
           <button
             type="submit"
             disabled={saveStatus === 'saving' || anyInvalid}
-            aria-label={`${saveButtonLabel} — saves your config to the bot`}
+            aria-label={`${saveButtonLabel} — enregistre la configuration du bot`}
             data-testid="config-save-btn"
             data-save-state={saveStatus}
             className={`group h-16 px-12 font-black text-xs uppercase tracking-[0.3em] rounded-3xl transition-all duration-300 active:scale-[0.98] flex items-center gap-4 border border-transparent dark:border-white/10 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed ${saveButtonClasses}`}
