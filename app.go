@@ -2640,6 +2640,7 @@ func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error
 		a.bot.RecordMemberSettingsChange(
 			settings.SpeedProfile,
 			settings.MaxAttacksPerHour,
+			settings.MaxAttacksPerSession,
 			settings.BreakEveryAttacks,
 			settings.BreakMinutes,
 		)
