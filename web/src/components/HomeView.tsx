@@ -12,6 +12,7 @@ interface HomeViewProps {
   starting: boolean;
   onStart: () => void;
   onStartWithPreset: (preset: 'short' | 'balanced' | 'fast') => void;
+  onSpeedChange: (profile: 'cautious' | 'normal' | 'fast') => void;
   onStartTestSession: () => void;
   onStartQuickTestSession: () => void;
   onStop: () => void;
@@ -240,7 +241,7 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, sessionReport, testSessionActive, running, starting,
-    onStart, onStartWithPreset, onStartTestSession, onStartQuickTestSession, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
+    onStart, onStartWithPreset, onSpeedChange, onStartTestSession, onStartQuickTestSession, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
     licenseReady, licenseRequired, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
     memberName, licensePlan, licenseExpiresAt, latestBootReport, currentArmy,
@@ -627,6 +628,46 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           </button>
         </div>
       </section>
+
+      {(running || starting) && !testSessionActive && (
+        <section className="rounded-[1.5rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-premium dark:shadow-none">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">Vitesse en direct</div>
+              <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white">Profil actuel · {runtimeSpeedLabel}</div>
+              <div className="mt-1 text-[11px] font-semibold text-zinc-500">Le changement s’applique au bot en cours sans modifier la limite de session.</div>
+            </div>
+            <div className="flex gap-2">
+              {([
+                ['cautious', 'Prudente'],
+                ['normal', 'Normale'],
+                ['fast', 'Rapide'],
+              ] as const).map(([id, label]) => {
+                const active =
+                  (id === 'cautious' && runtimeSpeedLabel === 'Prudente') ||
+                  (id === 'normal' && runtimeSpeedLabel === 'Normale') ||
+                  (id === 'fast' && runtimeSpeedLabel === 'Rapide');
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => onSpeedChange(id)}
+                    disabled={starting}
+                    className={
+                      'rounded-xl px-3.5 py-2.5 text-[9px] font-black uppercase tracking-widest transition disabled:opacity-40 ' +
+                      (active
+                        ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950'
+                        : 'border border-zinc-200 text-zinc-500 hover:text-zinc-950 dark:border-zinc-700 dark:hover:text-white')
+                    }
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
 
       {renewalNotice && (
         <button
