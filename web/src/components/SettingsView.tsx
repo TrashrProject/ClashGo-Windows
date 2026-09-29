@@ -212,42 +212,54 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           </div>
         </button>
 
-          {[
-            { label: 'État de connexion', value: stats.adb_health.consecutive_fails === 0 ? 'Optimal' : 'Interrompu', status: stats.adb_health.consecutive_fails === 0 ? 'success' : 'error', icon: 'hub', detail: stats.adb_health.last_error },
-            { label: 'Port ADB', value: adbPort.toString(), status: 'info', icon: 'router' },
-            { label: 'Latence capture', value: isNaN(stats.adb_health.avg_capture_ms) ? '0ms' : `${stats.adb_health.avg_capture_ms.toFixed(1)}ms`, status: stats.adb_health.avg_capture_ms < 200 ? 'success' : 'info', icon: 'speed' },
-            { label: 'Captures réussies', value: stats.adb_health.captures_total > 0 ? `${((stats.adb_health.captures_total / Math.max(1, stats.adb_health.captures_total + stats.adb_health.errors_total)) * 100).toFixed(1)}%` : '—', status: stats.adb_health.errors_total === 0 ? 'success' : 'info', icon: 'monitoring' },
-            { label: 'Erreurs ADB', value: stats.adb_health.errors_total.toLocaleString(), status: stats.adb_health.consecutive_fails > 0 ? 'error' : 'success', icon: 'error' },
-            // cpu_time_sec is device-independent (absolute CPU seconds since
-            // start). cpu_cores is a fraction of one core; scaled by the host's
-            // logical core count only to render a familiar 0-100% number.
-            { label: 'Temps CPU', value: `${stats.cpu_time_sec.toFixed(1)}s`, status: 'info', icon: 'schedule' },
-            { label: 'Utilisation CPU', value: isNaN(stats.cpu_cores) ? '0%' : `${(stats.cpu_cores * (navigator.hardwareConcurrency || 1) * 100).toFixed(1)}%`, status: stats.cpu_cores < 0.5 ? 'success' : 'info', icon: 'memory' },
-            { label: 'Récupérations réussies', value: stats.recovery_attempts > 0 ? `${stats.recovery_successes}/${stats.recovery_attempts}` : '0/0', status: stats.recovery_attempts === stats.recovery_successes ? 'success' : 'info', icon: 'healing' },
-            { label: 'Redémarrages BlueStacks', value: stats.bluestacks_restarts.toLocaleString(), status: stats.bluestacks_restarts === 0 ? 'success' : 'info', icon: 'restart_alt' },
-          ].map((item, i) => (
+        <details className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/20 overflow-hidden">
+          <summary className="cursor-pointer list-none flex items-center justify-between gap-4 p-5">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Mesures techniques</div>
+              <div className="mt-1 text-sm font-bold text-zinc-950 dark:text-white">ADB, captures, CPU et récupération</div>
+              <div className="mt-1 text-[10px] text-zinc-400">À ouvrir uniquement pour le diagnostic ou le support.</div>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">expand_more</span>
+          </summary>
+          <div className="border-t border-zinc-100 dark:border-zinc-800 p-4 space-y-3">
+            {[
+              { label: 'État de connexion', value: stats.adb_health.consecutive_fails === 0 ? 'Optimal' : 'Interrompu', status: stats.adb_health.consecutive_fails === 0 ? 'success' : 'error', icon: 'hub', detail: stats.adb_health.last_error },
+              { label: 'Port ADB', value: adbPort.toString(), status: 'info', icon: 'router' },
+              { label: 'Latence capture', value: isNaN(stats.adb_health.avg_capture_ms) ? '0ms' : `${stats.adb_health.avg_capture_ms.toFixed(1)}ms`, status: stats.adb_health.avg_capture_ms < 200 ? 'success' : 'info', icon: 'speed' },
+              { label: 'Captures réussies', value: stats.adb_health.captures_total > 0 ? `${((stats.adb_health.captures_total / Math.max(1, stats.adb_health.captures_total + stats.adb_health.errors_total)) * 100).toFixed(1)}%` : '—', status: stats.adb_health.errors_total === 0 ? 'success' : 'info', icon: 'monitoring' },
+              { label: 'Erreurs ADB', value: stats.adb_health.errors_total.toLocaleString(), status: stats.adb_health.consecutive_fails > 0 ? 'error' : 'success', icon: 'error' },
+              // cpu_time_sec is device-independent (absolute CPU seconds since
+              // start). cpu_cores is a fraction of one core; scaled by the host's
+              // logical core count only to render a familiar 0-100% number.
+              { label: 'Temps CPU', value: `${stats.cpu_time_sec.toFixed(1)}s`, status: 'info', icon: 'schedule' },
+              { label: 'Utilisation CPU', value: isNaN(stats.cpu_cores) ? '0%' : `${(stats.cpu_cores * (navigator.hardwareConcurrency || 1) * 100).toFixed(1)}%`, status: stats.cpu_cores < 0.5 ? 'success' : 'info', icon: 'memory' },
+              { label: 'Récupérations réussies', value: stats.recovery_attempts > 0 ? `${stats.recovery_successes}/${stats.recovery_attempts}` : '0/0', status: stats.recovery_attempts === stats.recovery_successes ? 'success' : 'info', icon: 'healing' },
+              { label: 'Redémarrages BlueStacks', value: stats.bluestacks_restarts.toLocaleString(), status: stats.bluestacks_restarts === 0 ? 'success' : 'info', icon: 'restart_alt' },
+            ].map((item, i) => (
 
-          <div key={i} className="flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 p-6 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 hover:bg-white dark:hover:bg-zinc-800/60 hover:shadow-premium dark:hover:shadow-none transition-all duration-300 group">
-            <div className="flex items-center gap-5">
-              <div className="w-12 h-12 rounded-xl bg-white dark:bg-zinc-900 flex items-center justify-center border border-zinc-100 dark:border-zinc-800 group-hover:scale-105 transition-all duration-300 shadow-sm">
-                <span className="material-symbols-outlined text-xl text-zinc-500 dark:text-zinc-500">{item.icon}</span>
+            <div key={i} className="flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 p-6 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 hover:bg-white dark:hover:bg-zinc-800/60 hover:shadow-premium dark:hover:shadow-none transition-all duration-300 group">
+              <div className="flex items-center gap-5">
+                <div className="w-12 h-12 rounded-xl bg-white dark:bg-zinc-900 flex items-center justify-center border border-zinc-100 dark:border-zinc-800 group-hover:scale-105 transition-all duration-300 shadow-sm">
+                  <span className="material-symbols-outlined text-xl text-zinc-500 dark:text-zinc-500">{item.icon}</span>
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.2em] mb-0.5">{item.label}</span>
+                  <span className={`text-sm font-bold tracking-tight ${item.status === 'error' ? 'text-rose-600 dark:text-rose-400' : 'text-zinc-950 dark:text-white'}`}>{item.value}</span>
+                  {item.detail && (
+                    <span className="mt-1 text-[10px] font-mono text-rose-500/70 truncate max-w-[220px]" title={item.detail}>{item.detail}</span>
+                  )}
+                </div>
               </div>
-              <div className="flex flex-col min-w-0">
-                <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.2em] mb-0.5">{item.label}</span>
-                <span className={`text-sm font-bold tracking-tight ${item.status === 'error' ? 'text-rose-600 dark:text-rose-400' : 'text-zinc-950 dark:text-white'}`}>{item.value}</span>
-                {item.detail && (
-                  <span className="mt-1 text-[10px] font-mono text-rose-500/70 truncate max-w-[220px]" title={item.detail}>{item.detail}</span>
-                )}
+              <div className="flex items-center gap-3">
+                 <div className={`w-2 h-2 rounded-full ${
+                   item.status === 'success' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' :
+                   item.status === 'error' ? 'bg-rose-500 animate-pulse shadow-[0_0_8px_rgba(244,63,94,0.4)]' : 'bg-zinc-300 dark:bg-zinc-600'
+                 }`}></div>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-               <div className={`w-2 h-2 rounded-full ${
-                 item.status === 'success' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' :
-                 item.status === 'error' ? 'bg-rose-500 animate-pulse shadow-[0_0_8px_rgba(244,63,94,0.4)]' : 'bg-zinc-300 dark:bg-zinc-600'
-               }`}></div>
-            </div>
-          </div>
         ))}
+          </div>
+        </details>
 
         {/* Mise à jour row — surfaces current version + a manual check
             button so users can force a refresh without waiting for the
