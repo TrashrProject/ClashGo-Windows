@@ -248,6 +248,20 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
 
   const lastAttack = history && history.length > 0 ? history[0] : undefined;
   const [sessionCopyState, setSessionCopyState] = React.useState<'idle' | 'copied' | 'error'>('idle');
+  const [startupElapsedSeconds, setStartupElapsedSeconds] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!starting) {
+      setStartupElapsedSeconds(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setStartupElapsedSeconds(0);
+    const timer = window.setInterval(() => {
+      setStartupElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [starting]);
   const recentActivity = React.useMemo(
     () => (activity || [])
       .filter((event) => event.type !== 'state_changed' && event.type !== 'target_skipped')
@@ -464,9 +478,17 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     return null;
   }, [licenseExpiresAt, licenseReady]);
 
+  const startupPhase = React.useMemo(() => {
+    if (!starting) return '';
+    if (startupElapsedSeconds < 15) return 'Préparation de BlueStacks…';
+    if (startupElapsedSeconds < 45) return 'Connexion ADB et détection de l’instance…';
+    if (startupElapsedSeconds < 90) return 'Vérification de Clash of Clans…';
+    return 'BlueStacks met plus de temps que prévu · ClashGO applique ses récupérations automatiques…';
+  }, [starting, startupElapsedSeconds]);
+
   const botLabel = starting ? 'Démarrage…' : running ? 'Bot en cours' : 'Bot arrêté';
   const botSub = starting
-    ? 'ClashGO prépare BlueStacks et l’automatisation.'
+    ? startupPhase
     : running
       ? 'L’automatisation est active. Tu peux laisser ClashGO travailler.'
       : 'Vérifie les quatre états ci-dessous puis lance le bot.';
@@ -515,6 +537,11 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
               {testSessionActive && (
                 <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-sky-300 dark:text-sky-600">
                   Mode test · {sessionCap > 0 ? sessionCap : '…'} attaques
+                </span>
+              )}
+              {starting && (
+                <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-amber-300 dark:text-amber-700 tabular-nums">
+                  Démarrage · {startupElapsedSeconds}s
                 </span>
               )}
               {licenseReady && (() => {
