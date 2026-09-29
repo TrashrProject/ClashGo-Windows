@@ -75,9 +75,25 @@ type supportIncident struct {
 	Fields     map[string]any `json:"fields,omitempty"`
 }
 
+type licenseEvent struct {
+	ID              string    `json:"id"`
+	LicenseID       string    `json:"license_id"`
+	LicenseHint     string    `json:"license_hint,omitempty"`
+	CustomerName    string    `json:"customer_name,omitempty"`
+	CustomerContact string    `json:"customer_contact,omitempty"`
+	EventType       string    `json:"event_type"`
+	Plan            string    `json:"plan,omitempty"`
+	AmountCents     int       `json:"amount_cents,omitempty"`
+	PaymentStatus   string    `json:"payment_status,omitempty"`
+	Note            string    `json:"note,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	ExpiresAt       time.Time `json:"expires_at,omitempty"`
+}
+
 type controlData struct {
 	Licenses  map[string]*licenseRecord `json:"licenses"`
 	Incidents []supportIncident         `json:"incidents"`
+	Events    []licenseEvent             `json:"events,omitempty"`
 }
 
 type controlStore struct {
@@ -140,6 +156,27 @@ func newLicenseKey() (string, error) {
 	}
 	raw := strings.ToUpper(hex.EncodeToString(buf))
 	return fmt.Sprintf("CGO-%s-%s-%s-%s", raw[0:6], raw[6:12], raw[12:18], raw[18:24]), nil
+}
+
+func newControlEventID() string {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("evt-%d", time.Now().UTC().UnixNano())
+	}
+	return hex.EncodeToString(buf)
+}
+
+func (s *controlStore) appendEventLocked(event licenseEvent) {
+	if event.ID == "" {
+		event.ID = newControlEventID()
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = time.Now().UTC()
+	}
+	s.data.Events = append(s.data.Events, event)
+	if len(s.data.Events) > 5000 {
+		s.data.Events = append([]licenseEvent(nil), s.data.Events[len(s.data.Events)-5000:]...)
+	}
 }
 
 func validRole(role string) string {
