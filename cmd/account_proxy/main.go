@@ -692,6 +692,96 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
 
+
+	mux.HandleFunc("POST /v1/admin/licenses/set-role", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminKey) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "admin authorization required"})
+			return
+		}
+		var in struct {
+			LicenseID string `json:"license_id"`
+			Role      string `json:"role"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
+			return
+		}
+		id := strings.TrimSpace(in.LicenseID)
+		if id == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "license_id is required"})
+			return
+		}
+		role := validRole(in.Role)
+		control.mu.Lock()
+		var rec *licenseRecord
+		for hash, candidate := range control.data.Licenses {
+			if candidate == nil {
+				continue
+			}
+			candidateID := candidate.ID
+			if candidateID == "" {
+				candidateID = licenseIDFromHash(hash)
+			}
+			if candidateID == id {
+				rec = candidate
+				break
+			}
+		}
+		if rec == nil {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "license not found"})
+			return
+		}
+		rec.Role = role
+		_ = control.saveLocked()
+		control.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "role": role})
+	})
+
+	mux.HandleFunc("POST /v1/admin/licenses/set-active", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminKey) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "admin authorization required"})
+			return
+		}
+		var in struct {
+			LicenseID string `json:"license_id"`
+			Active    bool   `json:"active"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
+			return
+		}
+		id := strings.TrimSpace(in.LicenseID)
+		if id == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "license_id is required"})
+			return
+		}
+		control.mu.Lock()
+		var rec *licenseRecord
+		for hash, candidate := range control.data.Licenses {
+			if candidate == nil {
+				continue
+			}
+			candidateID := candidate.ID
+			if candidateID == "" {
+				candidateID = licenseIDFromHash(hash)
+			}
+			if candidateID == id {
+				rec = candidate
+				break
+			}
+		}
+		if rec == nil {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "license not found"})
+			return
+		}
+		rec.Active = in.Active
+		_ = control.saveLocked()
+		control.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "active": in.Active})
+	})
+
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           corsMiddleware(mux, webOrigin),
