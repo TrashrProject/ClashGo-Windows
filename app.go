@@ -1405,6 +1405,16 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 	return BotStatus{Running: true, Message: "Initialisation du bot démarrée"}
 }
 
+func autonomousStopDetails(stats bot.BotStats) (string, string) {
+	if stats.SessionAttackCap > 0 && int(stats.SessionAttacks) >= stats.SessionAttackCap {
+		return "attack_cap", fmt.Sprintf(
+			"Session terminée · limite de %d attaques atteinte.",
+			stats.SessionAttackCap,
+		)
+	}
+	return "runtime_ended", "La session ClashGO est terminée."
+}
+
 func (a *App) watchBotRuntime(b *bot.Bot) {
 	if a == nil || b == nil {
 		return
@@ -1429,15 +1439,7 @@ func (a *App) watchBotRuntime(b *bot.Bot) {
 	a.stopping = true
 	a.mu.Unlock()
 
-	stopReason := "runtime_ended"
-	stopMessage := "La session ClashGO est terminée."
-	if current.SessionAttackCap > 0 && int(current.SessionAttacks) >= current.SessionAttackCap {
-		stopReason = "attack_cap"
-		stopMessage = fmt.Sprintf(
-			"Session terminée · limite de %d attaques atteinte.",
-			current.SessionAttackCap,
-		)
-	}
+	stopReason, stopMessage := autonomousStopDetails(current)
 
 	log.Info().
 		Str("reason", stopReason).
