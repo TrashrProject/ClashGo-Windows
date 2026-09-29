@@ -828,6 +828,28 @@ function App() {
     return null;
   }, [licenseAccessReady, licenseExpiresAt]);
 
+  const windowsPreflightReady = useMemo(() => (
+    systemDiagnostics
+      ? Boolean(
+          systemDiagnostics.assets_ready &&
+          systemDiagnostics.emulator?.adb_found &&
+          systemDiagnostics.emulator?.bluestacks_player_found &&
+          systemDiagnostics.emulator?.preferred_instance
+        )
+      : false
+  ), [systemDiagnostics]);
+
+  const startReady = licenseAccessReady && Boolean(playerTag) && windowsPreflightReady;
+  const startBlockedReason = !licenseAccessReady
+    ? 'Active ta licence dans Mon ClashGO.'
+    : !playerTag
+      ? 'Lie ton compte Clash dans Mon ClashGO.'
+      : !systemDiagnostics
+        ? 'Vérification de l’environnement Windows en cours…'
+        : !windowsPreflightReady
+          ? 'Vérifie BlueStacks et ADB dans Paramètres > État Windows.'
+          : '';
+
   const readinessIssues = useMemo(() => {
     if (!systemDiagnostics) return [] as string[];
     const issues: string[] = [];
@@ -919,6 +941,8 @@ function App() {
         licenseRole={licenseRole}
         memberName={licenseMemberName}
         licensePlan={licensePlan}
+        startReady={startReady}
+        startBlockedReason={startBlockedReason}
       />
 
       <main 
@@ -1053,14 +1077,7 @@ function App() {
               memberName={licenseMemberName}
               licensePlan={licensePlan}
               accountLinked={Boolean(playerTag)}
-              windowsReady={systemDiagnostics
-                ? Boolean(
-                    systemDiagnostics.assets_ready &&
-                    systemDiagnostics.emulator?.adb_found &&
-                    systemDiagnostics.emulator?.bluestacks_player_found &&
-                    systemDiagnostics.emulator?.preferred_instance
-                  )
-                : null}
+              windowsReady={systemDiagnostics ? windowsPreflightReady : null}
               readinessIssues={readinessIssues}
             />
           )}
