@@ -133,6 +133,9 @@ const friendlyLicenseError = (value?: string): string => {
   if (text.includes('already activated on another machine') || text.includes('machine mismatch')) {
     return 'Licence déjà liée à un autre PC · réinitialisation nécessaire.';
   }
+  if (text.includes('free trial already used')) {
+    return 'L’essai gratuit de 2 jours a déjà été utilisé sur ce PC.';
+  }
   if (text.includes('expired')) return 'Licence expirée · renouvellement nécessaire.';
   if (text.includes('invalid') || text.includes('revoked')) return 'Licence invalide ou désactivée.';
   if (text.includes('not configured')) return 'Le service de licence ClashGO n’est pas encore configuré.';
