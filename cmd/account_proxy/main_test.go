@@ -351,3 +351,26 @@ func TestApplyLicenseRenewalProtectsLifetime(t *testing.T) {
 		t.Fatalf("lifetime renewal = %q/%d/%s", plan, days, expiresAt)
 	}
 }
+
+
+func TestIncidentMachineAuthorized(t *testing.T) {
+	tests := []struct {
+		name     string
+		bound    string
+		reported string
+		want     bool
+	}{
+		{"exact match", "machine-a", "machine-a", true},
+		{"trimmed exact match", " machine-a ", "machine-a", true},
+		{"missing bound machine", "", "machine-a", false},
+		{"missing reported machine", "machine-a", "", false},
+		{"different machine", "machine-a", "machine-b", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := incidentMachineAuthorized(tc.bound, tc.reported); got != tc.want {
+				t.Fatalf("incidentMachineAuthorized(%q,%q)=%v want %v", tc.bound, tc.reported, got, tc.want)
+			}
+		})
+	}
+}
