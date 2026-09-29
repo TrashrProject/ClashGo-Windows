@@ -1453,9 +1453,8 @@ func (a *App) memberProfilePath() string {
 	return paths.ResolveConfig(filepath.Join("members", id+".json"))
 }
 
-func (a *App) persistMemberProfile(settings MemberSettings) error {
-	path := a.memberProfilePath()
-	if path == "" {
+func saveMemberProfileFile(path string, settings MemberSettings) error {
+	if strings.TrimSpace(path) == "" {
 		return nil
 	}
 	settings = sanitizeMemberSettings(settings)
@@ -1466,23 +1465,82 @@ func (a *App) persistMemberProfile(settings MemberSettings) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+
+	tmpPath := path + ".tmp"
+	backupPath := path + ".bak"
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	_ = os.Remove(backupPath)
+	hadOriginal := false
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Rename(path, backupPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return err
+		}
+		hadOriginal = true
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backupPath, path)
+		}
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	_ = os.Remove(backupPath)
+	return nil
+}
+
+func loadMemberProfileFile(path string) (MemberSettings, bool) {
+	if strings.TrimSpace(path) == "" {
+		return MemberSettings{}, false
+	}
+
+	read := func(candidate string) (MemberSettings, bool) {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			return MemberSettings{}, false
+		}
+		var settings MemberSettings
+		if json.Unmarshal(data, &settings) != nil {
+			return MemberSettings{}, false
+		}
+		return sanitizeMemberSettings(settings), true
+	}
+
+	if settings, ok := read(path); ok {
+		return settings, true
+	}
+	if settings, ok := read(path + ".bak"); ok {
+		// Best-effort self-heal so the next launch reads a valid primary file.
+		_ = saveMemberProfileFile(path, settings)
+		return settings, true
+	}
+	return MemberSettings{}, false
+}
+
+func (a *App) persistMemberProfile(settings MemberSettings) error {
+	return saveMemberProfileFile(a.memberProfilePath(), settings)
 }
 
 func (a *App) loadMemberProfile() (MemberSettings, bool) {
-	path := a.memberProfilePath()
-	if path == "" {
-		return MemberSettings{}, false
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return MemberSettings{}, false
-	}
-	var settings MemberSettings
-	if json.Unmarshal(data, &settings) != nil {
-		return MemberSettings{}, false
-	}
-	return sanitizeMemberSettings(settings), true
+	return loadMemberProfileFile(a.memberProfilePath())
 }
 
 func (a *App) applyMemberProfileForCurrentLicense() error {
