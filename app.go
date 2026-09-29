@@ -19,7 +19,9 @@ import (
 	"github.com/Ducky705/ClashGO/internal/bot"
 	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/logger"
+	"github.com/Ducky705/ClashGO/internal/licensing"
 	"github.com/Ducky705/ClashGO/internal/paths"
+	"github.com/Ducky705/ClashGO/internal/support"
 	"github.com/Ducky705/ClashGO/internal/telemetry"
 	"github.com/Ducky705/ClashGO/internal/updater"
 	"github.com/labstack/echo/v4"
@@ -56,6 +58,10 @@ type App struct {
 	cachedHistory   []bot.AttackReport
 	cachedHistoryMu sync.RWMutex
 
+	// License + automatic support reporting.
+	license         *licensing.Service
+	supportReporter *support.Reporter
+
 	// Updater wiring
 	updater       *updater.Service
 	updaterBgCtx  context.Context
@@ -87,8 +93,12 @@ func (w *WailsLogWriter) Write(p []byte) (n int, err error) {
 
 // NewApp creates a new App application struct
 func NewApp() *App {
+	cfg := config.LoadOrDefault("config.json")
+	controlURL := clashAccountServiceURL(cfg)
+	licenseService := licensing.New(controlURL, version)
 	return &App{
 		logBuffer: make([]string, 0, 100),
+		license:   licenseService,
 		updater:   updater.New(updater.DefaultConfigWithChannel(version, updateChannel)),
 	}
 }
@@ -98,10 +108,28 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	// Setup log bridge
+	// Setup license state + automatic support reporter before the logger so
+	// error/fatal/panic records can be queued from the first startup failure.
+	if a.license == nil {
+		cfg := config.LoadOrDefault("config.json")
+		a.license = licensing.New(clashAccountServiceURL(cfg), version)
+	}
+	cfg := config.LoadOrDefault("config.json")
+	a.supportReporter = support.New(clashAccountServiceURL(cfg), version, a.license)
+
+	// Setup log bridge.
 	wailsWriter := &WailsLogWriter{app: a}
-	logger.Init(os.Getenv("DEBUG") != "", wailsWriter)
+	logger.Init(os.Getenv("DEBUG") != "", wailsWriter, a.supportReporter)
 	a.loadPersistedStats()
+
+	// Validate a previously activated license without blocking first paint.
+	go func() {
+		state := a.license.Validate(context.Background())
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "license_state", state)
+		}
+		a.supportReporter.Flush(context.Background())
+	}()
 
 	// Bring up the updater service. If NewApp wasn't used (rare
 	// test scaffold), construct lazily.
@@ -172,6 +200,11 @@ func (a *App) loadPersistedStats() {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	if a.supportReporter != nil {
+		a.supportReporter.Flush(context.Background())
+		a.supportReporter.Close()
+	}
+
 	// Stop the updater's background poller so it can't fire an HTTP
 	// check mid-teardown.
 	if a.updaterBgStop != nil {
@@ -848,6 +881,49 @@ func (a *App) IsRunning() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.bot != nil
+}
+
+// GetLicenseState exposes safe activation metadata to the UI. The full
+// license key is intentionally never returned through Wails.
+func (a *App) GetLicenseState() licensing.State {
+	if a.license == nil {
+		return licensing.State{}
+	}
+	return a.license.GetState()
+}
+
+// ActivateLicense validates and binds a license to this Windows machine.
+func (a *App) ActivateLicense(key string) (licensing.State, error) {
+	if a.license == nil {
+		cfg := config.LoadOrDefault("config.json")
+		a.license = licensing.New(clashAccountServiceURL(cfg), version)
+	}
+	state, err := a.license.Activate(context.Background(), key)
+	if err != nil {
+		return state, err
+	}
+	if a.supportReporter != nil {
+		a.supportReporter.Flush(context.Background())
+	}
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "license_state", state)
+	}
+	return state, nil
+}
+
+// DeactivateLicense removes only the local activation data. Server-side
+// machine binding remains until an authorized developer/admin resets it.
+func (a *App) DeactivateLicense() error {
+	if a.license == nil {
+		return nil
+	}
+	if err := a.license.DeactivateLocal(); err != nil {
+		return err
+	}
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "license_state", a.license.GetState())
+	}
+	return nil
 }
 
 // GetConfig returns the current config.json settings
