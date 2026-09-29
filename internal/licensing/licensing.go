@@ -57,6 +57,31 @@ type activateResponse struct {
 	Message      string `json:"message,omitempty"`
 }
 
+type RemoteError struct {
+	Status  int
+	Message string
+}
+
+func (e *RemoteError) Error() string {
+	if e == nil {
+		return "license server error"
+	}
+	if strings.TrimSpace(e.Message) != "" {
+		return e.Message
+	}
+	return fmt.Sprintf("license server HTTP %d", e.Status)
+}
+
+func (e *RemoteError) Definitive() bool {
+	if e == nil {
+		return false
+	}
+	return e.Status == http.StatusUnauthorized ||
+		e.Status == http.StatusForbidden ||
+		e.Status == http.StatusConflict ||
+		e.Status == http.StatusNotFound
+}
+
 type Service struct {
 	baseURL    string
 	appVersion string
@@ -177,7 +202,7 @@ func (s *Service) Activate(ctx context.Context, key string) (State, error) {
 		if out.Message == "" {
 			out.Message = fmt.Sprintf("license server HTTP %d", resp.StatusCode)
 		}
-		return s.GetState(), errors.New(out.Message)
+		return s.GetState(), &RemoteError{Status: resp.StatusCode, Message: out.Message}
 	}
 
 	now := time.Now().UTC()
@@ -210,6 +235,17 @@ func (s *Service) Validate(ctx context.Context) State {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// A server-side rejection is authoritative. Offline grace exists only for
+	// transport/service outages, never for a revoked license or machine clash.
+	var remoteErr *RemoteError
+	if errors.As(err, &remoteErr) && remoteErr.Definitive() {
+		s.state = s.stateFromStored(s.stored)
+		s.state.Activated = false
+		s.state.Error = remoteErr.Error()
+		return s.state
+	}
+
 	if until, parseErr := time.Parse(time.RFC3339, s.stored.OfflineUntil); parseErr == nil && time.Now().Before(until) {
 		s.state = s.stateFromStored(s.stored)
 		s.state.Error = "offline grace period"
