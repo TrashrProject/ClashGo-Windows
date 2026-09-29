@@ -1502,6 +1502,14 @@ func (a *App) RefreshLicense() licensing.State {
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, "license_state", state)
 	}
+
+	// A manual refresh is an explicit entitlement check. If the server says
+	// the licence is no longer valid, enforce that result immediately instead
+	// of waiting for the periodic 15-minute validation loop.
+	if !state.Activated && a.botSessionActiveOrStarting() {
+		log.Warn().Str("reason", state.Error).Msg("manual license refresh invalidated active/starting session")
+		_ = a.StopBot()
+	}
 	return state
 }
 
