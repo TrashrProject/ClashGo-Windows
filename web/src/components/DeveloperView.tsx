@@ -640,6 +640,33 @@ const DeveloperView: React.FC = () => {
             </span>
           </div>
 
+          <div className="mt-5">
+            <div className="mb-2 text-[9px] font-black uppercase tracking-widest text-zinc-400">Durée rapide</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {([
+                ['free_2d', 'FREE · 2J', 'Test rapide'],
+                ['week_1', '1 SEMAINE', '7 jours'],
+                ['month_1', '1 MOIS', '30 jours'],
+                ['lifetime', 'À VIE', 'Sans expiration'],
+              ] as const).map(([value, label, description]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setNewPlan(value)}
+                  className={
+                    'rounded-xl border px-3 py-3 text-left transition ' +
+                    (newPlan === value
+                      ? 'border-zinc-950 bg-zinc-950 text-white dark:border-white dark:bg-white dark:text-zinc-950'
+                      : 'border-zinc-200 bg-zinc-50 text-zinc-950 hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-white')
+                  }
+                >
+                  <div className="text-xs font-black">{label}</div>
+                  <div className={'mt-1 text-[9px] font-bold ' + (newPlan === value ? 'opacity-60' : 'text-zinc-400')}>{description}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
             <label>
               <div className="mb-2 text-[9px] font-black uppercase tracking-widest text-zinc-400">Client / pseudo</div>
