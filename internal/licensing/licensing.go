@@ -42,6 +42,7 @@ type State struct {
 type storedLicense struct {
 	Key           string `json:"license_key"`
 	Role          Role   `json:"role"`
+	MemberName    string `json:"member_name,omitempty"`
 	MachineID     string `json:"machine_id"`
 	LastValidated string `json:"last_validated"`
 	OfflineUntil  string `json:"offline_until"`
@@ -128,6 +129,7 @@ func (s *Service) stateFromStored(st storedLicense) State {
 	return State{
 		Activated: st.Key != "",
 		Role: st.Role,
+		MemberName: st.MemberName,
 		LicenseHint: licenseHint(st.Key),
 		MachineID: st.MachineID,
 		LastValidated: st.LastValidated,
@@ -220,6 +222,7 @@ func (s *Service) Activate(ctx context.Context, key string) (State, error) {
 	s.stored = storedLicense{
 		Key: key,
 		Role: out.Role,
+		MemberName: strings.TrimSpace(out.MemberName),
 		MachineID: machineID,
 		LastValidated: now.Format(time.RFC3339),
 		OfflineUntil: out.OfflineUntil,
