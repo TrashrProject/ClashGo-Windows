@@ -571,6 +571,7 @@ func main() {
 		rec.MachineID = in.MachineID
 		rec.LastSeenAt = now
 		rec.AppVersion = strings.TrimSpace(in.AppVersion)
+		rec.NextDueAt = rec.ExpiresAt
 		_ = control.saveLocked()
 		role := rec.Role
 		plan := rec.Plan
@@ -709,6 +710,9 @@ func main() {
 			CustomerName    string `json:"customer_name,omitempty"`
 			CustomerContact string `json:"customer_contact,omitempty"`
 			CustomerNotes   string `json:"customer_notes,omitempty"`
+			AmountCents     int    `json:"amount_cents,omitempty"`
+			PaymentStatus   string `json:"payment_status,omitempty"`
+			PaymentNote     string `json:"note,omitempty"`
 		}
 		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
@@ -722,6 +726,13 @@ func main() {
 		}
 		role := validRole(in.Role)
 		plan, durationDays := validPlan(in.Plan)
+		if in.AmountCents < 0 {
+			in.AmountCents = 0
+		}
+		paymentStatus := validPaymentStatus(in.PaymentStatus)
+		if len(in.PaymentNote) > 1000 {
+			in.PaymentNote = in.PaymentNote[:1000]
+		}
 		keys := make([]string, 0, in.Count)
 
 		control.mu.Lock()
@@ -744,7 +755,8 @@ func main() {
 				CreatedAt:       time.Now().UTC(),
 				Plan:            plan,
 				DurationDays:    durationDays,
-				PaymentStatus:   "unknown",
+				PaymentStatus:   paymentStatus,
+				TotalPaidCents:  in.AmountCents,
 			}
 			control.data.Licenses[hash] = rec
 			control.appendEventLocked(licenseEvent{
@@ -754,7 +766,9 @@ func main() {
 				CustomerContact: rec.CustomerContact,
 				EventType:       "created",
 				Plan:            rec.Plan,
+				AmountCents:     in.AmountCents,
 				PaymentStatus:   rec.PaymentStatus,
+				Note:            strings.TrimSpace(in.PaymentNote),
 				CreatedAt:       rec.CreatedAt,
 			})
 			keys = append(keys, generated)
