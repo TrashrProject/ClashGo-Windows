@@ -92,7 +92,7 @@ func TestRecordMemberSettingsChangeAddsActivity(t *testing.T) {
 	defer bus.Close()
 
 	b := &Bot{telemetry: bus}
-	b.RecordMemberSettingsChange("fast", 16, 6, 2)
+	b.RecordMemberSettingsChange("fast", 16, 100, 6, 2)
 
 	events := b.RecentActivity(1)
 	if len(events) != 1 {
@@ -106,5 +106,8 @@ func TestRecordMemberSettingsChangeAddsActivity(t *testing.T) {
 	}
 	if got := events[0].Fields["max_attacks_per_hour"]; got != 16 {
 		t.Fatalf("max_attacks_per_hour=%v want 16", got)
+	}
+	if got := events[0].Fields["max_attacks_per_session"]; got != 100 {
+		t.Fatalf("max_attacks_per_session=%v want 100", got)
 	}
 }
