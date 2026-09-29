@@ -37,6 +37,7 @@ type FarmProfile = {
 type LicenseState = {
   activated: boolean;
   role: 'member' | 'developer' | 'admin' | '';
+  member_name?: string;
   license_hint?: string;
   machine_id?: string;
   last_validated?: string;
@@ -297,7 +298,9 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
             <div className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-400 dark:text-zinc-500">Licence ClashGO</div>
             <div className="mt-2 flex flex-wrap items-center gap-3">
               <h3 className="text-2xl font-black">
-                {licenseState?.activated ? 'Licence active' : 'Activer ClashGO'}
+                {licenseState?.activated
+                  ? (licenseState.member_name ? 'Bonjour ' + licenseState.member_name : 'Licence active')
+                  : 'Activer ClashGO'}
               </h3>
               {licenseState?.activated && (
                 <span className="px-3 py-1 rounded-full bg-emerald-400/15 text-emerald-400 dark:text-emerald-600 text-[10px] font-black uppercase tracking-widest">
