@@ -7,6 +7,7 @@ interface HomeViewProps {
   history: AttackReport[];
   activity: ActivityEvent[];
   sessionReport: SessionReportView | null;
+  testSessionActive: boolean;
   running: boolean;
   starting: boolean;
   onStart: () => void;
@@ -126,7 +127,7 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
 
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
-    stats, history, activity, sessionReport, running, starting,
+    stats, history, activity, sessionReport, testSessionActive, running, starting,
     onStart, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenSettings,
     licenseReady, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
@@ -216,6 +217,11 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
               {licenseReady && (
                 <span className="rounded-full border border-white/10 dark:border-zinc-200 bg-white/5 dark:bg-zinc-100 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600">
                   Plan · {licensePlan === 'free_2d' ? 'FREE 2J' : licensePlan === 'week_1' ? '1 SEMAINE' : licensePlan === 'month_1' ? '1 MOIS' : 'À VIE'}
+                </span>
+              )}
+              {testSessionActive && (
+                <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-sky-300 dark:text-sky-600">
+                  Mode test · 10 attaques
                 </span>
               )}
               {licenseReady && (() => {
@@ -412,12 +418,12 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
         <section className="rounded-[1.75rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-premium dark:shadow-none">
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
             <div>
-              <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">Session en cours</div>
+              <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">{testSessionActive ? 'Session test en cours' : 'Session en cours'}</div>
               <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white">
                 {sessionAttacks} / {sessionCap} attaques
               </div>
               <div className="mt-1 text-xs font-semibold text-zinc-500">
-                {Math.max(0, sessionCap - sessionAttacks)} attaque{Math.max(0, sessionCap - sessionAttacks) > 1 ? 's' : ''} restante{Math.max(0, sessionCap - sessionAttacks) > 1 ? 's' : ''} avant l’arrêt propre.
+                {Math.max(0, sessionCap - sessionAttacks)} attaque{Math.max(0, sessionCap - sessionAttacks) > 1 ? 's' : ''} restante{Math.max(0, sessionCap - sessionAttacks) > 1 ? 's' : ''} avant l’arrêt propre.{testSessionActive ? ' Tes réglages personnels seront ensuite restaurés.' : ''}
               </div>
             </div>
             <div className="text-2xl font-black tabular-nums text-zinc-950 dark:text-white">{sessionProgress}%</div>
