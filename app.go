@@ -1148,7 +1148,11 @@ func normalizePlayerTag(tag string) (string, error) {
 	if !strings.HasPrefix(tag, "#") {
 		tag = "#" + tag
 	}
-	for _, r := range tag[1:] {
+	body := tag[1:]
+	if len(body) < 5 || len(body) > 15 {
+		return "", fmt.Errorf("invalid player tag length")
+	}
+	for _, r := range body {
 		if !(r >= '0' && r <= '9') && !(r >= 'A' && r <= 'Z') {
 			return "", fmt.Errorf("invalid player tag")
 		}
