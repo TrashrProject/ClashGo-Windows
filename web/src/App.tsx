@@ -211,6 +211,8 @@ function App() {
   const [playerTag, setPlayerTag] = useState('');
   const [accountReady, setAccountReady] = useState(false);
   const [licenseAccessReady, setLicenseAccessReady] = useState(false);
+  const [licenseActivated, setLicenseActivated] = useState(false);
+  const [licenseEnforced, setLicenseEnforced] = useState(true);
   const [licenseRole, setLicenseRole] = useState<'member' | 'developer' | 'admin' | ''>('');
   const [licenseMemberName, setLicenseMemberName] = useState('');
   const [licensePlan, setLicensePlan] = useState('');
@@ -329,6 +331,8 @@ function App() {
         : state?.activated
           ? 'member'
           : '';
+    setLicenseActivated(Boolean(state?.activated));
+    setLicenseEnforced(Boolean(policy.enforced));
     setLicenseRole(role);
     setLicenseMemberName(state?.member_name || '');
     setLicensePlan(state?.plan || '');
@@ -429,12 +433,14 @@ function App() {
       try {
         const license = await GetLicenseState();
         if (license?.activated && (license.role === 'developer' || license.role === 'admin')) {
+          setLicenseActivated(true);
           setLicenseRole(license.role);
           setLicenseMemberName(license.member_name || '');
           setLicensePlan(license.plan || '');
           setLicenseExpiresAt(license.expires_at || '');
           setInterfaceLevel('developer');
         } else if (license?.activated) {
+          setLicenseActivated(true);
           setLicenseRole('member');
           setLicenseMemberName(license.member_name || '');
           setLicensePlan(license.plan || '');
@@ -446,6 +452,7 @@ function App() {
             setInterfaceLevel('simple');
           }
         } else {
+          setLicenseActivated(false);
           setLicenseRole('');
           setLicenseMemberName('');
           setLicensePlan('');
@@ -573,6 +580,7 @@ function App() {
           : payload?.activated
             ? 'member'
             : '';
+      setLicenseActivated(Boolean(payload?.activated));
       setLicenseRole(role);
       setLicenseMemberName(payload?.member_name || '');
       setLicensePlan(payload?.plan || '');
@@ -1018,7 +1026,7 @@ function App() {
           : 'En attente';
 
   const licenseExpiryNotice = useMemo(() => {
-    if (!licenseAccessReady || !licenseExpiresAt) return null;
+    if (!licenseActivated || !licenseExpiresAt) return null;
     const expiry = Date.parse(licenseExpiresAt);
     if (!Number.isFinite(expiry)) return null;
     const remainingMs = expiry - Date.now();
@@ -1033,7 +1041,7 @@ function App() {
       return { urgent: remainingHours <= 24, text };
     }
     return null;
-  }, [licenseAccessReady, licenseExpiresAt]);
+  }, [licenseActivated, licenseExpiresAt]);
 
   const windowsPreflightReady = useMemo(() => (
     systemDiagnostics
@@ -1162,7 +1170,7 @@ function App() {
         starting={isStarting}
         onStart={handleStart}
         onStop={handleStop}
-        licenseActivated={licenseAccessReady}
+        licenseActivated={licenseActivated}
         licenseRole={licenseRole}
         memberName={licenseMemberName}
         licensePlan={licensePlan}
@@ -1334,7 +1342,8 @@ function App() {
                 setTab('account');
               }}
               onOpenSettings={() => setTab('settings')}
-              licenseReady={licenseAccessReady}
+              licenseReady={licenseActivated}
+              licenseRequired={licenseEnforced}
               memberName={licenseMemberName}
               licensePlan={licensePlan}
               licenseExpiresAt={licenseExpiresAt}
