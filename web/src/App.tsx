@@ -53,6 +53,7 @@ import {
   GetCurrentArmy,
   SaveMemberInterfaceLevel,
   SetMemberSpeedProfile,
+  ExtendSessionAttacks,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
 import { InterfaceLevel, TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent, AttackReplayView, SessionReportView, BotStats, AttackReport } from './types';
@@ -1099,6 +1100,19 @@ function App() {
     }
   }, []);
 
+  const handleExtendSession = async (extra: 10 | 25) => {
+    if (!isRunning) return;
+    try {
+      await ExtendSessionAttacks(extra);
+      const fresh = await GetStats();
+      setStats(fresh as unknown as BotStats);
+      setMemberNotice('Session prolongée de ' + extra + ' attaques.');
+      window.setTimeout(() => setMemberNotice(''), 4000);
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
   const handleLiveSpeedChange = async (profile: 'cautious' | 'normal' | 'fast') => {
     try {
       await SetMemberSpeedProfile(profile);
@@ -1803,6 +1817,7 @@ function App() {
               onStart={handleStart}
               onStartWithPreset={(preset) => void handleStartWithPreset(preset)}
               onSpeedChange={(profile) => void handleLiveSpeedChange(profile)}
+              onExtendSession={(extra) => void handleExtendSession(extra)}
               onStartTestSession={handleStartTestSession}
               onStartQuickTestSession={handleStartQuickTestSession}
               onStop={handleStop}
