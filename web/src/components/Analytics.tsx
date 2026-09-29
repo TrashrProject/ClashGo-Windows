@@ -1194,9 +1194,9 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const errors = stats.adb_health?.errors_total || 0;
     const adbEvents = captures + errors;
     const adbErrorRate = adbEvents > 0 ? errors * 100 / adbEvents : 0;
-    const attaques = Math.max(0, stats.attacks_completed || history?.length || 0);
-    const anomalyRate = attaques > 0 ? (stats.anomalies || 0) * 100 / attacks: 0;
-    const restartRate = attaques > 0 ? (stats.bluestacks_restarts || 0) * 100 / attacks: 0;
+    const attacks = Math.max(0, stats.attacks_completed || history?.length || 0);
+    const anomalyRate = attacks > 0 ? (stats.anomalies || 0) * 100 / attacks : 0;
+    const restartRate = attacks > 0 ? (stats.bluestacks_restarts || 0) * 100 / attacks : 0;
     const tapTotal = stats.adb_health?.taps_total || 0;
     const legacy = stats.adb_health?.legacy_taps_total || 0;
     const pipe = stats.adb_health?.pipe_taps_total || 0;
@@ -1207,7 +1207,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       restartRate,
       captures,
       errors,
-      attaques,
+      attacks,
       tapTotal,
       legacy,
       pipe,
