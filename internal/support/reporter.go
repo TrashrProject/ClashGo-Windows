@@ -152,7 +152,7 @@ func (r *Reporter) shouldQueue(ev incident) bool {
 			surface = strings.TrimSpace(value)
 		}
 	}
-	key := ev.Level + "\x00" + strings.TrimSpace(ev.Message) + "\x00" + surface
+	key := ev.QueueOwner + "\x00" + ev.Level + "\x00" + strings.TrimSpace(ev.Message) + "\x00" + surface
 
 	r.recentMu.Lock()
 	defer r.recentMu.Unlock()
