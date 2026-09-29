@@ -198,6 +198,7 @@ type PlayerProfile = {
 interface AccountViewProps {
   playerTag: string;
   interfaceLevel: InterfaceLevel;
+  initialPage?: 'account' | 'settings' | 'village';
   onInterfaceLevelChange: (level: InterfaceLevel) => void;
   onAccountChanged: (tag: string) => void;
 }
@@ -205,6 +206,7 @@ interface AccountViewProps {
 const AccountView: React.FC<AccountViewProps> = React.memo(({
   playerTag,
   interfaceLevel,
+  initialPage = 'account',
   onInterfaceLevelChange,
   onAccountChanged,
 }) => {
@@ -226,7 +228,11 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [memberSaving, setMemberSaving] = React.useState(false);
   const [memberMessage, setMemberMessage] = React.useState('');
   const [memberSaveError, setMemberSaveError] = React.useState('');
-  const [memberPage, setMemberPage] = React.useState<'account' | 'settings' | 'village'>('account');
+  const [memberPage, setMemberPage] = React.useState<'account' | 'settings' | 'village'>(initialPage);
+
+  React.useEffect(() => {
+    setMemberPage(initialPage);
+  }, [initialPage]);
   const [confirmDeactivate, setConfirmDeactivate] = React.useState(false);
   const [supportCodeCopied, setSupportCodeCopied] = React.useState(false);
   const [confirmUnlink, setConfirmUnlink] = React.useState(false);
