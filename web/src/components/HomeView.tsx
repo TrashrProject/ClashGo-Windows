@@ -257,6 +257,34 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     ? Math.max(0, Math.min(100, Math.round((sessionAttacks / sessionCap) * 100)))
     : 0;
 
+  const lastSessionValidation = React.useMemo(() => {
+    if (!sessionReport || sessionReport.attacks <= 0) return null;
+    if (sessionReport.attacks < 5) {
+      return {
+        ok: false,
+        neutral: true,
+        label: 'Échantillon court',
+        detail: 'Moins de 5 attaques · garde ce rapport comme indication, pas comme validation longue.',
+      };
+    }
+    const deployOK = (sessionReport.full_deploy_rate || 0) >= 90;
+    const homeOK = (sessionReport.return_home_rate || 0) >= 90;
+    const healthOK = (sessionReport.health_score || 0) >= 75;
+    const ok = deployOK && homeOK && healthOK;
+    return {
+      ok,
+      neutral: false,
+      label: ok ? 'Validation technique OK' : 'À surveiller avant session longue',
+      detail: ok
+        ? 'Déploiement ≥90 % · retour village ≥90 % · santé ≥75.'
+        : [
+            !deployOK ? 'déploiement <90 %' : '',
+            !homeOK ? 'retour village <90 %' : '',
+            !healthOK ? 'santé <75' : '',
+          ].filter(Boolean).join(' · '),
+    };
+  }, [sessionReport]);
+
   const runCheckAction = React.useCallback((action?: string) => {
     switch (action) {
       case 'license_account':
@@ -703,6 +731,22 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
               <div className="mt-1 text-xs font-semibold text-zinc-500">
                 {sessionReport.recommendations?.[0] || 'Rapport sauvegardé automatiquement par ClashGO.'}
               </div>
+              {lastSessionValidation && (
+                <div className={
+                  'mt-3 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-[10px] font-black ' +
+                  (lastSessionValidation.neutral
+                    ? 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'
+                    : lastSessionValidation.ok
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-amber-500/10 text-amber-600 dark:text-amber-400')
+                }>
+                  <span className="material-symbols-outlined text-sm">
+                    {lastSessionValidation.neutral ? 'science' : lastSessionValidation.ok ? 'verified' : 'warning'}
+                  </span>
+                  <span>{lastSessionValidation.label}</span>
+                  <span className="font-semibold normal-case tracking-normal opacity-80">· {lastSessionValidation.detail}</span>
+                </div>
+              )}
               <div className="mt-3 flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-wider text-zinc-400">
                 <span>{sessionReport.anomalies || 0} anomalie{sessionReport.anomalies === 1 ? '' : 's'}</span>
                 <span>·</span>
