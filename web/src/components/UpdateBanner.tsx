@@ -184,7 +184,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
   const progressPct = Math.round((status.progress || 0) * 100);
   const showSkipped =
     status.skip_version && status.skip_version === status.latest_version;
-  const canOneClique sur =
+  const canOneClick =
     (status.available || status.state === 'ready') && status.state !== 'downloading';
 
   const guardedAction = async (key: string, fn: () => Promise<unknown>) => {
@@ -199,7 +199,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
     }
   };
 
-  const doOneClique sur = () => guardedAction('oneclick', onUpdateAndRestart);
+  const doOneClick = () => guardedAction('oneclick', onUpdateAndRestart);
   const doDownload = () => guardedAction('download', onDownload);
   const doApply = () => guardedAction('apply', onApply);
   const doSkip = async () => {
@@ -234,9 +234,9 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
         {status.state === 'downloading'
           ? `Téléchargement ${progressPct}%`
           : status.available
-            ? `Update ${status.latest_version}`
+            ? `Mise à jour ${status.latest_version}`
             : status.state === 'ready'
-              ? `v${status.latest_version} — Install`
+              ? `v${status.latest_version} — Installer`
               : status.state === 'error'
                 ? 'Échec de la mise à jour'
                 : stateLabel(status.state)}
@@ -324,7 +324,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                 </div>
               )}
 
-              {isBotRunning && canOneClique sur && (
+              {isBotRunning && canOneClick && (
                 <div className="mt-4 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] font-bold text-amber-600 dark:text-amber-400 tracking-wide leading-relaxed">
                   <span className="material-symbols-outlined text-xs align-middle mr-1">info</span>
                   Le bot est actuellement en cours. La mise à jour l’arrêtera proprement, fermera les opérations ADB puis relancera ClashGO avec la nouvelle version.
@@ -466,7 +466,7 @@ const DownloadBody: React.FC<{
 }> = ({ status, progressPct, formatBytes }) => (
   <div className="space-y-3">
     <div className="text-sm text-zinc-600 dark:text-zinc-300">
-      Downloading{' '}
+      Téléchargement{' '}
       <span className="font-mono font-bold text-zinc-950 dark:text-white">
         {status.asset_name}
       </span>
@@ -526,7 +526,7 @@ const ReadyBody: React.FC<{
       </div>
     )}
     <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
-      Clique sur <strong className="text-zinc-950 dark:text-white">Install &amp; Restart</strong>{' '}
+      Clique sur <strong className="text-zinc-950 dark:text-white">Installer et redémarrer</strong>{' '}
       pour appliquer la mise à jour maintenant. ClashGO se fermera brièvement puis se relancera automatiquement.
     </p>
   </div>
@@ -575,7 +575,7 @@ const RestartSplash: React.FC<{ status: UpdateStatus }> = ({ status }) => (
           Redémarrage de ClashGO
         </h3>
         <p className="text-sm text-zinc-400 leading-relaxed">
-          Installing{' '}
+          Installation de{' '}
           <span className="font-mono font-bold text-emerald-400">v{status.latest_version}</span>
           . La nouvelle version va se relancer dans quelques instants.
         </p>
