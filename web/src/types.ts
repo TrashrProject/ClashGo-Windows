@@ -1,5 +1,6 @@
 export interface BotStats {
   attacks_completed: number;
+  session_attack_cap: number;
   search_skips: number;
   total_gold: number;
   total_elixir: number;
