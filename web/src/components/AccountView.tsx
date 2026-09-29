@@ -285,6 +285,8 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [memberPresetBusy, setMemberPresetBusy] = React.useState<number | null>(null);
   const [memberPresetNames, setMemberPresetNames] = React.useState<Record<number, string>>({});
   const [memberPresetDeleteConfirm, setMemberPresetDeleteConfirm] = React.useState<number | null>(null);
+  const memberSaveLockRef = React.useRef(false);
+  const memberPresetLockRef = React.useRef(false);
   const [memberPage, setMemberPage] = React.useState<'account' | 'settings' | 'village'>(initialPage);
 
   React.useEffect(() => {
@@ -371,7 +373,8 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   }, []);
 
   const applyUsagePreset = async (preset: 'short' | 'balanced' | 'fast') => {
-    if (memberSaving || testSessionActive) return;
+    if (memberSaveLockRef.current || memberSaving || testSessionActive) return;
+    memberSaveLockRef.current = true;
     setMemberSaving(true);
     setMemberMessage('');
     setMemberSaveError('');
@@ -396,12 +399,14 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
         // Keep the last known state if the bridge is temporarily unavailable.
       }
     } finally {
+      memberSaveLockRef.current = false;
       setMemberSaving(false);
     }
   };
 
   const saveMemberSettings = async (next: MemberSettings) => {
-    if (memberSaving || testSessionActive) return;
+    if (memberSaveLockRef.current || memberSaving || testSessionActive) return;
+    memberSaveLockRef.current = true;
     setMemberSaving(true);
     setMemberMessage('');
     setMemberSaveError('');
@@ -420,6 +425,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
         // Keep the visible error if the local settings cannot be reloaded.
       }
     } finally {
+      memberSaveLockRef.current = false;
       setMemberSaving(false);
     }
   };
@@ -444,7 +450,8 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   };
 
   const savePersonalPreset = async (slot: number) => {
-    if (memberPresetBusy !== null || memberSaving || testSessionActive) return;
+    if (memberPresetLockRef.current || memberPresetBusy !== null || memberSaving || testSessionActive) return;
+    memberPresetLockRef.current = true;
     setMemberPresetBusy(slot);
     setMemberMessage('');
     setMemberSaveError('');
@@ -455,12 +462,14 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     } catch (e) {
       setMemberSaveError(e instanceof Error ? e.message : String(e));
     } finally {
+      memberPresetLockRef.current = false;
       setMemberPresetBusy(null);
     }
   };
 
   const applyPersonalPreset = async (slot: number) => {
-    if (memberPresetBusy !== null || memberSaving || testSessionActive) return;
+    if (memberPresetLockRef.current || memberPresetBusy !== null || memberSaving || testSessionActive) return;
+    memberPresetLockRef.current = true;
     setMemberPresetBusy(slot);
     setMemberMessage('');
     setMemberSaveError('');
@@ -473,12 +482,14 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     } catch (e) {
       setMemberSaveError(e instanceof Error ? e.message : String(e));
     } finally {
+      memberPresetLockRef.current = false;
       setMemberPresetBusy(null);
     }
   };
 
   const deletePersonalPreset = async (slot: number) => {
-    if (memberPresetBusy !== null || memberSaving || testSessionActive) return;
+    if (memberPresetLockRef.current || memberPresetBusy !== null || memberSaving || testSessionActive) return;
+    memberPresetLockRef.current = true;
     setMemberPresetBusy(slot);
     setMemberMessage('');
     setMemberSaveError('');
@@ -490,6 +501,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     } catch (e) {
       setMemberSaveError(e instanceof Error ? e.message : String(e));
     } finally {
+      memberPresetLockRef.current = false;
       setMemberPresetBusy(null);
     }
   };
