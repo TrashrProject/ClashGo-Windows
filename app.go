@@ -2794,30 +2794,45 @@ func sanitizeMemberPresetName(name string, slot int) string {
 }
 
 func loadMemberPresetStore(path string) memberPresetStore {
+	empty := memberPresetStore{Slots: []MemberPresetSlot{}}
 	if strings.TrimSpace(path) == "" {
-		return memberPresetStore{Slots: []MemberPresetSlot{}}
+		return empty
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return memberPresetStore{Slots: []MemberPresetSlot{}}
-	}
-	var store memberPresetStore
-	if json.Unmarshal(data, &store) != nil {
-		return memberPresetStore{Slots: []MemberPresetSlot{}}
-	}
-	clean := make([]MemberPresetSlot, 0, 3)
-	seen := map[int]bool{}
-	for _, item := range store.Slots {
-		if item.Slot < 1 || item.Slot > 3 || seen[item.Slot] {
-			continue
+
+	read := func(candidate string) (memberPresetStore, bool) {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			return empty, false
 		}
-		item.Name = sanitizeMemberPresetName(item.Name, item.Slot)
-		item.Settings = sanitizeMemberSettings(item.Settings)
-		seen[item.Slot] = true
-		clean = append(clean, item)
+		var store memberPresetStore
+		if json.Unmarshal(data, &store) != nil {
+			return empty, false
+		}
+		clean := make([]MemberPresetSlot, 0, 3)
+		seen := map[int]bool{}
+		for _, item := range store.Slots {
+			if item.Slot < 1 || item.Slot > 3 || seen[item.Slot] {
+				continue
+			}
+			item.Name = sanitizeMemberPresetName(item.Name, item.Slot)
+			item.Settings = sanitizeMemberSettings(item.Settings)
+			seen[item.Slot] = true
+			clean = append(clean, item)
+		}
+		store.Slots = clean
+		return store, true
 	}
-	store.Slots = clean
-	return store
+
+	if store, ok := read(path); ok {
+		return store
+	}
+	if store, ok := read(path + ".bak"); ok {
+		// A crash can occur after the old primary was renamed to .bak but
+		// before the new temp file became primary. Recover transparently.
+		_ = saveMemberPresetStore(path, store)
+		return store
+	}
+	return empty
 }
 
 func saveMemberPresetStore(path string, store memberPresetStore) error {
