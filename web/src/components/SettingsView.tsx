@@ -377,7 +377,18 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           </div>
         </button>
 
-        <section className={(settingsPage === 'general' ? '' : 'hidden ') + "rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30 p-5"}>
+
+
+        <details className={(settingsPage === 'diagnostic' ? '' : 'hidden ') + "rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/20 overflow-hidden"}>
+          <summary className="cursor-pointer list-none flex items-center justify-between gap-4 p-5">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Configuration bêta</div>
+              <div className="mt-1 text-sm font-bold text-zinc-950 dark:text-white">Serveur de licences ClashGO</div>
+              <div className="mt-1 text-[10px] text-zinc-400">À modifier uniquement pour relier une build bêta à un serveur de contrôle.</div>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">dns</span>
+          </summary>
+          <div className="border-t border-zinc-100 dark:border-zinc-800 p-5">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
@@ -436,7 +447,8 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           {(isRunning || isStarting) && !controlService?.embedded && (
             <div className="mt-3 text-[9px] font-semibold text-amber-500">Arrête le bot avant de modifier le serveur.</div>
           )}
-        </section>
+          </div>
+        </details>
 
         <details className={(settingsPage === 'diagnostic' ? '' : 'hidden ') + "rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/20 overflow-hidden"}>
           <summary className="cursor-pointer list-none flex items-center justify-between gap-4 p-5">
