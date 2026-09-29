@@ -222,6 +222,40 @@ func licenseExpired(rec *licenseRecord, now time.Time) bool {
 	return rec != nil && !rec.ExpiresAt.IsZero() && !now.Before(rec.ExpiresAt)
 }
 
+func applyLicenseRenewal(rec *licenseRecord, requestedPlan string, now time.Time) (string, int, time.Time, error) {
+	if rec == nil {
+		return "", 0, time.Time{}, fmt.Errorf("license not found")
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+
+	plan := strings.TrimSpace(requestedPlan)
+	if plan == "" {
+		plan = rec.Plan
+	}
+	plan, durationDays := validPlan(plan)
+	if rec.Plan == "lifetime" && plan != "lifetime" {
+		return "", 0, rec.ExpiresAt, fmt.Errorf("lifetime license cannot be downgraded by renewal")
+	}
+
+	rec.Plan = plan
+	rec.DurationDays = durationDays
+	rec.Active = true
+
+	if durationDays == 0 {
+		rec.ExpiresAt = time.Time{}
+	} else {
+		base := now
+		if !rec.ExpiresAt.IsZero() && rec.ExpiresAt.After(now) {
+			base = rec.ExpiresAt
+		}
+		rec.ExpiresAt = base.Add(time.Duration(durationDays) * 24 * time.Hour)
+	}
+	rec.NextDueAt = rec.ExpiresAt
+	return plan, durationDays, rec.ExpiresAt, nil
+}
+
 func adminAuthorized(r *http.Request, adminKey string) bool {
 	if adminKey == "" {
 		return false
@@ -571,7 +605,6 @@ func main() {
 		rec.MachineID = in.MachineID
 		rec.LastSeenAt = now
 		rec.AppVersion = strings.TrimSpace(in.AppVersion)
-		rec.NextDueAt = rec.ExpiresAt
 		_ = control.saveLocked()
 		role := rec.Role
 		plan := rec.Plan
@@ -876,28 +909,15 @@ func main() {
 			writeJSON(w, http.StatusNotFound, map[string]string{"message": "license not found"})
 			return
 		}
-		plan := strings.TrimSpace(in.Plan)
-		if plan == "" {
-			plan = rec.Plan
-		}
-		plan, durationDays := validPlan(plan)
-		if rec.Plan == "lifetime" && plan != "lifetime" {
+		plan, durationDays, expiresAt, renewErr := applyLicenseRenewal(rec, in.Plan, time.Now().UTC())
+		if renewErr != nil {
 			control.mu.Unlock()
-			writeJSON(w, http.StatusConflict, map[string]string{"message": "lifetime license cannot be downgraded by renewal"})
-			return
-		}
-		rec.Plan = plan
-		rec.DurationDays = durationDays
-		rec.Active = true
-		if durationDays == 0 {
-			rec.ExpiresAt = time.Time{}
-		} else {
-			now := time.Now().UTC()
-			base := now
-			if !rec.ExpiresAt.IsZero() && rec.ExpiresAt.After(now) {
-				base = rec.ExpiresAt
+			if strings.Contains(renewErr.Error(), "lifetime license") {
+				writeJSON(w, http.StatusConflict, map[string]string{"message": renewErr.Error()})
+				return
 			}
-			rec.ExpiresAt = base.Add(time.Duration(durationDays) * 24 * time.Hour)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": renewErr.Error()})
+			return
 		}
 		if in.AmountCents < 0 {
 			in.AmountCents = 0
@@ -908,7 +928,6 @@ func main() {
 		if len(in.Note) > 1000 {
 			in.Note = in.Note[:1000]
 		}
-		expiresAt := rec.ExpiresAt
 		control.appendEventLocked(licenseEvent{
 			LicenseID:       rec.ID,
 			LicenseHint:     rec.Hint,
