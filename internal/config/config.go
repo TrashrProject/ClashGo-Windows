@@ -391,24 +391,109 @@ func normalizeStrategyFile(cfg *BotConfig) {
 	}
 }
 
-func Load(path string) (*BotConfig, error) {
+func resolveConfigPath(path string) string {
 	if path == "config.json" {
-		path = paths.ResolveConfig("config.json")
+		return paths.ResolveConfig("config.json")
 	}
+	return path
+}
+
+func decodeConfig(data []byte) (*BotConfig, error) {
+	cfg := *DefaultConfig()
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	normalizeStrategyFile(&cfg)
+	return &cfg, nil
+}
+
+func Load(path string) (*BotConfig, error) {
+	path = resolveConfigPath(path)
 
 	data, err := os.ReadFile(path)
+	if err == nil {
+		if cfg, parseErr := decodeConfig(data); parseErr == nil {
+			return cfg, nil
+		}
+	}
+
+	// A transactional save keeps the previous valid file as .bak until the
+	// replacement is complete. If Windows or the process stopped mid-swap,
+	// recover that last known-good configuration automatically.
+	backupPath := path + ".bak"
+	if backup, backupErr := os.ReadFile(backupPath); backupErr == nil {
+		if cfg, parseErr := decodeConfig(backup); parseErr == nil {
+			return cfg, nil
+		}
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
+	return nil, fmt.Errorf("parse config: invalid JSON and no valid backup")
+}
 
-	cfg := *DefaultConfig()
-
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+// Save writes a complete configuration transactionally. The existing file is
+// first moved to .bak, then the fully-written temp file is swapped into place.
+// This avoids a truncated config.json if Windows or ClashGO stops mid-write.
+func Save(path string, cfg *BotConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("save config: nil config")
 	}
-	normalizeStrategyFile(&cfg)
+	path = resolveConfigPath(path)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("save config mkdir: %w", err)
+	}
 
-	return &cfg, nil
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("save config encode: %w", err)
+	}
+
+	tmpPath := path + ".tmp"
+	backupPath := path + ".bak"
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("save config temp: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("save config write: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("save config sync: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("save config close: %w", err)
+	}
+
+	_ = os.Remove(backupPath)
+	hadOriginal := false
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Rename(path, backupPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return fmt.Errorf("save config backup: %w", err)
+		}
+		hadOriginal = true
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backupPath, path)
+		}
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("save config replace: %w", err)
+	}
+
+	// The replacement is now durable enough for application state. Keep no
+	// stale backup during normal operation; a backup exists only across the
+	// small transactional replacement window.
+	_ = os.Remove(backupPath)
+	return nil
 }
 
 func LoadOrDefault(path string) *BotConfig {
