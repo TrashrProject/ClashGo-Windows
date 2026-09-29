@@ -28,6 +28,9 @@ type Incident = {
   payment_status?: string;
   total_paid_cents?: number;
   next_due_at?: string;
+  denied_activations?: number;
+  last_denied_at?: string;
+  last_denied_machine?: string;
 };
 
 type LicenseRow = {
@@ -513,6 +516,7 @@ const DeveloperView: React.FC = () => {
       item.hint,
       item.id,
       item.machine_id,
+      item.last_denied_machine,
       item.app_version,
       item.role,
       planLabel(item.plan),
@@ -1061,6 +1065,22 @@ const DeveloperView: React.FC = () => {
                   {item.customer_notes && (
                     <div className="mt-2 max-w-2xl text-[10px] font-semibold text-zinc-500 line-clamp-2" title={item.customer_notes}>
                       Note · {item.customer_notes}
+                    </div>
+                  )}
+                  {Number(item.denied_activations || 0) > 0 && (
+                    <div className="mt-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[10px] font-bold text-amber-600 dark:text-amber-300">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="material-symbols-outlined text-sm">warning</span>
+                        <span>
+                          {Number(item.denied_activations || 0)} tentative(s) bloquée(s) depuis un autre PC
+                        </span>
+                        {item.last_denied_at && <span>· {dateLabel(item.last_denied_at)}</span>}
+                      </div>
+                      {item.last_denied_machine && (
+                        <div className="mt-1 font-mono text-[9px] opacity-70">
+                          Machine refusée · {shortMachine(item.last_denied_machine)}
+                        </div>
+                      )}
                     </div>
                   )}
                   {isAdmin && (item.payment_status || Number(item.total_paid_cents || 0) > 0) && (
