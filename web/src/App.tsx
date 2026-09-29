@@ -1170,6 +1170,7 @@ function App() {
               stats={stats}
               history={history}
               activity={activity}
+              sessionReport={sessionReport}
               running={isRunning}
               starting={isStarting}
               onStart={handleStart}
