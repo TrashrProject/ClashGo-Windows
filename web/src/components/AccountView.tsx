@@ -916,14 +916,14 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       {memberPage === 'settings' && (licenseState?.activated || licensePolicy?.enforced === false) && memberSettings && (
         <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
           <div className="flex flex-col gap-6">
+            {testSessionActive && (
+              <div className="rounded-2xl border border-sky-400/30 bg-sky-400/10 px-4 py-3 text-xs font-bold text-sky-600 dark:text-sky-300">
+                Session test en cours · les réglages personnels sont verrouillés et seront restaurés automatiquement à la fin.
+              </div>
+            )}
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                {testSessionActive && (
-                <div className="mb-5 rounded-2xl border border-sky-400/30 bg-sky-400/10 px-4 py-3 text-xs font-bold text-sky-600 dark:text-sky-300">
-                  Session test en cours · les réglages personnels sont verrouillés jusqu’à la restauration automatique.
-                </div>
-              )}
-              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Mon ClashGO</div>
+                <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Mon ClashGO</div>
                 {!licenseState?.activated && licensePolicy?.enforced === false && (
                   <span className="rounded-full bg-amber-500/10 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-amber-500">
                     Mode bêta local
@@ -939,9 +939,9 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     : 'bg-emerald-500/10 text-emerald-500')
                 }>
                   <span className="material-symbols-outlined text-[12px]">
-                    {memberSaving ? 'sync' : 'cloud_done'}
+                    {memberSaving ? 'sync' : 'check_circle'}
                   </span>
-                  {memberSaving ? 'Enregistrement…' : 'Sauvegarde auto'}
+                  {memberSaving ? 'Enregistrement…' : 'Enregistré'}
                 </span>
               </div>
               <p className="mt-2 text-sm font-semibold text-zinc-500 max-w-2xl">
