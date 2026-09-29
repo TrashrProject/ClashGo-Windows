@@ -1156,6 +1156,7 @@ function App() {
               licenseReady={licenseAccessReady}
               memberName={licenseMemberName}
               licensePlan={licensePlan}
+              licenseExpiresAt={licenseExpiresAt}
               accountLinked={Boolean(playerTag)}
               windowsReady={systemDiagnostics ? windowsPreflightReady : null}
               readinessIssues={readinessIssues}
