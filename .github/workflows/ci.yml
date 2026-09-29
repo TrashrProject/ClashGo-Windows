@@ -44,7 +44,7 @@ jobs:
             for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
               const full = path.join(dir, entry.name);
               if (entry.isDirectory()) walk(full);
-              else if (entry.isFile() && /\.tsx?$/.test(entry.name)) files.push(full);
+              else if (entry.isFile() && /\.tsx?$/.test(entry.name) && !entry.name.endsWith('.d.ts')) files.push(full);
             }
           };
           walk('src');
