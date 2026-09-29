@@ -26,12 +26,12 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
   interfaceLevel
 }) => {
   const menuItems: { id: TabType; label: string; icon: string; minLevel: InterfaceLevel }[] = [
-    { id: 'dashboard', label: 'Home', icon: 'home', minLevel: 'simple' },
-    { id: 'config', label: 'Automation', icon: 'auto_awesome', minLevel: 'simple' },
-    { id: 'account', label: 'License', icon: 'license', minLevel: 'simple' },
-    { id: 'activity', label: 'Activity', icon: 'timeline', minLevel: 'advanced' },
-    { id: 'analytics', label: 'Statistics', icon: 'monitoring', minLevel: 'advanced' },
-    { id: 'settings', label: 'Settings', icon: 'settings', minLevel: 'advanced' },
+    { id: 'dashboard', label: 'Accueil', icon: 'home', minLevel: 'simple' },
+    { id: 'config', label: 'Automatisation', icon: 'auto_awesome', minLevel: 'simple' },
+    { id: 'account', label: 'Mon ClashGO', icon: 'account_circle', minLevel: 'simple' },
+    { id: 'activity', label: 'Activité', icon: 'timeline', minLevel: 'advanced' },
+    { id: 'analytics', label: 'Statistiques', icon: 'monitoring', minLevel: 'advanced' },
+    { id: 'settings', label: 'Paramètres', icon: 'settings', minLevel: 'advanced' },
     { id: 'developer', label: 'Support', icon: 'support_agent', minLevel: 'developer' },
   ];
 
@@ -101,7 +101,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
           <button
             onClick={starting ? undefined : (running ? onStop : onStart)}
             disabled={starting}
-            title={expanded ? undefined : (starting ? 'Bot starting' : (running ? 'Stop bot' : 'Start bot'))}
+            title={expanded ? undefined : (starting ? 'Démarrage du bot' : (running ? 'Arrêter le bot' : 'Démarrer le bot'))}
             className={`w-full h-12 rounded-2xl font-black text-[10px] tracking-[0.2em] transition-all duration-200 flex items-center relative overflow-hidden group/start ${
               starting
                 ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30 cursor-wait'
@@ -116,7 +116,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
               </span>
             </div>
             <span className={`transition-[opacity,transform] duration-200 ease-out whitespace-nowrap z-10 ${expanded ? 'opacity-100 translate-x-0' : 'opacity-0 w-0 -translate-x-2 overflow-hidden'}`}>
-              {starting ? 'STARTING...' : (running ? 'STOP BOT' : 'START BOT')}
+              {starting ? 'DÉMARRAGE...' : (running ? 'ARRÊTER' : 'DÉMARRER')}
             </span>
           </button>
         </div>
