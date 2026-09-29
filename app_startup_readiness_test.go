@@ -125,3 +125,38 @@ func TestNewStartupCheckItemKeepsRemediationWhenBlocked(t *testing.T) {
 		t.Fatalf("blocked check lost remediation action: %+v", item)
 	}
 }
+
+
+func TestStartupAdvisoryDoesNotBlockReadiness(t *testing.T) {
+	item := newStartupAdvisoryItem(
+		"account",
+		"Compte Clash",
+		false,
+		"Aucun tag joueur lié · optionnel",
+		"account",
+		"Lier le compte",
+	)
+	if item.OK {
+		t.Fatal("missing optional account should remain visible as not configured")
+	}
+	if item.Blocking {
+		t.Fatal("optional Clash account unexpectedly blocks startup")
+	}
+	if item.Action != "account" || item.ActionLabel == "" {
+		t.Fatalf("optional account lost its action: %+v", item)
+	}
+}
+
+func TestStartupFailureRemainsBlockingByDefault(t *testing.T) {
+	item := newStartupCheckItem(
+		"strategy",
+		"Stratégie",
+		false,
+		"Fichier introuvable",
+		"automation",
+		"Ouvrir Automatisation",
+	)
+	if !item.Blocking {
+		t.Fatalf("required startup failure became advisory: %+v", item)
+	}
+}
