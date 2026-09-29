@@ -168,34 +168,36 @@ const getInitialSidebarExpanded = (): boolean => {
   }
 };
 
+const createEmptyStats = (): BotStats => new bot.BotStats({
+  attacks_completed: 0,
+  search_skips: 0,
+  total_gold: 0,
+  total_elixir: 0,
+  total_de: 0,
+  stars_0: 0,
+  stars_1: 0,
+  stars_2: 0,
+  stars_3: 0,
+  uptime: 0,
+  cpu_time_sec: 0,
+  cpu_cores: 0,
+  recovery_attempts: 0,
+  recovery_successes: 0,
+  bluestacks_restarts: 0,
+  adb_health: {
+    last_capture: null,
+    avg_capture_ms: 0,
+    consecutive_fails: 0,
+    captures_total: 0,
+    errors_total: 0,
+    last_error: "",
+  },
+}) as unknown as BotStats;
+
 function App() {
   const [tab, setTab] = useState<TabType>('dashboard');
   const [accountPage, setAccountPage] = useState<'account' | 'settings' | 'village'>('account');
-  const [stats, setStats] = useState<BotStats>(new bot.BotStats({
-    attacks_completed: 0,
-    search_skips: 0,
-    total_gold: 0,
-    total_elixir: 0,
-    total_de: 0,
-    stars_0: 0,
-    stars_1: 0,
-    stars_2: 0,
-    stars_3: 0,
-    uptime: 0,
-    cpu_time_sec: 0,
-    cpu_cores: 0,
-    recovery_attempts: 0,
-    recovery_successes: 0,
-    bluestacks_restarts: 0,
-    adb_health: {
-      last_capture: null,
-      avg_capture_ms: 0,
-      consecutive_fails: 0,
-      captures_total: 0,
-      errors_total: 0,
-      last_error: ""
-    }
-  }) as unknown as BotStats);
+  const [stats, setStats] = useState<BotStats>(() => createEmptyStats());
   const [isRunning, setIsRunning] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [history, setHistory] = useState<AttackReport[]>([]);
@@ -262,12 +264,23 @@ function App() {
     startupCheckAutoRan.current = false;
     setStartupCheck(null);
     if (!activated) {
+      // Clear every member-scoped surface immediately. This prevents the next
+      // license (or the activation screen) from briefly displaying the
+      // previous member's counters, diagnostics or logs while its own state
+      // is being restored.
       setPlayerTag('');
+      setStats(createEmptyStats());
       setHistory([]);
       setResourceHistory([]);
       setActivity([]);
       setReplay({ available: false, complete: false, events: [] });
       setSessionReport(null);
+      setLogs([]);
+      setLatestBootReport(null);
+      setBotError('');
+      setBotDiagnosticPath('');
+      setMemberNotice('');
+      setTestSessionActive(false);
       return;
     }
 
