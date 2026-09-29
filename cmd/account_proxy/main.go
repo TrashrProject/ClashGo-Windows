@@ -164,6 +164,21 @@ func (s *controlStore) lookup(key string) (*licenseRecord, bool) {
 	return &cp, true
 }
 
+
+func (s *controlStore) authorizeDeveloper(key, machineID string) (*licenseRecord, bool) {
+	rec, ok := s.lookup(key)
+	if !ok || !rec.Active {
+		return nil, false
+	}
+	if rec.Role != "developer" && rec.Role != "admin" {
+		return nil, false
+	}
+	if rec.MachineID == "" || strings.TrimSpace(machineID) == "" || rec.MachineID != strings.TrimSpace(machineID) {
+		return nil, false
+	}
+	return rec, true
+}
+
 func (c *profileCache) get(tag string) (cacheEntry, bool) {
 	c.mu.RLock()
 	entry, ok := c.entries[tag]
@@ -438,6 +453,41 @@ func main() {
 		_ = control.saveLocked()
 		control.mu.Unlock()
 		writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "id": in.ID})
+	})
+
+
+	mux.HandleFunc("GET /v1/developer/incidents", func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
+		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
+		if _, ok := control.authorizeDeveloper(key, machineID); !ok {
+			writeJSON(w, http.StatusForbidden, map[string]string{"message": "developer license required"})
+			return
+		}
+		control.mu.RLock()
+		rows := append([]supportIncident(nil), control.data.Incidents...)
+		control.mu.RUnlock()
+		if len(rows) > 500 {
+			rows = rows[len(rows)-500:]
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"incidents": rows})
+	})
+
+	mux.HandleFunc("GET /v1/developer/licenses", func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
+		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
+		if _, ok := control.authorizeDeveloper(key, machineID); !ok {
+			writeJSON(w, http.StatusForbidden, map[string]string{"message": "developer license required"})
+			return
+		}
+		control.mu.RLock()
+		rows := make([]licenseRecord, 0, len(control.data.Licenses))
+		for _, rec := range control.data.Licenses {
+			if rec != nil {
+				rows = append(rows, *rec)
+			}
+		}
+		control.mu.RUnlock()
+		writeJSON(w, http.StatusOK, map[string]any{"licenses": rows})
 	})
 
 	mux.HandleFunc("POST /v1/admin/licenses", func(w http.ResponseWriter, r *http.Request) {
