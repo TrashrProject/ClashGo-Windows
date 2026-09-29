@@ -1186,7 +1186,7 @@ function App() {
                 <UpdateBanner
                   status={updateStatus}
                   appVersion={appVersion}
-                  isBotRunning={isRunning}
+                  isBotRunning={isRunning || isStarting}
                   onCheckNow={handleUpdaterCheck}
                   onDownload={handleUpdaterDownload}
                   onApply={handleUpdaterApply}
