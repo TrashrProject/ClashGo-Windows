@@ -43,6 +43,7 @@ type LicenseState = {
   activated?: boolean;
   role?: 'member' | 'developer' | 'admin' | '';
   license_hint?: string;
+  machine_id?: string;
 };
 
 const copyText = async (value: string): Promise<void> => {
@@ -101,7 +102,6 @@ const DeveloperView: React.FC = () => {
   const [role, setRole] = React.useState<LicenseState['role']>('');
   const [currentLicenseHint, setCurrentLicenseHint] = React.useState('');
   const [currentMachineID, setCurrentMachineID] = React.useState('');
-  const [currentLicenseHint, setCurrentLicenseHint] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [actionID, setActionID] = React.useState('');
@@ -570,11 +570,6 @@ const DeveloperView: React.FC = () => {
                       {planLabel(item.plan)}
                     </span>
                     {isCurrentAdminLicense(item) && (
-                      <span className="px-2 py-1 rounded-lg bg-sky-500/10 text-[9px] font-black uppercase tracking-widest text-sky-500">
-                        Cette licence
-                      </span>
-                    )}
-                    {Boolean(currentLicenseHint && item.hint === currentLicenseHint) && (
                       <span className="px-2 py-1 rounded-lg bg-sky-500/10 text-[9px] font-black uppercase tracking-widest text-sky-500">
                         Cette licence
                       </span>
