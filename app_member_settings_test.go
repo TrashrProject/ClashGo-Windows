@@ -1658,3 +1658,68 @@ func TestUndoMemberSettingsSwapsCurrentAndPrevious(t *testing.T) {
 		t.Fatalf("second undo did not swap back to prior state: %+v", got)
 	}
 }
+
+
+func TestMemberPresetStoreRoundTripAndOverwrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "members", "member.presets.json")
+	first := memberPresetStore{Slots: []MemberPresetSlot{{
+		Slot: 1,
+		Name: "Farm cool",
+		UpdatedAt: "2026-09-29T08:00:00Z",
+		Settings: MemberSettings{
+			SpeedProfile: "normal",
+			MaxAttacksPerHour: 12,
+			MaxAttacksPerSession: 50,
+			BreakEveryAttacks: 5,
+			BreakMinutes: 3,
+		},
+	}}}
+	if err := saveMemberPresetStore(path, first); err != nil {
+		t.Fatalf("first save failed: %v", err)
+	}
+	second := first
+	second.Slots[0].Name = "Farm rapide"
+	second.Slots[0].Settings.SpeedProfile = "fast"
+	second.Slots[0].Settings.MaxAttacksPerHour = 16
+	if err := saveMemberPresetStore(path, second); err != nil {
+		t.Fatalf("overwrite failed: %v", err)
+	}
+	got := loadMemberPresetStore(path)
+	if len(got.Slots) != 1 {
+		t.Fatalf("slot count=%d want 1", len(got.Slots))
+	}
+	if got.Slots[0].Name != "Farm rapide" || got.Slots[0].Settings.SpeedProfile != "fast" {
+		t.Fatalf("unexpected stored preset: %+v", got.Slots[0])
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("temporary preset file survived save: %v", err)
+	}
+}
+
+func TestMemberPresetStoreSanitizesSlotsAndNames(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "member.presets.json")
+	longName := strings.Repeat("A", 80)
+	raw := memberPresetStore{Slots: []MemberPresetSlot{
+		{Slot: 1, Name: "", Settings: MemberSettings{SpeedProfile: "normal", MaxAttacksPerHour: 12, MaxAttacksPerSession: 50}},
+		{Slot: 1, Name: "duplicate", Settings: MemberSettings{SpeedProfile: "fast", MaxAttacksPerHour: 16, MaxAttacksPerSession: 100}},
+		{Slot: 2, Name: longName, Settings: MemberSettings{SpeedProfile: "fast", MaxAttacksPerHour: 999, MaxAttacksPerSession: 9999}},
+		{Slot: 4, Name: "invalid slot", Settings: MemberSettings{SpeedProfile: "normal", MaxAttacksPerHour: 12, MaxAttacksPerSession: 50}},
+	}}
+	data, err := json.Marshal(raw)
+	if err != nil { t.Fatal(err) }
+	if err := os.WriteFile(path, data, 0o600); err != nil { t.Fatal(err) }
+
+	got := loadMemberPresetStore(path)
+	if len(got.Slots) != 2 {
+		t.Fatalf("slot count=%d want 2", len(got.Slots))
+	}
+	if got.Slots[0].Name != "Profil 1" {
+		t.Fatalf("default name=%q", got.Slots[0].Name)
+	}
+	if len([]rune(got.Slots[1].Name)) != 32 {
+		t.Fatalf("sanitized name length=%d want 32", len([]rune(got.Slots[1].Name)))
+	}
+	if got.Slots[1].Settings.MaxAttacksPerHour != 24 || got.Slots[1].Settings.MaxAttacksPerSession != 500 {
+		t.Fatalf("settings were not sanitized: %+v", got.Slots[1].Settings)
+	}
+}
