@@ -720,6 +720,7 @@ type StartupCheckItem struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`
 	OK          bool   `json:"ok"`
+	Blocking    bool   `json:"blocking"`
 	Message     string `json:"message"`
 	Action      string `json:"action,omitempty"`
 	ActionLabel string `json:"action_label,omitempty"`
@@ -736,9 +737,19 @@ func newStartupCheckItem(id, label string, ok bool, message, action, actionLabel
 		actionLabel = ""
 	}
 	return StartupCheckItem{
-		ID: id, Label: label, OK: ok, Message: message,
+		ID: id, Label: label, OK: ok, Blocking: !ok, Message: message,
 		Action: action, ActionLabel: actionLabel,
 	}
+}
+
+func newStartupAdvisoryItem(id, label string, ok bool, message, action, actionLabel string) StartupCheckItem {
+	item := newStartupCheckItem(id, label, ok, message, action, actionLabel)
+	item.Blocking = false
+	if !ok {
+		item.Action = action
+		item.ActionLabel = actionLabel
+	}
+	return item
 }
 
 func memberRuntimeConfigReady(cfg *config.BotConfig) (bool, string) {
@@ -804,11 +815,13 @@ func (a *App) GetStartupReadiness() StartupReadiness {
 
 	cfg := config.LoadOrDefault("config.json")
 	accountOK := strings.TrimSpace(cfg.Account.PlayerTag) != ""
-	accountMessage := "Compte Clash lié"
+	accountMessage := "Compte Clash lié · profil HDV automatique disponible"
 	if !accountOK {
-		accountMessage = "Aucun tag joueur lié"
+		accountMessage = "Aucun tag joueur lié · optionnel, la configuration locale reste utilisable"
 	}
-	add("account", "Compte Clash", accountOK, accountMessage, "account", "Lier le compte")
+	checks = append(checks, newStartupAdvisoryItem(
+		"account", "Compte Clash", accountOK, accountMessage, "account", "Lier le compte",
+	))
 
 	diag := collectSystemDiagnostics()
 	add("assets", "Fichiers ClashGO", diag.AssetsReady, func() string {
@@ -867,7 +880,7 @@ func (a *App) GetStartupReadiness() StartupReadiness {
 
 	ready := true
 	for _, check := range checks {
-		if !check.OK {
+		if !check.OK && check.Blocking {
 			ready = false
 			break
 		}
