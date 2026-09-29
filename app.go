@@ -3823,6 +3823,32 @@ func (a *App) StartQuickTestSession(gold, elixir, dark int, upgradeWalls bool, s
 	return a.startTemporaryTestSession(3, gold, elixir, dark, upgradeWalls, searchEnabled)
 }
 
+func (a *App) ExtendSessionAttacks(extra int) (MemberSettings, error) {
+	if extra < 1 {
+		extra = 1
+	}
+	if extra > 100 {
+		extra = 100
+	}
+
+	current := a.GetMemberSettings()
+	base := current.MaxAttacksPerSession
+
+	a.mu.Lock()
+	if a.bot != nil {
+		if completed := int(a.bot.Stats().SessionAttacks); completed > base {
+			base = completed
+		}
+	}
+	a.mu.Unlock()
+
+	current.MaxAttacksPerSession = base + extra
+	if current.MaxAttacksPerSession > 500 {
+		current.MaxAttacksPerSession = 500
+	}
+	return a.SaveMemberSettings(current)
+}
+
 func (a *App) SetMemberSpeedProfile(profile string) (MemberSettings, error) {
 	current := a.GetMemberSettings()
 	switch normalizeSpeedProfile(profile) {
