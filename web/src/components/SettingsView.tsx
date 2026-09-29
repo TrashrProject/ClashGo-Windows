@@ -130,7 +130,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   };
 
   const handleResetClick = () => {
-    if (isRunning) return;
+    if (isRunning || isStarting) return;
     if (!resetArmed) {
       setResetArmed(true);
       resetTimerRef.current = window.setTimeout(() => setResetArmed(false), 4000);
@@ -461,7 +461,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
         <div className="pt-8 mt-8 border-t border-zinc-50 dark:border-zinc-800/50">
            <button
              onClick={handleResetClick}
-             disabled={isRunning}
+             disabled={isRunning || isStarting}
              aria-live="polite"
              className={`w-full flex justify-between items-center p-6 rounded-2xl border transition-all duration-300 group disabled:opacity-50 disabled:cursor-not-allowed ${
                resetArmed
@@ -478,7 +478,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
                <div className="flex flex-col text-left">
                  <span className={`text-[10px] font-black uppercase tracking-[0.2em] mb-0.5 ${resetArmed ? 'text-white/80' : 'text-rose-600 dark:text-rose-500'}`}>Zone sensible</span>
                  <span className={`text-sm font-bold ${resetArmed ? 'text-white' : 'text-rose-600 dark:text-rose-400'}`}>
-                   {isRunning ? 'Arrête le bot avant de réinitialiser' : (resetArmed ? 'Cliquer encore pour confirmer — efface toutes les statistiques' : 'Réinitialiser toutes les statistiques')}
+                   {isRunning || isStarting ? 'Attends l’arrêt complet du bot avant de réinitialiser' : (resetArmed ? 'Cliquer encore pour confirmer — efface toutes les statistiques' : 'Réinitialiser toutes les statistiques')}
                  </span>
                </div>
              </div>
