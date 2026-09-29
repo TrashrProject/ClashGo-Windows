@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivateLicense, GetLicensePolicy, GetLicenseState } from '../../wailsjs/go/main/App';
+import { ActivateLicense, GetLicensePolicy, GetLicenseState, RefreshLicense } from '../../wailsjs/go/main/App';
 import logo from '../assets/images/clashgo-logo.png';
 
 type LicenseState = {
@@ -79,6 +79,43 @@ const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
 
   React.useEffect(() => { void refresh(); }, [refresh]);
 
+  React.useEffect(() => {
+    if (!policy?.enforced || state?.activated || !state?.license_hint) return;
+
+    const retry = () => { void refreshExisting(); };
+    const timer = window.setInterval(retry, 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') retry();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', retry);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', retry);
+    };
+  }, [policy?.enforced, state?.activated, state?.license_hint, refreshExisting]);
+
+  const refreshExisting = React.useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const next = await RefreshLicense();
+      const nextState = next as LicenseState;
+      setState(nextState);
+      if (nextState.activated) {
+        onReady(nextState, policy || { enforced: true, service_configured: true });
+      } else if (nextState.error) {
+        setError(friendlyLicenseError(nextState.error));
+      }
+    } catch (e) {
+      setError(friendlyLicenseError(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, onReady, policy]);
+
   const activate = async () => {
     const value = key.trim();
     if (!value || busy) return;
@@ -145,6 +182,25 @@ const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
           </div>
 
           <div className="mt-7 space-y-3">
+            {!state?.activated && state?.license_hint && (
+              <div className="rounded-2xl border border-zinc-700 bg-zinc-950/70 p-4">
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">Licence déjà enregistrée</div>
+                <div className="mt-1 font-mono text-sm font-bold text-zinc-200">{state.license_hint}</div>
+                <div className="mt-2 text-xs font-semibold leading-5 text-zinc-500">
+                  Si tu viens de renouveler ta licence, aucun nouveau code n’est nécessaire.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void refreshExisting()}
+                  disabled={busy}
+                  className="mt-4 w-full h-12 rounded-xl bg-emerald-500 text-zinc-950 text-[10px] font-black uppercase tracking-[0.16em] transition active:scale-[0.99] disabled:opacity-40"
+                >
+                  {busy ? 'Vérification…' : 'J’AI RENOUVELÉ · ACTUALISER'}
+                </button>
+              </div>
+            )}
+
+            {(!state?.license_hint || state?.activated) && (
             <input
               value={key}
               onChange={(e) => setKey(e.target.value.toUpperCase())}
@@ -162,6 +218,7 @@ const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
             >
               {busy ? 'Vérification…' : 'Activer ma licence'}
             </button>
+            )}
           </div>
 
           {(error || state?.error) && (
