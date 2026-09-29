@@ -246,6 +246,16 @@ func (a *App) archiveMemberRuntimeState(clearShared bool) error {
 	for _, rel := range memberRuntimeStateFiles {
 		src := paths.ResolveConfig(rel)
 		dst := filepath.Join(dir, rel)
+
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			// Absence is meaningful (for example after ResetStats): remove any
+			// older archived copy so deleted member data cannot reappear later.
+			_ = os.Remove(dst)
+			_ = os.Remove(dst + ".bak")
+			_ = os.Remove(dst + ".tmp")
+			continue
+		}
+
 		if err := copyRuntimeStateFile(src, dst); err != nil {
 			return fmt.Errorf("archive member state %s: %w", rel, err)
 		}
