@@ -173,3 +173,41 @@ func TestStateFromStoredKeepsFutureEntitlementActive(t *testing.T) {
 		t.Fatalf("future entitlement restored with unexpected error %q", got.Error)
 	}
 }
+
+
+func TestProfileIDIsStableAndDoesNotExposeLicenseKey(t *testing.T) {
+	svc := &Service{
+		stored: storedLicense{Key: "CGO-ABCDEF-GHIJKL-MNOPQR-STUVWX"},
+	}
+
+	id1 := svc.ProfileID()
+	id2 := svc.ProfileID()
+	if id1 == "" {
+		t.Fatal("expected non-empty profile id")
+	}
+	if id1 != id2 {
+		t.Fatalf("profile id is not stable: %q != %q", id1, id2)
+	}
+	if strings.Contains(id1, "ABCDEF") || strings.Contains(id1, "STUVWX") {
+		t.Fatalf("profile id leaked license material: %q", id1)
+	}
+	if len(id1) != 16 {
+		t.Fatalf("profile id length=%d want 16", len(id1))
+	}
+}
+
+func TestProfileIDDifferentLicensesDoNotCollideInBasicCase(t *testing.T) {
+	a := &Service{stored: storedLicense{Key: "CGO-AAAAAA-BBBBBB-CCCCCC-DDDDDD"}}
+	b := &Service{stored: storedLicense{Key: "CGO-111111-222222-333333-444444"}}
+
+	if a.ProfileID() == b.ProfileID() {
+		t.Fatalf("different licenses produced same profile id %q", a.ProfileID())
+	}
+}
+
+func TestProfileIDEmptyWithoutLicense(t *testing.T) {
+	svc := &Service{}
+	if got := svc.ProfileID(); got != "" {
+		t.Fatalf("empty license profile id=%q want empty", got)
+	}
+}
