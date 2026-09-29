@@ -1724,3 +1724,48 @@ func TestMemberPresetStoreSanitizesSlotsAndNames(t *testing.T) {
 		t.Fatalf("settings were not sanitized: %+v", got.Slots[1].Settings)
 	}
 }
+
+
+func TestBuildTemporaryTestSettingsUsesRequestedLimit(t *testing.T) {
+	original := MemberSettings{
+		InterfaceLevel:       "advanced",
+		SpeedProfile:         "fast",
+		MaxAttacksPerHour:    16,
+		MaxAttacksPerSession: 77,
+		BreakEveryAttacks:    9,
+		BreakMinutes:         7,
+		AdaptiveSearch:       false,
+		AutoProfileSync:      true,
+		AutoArmyGuard:        true,
+		AutoResourceTracking: true,
+	}
+
+	for _, limit := range []int{3, 10} {
+		got, err := buildTemporaryTestSettings(original, limit)
+		if err != nil {
+			t.Fatalf("buildTemporaryTestSettings(%d): %v", limit, err)
+		}
+		if got.MaxAttacksPerSession != limit {
+			t.Fatalf("limit=%d got MaxAttacksPerSession=%d", limit, got.MaxAttacksPerSession)
+		}
+		if got.SpeedProfile != "normal" || got.MaxAttacksPerHour != 12 {
+			t.Fatalf("temporary test did not use safe short-session pacing: %+v", got)
+		}
+		if !got.AdaptiveSearch {
+			t.Fatal("temporary test should enable adaptive search")
+		}
+		if got.InterfaceLevel != "advanced" {
+			t.Fatalf("temporary test changed presentation level: %q", got.InterfaceLevel)
+		}
+	}
+}
+
+func TestBuildTemporaryTestSettingsClampsInvalidLimit(t *testing.T) {
+	got, err := buildTemporaryTestSettings(defaultMemberSettings(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MaxAttacksPerSession != 1 {
+		t.Fatalf("MaxAttacksPerSession=%d want 1", got.MaxAttacksPerSession)
+	}
+}
