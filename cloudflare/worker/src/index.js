@@ -258,7 +258,8 @@ async function listLicenses(env) {
 async function listCustomers(env) {
   const result = await env.DB.prepare(`
     SELECT
-      c.id, c.display_name, c.contact, c.notes, c.created_at, c.updated_at,
+      c.id, c.display_name, c.contact, c.notes, c.payment_status,
+      c.total_paid_cents, c.next_due_at, c.created_at, c.updated_at,
       COUNT(l.id) AS license_count,
       SUM(CASE WHEN l.active = 1 THEN 1 ELSE 0 END) AS active_license_count,
       MAX(l.last_seen_at) AS last_seen_at
@@ -277,10 +278,30 @@ async function createCustomer(body, env) {
   const now = new Date().toISOString();
   const id = randomHex(8);
   await env.DB.prepare(`
-    INSERT INTO customers (id, display_name, contact, notes, created_at, updated_at)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?5)
-  `).bind(id, name.slice(0, 120), clean(body.contact).slice(0, 180), clean(body.notes).slice(0, 1000), now).run();
-  return { customer: { id, display_name: name.slice(0,120), contact: clean(body.contact).slice(0,180), notes: clean(body.notes).slice(0,1000), created_at: now, updated_at: now } };
+    INSERT INTO customers (
+      id, display_name, contact, notes, payment_status, total_paid_cents, next_due_at, created_at, updated_at
+    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+  `).bind(
+    id,
+    name.slice(0, 120),
+    clean(body.contact).slice(0, 180),
+    clean(body.notes).slice(0, 1000),
+    clean(body.payment_status) || "unknown",
+    Math.max(0, Number(body.total_paid_cents || 0)),
+    clean(body.next_due_at) || null,
+    now
+  ).run();
+  return { customer: {
+    id,
+    display_name: name.slice(0,120),
+    contact: clean(body.contact).slice(0,180),
+    notes: clean(body.notes).slice(0,1000),
+    payment_status: clean(body.payment_status) || "unknown",
+    total_paid_cents: Math.max(0, Number(body.total_paid_cents || 0)),
+    next_due_at: clean(body.next_due_at) || null,
+    created_at: now,
+    updated_at: now
+  } };
 }
 
 async function createCustomerRequest(request, env) {
@@ -301,9 +322,24 @@ async function updateCustomer(request, env) {
   if (!id || !name) return json({ message: "customer_id and display_name are required" }, 400);
   const result = await env.DB.prepare(`
     UPDATE customers
-    SET display_name = ?1, contact = ?2, notes = ?3, updated_at = ?4
-    WHERE id = ?5
-  `).bind(name.slice(0,120), clean(body.contact).slice(0,180), clean(body.notes).slice(0,1000), new Date().toISOString(), id).run();
+    SET display_name = ?1,
+        contact = ?2,
+        notes = ?3,
+        payment_status = ?4,
+        total_paid_cents = ?5,
+        next_due_at = ?6,
+        updated_at = ?7
+    WHERE id = ?8
+  `).bind(
+    name.slice(0,120),
+    clean(body.contact).slice(0,180),
+    clean(body.notes).slice(0,1000),
+    clean(body.payment_status) || "unknown",
+    Math.max(0, Number(body.total_paid_cents || 0)),
+    clean(body.next_due_at) || null,
+    new Date().toISOString(),
+    id
+  ).run();
   if (!result.meta?.changes) return json({ message: "customer not found" }, 404);
   return json({ ok: true });
 }
@@ -356,9 +392,108 @@ async function createLicenses(request, env) {
         id, license_hash, hint, role, active, created_at, plan, duration_days, customer_id
       ) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7, ?8)
     `).bind(id, hash, licenseHint(key), role, now, licensePlan.plan, licensePlan.days, customerId || null).run();
+    await recordLicenseEvent(env, {
+      licenseId: id,
+      customerId: customerId || null,
+      eventType: "created",
+      plan: licensePlan.plan,
+      paymentStatus: clean(body.payment_status) || null,
+      amountCents: body.amount_cents == null ? null : Number(body.amount_cents),
+      note: clean(body.note) || null,
+    });
     created.push(key);
   }
   return json({ role, plan: licensePlan.plan, duration_days: licensePlan.days, customer_id: customerId || null, licenses: created }, 201);
+}
+
+async function recordLicenseEvent(env, {
+  licenseId,
+  customerId = null,
+  eventType,
+  plan = null,
+  amountCents = null,
+  paymentStatus = null,
+  note = null,
+  expiresAt = null,
+}) {
+  await env.DB.prepare(`
+    INSERT INTO license_events (
+      id, license_id, customer_id, event_type, plan,
+      amount_cents, payment_status, note, created_at, expires_at
+    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+  `).bind(
+    randomHex(8),
+    licenseId,
+    customerId || null,
+    eventType,
+    plan || null,
+    amountCents == null ? null : Math.max(0, Number(amountCents)),
+    paymentStatus || null,
+    note ? String(note).slice(0, 1000) : null,
+    new Date().toISOString(),
+    expiresAt || null
+  ).run();
+}
+
+async function listLicenseEvents(env, limit = 500) {
+  const result = await env.DB.prepare(`
+    SELECT
+      e.id, e.license_id, e.customer_id, e.event_type, e.plan,
+      e.amount_cents, e.payment_status, e.note, e.created_at, e.expires_at,
+      l.hint AS license_hint,
+      c.display_name AS customer_name,
+      c.contact AS customer_contact
+    FROM license_events e
+    LEFT JOIN licenses l ON l.id = e.license_id
+    LEFT JOIN customers c ON c.id = e.customer_id
+    ORDER BY e.created_at DESC
+    LIMIT ?1
+  `).bind(limit).all();
+  return result.results || [];
+}
+
+async function dashboardSummary(env) {
+  const now = new Date();
+  const in7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const nowISO = now.toISOString();
+
+  const [customers, activeLicenses, expiredLicenses, expiringSoon, neverActivated, incidents, paidCustomers] = await Promise.all([
+    env.DB.prepare("SELECT COUNT(*) AS n FROM customers").first(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM licenses WHERE active = 1 AND (expires_at IS NULL OR expires_at > ?1)").bind(nowISO).first(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM licenses WHERE expires_at IS NOT NULL AND expires_at <= ?1").bind(nowISO).first(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM licenses WHERE expires_at IS NOT NULL AND expires_at > ?1 AND expires_at <= ?2").bind(nowISO, in7).first(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM licenses WHERE activated_at IS NULL").first(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM incidents").first(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM customers WHERE payment_status = 'paid'").first(),
+  ]);
+
+  const errorsBySignature = await env.DB.prepare(`
+    SELECT level, app_version, message, COUNT(*) AS count
+    FROM incidents
+    GROUP BY level, app_version, message
+    ORDER BY count DESC, received_at DESC
+    LIMIT 20
+  `).all();
+
+  const freeToPaid = await env.DB.prepare(`
+    SELECT COUNT(DISTINCT customer_id) AS n
+    FROM license_events
+    WHERE customer_id IS NOT NULL
+      AND event_type = 'renewal'
+      AND plan IN ('week_1','month_1','lifetime')
+  `).first();
+
+  return {
+    customers: Number(customers?.n || 0),
+    active_licenses: Number(activeLicenses?.n || 0),
+    expired_licenses: Number(expiredLicenses?.n || 0),
+    expiring_7d: Number(expiringSoon?.n || 0),
+    never_activated: Number(neverActivated?.n || 0),
+    incidents: Number(incidents?.n || 0),
+    paid_customers: Number(paidCustomers?.n || 0),
+    free_to_paid_customers: Number(freeToPaid?.n || 0),
+    top_errors: errorsBySignature.results || [],
+  };
 }
 
 async function resetMachine(request, env) {
@@ -437,6 +572,34 @@ async function renewLicense(request, env) {
     await env.DB.prepare(
       "UPDATE licenses SET plan = 'lifetime', duration_days = NULL, expires_at = NULL, active = 1 WHERE id = ?1"
     ).bind(id).run();
+
+    const licenseOwner = await env.DB.prepare("SELECT customer_id FROM licenses WHERE id = ?1").bind(id).first();
+    const customerId = licenseOwner?.customer_id || null;
+    const amountCents = body.amount_cents == null ? null : Math.max(0, Number(body.amount_cents));
+    const paymentStatus = clean(body.payment_status) || null;
+
+    await recordLicenseEvent(env, {
+      licenseId: id,
+      customerId,
+      eventType: "renewal",
+      plan: "lifetime",
+      amountCents,
+      paymentStatus,
+      note: clean(body.note) || null,
+      expiresAt: null,
+    });
+
+    if (customerId) {
+      await env.DB.prepare(`
+        UPDATE customers
+        SET payment_status = COALESCE(?1, payment_status),
+            total_paid_cents = total_paid_cents + ?2,
+            next_due_at = NULL,
+            updated_at = ?3
+        WHERE id = ?4
+      `).bind(paymentStatus, amountCents || 0, new Date().toISOString(), customerId).run();
+    }
+
     return json({ ok: true, plan: "lifetime", expires_at: null });
   }
 
@@ -448,6 +611,39 @@ async function renewLicense(request, env) {
   await env.DB.prepare(
     "UPDATE licenses SET plan = ?1, duration_days = ?2, expires_at = ?3, active = 1 WHERE id = ?4"
   ).bind(planInfo.plan, planInfo.days, expiresAt, id).run();
+
+  const licenseOwner = await env.DB.prepare("SELECT customer_id FROM licenses WHERE id = ?1").bind(id).first();
+  const customerId = licenseOwner?.customer_id || null;
+  const amountCents = body.amount_cents == null ? null : Math.max(0, Number(body.amount_cents));
+  const paymentStatus = clean(body.payment_status) || null;
+
+  await recordLicenseEvent(env, {
+    licenseId: id,
+    customerId,
+    eventType: "renewal",
+    plan: planInfo.plan,
+    amountCents,
+    paymentStatus,
+    note: clean(body.note) || null,
+    expiresAt,
+  });
+
+  if (customerId) {
+    await env.DB.prepare(`
+      UPDATE customers
+      SET payment_status = COALESCE(?1, payment_status),
+          total_paid_cents = total_paid_cents + ?2,
+          next_due_at = ?3,
+          updated_at = ?4
+      WHERE id = ?5
+    `).bind(
+      paymentStatus,
+      amountCents || 0,
+      expiresAt,
+      new Date().toISOString(),
+      customerId
+    ).run();
+  }
 
   return json({
     ok: true,
@@ -508,6 +704,12 @@ async function router(request, env) {
     }
     if (request.method === "GET" && path === "/v1/admin/customers") {
       return json({ customers: await listCustomers(env) });
+    }
+    if (request.method === "GET" && path === "/v1/admin/history") {
+      return json({ events: await listLicenseEvents(env, 500) });
+    }
+    if (request.method === "GET" && path === "/v1/admin/summary") {
+      return json(await dashboardSummary(env));
     }
     if (request.method === "POST" && path === "/v1/admin/customers") {
       return createCustomerRequest(request, env);
