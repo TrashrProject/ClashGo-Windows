@@ -94,7 +94,7 @@ func (w *WailsLogWriter) Write(p []byte) (n int, err error) {
 // NewApp creates a new App application struct
 func NewApp() *App {
 	cfg := config.LoadOrDefault("config.json")
-	controlURL := clashAccountServiceURL(cfg)
+	controlURL := clashControlServiceURL(cfg)
 	licenseService := licensing.New(controlURL, version)
 	return &App{
 		logBuffer: make([]string, 0, 100),
@@ -112,10 +112,10 @@ func (a *App) startup(ctx context.Context) {
 	// error/fatal/panic records can be queued from the first startup failure.
 	if a.license == nil {
 		cfg := config.LoadOrDefault("config.json")
-		a.license = licensing.New(clashAccountServiceURL(cfg), version)
+		a.license = licensing.New(clashControlServiceURL(cfg), version)
 	}
 	cfg := config.LoadOrDefault("config.json")
-	a.supportReporter = support.New(clashAccountServiceURL(cfg), version, a.license)
+	a.supportReporter = support.New(clashControlServiceURL(cfg), version, a.license)
 
 	// Setup log bridge.
 	wailsWriter := &WailsLogWriter{app: a}
@@ -896,7 +896,7 @@ func (a *App) GetLicenseState() licensing.State {
 func (a *App) ActivateLicense(key string) (licensing.State, error) {
 	if a.license == nil {
 		cfg := config.LoadOrDefault("config.json")
-		a.license = licensing.New(clashAccountServiceURL(cfg), version)
+		a.license = licensing.New(clashControlServiceURL(cfg), version)
 	}
 	state, err := a.license.Activate(context.Background(), key)
 	if err != nil {
@@ -936,7 +936,7 @@ func (a *App) developerControlGET(path string) ([]map[string]any, error) {
 	}
 
 	cfg := config.LoadOrDefault("config.json")
-	baseURL := clashAccountServiceURL(cfg)
+	baseURL := clashControlServiceURL(cfg)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, baseURL+path, nil)
 	if err != nil {
 		return nil, err
@@ -1076,6 +1076,18 @@ func clashAccountServiceURL(cfg *config.BotConfig) string {
 	// Development fallback. Production builds should inject
 	// CLASHGO_ACCOUNT_API_URL or persist account.proxy_url.
 	return "http://127.0.0.1:8787"
+}
+
+func clashControlServiceURL(cfg *config.BotConfig) string {
+	if raw := strings.TrimSpace(os.Getenv("CLASHGO_CONTROL_API_URL")); raw != "" {
+		return strings.TrimRight(raw, "/")
+	}
+	if raw := strings.TrimSpace(controlServiceURL); raw != "" {
+		return strings.TrimRight(raw, "/")
+	}
+	// Local development reuses the combined Go service. Production builds
+	// normally embed the Cloudflare Worker URL independently.
+	return clashAccountServiceURL(cfg)
 }
 
 // GetAccountConfig returns safe account metadata only. End users never see,
