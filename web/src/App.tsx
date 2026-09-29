@@ -37,9 +37,11 @@ import {
   ClearSkippedVersion,
   GetAccountConfig,
   GetLicenseState,
+  GetMemberInterfaceLevel,
   GetPlayerProfile,
   GetVillageResourceHistory,
   SetSimpleMode,
+  SaveMemberInterfaceLevel,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
 import { InterfaceLevel, TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent, AttackReplayView, SessionReportView } from './types';
@@ -245,6 +247,16 @@ function App() {
 
     if (role === 'developer' || role === 'admin') {
       setInterfaceLevel('developer');
+    } else if (state?.activated) {
+      void GetMemberInterfaceLevel()
+        .then((saved) => {
+          const level: InterfaceLevel = saved === 'advanced' ? 'advanced' : 'simple';
+          setInterfaceLevel(level);
+        })
+        .catch(() => {
+          setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
+        });
+      setTab((current) => current === 'developer' ? 'dashboard' : current);
     } else {
       setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
       setTab((current) => current === 'developer' ? 'dashboard' : current);
@@ -261,6 +273,9 @@ function App() {
       const simple = level === 'simple';
       setSimpleMode(simple);
       void SetSimpleMode(simple);
+      void SaveMemberInterfaceLevel(level).catch((err) => {
+        console.warn('Failed to save member interface level:', err);
+      });
     }
   }, []);
 
@@ -335,7 +350,12 @@ function App() {
           setLicenseRole('member');
           setLicenseMemberName(license.member_name || '');
           setLicensePlan(license.plan || '');
-          setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
+          try {
+            const savedLevel = await GetMemberInterfaceLevel();
+            setInterfaceLevel(savedLevel === 'advanced' ? 'advanced' : 'simple');
+          } catch {
+            setInterfaceLevel('simple');
+          }
         } else {
           setLicenseRole('');
           setLicenseMemberName('');
@@ -469,6 +489,11 @@ function App() {
 
       if (role === 'developer' || role === 'admin') {
         setInterfaceLevel('developer');
+      } else if (payload?.activated) {
+        void GetMemberInterfaceLevel()
+          .then((saved) => setInterfaceLevel(saved === 'advanced' ? 'advanced' : 'simple'))
+          .catch(() => setInterfaceLevel('simple'));
+        setTab((current) => current === 'developer' ? 'dashboard' : current);
       } else {
         setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
         setTab((current) => current === 'developer' ? 'dashboard' : current);
