@@ -57,6 +57,9 @@ type App struct {
 	gracefulStopRequested bool
 	sessionStopTimer       *time.Timer
 	sessionStopAt          time.Time
+	sessionGoldGoal        int64
+	sessionElixirGoal      int64
+	sessionDarkGoal        int64
 	gracefulStopSequenceStartUnix int64
 
 	// Logs are high-frequency and unrelated to bot lifecycle ownership.
@@ -1316,16 +1319,38 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			a.cachedHistoryMu.Unlock()
 
 			shouldStopGracefully := false
+			lootGoalReached := false
+			currentStats := b.Stats()
 			a.mu.Lock()
 			if a.gracefulStopRequested && gracefulStopReached(history, a.gracefulStopSequenceStartUnix) {
 				a.gracefulStopRequested = false
 				a.gracefulStopSequenceStartUnix = 0
 				shouldStopGracefully = true
 			}
+			if len(history) > 0 && history[0].ReturnHomeDurationMS > 0 {
+				goldReached := a.sessionGoldGoal > 0 && currentStats.TotalGold >= a.sessionGoldGoal
+				elixirReached := a.sessionElixirGoal > 0 && currentStats.TotalElixir >= a.sessionElixirGoal
+				darkReached := a.sessionDarkGoal > 0 && currentStats.TotalDE >= a.sessionDarkGoal
+				if goldReached || elixirReached || darkReached {
+					lootGoalReached = true
+					shouldStopGracefully = true
+					a.sessionGoldGoal = 0
+					a.sessionElixirGoal = 0
+					a.sessionDarkGoal = 0
+				}
+			}
 			a.mu.Unlock()
 
 			a.saveStatsSoon()
 
+			if lootGoalReached && a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "session_loot_goal_reached", map[string]any{
+					"gold": currentStats.TotalGold,
+					"elixir": currentStats.TotalElixir,
+					"dark_elixir": currentStats.TotalDE,
+					"message": "Objectif de butin atteint · arrêt propre de la session.",
+				})
+			}
 			if shouldStopGracefully {
 				if a.ctx != nil {
 					message := "Attaque terminée · retour au village confirmé · arrêt de ClashGO."
@@ -1559,6 +1584,73 @@ func (a *App) clearStartStateLocked() {
 // the next NewAsyncWriter — acceptable, since the previous code path
 // had the same constraint and the new behaviour is strictly an
 // improvement on the slow path.
+type SessionLootGoal struct {
+	Gold       int64 `json:"gold"`
+	Elixir     int64 `json:"elixir"`
+	DarkElixir int64 `json:"dark_elixir"`
+	Active     bool  `json:"active"`
+}
+
+func (a *App) SetSessionLootGoal(gold, elixir, dark int64) SessionLootGoal {
+	clamp := func(v int64) int64 {
+		if v < 0 { return 0 }
+		if v > 100000000 { return 100000000 }
+		return v
+	}
+	gold, elixir, dark = clamp(gold), clamp(elixir), clamp(dark)
+
+	a.mu.Lock()
+	a.sessionGoldGoal = gold
+	a.sessionElixirGoal = elixir
+	a.sessionDarkGoal = dark
+	b := a.bot
+	a.mu.Unlock()
+
+	goal := SessionLootGoal{
+		Gold: gold, Elixir: elixir, DarkElixir: dark,
+		Active: gold > 0 || elixir > 0 || dark > 0,
+	}
+
+	// If the target is set after the session has already passed it, honor it
+	// immediately. StopAfterCurrentAttack remains safe if a sequence is active.
+	if b != nil && goal.Active {
+		stats := b.Stats()
+		reached := (gold > 0 && stats.TotalGold >= gold) ||
+			(elixir > 0 && stats.TotalElixir >= elixir) ||
+			(dark > 0 && stats.TotalDE >= dark)
+		if reached {
+			go a.StopAfterCurrentAttack()
+		}
+	}
+
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "session_loot_goal", goal)
+	}
+	return goal
+}
+
+func (a *App) ClearSessionLootGoal() {
+	a.mu.Lock()
+	a.sessionGoldGoal = 0
+	a.sessionElixirGoal = 0
+	a.sessionDarkGoal = 0
+	a.mu.Unlock()
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "session_loot_goal", SessionLootGoal{})
+	}
+}
+
+func (a *App) GetSessionLootGoal() SessionLootGoal {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return SessionLootGoal{
+		Gold: a.sessionGoldGoal,
+		Elixir: a.sessionElixirGoal,
+		DarkElixir: a.sessionDarkGoal,
+		Active: a.sessionGoldGoal > 0 || a.sessionElixirGoal > 0 || a.sessionDarkGoal > 0,
+	}
+}
+
 func (a *App) ScheduleSessionStop(minutes int) (string, error) {
 	if minutes < 5 {
 		minutes = 5
@@ -1603,6 +1695,9 @@ func (a *App) CancelScheduledSessionStop() {
 		a.sessionStopTimer = nil
 	}
 	a.sessionStopAt = time.Time{}
+	a.sessionGoldGoal = 0
+	a.sessionElixirGoal = 0
+	a.sessionDarkGoal = 0
 	a.mu.Unlock()
 
 	if a.ctx != nil {
