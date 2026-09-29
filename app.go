@@ -1754,10 +1754,11 @@ func (a *App) AdminSetLicenseRole(licenseID, role string) error {
 	return err
 }
 
-func (a *App) AdminUpdateLicenseCustomer(licenseID, customerName, customerContact string) error {
+func (a *App) AdminUpdateLicenseCustomer(licenseID, customerName, customerContact, customerNotes string) error {
 	licenseID = strings.TrimSpace(licenseID)
 	customerName = strings.TrimSpace(customerName)
 	customerContact = strings.TrimSpace(customerContact)
+	customerNotes = strings.TrimSpace(customerNotes)
 	if licenseID == "" {
 		return fmt.Errorf("license id is required")
 	}
@@ -1768,6 +1769,7 @@ func (a *App) AdminUpdateLicenseCustomer(licenseID, customerName, customerContac
 		"license_id":       licenseID,
 		"customer_name":    customerName,
 		"customer_contact": customerContact,
+		"customer_notes":   customerNotes,
 	})
 	return err
 }
@@ -1794,6 +1796,7 @@ type AdminLicenseRequest struct {
 	Plan            string `json:"plan"`
 	CustomerName    string `json:"customer_name,omitempty"`
 	CustomerContact string `json:"customer_contact,omitempty"`
+	CustomerNotes   string `json:"customer_notes,omitempty"`
 }
 
 type AdminLicenseResult struct {
@@ -1831,6 +1834,7 @@ func (a *App) CreateAdminLicense(input AdminLicenseRequest) (AdminLicenseResult,
 		"count":            1,
 		"customer_name":    strings.TrimSpace(input.CustomerName),
 		"customer_contact": strings.TrimSpace(input.CustomerContact),
+		"customer_notes":   strings.TrimSpace(input.CustomerNotes),
 	})
 	if err != nil {
 		return AdminLicenseResult{}, err
