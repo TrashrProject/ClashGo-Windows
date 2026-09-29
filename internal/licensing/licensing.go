@@ -33,6 +33,7 @@ type State struct {
 	MemberName    string `json:"member_name,omitempty"`
 	LicenseHint   string `json:"license_hint,omitempty"`
 	MachineID     string `json:"machine_id,omitempty"`
+	MachineName   string `json:"machine_name,omitempty"`
 	LastValidated string `json:"last_validated,omitempty"`
 	OfflineUntil  string `json:"offline_until,omitempty"`
 	Plan          string `json:"plan,omitempty"`
@@ -46,6 +47,7 @@ type storedLicense struct {
 	LicenseID     string `json:"license_id,omitempty"`
 	MemberName    string `json:"member_name,omitempty"`
 	MachineID     string `json:"machine_id"`
+	MachineName   string `json:"machine_name,omitempty"`
 	LastValidated string `json:"last_validated"`
 	OfflineUntil  string `json:"offline_until"`
 	Plan          string `json:"plan,omitempty"`
@@ -54,8 +56,9 @@ type storedLicense struct {
 
 type activateRequest struct {
 	LicenseKey string `json:"license_key"`
-	MachineID  string `json:"machine_id"`
-	AppVersion string `json:"app_version"`
+	MachineID   string `json:"machine_id"`
+	MachineName string `json:"machine_name,omitempty"`
+	AppVersion  string `json:"app_version"`
 }
 
 type activateResponse struct {
@@ -209,6 +212,7 @@ func (s *Service) stateFromStored(st storedLicense) State {
 		MemberName: st.MemberName,
 		LicenseHint: licenseHint(st.Key),
 		MachineID: st.MachineID,
+		MachineName: st.MachineName,
 		LastValidated: st.LastValidated,
 		OfflineUntil: st.OfflineUntil,
 		Plan: st.Plan,
@@ -316,6 +320,18 @@ func (s *Service) ProfileID() string {
 	return encoded
 }
 
+func machineDisplayName() string {
+	host, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	host = strings.TrimSpace(host)
+	if len(host) > 80 {
+		host = host[:80]
+	}
+	return host
+}
+
 func (s *Service) Activate(ctx context.Context, key string) (State, error) {
 	key = strings.ToUpper(strings.TrimSpace(key))
 	if len(key) < 12 {
@@ -330,9 +346,11 @@ func (s *Service) Activate(ctx context.Context, key string) (State, error) {
 		return s.GetState(), errors.New("license service is not configured")
 	}
 
+	machineName := machineDisplayName()
 	reqBody, _ := json.Marshal(activateRequest{
 		LicenseKey: key,
 		MachineID: machineID,
+		MachineName: machineName,
 		AppVersion: s.appVersion,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/license/activate", bytes.NewReader(reqBody))
