@@ -213,6 +213,12 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       setMemberMessage('Réglages appliqués au bot.');
     } catch (e) {
       setMemberSaveError(e instanceof Error ? e.message : String(e));
+      try {
+        const current = await GetMemberSettings();
+        setMemberSettings(current as MemberSettings);
+      } catch {
+        // Keep the visible error if the local settings cannot be reloaded.
+      }
     } finally {
       setMemberSaving(false);
     }
@@ -684,6 +690,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     </div>
                     <input
                       type="number"
+                      disabled={memberSaving}
                       min={1}
                       max={24}
                       value={memberSettings.max_attacks_per_hour}
@@ -702,6 +709,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     </div>
                     <input
                       type="number"
+                      disabled={memberSaving}
                       min={0}
                       max={20}
                       value={memberSettings.break_every_attacks}
@@ -720,6 +728,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     </div>
                     <input
                       type="number"
+                      disabled={memberSaving}
                       min={0}
                       max={30}
                       value={memberSettings.break_minutes}
