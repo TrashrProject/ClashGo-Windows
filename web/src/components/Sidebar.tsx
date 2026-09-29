@@ -31,6 +31,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
     { id: 'dashboard', label: 'Home', icon: 'home', minLevel: 'simple' },
     { id: 'config', label: 'Automation', icon: 'auto_awesome', minLevel: 'simple' },
     { id: 'account', label: 'Account', icon: 'person', minLevel: 'simple' },
+    { id: 'activity', label: 'Activity', icon: 'timeline', minLevel: 'advanced' },
     { id: 'analytics', label: 'Statistics', icon: 'monitoring', minLevel: 'advanced' },
     { id: 'settings', label: interfaceLevel === 'developer' ? 'Developer & Settings' : 'Settings', icon: 'settings', minLevel: 'advanced' },
   ];
