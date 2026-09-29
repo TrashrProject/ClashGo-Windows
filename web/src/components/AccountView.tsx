@@ -53,6 +53,7 @@ type MemberUpdateStatus = {
   available?: boolean;
   current_version?: string;
   latest_version?: string;
+  progress?: number;
   error?: string;
 };
 
@@ -714,6 +715,17 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     return off;
   }, [interfaceLevel, onInterfaceLevelChange, refreshMemberSettings]);
 
+  React.useEffect(() => {
+    const off = safeEventsOn<MemberUpdateStatus>('updater_status', (payload) => {
+      if (!payload || typeof payload !== 'object') return;
+      setMemberUpdate(payload);
+      if (payload.state === 'error') {
+        setInstallingUpdate(false);
+      }
+    });
+    return off;
+  }, []);
+
   // The local/proxied account service may start a few seconds after ClashGO.
   // Retry automatically while no profile is available so users never have to
   // hammer "Sync profile" after launching the service.
@@ -1147,17 +1159,25 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 </h3>
                 <span className={
                   'rounded-full px-2.5 py-1 text-[8px] font-black uppercase tracking-widest ' +
-                  (memberUpdate?.available
-                    ? 'bg-amber-500/10 text-amber-500'
-                    : memberUpdate?.state === 'error'
-                      ? 'bg-rose-500/10 text-rose-500'
-                      : 'bg-emerald-500/10 text-emerald-500')
+                  (memberUpdate?.state === 'error'
+                    ? 'bg-rose-500/10 text-rose-500'
+                    : memberUpdate?.state === 'downloading' || memberUpdate?.state === 'restarting'
+                      ? 'bg-sky-500/10 text-sky-500'
+                      : memberUpdate?.available
+                        ? 'bg-amber-500/10 text-amber-500'
+                        : 'bg-emerald-500/10 text-emerald-500')
                 }>
-                  {memberUpdate?.available
-                    ? 'Mise à jour disponible'
-                    : memberUpdate?.state === 'error'
-                      ? 'Vérification impossible'
-                      : 'À jour'}
+                  {memberUpdate?.state === 'downloading'
+                    ? `Téléchargement ${Math.round((memberUpdate.progress || 0) * 100)}%`
+                    : memberUpdate?.state === 'ready'
+                      ? 'Prête à installer'
+                      : memberUpdate?.state === 'restarting'
+                        ? 'Redémarrage…'
+                        : memberUpdate?.available
+                          ? 'Mise à jour disponible'
+                          : memberUpdate?.state === 'error'
+                            ? 'Vérification impossible'
+                            : 'À jour'}
                 </span>
               </div>
               <p className="mt-2 text-xs font-semibold text-zinc-500">
@@ -1169,10 +1189,10 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
-              {memberUpdate?.available && (
+              {(memberUpdate?.available || memberUpdate?.state === 'ready') && (
                 <button
                   type="button"
-                  disabled={installingUpdate || checkingUpdate}
+                  disabled={installingUpdate || checkingUpdate || memberUpdate?.state === 'downloading' || memberUpdate?.state === 'restarting'}
                   onClick={() => void installMemberUpdate()}
                   className="rounded-xl bg-zinc-950 dark:bg-white px-4 py-3 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950 disabled:opacity-40"
                 >
