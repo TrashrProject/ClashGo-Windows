@@ -672,10 +672,15 @@ async function renewLicense(request, env) {
       "UPDATE licenses SET plan = 'lifetime', duration_days = NULL, expires_at = NULL, active = 1 WHERE id = ?1"
     ).bind(id).run();
 
-    const licenseOwner = await env.DB.prepare("SELECT customer_id FROM licenses WHERE id = ?1").bind(id).first();
+    const licenseOwner = await env.DB.prepare(`
+      SELECT l.customer_id, c.payment_status
+      FROM licenses l
+      LEFT JOIN customers c ON c.id = l.customer_id
+      WHERE l.id = ?1
+    `).bind(id).first();
     const customerId = licenseOwner?.customer_id || null;
     const amountCents = body.amount_cents == null ? null : Math.max(0, Number(body.amount_cents));
-    const paymentStatus = clean(body.payment_status) || null;
+    const paymentStatus = clean(body.payment_status) || clean(licenseOwner?.payment_status) || null;
 
     await recordLicenseEvent(env, {
       licenseId: id,
@@ -711,10 +716,15 @@ async function renewLicense(request, env) {
     "UPDATE licenses SET plan = ?1, duration_days = ?2, expires_at = ?3, active = 1 WHERE id = ?4"
   ).bind(planInfo.plan, planInfo.days, expiresAt, id).run();
 
-  const licenseOwner = await env.DB.prepare("SELECT customer_id FROM licenses WHERE id = ?1").bind(id).first();
+  const licenseOwner = await env.DB.prepare(`
+    SELECT l.customer_id, c.payment_status
+    FROM licenses l
+    LEFT JOIN customers c ON c.id = l.customer_id
+    WHERE l.id = ?1
+  `).bind(id).first();
   const customerId = licenseOwner?.customer_id || null;
   const amountCents = body.amount_cents == null ? null : Math.max(0, Number(body.amount_cents));
-  const paymentStatus = clean(body.payment_status) || null;
+  const paymentStatus = clean(body.payment_status) || clean(licenseOwner?.payment_status) || null;
 
   await recordLicenseEvent(env, {
     licenseId: id,
