@@ -334,6 +334,39 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 Accès hors ligne jusqu’au {new Date(licenseState.offline_until).toLocaleString()}
               </p>
             )}
+
+            {licenseState?.activated && (
+              <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div className="rounded-xl border border-white/10 dark:border-zinc-200/70 bg-white/5 dark:bg-zinc-100 px-3 py-2.5">
+                  <div className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-500">Plan</div>
+                  <div className="mt-1 text-xs font-black">
+                    {licenseState.plan === 'free_2d'
+                      ? 'FREE 2J'
+                      : licenseState.plan === 'week_1'
+                        ? '1 SEMAINE'
+                        : licenseState.plan === 'month_1'
+                          ? '1 MOIS'
+                          : 'À VIE'}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-white/10 dark:border-zinc-200/70 bg-white/5 dark:bg-zinc-100 px-3 py-2.5">
+                  <div className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-500">Rôle</div>
+                  <div className="mt-1 text-xs font-black uppercase">{licenseState.role || 'member'}</div>
+                </div>
+                <div className="rounded-xl border border-white/10 dark:border-zinc-200/70 bg-white/5 dark:bg-zinc-100 px-3 py-2.5">
+                  <div className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-500">Appareil</div>
+                  <div className="mt-1 text-xs font-black font-mono">
+                    {licenseState.machine_id ? licenseState.machine_id.slice(0, 8) + '…' : '—'}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-white/10 dark:border-zinc-200/70 bg-white/5 dark:bg-zinc-100 px-3 py-2.5">
+                  <div className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-500">Expiration</div>
+                  <div className="mt-1 text-xs font-black">
+                    {licenseState.expires_at ? new Date(licenseState.expires_at).toLocaleDateString() : 'Jamais'}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {licenseState?.activated ? (
