@@ -314,7 +314,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                 </pre>
               ) : (
                 <div className="text-sm text-zinc-500 dark:text-zinc-400">
-                  Aucune note de version n’a été publiée pour cette version.
+                  Aucune note de version n’a été publiée pour cette mise à jour.
                 </div>
               )}
 
@@ -347,7 +347,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                   {busy === 'oneclick'
                     ? status.state === 'ready'
                       ? 'Installation…'
-                      : 'Téléchargement & installing…'
+                      : 'Téléchargement et installation…'
                     : status.state === 'ready'
                       ? 'Installer et redémarrer'
                       : `Mettre à jour vers v${status.latest_version}`}
@@ -443,7 +443,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
 const busyLabel = (b: string): string => {
   switch (b) {
     case 'oneclick':
-      return 'Téléchargement • verifying • installing…';
+      return 'Téléchargement • vérification • installation…';
     case 'download':
       return 'Téléchargement…';
     case 'apply':
@@ -517,7 +517,7 @@ const ReadyBody: React.FC<{
         verified_user
       </span>
       <span className="text-xs font-bold text-zinc-950 dark:text-white">
-        Verified. Prête à installer.
+        Fichier vérifié. Prêt à installer.
       </span>
     </div>
     {status.download_path && (
@@ -581,7 +581,7 @@ const RestartSplash: React.FC<{ status: UpdateStatus }> = ({ status }) => (
         </p>
       </div>
       <div className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.4em]">
-        ne ferme pas cette fenêtre
+        Ne ferme pas cette fenêtre
       </div>
     </div>
   </div>
