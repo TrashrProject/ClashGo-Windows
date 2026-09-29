@@ -1896,3 +1896,63 @@ func TestMemberPresetsAreIsolatedPerLicense(t *testing.T) {
 		t.Fatalf("first license preset disappeared or changed: %+v", gotFirst)
 	}
 }
+
+
+func TestTemporarySessionBlocksAutomationMutations(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+
+	a := &App{}
+	restorePath := a.testSessionRestorePath()
+	if err := os.MkdirAll(filepath.Dir(restorePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveMemberProfileFile(restorePath, defaultMemberSettings()); err != nil {
+		t.Fatalf("seed test-session restore file: %v", err)
+	}
+
+	if err := a.SaveConfig(100, 100, 10, false, "", true, 10, false, 100); err == nil {
+		t.Fatal("SaveConfig should be blocked while a validation session is pending")
+	}
+	if err := a.SetSimpleMode(true); err == nil {
+		t.Fatal("SetSimpleMode should be blocked while a validation session is pending")
+	}
+
+	profile := config.FarmProfile{
+		TownHall:      18,
+		Label:         "Test",
+		TroopCapacity: 100,
+		SpellCapacity: 2,
+		Troops: []config.FarmUnit{
+			{Name: "Balloon", Count: 10, Housing: 5},
+		},
+		Spells: []config.FarmUnit{
+			{Name: "Rage Spell", Count: 1, Housing: 2},
+		},
+	}
+	payload, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SaveFarmComposition(true, 18, string(payload)); err == nil {
+		t.Fatal("SaveFarmComposition should be blocked while a validation session is pending")
+	}
+}
+
+func TestActiveAutomationBlocksAccountIdentityChanges(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+
+	a := &App{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.botCtx = ctx
+	a.cancel = cancel
+
+	if err := a.SaveAccountConfig("#ABC123"); err == nil {
+		t.Fatal("SaveAccountConfig should be blocked while automation is active or starting")
+	}
+	if err := a.ClearAccount(); err == nil {
+		t.Fatal("ClearAccount should be blocked while automation is active or starting")
+	}
+}
