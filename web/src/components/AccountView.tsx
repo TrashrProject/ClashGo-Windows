@@ -210,6 +210,7 @@ interface AccountViewProps {
   playerTag: string;
   interfaceLevel: InterfaceLevel;
   initialPage?: 'account' | 'settings' | 'village';
+  testSessionActive?: boolean;
   onInterfaceLevelChange: (level: InterfaceLevel) => void;
   onAccountChanged: (tag: string) => void;
 }
@@ -218,6 +219,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   playerTag,
   interfaceLevel,
   initialPage = 'account',
+  testSessionActive = false,
   onInterfaceLevelChange,
   onAccountChanged,
 }) => {
@@ -302,7 +304,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   }, []);
 
   const applyUsagePreset = async (preset: 'short' | 'balanced' | 'fast') => {
-    if (memberSaving) return;
+    if (memberSaving || testSessionActive) return;
     setMemberSaving(true);
     setMemberMessage('');
     setMemberSaveError('');
@@ -330,7 +332,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   };
 
   const saveMemberSettings = async (next: MemberSettings) => {
-    if (memberSaving) return;
+    if (memberSaving || testSessionActive) return;
     setMemberSaving(true);
     setMemberMessage('');
     setMemberSaveError('');
@@ -842,7 +844,12 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
           <div className="flex flex-col gap-6">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Mon ClashGO</div>
+                {testSessionActive && (
+                <div className="mb-5 rounded-2xl border border-sky-400/30 bg-sky-400/10 px-4 py-3 text-xs font-bold text-sky-600 dark:text-sky-300">
+                  Session test en cours · les réglages personnels sont verrouillés jusqu’à la restauration automatique.
+                </div>
+              )}
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Mon ClashGO</div>
                 {!licenseState?.activated && licensePolicy?.enforced === false && (
                   <span className="rounded-full bg-amber-500/10 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-amber-500">
                     Mode bêta local
@@ -870,7 +877,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
             <div className="flex justify-end">
               <button
                 type="button"
-                disabled={memberSaving}
+                disabled={memberSaving || testSessionActive}
                 onClick={() => {
                   const next = {
                     ...applySpeedPreset(memberSettings, 'normal'),
@@ -909,7 +916,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                   <button
                     key={preset}
                     type="button"
-                    disabled={memberSaving}
+                    disabled={memberSaving || testSessionActive}
                     onClick={() => void applyUsagePreset(preset)}
                     className={
                       'group rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 disabled:opacity-40 ' +
@@ -948,7 +955,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                   <button
                     key={value}
                     type="button"
-                    disabled={memberSaving}
+                    disabled={memberSaving || testSessionActive}
                     onClick={() => {
                       const next = applySpeedPreset(memberSettings, value);
                       setMemberSettings(next);
@@ -1003,7 +1010,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     </div>
                     <input
                       type="number"
-                      disabled={memberSaving}
+                      disabled={memberSaving || testSessionActive}
                       min={1}
                       max={24}
                       value={memberSettings.max_attacks_per_hour}
@@ -1022,7 +1029,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     </div>
                     <input
                       type="number"
-                      disabled={memberSaving}
+                      disabled={memberSaving || testSessionActive}
                       min={1}
                       max={500}
                       value={memberSettings.max_attacks_per_session}
@@ -1039,7 +1046,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                       <button
                         key={limit}
                         type="button"
-                        disabled={memberSaving}
+                        disabled={memberSaving || testSessionActive}
                         onClick={() => {
                           const next = { ...memberSettings, max_attacks_per_session: limit };
                           setMemberSettings(next);
@@ -1066,7 +1073,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     </div>
                     <input
                       type="number"
-                      disabled={memberSaving}
+                      disabled={memberSaving || testSessionActive}
                       min={0}
                       max={20}
                       value={memberSettings.break_every_attacks}
@@ -1085,7 +1092,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     </div>
                     <input
                       type="number"
-                      disabled={memberSaving}
+                      disabled={memberSaving || testSessionActive}
                       min={0}
                       max={30}
                       value={memberSettings.break_minutes}
@@ -1101,7 +1108,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <button
                 type="button"
-                disabled={memberSaving}
+                disabled={memberSaving || testSessionActive}
                 onClick={() => {
                   const next = { ...memberSettings, adaptive_search: !memberSettings.adaptive_search };
                   setMemberSettings(next);
