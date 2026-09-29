@@ -1956,3 +1956,27 @@ func TestActiveAutomationBlocksAccountIdentityChanges(t *testing.T) {
 		t.Fatal("ClearAccount should be blocked while automation is active or starting")
 	}
 }
+
+
+func TestClearInMemoryMemberRuntimeStateClearsTechnicalLogs(t *testing.T) {
+	a := &App{}
+	a.lastActivity = []telemetry.Event{{}}
+	a.logBuffer = []string{"member A private runtime log"}
+	a.cachedHistory = []bot.AttackReport{{}}
+	a.lastStats.AttacksCompleted = 7
+
+	a.clearInMemoryMemberRuntimeState()
+
+	if len(a.lastActivity) != 0 {
+		t.Fatalf("activity buffer not cleared: %d entries", len(a.lastActivity))
+	}
+	if len(a.logBuffer) != 0 {
+		t.Fatalf("technical log buffer not cleared: %d entries", len(a.logBuffer))
+	}
+	if len(a.cachedHistory) != 0 {
+		t.Fatalf("history cache not cleared: %d entries", len(a.cachedHistory))
+	}
+	if a.lastStats.AttacksCompleted != 0 {
+		t.Fatalf("stats not cleared: attacks=%d", a.lastStats.AttacksCompleted)
+	}
+}
