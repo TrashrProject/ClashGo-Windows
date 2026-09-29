@@ -23,6 +23,7 @@ interface ConfigViewProps {
   setLootExitPercent: (v: number) => void;
   simpleMode: boolean;
   testSessionActive?: boolean;
+  automationActive?: boolean;
   onSetSimpleMode: (enabled: boolean) => Promise<void>;
   // Returns the underlying SaveConfig promise so ConfigView can own
   // the save-status indicator (green flash / red flash + inline
@@ -62,6 +63,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   lootExitPercent, setLootExitPercent,
   simpleMode,
   testSessionActive = false,
+  automationActive = false,
   onSetSimpleMode,
   onSave
 }) => {
@@ -107,7 +109,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   // swallowed by App.tsx.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (saveStatus === 'saving' || testSessionActive) return;
+    if (saveStatus === 'saving' || testSessionActive || automationActive) return;
     if (savedTimerRef.current) { window.clearTimeout(savedTimerRef.current); savedTimerRef.current = null; }
     if (errorTimerRef.current) { window.clearTimeout(errorTimerRef.current); errorTimerRef.current = null; }
     setSaveStatus('saving');
@@ -168,8 +170,24 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   const lootExitInvalid = invalid(lootExitPercent, 100);
   const anyInvalid = stallInvalid || lootExitInvalid || thresholdItems.some((t) => invalid(t.value, THRESHOLD_MAX));
 
+  const settingsLocked = testSessionActive || automationActive;
+
   return (
     <div className="max-w-4xl mx-auto">
+
+      {automationActive && !testSessionActive && (
+        <div className="mb-5 rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 px-4 py-3">
+          <div className="flex items-start gap-3">
+            <span className="material-symbols-outlined text-amber-500">lock</span>
+            <div>
+              <div className="text-xs font-black text-amber-700 dark:text-amber-300">Session active · réglages critiques verrouillés</div>
+              <div className="mt-1 text-[11px] font-semibold leading-5 text-amber-700/80 dark:text-amber-300/80">
+                Arrête la session avant de modifier stratégie, seuils, armée ou comportement. Vitesse, pause, durée et objectif de butin restent réglables depuis Accueil.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {testSessionActive && (
         <div className="mb-5 rounded-2xl border border-sky-200 dark:border-sky-900/50 bg-sky-50 dark:bg-sky-950/20 px-4 py-3">
@@ -187,8 +205,8 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
 
       <form
         onSubmit={handleSubmit}
-        className={'space-y-8 transition-opacity ' + (testSessionActive ? 'opacity-55 pointer-events-none select-none' : '')}
-        aria-disabled={testSessionActive}
+        className={'space-y-8 transition-opacity ' + (settingsLocked ? 'opacity-55 pointer-events-none select-none' : '')}
+        aria-disabled={settingsLocked}
       >
         <section className="bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
@@ -215,7 +233,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
 
             <button
               type="button"
-              disabled={simpleModeBusy}
+              disabled={simpleModeBusy || settingsLocked}
               onClick={async () => {
                 if (simpleModeBusy) return;
                 setSimpleModeBusy(true);
