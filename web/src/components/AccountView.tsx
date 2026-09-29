@@ -41,6 +41,8 @@ type LicenseState = {
   machine_id?: string;
   last_validated?: string;
   offline_until?: string;
+  plan?: string;
+  expires_at?: string;
   error?: string;
 };
 
@@ -256,6 +258,22 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 ? (licenseState.license_hint || 'License') + ' · linked to this machine'
                 : 'Enter the license key supplied by ClashGO. One license can be linked to one machine.'}
             </p>
+            {licenseState?.activated && (
+              <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                <span>
+                  {licenseState.plan === 'free_2d'
+                    ? 'FREE · 2 days'
+                    : licenseState.plan === 'week_1'
+                      ? '1 week'
+                      : licenseState.plan === 'month_1'
+                        ? '1 month'
+                        : 'Lifetime'}
+                </span>
+                {licenseState.expires_at && (
+                  <span>· Expires {new Date(licenseState.expires_at).toLocaleString()}</span>
+                )}
+              </div>
+            )}
             {licenseState?.offline_until && (
               <p className="mt-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
                 Offline access until {new Date(licenseState.offline_until).toLocaleString()}
