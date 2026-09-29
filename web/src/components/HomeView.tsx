@@ -296,6 +296,20 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     };
   }, [currentArmy]);
 
+  const startupCheckSummary = React.useMemo(() => {
+    const checks = startupCheck?.checks || [];
+    const attention = checks.filter((check) => !check.ok);
+    const blocking = attention.filter((check) => check.blocking !== false);
+    const advisory = attention.filter((check) => check.blocking === false);
+    return {
+      total: checks.length,
+      passed: checks.length - attention.length,
+      attention,
+      blocking,
+      advisory,
+    };
+  }, [startupCheck]);
+
   const sessionCap = Math.max(0, Number(stats.session_attack_cap || 0));
   const sessionAttacks = Math.max(0, Number(stats.session_attacks || 0));
   const sessionProgress = sessionCap > 0
@@ -823,33 +837,60 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                 ? 'Configuration prête : ClashGO peut démarrer.'
                 : 'Un ou plusieurs points doivent être corrigés avant le démarrage.'}
             </div>
-            <div className="mt-3 grid md:grid-cols-2 gap-2">
-              {startupCheck.checks.map((check) => (
-                <div key={check.id} className="rounded-xl border border-zinc-100 dark:border-zinc-800 p-3">
-                  <div className="flex items-start gap-3">
-                    <span className={
-                      'material-symbols-outlined text-base ' +
-                      (check.ok ? 'text-emerald-500' : check.blocking === false ? 'text-amber-500' : 'text-rose-500')
-                    }>
-                      {check.ok ? 'check_circle' : check.blocking === false ? 'info' : 'cancel'}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-xs font-black text-zinc-950 dark:text-white">{check.label}</div>
-                      <div className="mt-0.5 text-[10px] font-semibold text-zinc-500">{check.message}</div>
-                      {!check.ok && check.action && (
-                        <button
-                          type="button"
-                          onClick={() => runCheckAction(check.action)}
-                          className="mt-2 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-500 transition hover:border-zinc-400 hover:text-zinc-950 dark:hover:text-white"
-                        >
-                          {check.action_label || 'Corriger'}
-                        </button>
-                      )}
+            {startupCheckSummary.attention.length > 0 && (
+              <div className="mt-3 grid md:grid-cols-2 gap-2">
+                {startupCheckSummary.attention.map((check) => (
+                  <div key={check.id} className="rounded-xl border border-zinc-100 dark:border-zinc-800 p-3">
+                    <div className="flex items-start gap-3">
+                      <span className={
+                        'material-symbols-outlined text-base ' +
+                        (check.blocking === false ? 'text-amber-500' : 'text-rose-500')
+                      }>
+                        {check.blocking === false ? 'info' : 'cancel'}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black text-zinc-950 dark:text-white">{check.label}</div>
+                        <div className="mt-0.5 text-[10px] font-semibold text-zinc-500">{check.message}</div>
+                        {check.action && (
+                          <button
+                            type="button"
+                            onClick={() => runCheckAction(check.action)}
+                            className="mt-2 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-500 transition hover:border-zinc-400 hover:text-zinc-950 dark:hover:text-white"
+                          >
+                            {check.action_label || 'Corriger'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
+                ))}
+              </div>
+            )}
+
+            <details className="mt-3 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/20 overflow-hidden">
+              <summary className="cursor-pointer list-none flex items-center justify-between gap-4 px-4 py-3">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
+                    Contrôles réussis · {startupCheckSummary.passed}/{startupCheckSummary.total}
+                  </div>
+                  <div className="mt-0.5 text-[10px] font-semibold text-zinc-400">
+                    Ouvre uniquement si tu veux voir le détail complet.
+                  </div>
                 </div>
-              ))}
-            </div>
+                <span className="material-symbols-outlined text-zinc-400">expand_more</span>
+              </summary>
+              <div className="border-t border-zinc-100 dark:border-zinc-800 p-3 grid md:grid-cols-2 gap-2">
+                {startupCheck.checks.filter((check) => check.ok).map((check) => (
+                  <div key={check.id} className="flex items-start gap-2 rounded-lg px-2 py-2">
+                    <span className="material-symbols-outlined text-sm text-emerald-500">check_circle</span>
+                    <div className="min-w-0">
+                      <div className="text-[10px] font-black text-zinc-800 dark:text-zinc-200">{check.label}</div>
+                      <div className="mt-0.5 text-[9px] font-semibold text-zinc-400">{check.message}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </details>
           </div>
         )}
       </section>
