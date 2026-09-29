@@ -316,6 +316,12 @@ func (a *App) clearInMemoryMemberRuntimeState() {
 	a.cachedHistoryMu.Unlock()
 }
 
+func clearSharedMemberRuntimeStateFiles() {
+	for _, rel := range memberRuntimeStateFiles {
+		_ = os.Remove(paths.ResolveConfig(rel))
+	}
+}
+
 func (a *App) waitForBotTeardown(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
@@ -1225,8 +1231,6 @@ func (a *App) DeactivateLicense() error {
 	}
 
 	// A local deactivation must immediately end an active automation session.
-	// Otherwise the bot could keep running until the next periodic license
-	// validation even though the member removed the entitlement locally.
 	if a.IsRunning() {
 		_ = a.StopBot()
 	}
@@ -1234,29 +1238,38 @@ func (a *App) DeactivateLicense() error {
 		return err
 	}
 
-	// The teardown has flushed the final stats/history by this point. Archive
-	// them under the current license before removing the entitlement.
+	// Flush and snapshot the current member without deleting shared runtime
+	// files yet. Every destructive step happens only after the entitlement and
+	// cleared runtime config can both be committed successfully.
 	a.saveStats()
-	if err := a.archiveMemberRuntimeState(true); err != nil {
+	if err := a.archiveMemberRuntimeState(false); err != nil {
 		return err
 	}
-	a.clearInMemoryMemberRuntimeState()
 
 	cfg := config.LoadOrDefault("config.json")
-	if err := a.persistMemberAccountTag(cfg.Account.PlayerTag); err != nil {
-		return err
-	}
-	if err := a.license.DeactivateLocal(); err != nil {
+	oldTag := strings.TrimSpace(cfg.Account.PlayerTag)
+	if err := a.persistMemberAccountTag(oldTag); err != nil {
 		return err
 	}
 
-	// Remove member-specific account state from the shared runtime config so
-	// the next license cannot inherit the previous user's Clash account.
 	cfg.Account.PlayerTag = ""
 	cfg.Account.LegacyAPIKey = ""
 	if err := config.Save("config.json", cfg); err != nil {
 		return err
 	}
+
+	if err := a.license.DeactivateLocal(); err != nil {
+		// Best-effort rollback: the member still owns the active entitlement,
+		// so restore their account into the shared runtime config.
+		cfg.Account.PlayerTag = oldTag
+		_ = config.Save("config.json", cfg)
+		return err
+	}
+
+	// The entitlement is now locally removed and the shared config no longer
+	// carries member identity. It is safe to clear shared runtime artifacts.
+	clearSharedMemberRuntimeStateFiles()
+	a.clearInMemoryMemberRuntimeState()
 	_ = os.Remove(accountProfileCachePath())
 
 	if a.ctx != nil {
