@@ -252,7 +252,8 @@ async function listLicenses(env) {
     SELECT
       l.id, l.hint, l.role, l.active, l.machine_id, l.created_at, l.last_seen_at, l.app_version,
       l.plan, l.duration_days, l.activated_at, l.expires_at, l.customer_id,
-      c.display_name AS customer_name, c.contact AS customer_contact, c.notes AS customer_notes
+      c.display_name AS customer_name, c.contact AS customer_contact, c.notes AS customer_notes,
+      c.payment_status AS payment_status, c.total_paid_cents AS total_paid_cents, c.next_due_at AS next_due_at
     FROM licenses l
     LEFT JOIN customers c ON c.id = l.customer_id
     ORDER BY l.created_at DESC LIMIT 1000
