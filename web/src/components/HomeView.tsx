@@ -440,6 +440,29 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     }
   }, [onOpenAccount, onOpenAutomation, onOpenMemberSettings, onOpenSettings, onOpenVillage]);
 
+  const renewalNotice = React.useMemo(() => {
+    if (!licenseReady || !licenseExpiresAt) return null;
+    const expiry = new Date(licenseExpiresAt).getTime();
+    if (!Number.isFinite(expiry)) return null;
+    const remaining = expiry - Date.now();
+    if (remaining <= 0) {
+      return {
+        title: 'Licence expirée',
+        detail: 'Renouvelle ta licence avant de relancer l’automatisation.',
+        urgent: true,
+      };
+    }
+    const days = Math.ceil(remaining / 86_400_000);
+    if (days <= 3) {
+      return {
+        title: days <= 1 ? 'Licence bientôt expirée' : `Licence · ${days} jours restants`,
+        detail: 'Pense à la renouveler pour garder l’accès sans interruption.',
+        urgent: days <= 1,
+      };
+    }
+    return null;
+  }, [licenseExpiresAt, licenseReady]);
+
   const botLabel = starting ? 'Démarrage…' : running ? 'Bot en cours' : 'Bot arrêté';
   const botSub = starting
     ? 'ClashGO prépare BlueStacks et l’automatisation.'
@@ -576,6 +599,27 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           </button>
         </div>
       </section>
+
+      {renewalNotice && (
+        <button
+          type="button"
+          onClick={onOpenAccount}
+          className={
+            'w-full rounded-2xl border px-5 py-4 text-left transition hover:-translate-y-0.5 ' +
+            (renewalNotice.urgent
+              ? 'border-rose-400/30 bg-rose-500/10 text-rose-600 dark:text-rose-300'
+              : 'border-amber-400/30 bg-amber-400/10 text-amber-700 dark:text-amber-300')
+          }
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-xs font-black uppercase tracking-[0.18em]">{renewalNotice.title}</div>
+              <div className="mt-1 text-sm font-semibold opacity-80">{renewalNotice.detail}</div>
+            </div>
+            <span className="material-symbols-outlined shrink-0">arrow_forward</span>
+          </div>
+        </button>
+      )}
 
       <section className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         {[
