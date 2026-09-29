@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ApplyMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetUpdateStatus, GetVillageResources, RefreshLicense, SaveMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ApplyMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetUpdateStatus, GetVillageResources, RefreshLicense, SaveAccountConfig, SaveMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
@@ -248,12 +248,19 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   React.useEffect(() => {
     setMemberPage(initialPage);
   }, [initialPage]);
+
+  React.useEffect(() => {
+    setAccountTagInput(playerTag || '');
+  }, [playerTag]);
   const [confirmDeactivate, setConfirmDeactivate] = React.useState(false);
   const [supportCodeCopied, setSupportCodeCopied] = React.useState(false);
   const [confirmUnlink, setConfirmUnlink] = React.useState(false);
   const [appVersion, setAppVersion] = React.useState('');
   const [memberUpdate, setMemberUpdate] = React.useState<MemberUpdateStatus | null>(null);
   const [checkingUpdate, setCheckingUpdate] = React.useState(false);
+  const [accountTagInput, setAccountTagInput] = React.useState(playerTag || '');
+  const [accountLinkBusy, setAccountLinkBusy] = React.useState(false);
+  const [accountLinkMessage, setAccountLinkMessage] = React.useState('');
 
   const refreshLicense = React.useCallback(async () => {
     try {
@@ -277,7 +284,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     } catch {
       // Update status is secondary information; the member area remains usable.
     }
-  }, []);
+  }, [playerTag]);
 
   const checkMemberUpdate = async () => {
     if (checkingUpdate) return;
@@ -430,18 +437,29 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
         setFarmProfile(null);
       }
 
-      const cached = await GetCachedPlayerProfile();
-      if (cached) setProfile(cached as PlayerProfile);
+      if (playerTag) {
+        const cached = await GetCachedPlayerProfile();
+        if (cached) setProfile(cached as PlayerProfile);
 
-      const p = await GetPlayerProfile();
-      setProfile(p as PlayerProfile);
+        try {
+          const p = await GetPlayerProfile();
+          setProfile(p as PlayerProfile);
 
-      // Account sync may auto-switch the farm profile to the player's HDV.
-      // Re-read config once so the visible plan updates immediately.
-      const refreshedCfg = await GetConfig();
-      const refreshedFarm = (refreshedCfg as any)?.attack?.farm;
-      if (refreshedFarm?.enabled && refreshedFarm?.profiles) {
-        setFarmProfile(refreshedFarm.profiles[String(refreshedFarm.town_hall)] || null);
+          // Account sync may auto-switch the farm profile to the player's HDV.
+          // Re-read config once so the visible plan updates immediately.
+          const refreshedCfg = await GetConfig();
+          const refreshedFarm = (refreshedCfg as any)?.attack?.farm;
+          if (refreshedFarm?.enabled && refreshedFarm?.profiles) {
+            setFarmProfile(refreshedFarm.profiles[String(refreshedFarm.town_hall)] || null);
+          }
+        } catch (syncErr) {
+          // The tag is still useful locally even when the optional account
+          // service is offline. Surface a soft warning without treating the
+          // member space as broken.
+          setError(syncErr instanceof Error ? syncErr.message : String(syncErr));
+        }
+      } else {
+        setProfile(null);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -514,6 +532,49 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     }, 4000);
     return () => window.clearInterval(id);
   }, [profile, busy, playerTag, refresh]);
+
+  const linkClashAccount = async () => {
+    if (accountLinkBusy) return;
+    let tag = accountTagInput.trim().toUpperCase().replace(/\s+/g, '');
+    if (!tag) {
+      setAccountLinkMessage('Entre ton tag joueur Clash of Clans.');
+      return;
+    }
+    if (!tag.startsWith('#')) tag = '#' + tag;
+    if (tag.length < 4 || tag.length > 20 || !/^[#][A-Z0-9]+$/.test(tag)) {
+      setAccountLinkMessage('Tag invalide. Exemple : #2ABC123XY');
+      return;
+    }
+
+    setAccountLinkBusy(true);
+    setAccountLinkMessage('');
+    setError('');
+    try {
+      await SaveAccountConfig(tag);
+      setAccountTagInput(tag);
+      onAccountChanged(tag);
+
+      if (serviceConfigured) {
+        try {
+          const synced = await GetPlayerProfile();
+          if (synced) {
+            setProfile(synced as PlayerProfile);
+            setAccountLinkMessage('Compte lié et profil synchronisé.');
+          } else {
+            setAccountLinkMessage('Tag enregistré. La synchronisation se fera automatiquement.');
+          }
+        } catch {
+          setAccountLinkMessage('Tag enregistré. Le profil se synchronisera plus tard ; le bot reste utilisable.');
+        }
+      } else {
+        setAccountLinkMessage('Tag enregistré localement. Le bot reste utilisable ; la synchronisation du profil est optionnelle.');
+      }
+    } catch (e) {
+      setAccountLinkMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAccountLinkBusy(false);
+    }
+  };
 
   const unlink = async () => {
     setBusy(true);
@@ -1221,6 +1282,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                   : 'Tu peux lier ton tag joueur pour sélectionner automatiquement le profil HDV. ClashGO reste utilisable sans cette liaison.'}
             </p>
           </div>
+          {playerTag && (
           <details className="relative">
             <summary className="list-none cursor-pointer px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-black text-zinc-500 select-none">
               Options du compte
@@ -1262,6 +1324,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               )}
             </div>
           </details>
+          )}
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -1308,6 +1371,43 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               ? 'ClashGO récupérera automatiquement les informations du village dès que le service de compte sera disponible.'
               : 'Cette liaison est facultative. Le bot peut utiliser la configuration locale et tu pourras ajouter ton tag plus tard.'}
           </p>
+          {!playerTag && (
+            <div className="mx-auto mt-6 max-w-xl text-left">
+              <label className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-400">Tag joueur</label>
+              <div className="mt-2 flex flex-col sm:flex-row gap-2">
+                <input
+                  value={accountTagInput}
+                  onChange={(e) => {
+                    setAccountTagInput(e.target.value.toUpperCase());
+                    setAccountLinkMessage('');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void linkClashAccount();
+                  }}
+                  placeholder="#2ABC123XY"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="min-w-0 flex-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-4 py-3 font-mono text-sm font-black uppercase outline-none focus:border-zinc-400 dark:focus:border-zinc-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => void linkClashAccount()}
+                  disabled={accountLinkBusy || !accountTagInput.trim()}
+                  className="rounded-xl bg-zinc-950 dark:bg-white px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950 disabled:opacity-40"
+                >
+                  {accountLinkBusy ? 'Enregistrement…' : 'Lier ce compte'}
+                </button>
+              </div>
+              <div className="mt-2 text-[10px] font-semibold text-zinc-400">
+                Le tag est visible dans ton profil Clash of Clans. Aucun mot de passe Supercell n’est demandé.
+              </div>
+              {accountLinkMessage && (
+                <div className="mt-3 rounded-xl bg-zinc-100 dark:bg-zinc-800 px-4 py-3 text-xs font-bold text-zinc-600 dark:text-zinc-300">
+                  {accountLinkMessage}
+                </div>
+              )}
+            </div>
+          )}
         </section>
       )}
 
