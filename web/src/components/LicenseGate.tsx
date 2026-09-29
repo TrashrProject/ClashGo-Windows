@@ -79,23 +79,6 @@ const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
 
   React.useEffect(() => { void refresh(); }, [refresh]);
 
-  React.useEffect(() => {
-    if (!policy?.enforced || state?.activated || !state?.license_hint) return;
-
-    const retry = () => { void refreshExisting(); };
-    const timer = window.setInterval(retry, 60_000);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') retry();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('focus', retry);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('focus', retry);
-    };
-  }, [policy?.enforced, state?.activated, state?.license_hint, refreshExisting]);
-
   const refreshExisting = React.useCallback(async () => {
     if (busy) return;
     setBusy(true);
@@ -115,6 +98,23 @@ const LicenseGate: React.FC<LicenseGateProps> = ({ onReady }) => {
       setBusy(false);
     }
   }, [busy, onReady, policy]);
+
+  React.useEffect(() => {
+    if (!policy?.enforced || state?.activated || !state?.license_hint) return;
+
+    const retry = () => { void refreshExisting(); };
+    const timer = window.setInterval(retry, 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') retry();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', retry);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', retry);
+    };
+  }, [policy?.enforced, state?.activated, state?.license_hint, refreshExisting]);
 
   const activate = async () => {
     const value = key.trim();
