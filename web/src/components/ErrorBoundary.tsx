@@ -6,6 +6,7 @@ interface ErrorBoundaryProps {
 
 interface ErrorBoundaryState {
   error: Error | null;
+  copied: boolean;
 }
 
 /**
@@ -25,11 +26,11 @@ interface ErrorBoundaryState {
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.state = { error: null };
+    this.state = { error: null, copied: false };
   }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { error };
+    return { error, copied: false };
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
@@ -44,6 +45,23 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
     window.location.reload();
   };
 
+  handleCopy = async (): Promise<void> => {
+    const message = this.state.error?.message || String(this.state.error || '');
+    try {
+      await navigator.clipboard.writeText(message);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = message;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    this.setState({ copied: true });
+  };
+
   render() {
     if (this.state.error) {
       return (
@@ -53,20 +71,28 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
               <span className="material-symbols-outlined text-rose-500 text-3xl">error</span>
             </div>
             <div className="space-y-2">
-              <h1 className="font-headline text-xl font-bold tracking-tight">Something went wrong</h1>
+              <h1 className="font-headline text-xl font-bold tracking-tight">ClashGO a rencontré un problème</h1>
               <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">
-                The interface hit an unexpected error. Reloading usually fixes it.
+                L’interface a rencontré une erreur inattendue. Un redémarrage de l’interface suffit généralement à la corriger.
               </p>
             </div>
             <pre className="max-h-32 overflow-y-auto text-left text-[11px] font-mono text-rose-500/80 bg-rose-500/5 border border-rose-500/20 rounded-xl p-3 break-words whitespace-pre-wrap">
               {this.state.error.message || String(this.state.error)}
             </pre>
-            <button
-              onClick={this.handleReload}
-              className="h-12 w-full rounded-2xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 font-black text-[11px] uppercase tracking-[0.3em] transition-all hover:shadow-premium-lg active:scale-[0.98]"
-            >
-              Reload ClashGO
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                onClick={() => void this.handleCopy()}
+                className="h-12 w-full rounded-2xl border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 font-black text-[10px] uppercase tracking-[0.2em] transition-all hover:bg-zinc-50 dark:hover:bg-zinc-800 active:scale-[0.98]"
+              >
+                {this.state.copied ? 'Erreur copiée' : 'Copier l’erreur'}
+              </button>
+              <button
+                onClick={this.handleReload}
+                className="h-12 w-full rounded-2xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 font-black text-[10px] uppercase tracking-[0.2em] transition-all hover:shadow-premium-lg active:scale-[0.98]"
+              >
+                Relancer l’interface
+              </button>
+            </div>
           </div>
         </div>
       );
