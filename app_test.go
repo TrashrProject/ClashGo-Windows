@@ -156,6 +156,8 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 	}
 	current := bot.BotStats{
 		AttacksCompleted:        2,
+		SessionAttacks:          2,
+		SessionAttackCap:        10,
 		TotalGold:               1_000_000,
 		TotalElixir:             1_000_000,
 		TotalDE:                 5_000,
