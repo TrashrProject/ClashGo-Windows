@@ -3491,6 +3491,9 @@ func (a *App) saveMemberSettings(settings MemberSettings, internalRestore bool) 
 }
 
 func (a *App) SetSimpleMode(enabled bool) error {
+	if a.testSessionRestorePending() {
+		return fmt.Errorf("session test active: wait for it to finish before changing automation mode")
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
