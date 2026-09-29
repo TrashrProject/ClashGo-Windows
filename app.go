@@ -1035,7 +1035,7 @@ func (a *App) ActivateLicense(key string) (licensing.State, error) {
 		return state, err
 	}
 	if err := a.applyMemberProfileForCurrentLicense(); err != nil {
-		return state, fmt.Errorf("restore member profile: %w", err)
+		log.Warn().Err(err).Msg("license activated but member preferences could not be restored")
 	}
 	if a.supportReporter != nil {
 		a.supportReporter.Flush(context.Background())
