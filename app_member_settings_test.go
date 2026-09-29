@@ -1982,3 +1982,43 @@ func TestClearInMemoryMemberRuntimeStateClearsTechnicalLogs(t *testing.T) {
 		t.Fatalf("stats not cleared: attacks=%d", a.lastStats.AttacksCompleted)
 	}
 }
+
+
+func TestLoadMemberPresetStoreRecoversBackupAfterInterruptedSave(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "member.presets.json")
+
+	store := memberPresetStore{Slots: []MemberPresetSlot{{
+		Slot:      1,
+		Name:      "Farm nuit",
+		UpdatedAt: "2026-09-29T08:00:00Z",
+		Settings:  defaultMemberSettings(),
+	}}}
+	data, err := json.MarshalIndent(store, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".bak", data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := loadMemberPresetStore(path)
+	if len(got.Slots) != 1 || got.Slots[0].Name != "Farm nuit" {
+		t.Fatalf("backup preset store not recovered: %#v", got)
+	}
+
+	repaired, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("primary preset store was not self-healed: %v", err)
+	}
+	var decoded memberPresetStore
+	if err := json.Unmarshal(repaired, &decoded); err != nil {
+		t.Fatalf("self-healed preset store is invalid JSON: %v", err)
+	}
+	if len(decoded.Slots) != 1 {
+		t.Fatalf("self-healed preset store lost slots: %#v", decoded)
+	}
+}
