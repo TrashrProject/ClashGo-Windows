@@ -336,9 +336,17 @@ func (a *App) clearInMemoryMemberRuntimeState() {
 	a.lastStats = bot.BotStats{}
 	a.lastActivity = nil
 	a.mu.Unlock()
+
 	a.cachedHistoryMu.Lock()
 	a.cachedHistory = nil
 	a.cachedHistoryMu.Unlock()
+
+	// Logs can contain member-specific runtime context (village state,
+	// strategy decisions, device errors). Never carry that buffer into the
+	// next locally activated licence in the same desktop process.
+	a.logMu.Lock()
+	a.logBuffer = nil
+	a.logMu.Unlock()
 }
 
 func clearSharedMemberRuntimeStateFiles() {
