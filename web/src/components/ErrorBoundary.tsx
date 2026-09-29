@@ -1,4 +1,5 @@
 import React from 'react';
+import { ReportUIError } from '../../wailsjs/go/main/App';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -35,6 +36,11 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
     console.error('ClashGO UI crashed:', error, info.componentStack);
+    try {
+      void ReportUIError(error.message || String(error), info.componentStack || '').catch(() => {});
+    } catch {
+      // The Wails bridge may not exist when running the frontend directly.
+    }
   }
 
   handleReload = (): void => {
