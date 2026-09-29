@@ -31,10 +31,11 @@ func TestApplyMemberSpeedProfile(t *testing.T) {
 		attacks    int
 		breakEvery int
 		breakFor   time.Duration
+		minGap     int
 	}{
-		{"cautious", "cautious", 700 * time.Millisecond, 2200 * time.Millisecond, 8, 4, 4 * time.Minute},
-		{"normal", "normal", 500 * time.Millisecond, 2 * time.Second, 12, 5, 3 * time.Minute},
-		{"fast", "fast", 300 * time.Millisecond, 1300 * time.Millisecond, 16, 6, 2 * time.Minute},
+		{"cautious", "cautious", 700 * time.Millisecond, 2200 * time.Millisecond, 8, 4, 4 * time.Minute, 45},
+		{"normal", "normal", 500 * time.Millisecond, 2 * time.Second, 12, 5, 3 * time.Minute, 30},
+		{"fast", "fast", 300 * time.Millisecond, 1300 * time.Millisecond, 16, 6, 2 * time.Minute, 20},
 	}
 
 	for _, tc := range tests {
@@ -64,6 +65,9 @@ func TestApplyMemberSpeedProfile(t *testing.T) {
 			}
 			if cfg.Automation.BreakDuration.Duration != tc.breakFor {
 				t.Fatalf("BreakDuration = %s, want %s", cfg.Automation.BreakDuration.Duration, tc.breakFor)
+			}
+			if cfg.Attack.MinSecondsBetweenAttacks != tc.minGap {
+				t.Fatalf("MinSecondsBetweenAttacks = %d, want %d", cfg.Attack.MinSecondsBetweenAttacks, tc.minGap)
 			}
 
 			// Speed profiles must not touch unrelated working settings.
