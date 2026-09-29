@@ -145,8 +145,17 @@ func (s *Service) load() {
 }
 
 func (s *Service) stateFromStored(st storedLicense) State {
+	activated := st.Key != ""
+	stateErr := ""
+	if activated && strings.TrimSpace(st.ExpiresAt) != "" {
+		if expiry, err := time.Parse(time.RFC3339, st.ExpiresAt); err == nil && !time.Now().Before(expiry) {
+			activated = false
+			stateErr = "license has expired"
+		}
+	}
+
 	return State{
-		Activated: st.Key != "",
+		Activated: activated,
 		Role: st.Role,
 		MemberName: st.MemberName,
 		LicenseHint: licenseHint(st.Key),
@@ -155,6 +164,7 @@ func (s *Service) stateFromStored(st storedLicense) State {
 		OfflineUntil: st.OfflineUntil,
 		Plan: st.Plan,
 		ExpiresAt: st.ExpiresAt,
+		Error: stateErr,
 	}
 }
 
