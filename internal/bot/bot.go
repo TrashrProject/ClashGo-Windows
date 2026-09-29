@@ -72,6 +72,7 @@ type Bot struct {
 	stars2      atomic.Int32
 	stars3      atomic.Int32
 	seqRunning        atomic.Bool
+	seqStartedAtUnix  atomic.Int64
 	paused            atomic.Bool
 	zoomedOut         atomic.Bool
 	recoveryAttempts  atomic.Int32
@@ -1717,6 +1718,8 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	if !b.seqRunning.CompareAndSwap(false, true) {
 		return
 	}
+	b.seqStartedAtUnix.Store(time.Now().Unix())
+	defer b.seqStartedAtUnix.Store(0)
 	defer b.seqRunning.Store(false)
 
 	if b.cfg.Debug.UseShellPipe && runtime.GOOS != "windows" {
@@ -3857,6 +3860,13 @@ func (b *Bot) IsSequenceRunning() bool {
 		return false
 	}
 	return b.seqRunning.Load()
+}
+
+func (b *Bot) SequenceStartedAtUnix() int64 {
+	if b == nil {
+		return 0
+	}
+	return b.seqStartedAtUnix.Load()
 }
 
 func (b *Bot) PauseAutomation() {
