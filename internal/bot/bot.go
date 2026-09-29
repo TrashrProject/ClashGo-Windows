@@ -3844,6 +3844,13 @@ func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 }
 
 
+func (b *Bot) IsSequenceRunning() bool {
+	if b == nil {
+		return false
+	}
+	return b.seqRunning.Load()
+}
+
 // HistorySnapshot returns an immutable copy of the bot's authoritative
 // in-memory attack history. The App uses this to update React immediately at
 // attack boundaries without writing then re-reading attack_history.json.
