@@ -250,6 +250,18 @@ async function ingestIncident(request, env) {
     JSON.stringify(fields)
   ).run();
 
+  // Keep support data bounded and short-lived. This mirrors the desktop
+  // reporter queue policy and the Go fallback service.
+  const retentionCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  await env.DB.prepare("DELETE FROM incidents WHERE received_at < ?1")
+    .bind(retentionCutoff).run();
+  await env.DB.prepare(`
+    DELETE FROM incidents
+    WHERE id NOT IN (
+      SELECT id FROM incidents ORDER BY received_at DESC LIMIT 5000
+    )
+  `).run();
+
   return json({ ok: true, id }, 202);
 }
 
