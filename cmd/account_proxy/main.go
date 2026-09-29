@@ -911,6 +911,18 @@ func main() {
 		rec.MachineID = ""
 		rec.LastSeenAt = time.Time{}
 		rec.AppVersion = ""
+		control.appendEventLocked(licenseEvent{
+			LicenseID:       rec.ID,
+			LicenseHint:     rec.Hint,
+			CustomerName:    rec.CustomerName,
+			CustomerContact: rec.CustomerContact,
+			EventType:       "machine_reset",
+			Plan:            rec.Plan,
+			PaymentStatus:   rec.PaymentStatus,
+			Note:            "Liaison PC réinitialisée",
+			CreatedAt:       time.Now().UTC(),
+			ExpiresAt:       rec.ExpiresAt,
+		})
 		_ = control.saveLocked()
 		control.mu.Unlock()
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -944,6 +956,24 @@ func main() {
 			return
 		}
 		rec.Active = in.Active
+		eventType := "revoked"
+		eventNote := "Licence révoquée"
+		if in.Active {
+			eventType = "reactivated"
+			eventNote = "Licence réactivée"
+		}
+		control.appendEventLocked(licenseEvent{
+			LicenseID:       rec.ID,
+			LicenseHint:     rec.Hint,
+			CustomerName:    rec.CustomerName,
+			CustomerContact: rec.CustomerContact,
+			EventType:       eventType,
+			Plan:            rec.Plan,
+			PaymentStatus:   rec.PaymentStatus,
+			Note:            eventNote,
+			CreatedAt:       time.Now().UTC(),
+			ExpiresAt:       rec.ExpiresAt,
+		})
 		_ = control.saveLocked()
 		control.mu.Unlock()
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "active": in.Active})
@@ -1068,6 +1098,18 @@ func main() {
 		rec.CustomerName = in.CustomerName
 		rec.CustomerContact = in.CustomerContact
 		rec.CustomerNotes = in.CustomerNotes
+		control.appendEventLocked(licenseEvent{
+			LicenseID:       rec.ID,
+			LicenseHint:     rec.Hint,
+			CustomerName:    rec.CustomerName,
+			CustomerContact: rec.CustomerContact,
+			EventType:       "customer_updated",
+			Plan:            rec.Plan,
+			PaymentStatus:   rec.PaymentStatus,
+			Note:            "Fiche client mise à jour",
+			CreatedAt:       time.Now().UTC(),
+			ExpiresAt:       rec.ExpiresAt,
+		})
 		_ = control.saveLocked()
 		control.mu.Unlock()
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -1106,7 +1148,20 @@ func main() {
 			writeJSON(w, http.StatusNotFound, map[string]string{"message": "license not found"})
 			return
 		}
+		previousRole := rec.Role
 		rec.Role = role
+		control.appendEventLocked(licenseEvent{
+			LicenseID:       rec.ID,
+			LicenseHint:     rec.Hint,
+			CustomerName:    rec.CustomerName,
+			CustomerContact: rec.CustomerContact,
+			EventType:       "role_changed",
+			Plan:            rec.Plan,
+			PaymentStatus:   rec.PaymentStatus,
+			Note:            fmt.Sprintf("%s → %s", previousRole, role),
+			CreatedAt:       time.Now().UTC(),
+			ExpiresAt:       rec.ExpiresAt,
+		})
 		_ = control.saveLocked()
 		control.mu.Unlock()
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "role": role})
