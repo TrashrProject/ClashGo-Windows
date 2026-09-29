@@ -1551,14 +1551,19 @@ func (a *App) GetPlayerProfile() (*ClashPlayerProfile, error) {
 		if _, ok := cfg.Attack.Farm.Profiles[fmt.Sprintf("%d", profile.TownHallLevel)]; ok {
 			cfg.Attack.Farm.TownHall = profile.TownHallLevel
 			cfg.Attack.Farm.Enabled = true
-			if data, marshalErr := json.MarshalIndent(cfg, "", "  "); marshalErr == nil {
-				_ = os.WriteFile(paths.ResolveConfig("config.json"), data, 0600)
+
+			data, marshalErr := json.MarshalIndent(cfg, "", "  ")
+			if marshalErr != nil {
+				log.Warn().Err(marshalErr).Msg("account sync: could not encode automatic farm profile")
+			} else if writeErr := os.WriteFile(paths.ResolveConfig("config.json"), data, 0600); writeErr != nil {
+				log.Warn().Err(writeErr).Msg("account sync: could not persist automatic farm profile")
+			} else {
+				a.mu.Lock()
+				if a.bot != nil {
+					a.bot.UpdateConfig(cfg)
+				}
+				a.mu.Unlock()
 			}
-			a.mu.Lock()
-			if a.bot != nil {
-				a.bot.UpdateConfig(cfg)
-			}
-			a.mu.Unlock()
 		}
 	}
 
