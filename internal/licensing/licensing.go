@@ -366,6 +366,7 @@ func (s *Service) Activate(ctx context.Context, key string) (State, error) {
 	nextStored := storedLicense{
 		Key:           key,
 		Role:          out.Role,
+		LicenseID:     strings.TrimSpace(out.LicenseID),
 		MemberName:    strings.TrimSpace(out.MemberName),
 		MachineID:     machineID,
 		LastValidated: now.Format(time.RFC3339),
