@@ -594,12 +594,13 @@ function App() {
     const fetchFastData = async () => {
       if (!uiVisible()) return;
       try {
-        const [s, a] = await Promise.all([
-          GetStats(),
-          GetActivity(),
-        ]);
-        setStats(s as unknown as BotStats);
-        setActivity((a ?? []) as unknown as ActivityEvent[]);
+        const statsValue = await GetStats();
+        setStats(statsValue as unknown as BotStats);
+
+        if (tabRef.current === 'dashboard' || tabRef.current === 'activity') {
+          const activityValue = await GetActivity();
+          setActivity((activityValue ?? []) as unknown as ActivityEvent[]);
+        }
       } catch (err) {
         console.error('Fast data fetch failed:', err);
       }
