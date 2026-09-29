@@ -1,6 +1,13 @@
 import React from 'react';
 import { BotStats, UpdateStatus, SystemDiagnostics } from '../types';
-import { GetLatestAttackTrace, GetLatestBootReport } from '../../wailsjs/go/main/App';
+import { GetControlServiceConfig, GetLatestAttackTrace, GetLatestBootReport, SetBetaControlServiceURL } from '../../wailsjs/go/main/App';
+
+type ControlServiceView = {
+  service_url?: string;
+  configured?: boolean;
+  embedded?: boolean;
+  requires_restart?: boolean;
+};
 
 type BootReportView = {
   started_at?: string;
@@ -63,6 +70,10 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   const [latestTrace, setLatestTrace] = React.useState('');
   const [traceBusy, setTraceBusy] = React.useState(false);
   const [bootReport, setBootReport] = React.useState<BootReportView | null>(null);
+  const [controlService, setControlService] = React.useState<ControlServiceView | null>(null);
+  const [controlURLInput, setControlURLInput] = React.useState('');
+  const [controlURLBusy, setControlURLBusy] = React.useState(false);
+  const [controlURLMessage, setControlURLMessage] = React.useState('');
   const [settingsPage, setSettingsPage] = React.useState<'general' | 'windows' | 'diagnostic'>(() => {
     try {
       const saved = localStorage.getItem('clashgo_settings_page');
@@ -98,6 +109,42 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
       window.clearInterval(id);
     };
   }, []);
+
+  React.useEffect(() => {
+    let active = true;
+    const loadControl = async () => {
+      try {
+        const value = await GetControlServiceConfig();
+        if (!active) return;
+        const typed = (value || {}) as ControlServiceView;
+        setControlService(typed);
+        setControlURLInput(typed.service_url || '');
+      } catch {
+        if (active) setControlService(null);
+      }
+    };
+    void loadControl();
+    return () => { active = false; };
+  }, []);
+
+  const saveControlServiceURL = async () => {
+    if (controlURLBusy || isRunning || isStarting || controlService?.embedded) return;
+    setControlURLBusy(true);
+    setControlURLMessage('');
+    try {
+      const value = await SetBetaControlServiceURL(controlURLInput.trim());
+      const typed = (value || {}) as ControlServiceView;
+      setControlService(typed);
+      setControlURLInput(typed.service_url || controlURLInput.trim());
+      setControlURLMessage(typed.requires_restart
+        ? 'Serveur enregistré · redémarre ClashGO pour l’utiliser.'
+        : 'Serveur enregistré.');
+    } catch (e) {
+      setControlURLMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setControlURLBusy(false);
+    }
+  };
 
   const handleInstanceChange = async (instance: string) => {
     if (instanceBusy || isRunning || isStarting) return;
@@ -329,6 +376,67 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             <div className={`w-4 h-4 rounded-full bg-white dark:bg-zinc-400 transition-all duration-500 ease-in-out shadow-md ${darkMode ? 'translate-x-6' : 'translate-x-0'}`}></div>
           </div>
         </button>
+
+        <section className={(settingsPage === 'general' ? '' : 'hidden ') + "rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30 p-5"}>
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <div className={
+                  'w-2 h-2 rounded-full ' +
+                  (controlService?.configured ? 'bg-emerald-500' : 'bg-amber-400')
+                } />
+                <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Serveur ClashGO</div>
+                {controlService?.embedded && (
+                  <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[8px] font-black uppercase tracking-wider text-emerald-500">Intégré</span>
+                )}
+              </div>
+              <div className="mt-1 text-sm font-bold text-zinc-950 dark:text-white">
+                {controlService?.embedded
+                  ? 'Serveur de licences intégré à cette version'
+                  : controlService?.configured
+                    ? 'Serveur bêta configuré'
+                    : 'Mode bêta local'}
+              </div>
+              <div className="mt-1 text-[10px] font-semibold text-zinc-400">
+                {controlService?.embedded
+                  ? 'Cette adresse est verrouillée par la build et ne peut pas être remplacée localement.'
+                  : 'À utiliser uniquement pour relier une bêta à ton serveur de licences. HTTPS obligatoire hors localhost.'}
+              </div>
+            </div>
+
+            {!controlService?.embedded && (
+              <div className="flex w-full lg:w-auto flex-col sm:flex-row gap-2">
+                <input
+                  value={controlURLInput}
+                  onChange={(e) => setControlURLInput(e.target.value)}
+                  disabled={controlURLBusy || isRunning || isStarting}
+                  placeholder="https://clashgo-control-api.…workers.dev"
+                  spellCheck={false}
+                  className="h-11 min-w-0 lg:w-80 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 text-xs font-mono outline-none focus:border-zinc-400 disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  onClick={() => void saveControlServiceURL()}
+                  disabled={controlURLBusy || isRunning || isStarting || !controlURLInput.trim()}
+                  className="h-11 shrink-0 rounded-xl bg-zinc-950 dark:bg-white px-4 text-[9px] font-black uppercase tracking-wider text-white dark:text-zinc-950 disabled:opacity-30"
+                >
+                  {controlURLBusy ? 'Validation…' : 'Enregistrer'}
+                </button>
+              </div>
+            )}
+          </div>
+          {controlService?.service_url && (
+            <div className="mt-3 truncate rounded-lg bg-white/70 dark:bg-zinc-950/50 px-3 py-2 text-[9px] font-mono text-zinc-500" title={controlService.service_url}>
+              {controlService.service_url}
+            </div>
+          )}
+          {controlURLMessage && (
+            <div className="mt-3 text-[10px] font-bold text-amber-600 dark:text-amber-300">{controlURLMessage}</div>
+          )}
+          {(isRunning || isStarting) && !controlService?.embedded && (
+            <div className="mt-3 text-[9px] font-semibold text-amber-500">Arrête le bot avant de modifier le serveur.</div>
+          )}
+        </section>
 
         <details className={(settingsPage === 'diagnostic' ? '' : 'hidden ') + "rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/20 overflow-hidden"}>
           <summary className="cursor-pointer list-none flex items-center justify-between gap-4 p-5">
