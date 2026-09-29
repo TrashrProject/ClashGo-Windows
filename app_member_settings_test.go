@@ -5,6 +5,9 @@ import (
 	"time"
 
 	"github.com/Ducky705/ClashGO/internal/config"
+	"encoding/json"
+	"os"
+	"path/filepath"
 )
 
 func TestNormalizeSpeedProfile(t *testing.T) {
@@ -219,5 +222,80 @@ func TestApplyMemberSettingsToConfigPreservesUnrelatedFarmSettings(t *testing.T)
 	}
 	if !cfg.Attack.LootExitEnabled || cfg.Attack.LootExitPercent != 77 {
 		t.Fatalf("member settings changed loot-exit behavior: %+v", cfg.Attack)
+	}
+}
+
+
+func TestMemberProfileFileRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "members", "profile.json")
+	want := MemberSettings{
+		SpeedProfile:         "fast",
+		MaxAttacksPerHour:    16,
+		BreakEveryAttacks:    6,
+		BreakMinutes:         2,
+		AdaptiveSearch:       true,
+		AutoProfileSync:      true,
+		AutoArmyGuard:        true,
+		AutoResourceTracking: true,
+	}
+
+	if err := saveMemberProfileFile(path, want); err != nil {
+		t.Fatalf("saveMemberProfileFile: %v", err)
+	}
+	got, ok := loadMemberProfileFile(path)
+	if !ok {
+		t.Fatal("expected saved member profile to load")
+	}
+	if got != sanitizeMemberSettings(want) {
+		t.Fatalf("loaded member settings mismatch: got=%+v want=%+v", got, sanitizeMemberSettings(want))
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("temporary member profile survived successful save: %v", err)
+	}
+	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+		t.Fatalf("backup member profile survived successful save: %v", err)
+	}
+}
+
+func TestMemberProfileFileRecoversBackup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "members", "profile.json")
+	want := MemberSettings{
+		SpeedProfile:         "cautious",
+		MaxAttacksPerHour:    8,
+		BreakEveryAttacks:    4,
+		BreakMinutes:         4,
+		AdaptiveSearch:       false,
+		AutoProfileSync:      true,
+		AutoArmyGuard:        true,
+		AutoResourceTracking: true,
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".bak", data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := loadMemberProfileFile(path)
+	if !ok {
+		t.Fatal("expected backup member profile to recover")
+	}
+	if got != sanitizeMemberSettings(want) {
+		t.Fatalf("recovered member settings mismatch: got=%+v want=%+v", got, sanitizeMemberSettings(want))
+	}
+	if primary, err := os.ReadFile(path); err != nil {
+		t.Fatalf("recovered primary missing: %v", err)
+	} else {
+		var restored MemberSettings
+		if json.Unmarshal(primary, &restored) != nil {
+			t.Fatalf("recovered primary is not valid json: %q", string(primary))
+		}
 	}
 }
