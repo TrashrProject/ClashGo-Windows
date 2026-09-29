@@ -1569,6 +1569,100 @@ func (a *App) applyMemberProfileForCurrentLicense() error {
 	return nil
 }
 
+type memberAccountProfile struct {
+	PlayerTag string `json:"player_tag"`
+}
+
+func (a *App) memberAccountPath() string {
+	if a == nil || a.license == nil {
+		return ""
+	}
+	id := strings.TrimSpace(a.license.ProfileID())
+	if id == "" {
+		return ""
+	}
+	return paths.ResolveConfig(filepath.Join("members", id+".account.json"))
+}
+
+func (a *App) persistMemberAccountTag(tag string) error {
+	path := a.memberAccountPath()
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	payload := memberAccountProfile{PlayerTag: strings.TrimSpace(tag)}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+func (a *App) loadMemberAccountTag() (string, bool) {
+	path := a.memberAccountPath()
+	if path == "" {
+		return "", false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	var profile memberAccountProfile
+	if json.Unmarshal(data, &profile) != nil {
+		return "", false
+	}
+	return strings.TrimSpace(profile.PlayerTag), true
+}
+
+func clearCachedPlayerProfileIfDifferent(tag string) {
+	data, err := os.ReadFile(accountProfileCachePath())
+	if err != nil {
+		return
+	}
+	var profile ClashPlayerProfile
+	if json.Unmarshal(data, &profile) != nil {
+		_ = os.Remove(accountProfileCachePath())
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(profile.Tag), strings.TrimSpace(tag)) {
+		_ = os.Remove(accountProfileCachePath())
+	}
+}
+
+func (a *App) applyMemberAccountForCurrentLicense() error {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return nil
+	}
+	cfg := config.LoadOrDefault("config.json")
+	tag, exists := a.loadMemberAccountTag()
+	if !exists {
+		// Migration path for the first version that introduces per-license
+		// accounts: the currently linked tag belongs to the currently active
+		// license. Deactivation clears it, so a future different license can
+		// never accidentally adopt the previous member's account.
+		tag = strings.TrimSpace(cfg.Account.PlayerTag)
+		if err := a.persistMemberAccountTag(tag); err != nil {
+			return err
+		}
+	}
+
+	cfg.Account.PlayerTag = tag
+	cfg.Account.LegacyAPIKey = ""
+	if err := config.Save("config.json", cfg); err != nil {
+		return err
+	}
+	clearCachedPlayerProfileIfDifferent(tag)
+
+	a.mu.Lock()
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	a.mu.Unlock()
+	return nil
+}
+
 func (a *App) GetMemberSettings() MemberSettings {
 	cfg := config.LoadOrDefault("config.json")
 	profile := normalizeSpeedProfile(cfg.Automation.SpeedProfile)
