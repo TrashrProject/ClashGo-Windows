@@ -34,16 +34,51 @@ jobs:
         shell: bash
         run: |
           npm ci
-          rm -rf .syntax-check
-          mkdir -p .syntax-check
-          find src -type f \( -name '*.ts' -o -name '*.tsx' \) -print0 | while IFS= read -r -d '' file; do
-            out=".syntax-check/${file//\//_}.js"
-            npx --no-install esbuild "$file" --format=esm --platform=browser --outfile="$out" >/dev/null
-          done
-          rm -rf .syntax-check
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import ts from 'typescript';
+
+          const files = [];
+          const walk = (dir) => {
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) walk(full);
+              else if (entry.isFile() && /\.tsx?$/.test(entry.name)) files.push(full);
+            }
+          };
+          walk('src');
+
+          let failed = false;
+          for (const file of files) {
+            const source = fs.readFileSync(file, 'utf8');
+            const result = ts.transpileModule(source, {
+              fileName: file,
+              reportDiagnostics: true,
+              compilerOptions: {
+                jsx: ts.JsxEmit.ReactJSX,
+                target: ts.ScriptTarget.ES2020,
+                module: ts.ModuleKind.ESNext,
+              },
+            });
+            for (const diagnostic of result.diagnostics || []) {
+              if (diagnostic.category !== ts.DiagnosticCategory.Error) continue;
+              failed = true;
+              const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n');
+              if (diagnostic.file && typeof diagnostic.start === 'number') {
+                const pos = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
+                console.error(`${file}:${pos.line + 1}:${pos.character + 1} ${message}`);
+              } else {
+                console.error(`${file}: ${message}`);
+              }
+            }
+          }
+          if (failed) process.exit(1);
+          console.log(`TS/TSX syntax OK: ${files.length} files`);
+          NODE
 
       # The Windows Beta workflow remains authoritative for generated Wails
       # bindings, full TypeScript/Vite type checking, GoCV/OpenCV and packaging.
-      # The esbuild pass above compiles each file independently without bundling:
-      # it is a fast syntax guard that catches malformed TS/TSX before waiting
-      # for Windows.
+      # The TypeScript transpile pass above parses each file independently:
+      # it is a fast syntax guard that catches malformed TS/TSX without module
+      # resolution or generated Wails bindings.
