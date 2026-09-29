@@ -851,6 +851,7 @@ function App() {
               onStop={handleStop}
               onOpenAutomation={() => setTab('config')}
               onOpenAccount={() => setTab('account')}
+              onOpenSettings={() => setTab('settings')}
               licenseReady={licenseAccessReady}
               accountLinked={Boolean(playerTag)}
               windowsReady={systemDiagnostics
