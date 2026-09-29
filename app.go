@@ -350,13 +350,13 @@ func (a *App) waitForBotTeardown(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
 		a.mu.Lock()
-		stopping := a.stopping
+		active := a.bot != nil || a.cancel != nil || a.stopping
 		a.mu.Unlock()
-		if !stopping {
+		if !active {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("bot teardown did not finish within %s", timeout)
+			return fmt.Errorf("bot startup/teardown did not finish within %s", timeout)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -460,8 +460,8 @@ func (a *App) licenseValidationLoop(ctx context.Context) {
 			if a.ctx != nil {
 				runtime.EventsEmit(a.ctx, "license_state", state)
 			}
-			if !state.Activated && a.IsRunning() {
-				log.Warn().Str("reason", state.Error).Msg("license became invalid; stopping bot")
+			if !state.Activated && a.botSessionActiveOrStarting() {
+				log.Warn().Str("reason", state.Error).Msg("license became invalid; stopping active or starting bot")
 				_ = a.StopBot()
 			}
 		}
@@ -1414,6 +1414,15 @@ func (a *App) IsRunning() bool {
 	return a.bot != nil
 }
 
+func (a *App) botSessionActiveOrStarting() bool {
+	if a == nil {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.bot != nil || a.cancel != nil || a.stopping
+}
+
 type LicensePolicy struct {
 	Enforced          bool   `json:"enforced"`
 	ServiceConfigured bool   `json:"service_configured"`
@@ -1536,8 +1545,10 @@ func (a *App) DeactivateLicense() error {
 		return nil
 	}
 
-	// A local deactivation must immediately end an active automation session.
-	if a.IsRunning() {
+	// A local deactivation must immediately end an active OR in-flight
+	// automation session. A boot that already passed license validation must
+	// never be allowed to finish after the local entitlement is removed.
+	if a.botSessionActiveOrStarting() {
 		_ = a.StopBot()
 	}
 	if err := a.waitForBotTeardown(20 * time.Second); err != nil {
