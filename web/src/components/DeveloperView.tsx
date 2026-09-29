@@ -4,6 +4,7 @@ import {
   AdminResetLicenseMachine,
   AdminSetLicenseActive,
   AdminSetLicenseRole,
+  AdminUpdateLicenseCustomer,
   CreateAdminLicense,
   GetDeveloperIncidents,
   GetDeveloperLicenses,
@@ -135,6 +136,9 @@ const DeveloperView: React.FC = () => {
   const [search, setSearch] = React.useState('');
   const [licenseFilter, setLicenseFilter] = React.useState<'all' | 'active' | 'revoked' | 'expired' | 'expiring' | 'unactivated'>('all');
   const [renewPlans, setRenewPlans] = React.useState<Record<string, 'free_2d' | 'week_1' | 'month_1' | 'lifetime'>>({});
+  const [editingCustomerID, setEditingCustomerID] = React.useState('');
+  const [editCustomerName, setEditCustomerName] = React.useState('');
+  const [editCustomerContact, setEditCustomerContact] = React.useState('');
   const generatedKeyTimerRef = React.useRef<number | null>(null);
 
   const isAdmin = role === 'admin';
@@ -150,6 +154,7 @@ const DeveloperView: React.FC = () => {
       ]);
       setRole((state as LicenseState)?.role || '');
       setCurrentLicenseHint((state as LicenseState)?.license_hint || '');
+      setCurrentMachineID((state as LicenseState)?.machine_id || '');
       setIncidents((i || []) as Incident[]);
       setLicenses((l || []) as LicenseRow[]);
     } catch (e) {
@@ -260,6 +265,37 @@ const DeveloperView: React.FC = () => {
     const id = String(item.id || '');
     if (!id || nextRole === item.role) return;
     await runLicenseAction(id, () => AdminSetLicenseRole(id, nextRole), 'Rôle de la licence mis à jour.');
+  };
+
+  const startCustomerEdit = (item: LicenseRow) => {
+    const id = String(item.id || '');
+    if (!id) return;
+    setEditingCustomerID(id);
+    setEditCustomerName(item.customer_name || '');
+    setEditCustomerContact(item.customer_contact || '');
+    setError('');
+    setNotice('');
+  };
+
+  const cancelCustomerEdit = () => {
+    setEditingCustomerID('');
+    setEditCustomerName('');
+    setEditCustomerContact('');
+  };
+
+  const saveCustomerEdit = async (item: LicenseRow) => {
+    const id = String(item.id || '');
+    const name = editCustomerName.trim();
+    if (!id || !name) {
+      setError('Le nom ou pseudo du client est obligatoire.');
+      return;
+    }
+    await runLicenseAction(
+      id,
+      () => AdminUpdateLicenseCustomer(id, name, editCustomerContact.trim()),
+      'Informations client mises à jour.'
+    );
+    cancelCustomerEdit();
   };
 
   const copyGeneratedKey = async () => {
@@ -625,6 +661,44 @@ const DeveloperView: React.FC = () => {
                   {item.customer_contact && (
                     <div className="mt-1 text-[10px] font-semibold text-zinc-400">{item.customer_contact}</div>
                   )}
+
+                  {isAdmin && item.id && editingCustomerID === String(item.id) && (
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2 max-w-2xl">
+                      <input
+                        value={editCustomerName}
+                        onChange={(e) => setEditCustomerName(e.target.value)}
+                        placeholder="Nom / pseudo"
+                        maxLength={120}
+                        autoFocus
+                        className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 text-xs font-semibold outline-none focus:border-zinc-400"
+                      />
+                      <input
+                        value={editCustomerContact}
+                        onChange={(e) => setEditCustomerContact(e.target.value)}
+                        placeholder="Discord / contact"
+                        maxLength={180}
+                        className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 text-xs font-semibold outline-none focus:border-zinc-400"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={actionID === item.id || !editCustomerName.trim()}
+                          onClick={() => void saveCustomerEdit(item)}
+                          className="h-9 rounded-lg bg-zinc-950 dark:bg-white px-3 text-[9px] font-black uppercase tracking-wider text-white dark:text-zinc-950 disabled:opacity-40"
+                        >
+                          Enregistrer
+                        </button>
+                        <button
+                          type="button"
+                          disabled={actionID === item.id}
+                          onClick={cancelCustomerEdit}
+                          className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-500 disabled:opacity-40"
+                        >
+                          Annuler
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="lg:text-right">
                   <div className={
@@ -645,9 +719,18 @@ const DeveloperView: React.FC = () => {
 
                 {isAdmin && item.id && (
                   <div className="lg:w-full xl:w-auto xl:min-w-[390px] flex flex-wrap items-center gap-2 lg:justify-end">
+                    <button
+                      type="button"
+                      disabled={actionID === item.id || editingCustomerID === String(item.id)}
+                      onClick={() => startCustomerEdit(item)}
+                      className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-40"
+                    >
+                      Client
+                    </button>
+
                     <select
                       value={(item.role === 'developer' || item.role === 'admin') ? item.role : 'member'}
-                      disabled={actionID === item.id || Boolean(currentLicenseHint && item.hint === currentLicenseHint)}
+                      disabled={actionID === item.id || isCurrentAdminLicense(item)}
                       onChange={(e) => void setLicenseRole(item, e.target.value as 'member' | 'developer' | 'admin')}
                       className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-2 text-[9px] font-black uppercase tracking-wider outline-none disabled:opacity-40"
                     >
@@ -691,7 +774,7 @@ const DeveloperView: React.FC = () => {
 
                     <button
                       type="button"
-                      disabled={actionID === item.id || !item.machine_id || Boolean(currentLicenseHint && item.hint === currentLicenseHint)}
+                      disabled={actionID === item.id || !item.machine_id || isCurrentAdminLicense(item)}
                       onClick={() => void resetMachine(item)}
                       className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-30"
                     >
@@ -700,7 +783,7 @@ const DeveloperView: React.FC = () => {
 
                     <button
                       type="button"
-                      disabled={actionID === item.id || Boolean(currentLicenseHint && item.hint === currentLicenseHint)}
+                      disabled={actionID === item.id || isCurrentAdminLicense(item)}
                       onClick={() => void setActive(item, item.active === false)}
                       className={
                         'h-9 rounded-lg border px-3 text-[9px] font-black uppercase tracking-wider disabled:opacity-40 ' +
