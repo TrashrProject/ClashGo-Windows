@@ -368,17 +368,26 @@ const DeveloperView: React.FC = () => {
 
         <div className="mt-6 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           {[
-            ['Licences', licenses.length],
-            ['Utilisables', activeLicenses],
-            ['Expire < 7j', expiringSoon],
-            ['Expirées', expiredLicenses],
-            ['Jamais activées', neverActivated],
-            ['Erreurs', recentErrors.length],
-          ].map(([label, value]) => (
-            <div key={String(label)} className="rounded-2xl bg-white/5 dark:bg-zinc-100 p-4">
-              <div className="text-2xl font-black">{value}</div>
-              <div className="mt-1 text-[9px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">{label}</div>
-            </div>
+            { label: 'Licences', value: licenses.length, tab: 'licenses' as const, filter: 'all' as const },
+            { label: 'Utilisables', value: activeLicenses, tab: 'licenses' as const, filter: 'active' as const },
+            { label: 'Expire < 7j', value: expiringSoon, tab: 'licenses' as const, filter: 'expiring' as const },
+            { label: 'Expirées', value: expiredLicenses, tab: 'licenses' as const, filter: 'expired' as const },
+            { label: 'Jamais activées', value: neverActivated, tab: 'licenses' as const, filter: 'unactivated' as const },
+            { label: 'Erreurs', value: recentErrors.length, tab: 'incidents' as const, filter: null },
+          ].map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => {
+                setTab(item.tab);
+                if (item.filter) setLicenseFilter(item.filter);
+              }}
+              className="rounded-2xl bg-white/5 dark:bg-zinc-100 p-4 text-left transition hover:bg-white/10 dark:hover:bg-zinc-200 active:scale-[0.98]"
+              title={'Afficher ' + item.label.toLowerCase()}
+            >
+              <div className="text-2xl font-black">{item.value}</div>
+              <div className="mt-1 text-[9px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">{item.label}</div>
+            </button>
           ))}
         </div>
       </section>
