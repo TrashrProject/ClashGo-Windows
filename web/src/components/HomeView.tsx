@@ -25,7 +25,20 @@ interface HomeViewProps {
   onRunStartupCheck: () => void;
   memberName?: string;
   licensePlan?: string;
+  licenseExpiresAt?: string;
 }
+
+const licenseRemainingLabel = (expiresAt?: string): { label: string; urgent: boolean } => {
+  if (!expiresAt) return { label: 'À vie', urgent: false };
+  const expiry = new Date(expiresAt).getTime();
+  if (!Number.isFinite(expiry)) return { label: 'Expiration inconnue', urgent: false };
+  const remaining = expiry - Date.now();
+  if (remaining <= 0) return { label: 'Expirée', urgent: true };
+  const hours = Math.ceil(remaining / 3_600_000);
+  if (hours <= 24) return { label: 'Expire aujourd’hui', urgent: true };
+  const days = Math.ceil(hours / 24);
+  return { label: `${days} j restants`, urgent: days <= 3 };
+};
 
 const formatLoot = (value: number): string => {
   if (!Number.isFinite(value) || value <= 0) return '0';
@@ -106,7 +119,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     onStart, onStop, onOpenAutomation, onOpenAccount, onOpenSettings,
     licenseReady, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
-    memberName, licensePlan,
+    memberName, licensePlan, licenseExpiresAt,
   } = props;
 
   const lastAttack = history && history.length > 0 ? history[0] : undefined;
@@ -161,6 +174,19 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                   Plan · {licensePlan === 'free_2d' ? 'FREE 2J' : licensePlan === 'week_1' ? '1 SEMAINE' : licensePlan === 'month_1' ? '1 MOIS' : 'À VIE'}
                 </span>
               )}
+              {licenseReady && (() => {
+                const remaining = licenseRemainingLabel(licenseExpiresAt);
+                return (
+                  <span className={
+                    'rounded-full border px-3 py-1.5 text-[9px] font-black uppercase tracking-widest ' +
+                    (remaining.urgent
+                      ? 'border-amber-400/40 bg-amber-400/10 text-amber-300 dark:text-amber-600'
+                      : 'border-white/10 dark:border-zinc-200 bg-white/5 dark:bg-zinc-100 text-zinc-300 dark:text-zinc-600')
+                  }>
+                    Licence · {remaining.label}
+                  </span>
+                );
+              })()}
               <span className="rounded-full border border-white/10 dark:border-zinc-200 bg-white/5 dark:bg-zinc-100 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600">
                 Cadence · {stats.speed_profile === 'fast' ? 'Rapide' : stats.speed_profile === 'cautious' ? 'Prudente' : 'Normale'}
               </span>
