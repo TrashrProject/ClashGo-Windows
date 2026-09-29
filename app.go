@@ -497,7 +497,7 @@ func (a *App) accountProfileSyncLoop(ctx context.Context) {
 	}
 
 	syncOnce()
-	ticker := time.NewTicker(15 * time.Minute)
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
