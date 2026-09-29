@@ -21,6 +21,8 @@ jobs:
           go test ./internal/config
           go test ./internal/telemetry
           go test ./internal/intelligence
+          go test ./internal/licensing
+          go test ./internal/support
           go test ./cmd/account_proxy
 
       - uses: actions/setup-node@v4
