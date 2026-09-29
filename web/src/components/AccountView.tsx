@@ -659,6 +659,32 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
           </div>
         )}
       </section>
+
+      {memberPage === 'account' && licenseState?.activated && (
+        <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
+          <div className="flex items-start gap-4">
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-emerald-500/10 text-emerald-500">
+              <span className="material-symbols-outlined">folder_managed</span>
+            </div>
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Données membre</div>
+              <h3 className="mt-1 text-lg font-black text-zinc-950 dark:text-white">Tes données suivent cette licence</h3>
+              <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-zinc-500">
+                Tes préférences, ton compte Clash lié, tes statistiques et ton historique local restent associés à cette licence sur ce PC.
+                Si une autre licence est utilisée plus tard, ClashGO charge son propre espace sans mélanger les données.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {['Préférences', 'Compte Clash', 'Statistiques', 'Historique'].map((label) => (
+                  <span key={label} className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 text-[9px] font-black uppercase tracking-wider text-zinc-500">
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       {memberPage === 'settings' && (licenseState?.activated || licensePolicy?.enforced === false) && memberSettings && (
         <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
           <div className="flex flex-col gap-6">
