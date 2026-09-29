@@ -1,6 +1,6 @@
 package main
 
-// Build marker: beta pipeline validation after Xingchen-style runtime supervisor integration.
+// Build marker: beta pipeline validation after file-backed BlueStacks PNG capture.
 import (
 	"bytes"
 	"context"
