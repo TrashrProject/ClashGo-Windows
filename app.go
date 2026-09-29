@@ -2573,6 +2573,179 @@ func (a *App) loadMemberProfile() (MemberSettings, bool) {
 	return loadMemberProfileFile(a.memberProfilePath())
 }
 
+
+type MemberPresetSlot struct {
+	Slot      int            `json:"slot"`
+	Name      string         `json:"name"`
+	UpdatedAt string         `json:"updated_at"`
+	Settings  MemberSettings `json:"settings"`
+}
+
+type memberPresetStore struct {
+	Slots []MemberPresetSlot `json:"slots"`
+}
+
+func (a *App) memberPresetStorePath() string {
+	if a == nil || a.license == nil {
+		return ""
+	}
+	id := strings.TrimSpace(a.license.ProfileID())
+	if id == "" {
+		return ""
+	}
+	return paths.ResolveConfig(filepath.Join("members", id+".presets.json"))
+}
+
+func sanitizeMemberPresetName(name string, slot int) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Sprintf("Profil %d", slot)
+	}
+	runes := []rune(name)
+	if len(runes) > 32 {
+		runes = runes[:32]
+	}
+	return string(runes)
+}
+
+func loadMemberPresetStore(path string) memberPresetStore {
+	if strings.TrimSpace(path) == "" {
+		return memberPresetStore{Slots: []MemberPresetSlot{}}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return memberPresetStore{Slots: []MemberPresetSlot{}}
+	}
+	var store memberPresetStore
+	if json.Unmarshal(data, &store) != nil {
+		return memberPresetStore{Slots: []MemberPresetSlot{}}
+	}
+	clean := make([]MemberPresetSlot, 0, 3)
+	seen := map[int]bool{}
+	for _, item := range store.Slots {
+		if item.Slot < 1 || item.Slot > 3 || seen[item.Slot] {
+			continue
+		}
+		item.Name = sanitizeMemberPresetName(item.Name, item.Slot)
+		item.Settings = sanitizeMemberSettings(item.Settings)
+		seen[item.Slot] = true
+		clean = append(clean, item)
+	}
+	store.Slots = clean
+	return store
+}
+
+func saveMemberPresetStore(path string, store memberPresetStore) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("member preset path unavailable")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(store, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	if f, err := os.Open(tmp); err == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func (a *App) GetMemberPresets() []MemberPresetSlot {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return []MemberPresetSlot{}
+	}
+	store := loadMemberPresetStore(a.memberPresetStorePath())
+	sort.Slice(store.Slots, func(i, j int) bool { return store.Slots[i].Slot < store.Slots[j].Slot })
+	return store.Slots
+}
+
+func (a *App) SaveMemberPreset(slot int, name string) ([]MemberPresetSlot, error) {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return nil, fmt.Errorf("active ClashGO license required")
+	}
+	if slot < 1 || slot > 3 {
+		return nil, fmt.Errorf("preset slot must be between 1 and 3")
+	}
+	if a.testSessionRestorePending() {
+		return nil, fmt.Errorf("session test active: wait for it to finish before saving a preset")
+	}
+
+	store := loadMemberPresetStore(a.memberPresetStorePath())
+	item := MemberPresetSlot{
+		Slot:      slot,
+		Name:      sanitizeMemberPresetName(name, slot),
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		Settings:  a.GetMemberSettings(),
+	}
+	replaced := false
+	for i := range store.Slots {
+		if store.Slots[i].Slot == slot {
+			store.Slots[i] = item
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		store.Slots = append(store.Slots, item)
+	}
+	sort.Slice(store.Slots, func(i, j int) bool { return store.Slots[i].Slot < store.Slots[j].Slot })
+	if err := saveMemberPresetStore(a.memberPresetStorePath(), store); err != nil {
+		return nil, err
+	}
+	return store.Slots, nil
+}
+
+func (a *App) ApplySavedMemberPreset(slot int) (MemberSettings, error) {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return MemberSettings{}, fmt.Errorf("active ClashGO license required")
+	}
+	if slot < 1 || slot > 3 {
+		return MemberSettings{}, fmt.Errorf("preset slot must be between 1 and 3")
+	}
+	if a.testSessionRestorePending() {
+		return MemberSettings{}, fmt.Errorf("session test active: wait for it to finish before applying a preset")
+	}
+	store := loadMemberPresetStore(a.memberPresetStorePath())
+	for _, item := range store.Slots {
+		if item.Slot == slot {
+			return a.saveMemberSettings(item.Settings, true)
+		}
+	}
+	return MemberSettings{}, fmt.Errorf("saved member preset not found")
+}
+
+func (a *App) DeleteMemberPreset(slot int) ([]MemberPresetSlot, error) {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return nil, fmt.Errorf("active ClashGO license required")
+	}
+	if slot < 1 || slot > 3 {
+		return nil, fmt.Errorf("preset slot must be between 1 and 3")
+	}
+	store := loadMemberPresetStore(a.memberPresetStorePath())
+	next := make([]MemberPresetSlot, 0, len(store.Slots))
+	for _, item := range store.Slots {
+		if item.Slot != slot {
+			next = append(next, item)
+		}
+	}
+	store.Slots = next
+	if err := saveMemberPresetStore(a.memberPresetStorePath(), store); err != nil {
+		return nil, err
+	}
+	return store.Slots, nil
+}
+
 func (a *App) memberPreviousProfilePath() string {
 	path := a.memberProfilePath()
 	if strings.TrimSpace(path) == "" {
