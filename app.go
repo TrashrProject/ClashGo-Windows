@@ -36,8 +36,9 @@ type App struct {
 	botCtx    context.Context
 	cancel    context.CancelFunc
 	mu        sync.Mutex
-	stopping  bool
-	lastStats bot.BotStats
+	stopping    bool
+	lastStats   bot.BotStats
+	lastActivity []telemetry.Event
 
 	// Logs are high-frequency and unrelated to bot lifecycle ownership.
 	// Keep them off the main App mutex so console traffic cannot delay
@@ -331,6 +332,7 @@ func (a *App) restoreMemberRuntimeState(adoptShared bool) error {
 func (a *App) clearInMemoryMemberRuntimeState() {
 	a.mu.Lock()
 	a.lastStats = bot.BotStats{}
+	a.lastActivity = nil
 	a.mu.Unlock()
 	a.cachedHistoryMu.Lock()
 	a.cachedHistory = nil
@@ -1226,7 +1228,9 @@ func (a *App) watchBotRuntime(b *bot.Bot) {
 	}
 
 	current := b.Stats()
+	recentActivity := b.RecentActivity(24)
 	a.lastStats = mergeStats(a.lastStats, current)
+	a.lastActivity = append([]telemetry.Event(nil), recentActivity...)
 	a.bot = nil
 	a.cancel = nil
 	a.botCtx = nil
@@ -1331,7 +1335,9 @@ func (a *App) StopBot() BotStatus {
 	// Capture and accumulate final stats before stopping. All counters
 	// are atomic.Int* loads, so this is O(1) and non-blocking.
 	current := a.bot.Stats()
+	recentActivity := a.bot.RecentActivity(24)
 	a.lastStats = mergeStats(a.lastStats, current)
+	a.lastActivity = append([]telemetry.Event(nil), recentActivity...)
 
 	// Snapshot the bot pointer + synchronously cancel its context so
 	// the captureLoop and any in-flight executeAttackSequence see the
@@ -3023,9 +3029,13 @@ func (a *App) SetBlueStacksInstance(instance string) error {
 func (a *App) GetActivity() []telemetry.Event {
 	a.mu.Lock()
 	b := a.bot
+	cached := append([]telemetry.Event(nil), a.lastActivity...)
 	a.mu.Unlock()
 	if b == nil {
-		return []telemetry.Event{}
+		if cached == nil {
+			return []telemetry.Event{}
+		}
+		return cached
 	}
 	return b.RecentActivity(24)
 }
