@@ -404,7 +404,7 @@ func TestMemberAccountFileRecoversBackup(t *testing.T) {
 }
 
 
-func TestMemberAccountFileRoundTrip(t *testing.T) {
+func TestMemberAccountFileRoundTripMinimal(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "member.account.json")
 	if err := saveMemberAccountFile(path, "#ABC123"); err != nil {
 		t.Fatalf("saveMemberAccountFile failed: %v", err)
@@ -452,5 +452,53 @@ func TestMemberAccountFileRecoversFromBackup(t *testing.T) {
 	}
 	if healed.PlayerTag != "#SAFE123" {
 		t.Fatalf("self-healed tag=%q want #SAFE123", healed.PlayerTag)
+	}
+}
+
+
+func TestMemberInterfaceLevelDefaultsToSimple(t *testing.T) {
+	got := sanitizeMemberSettings(MemberSettings{
+		InterfaceLevel:       "",
+		SpeedProfile:         "normal",
+		MaxAttacksPerHour:    12,
+		BreakEveryAttacks:    5,
+		BreakMinutes:         3,
+		AdaptiveSearch:       true,
+		AutoProfileSync:      true,
+		AutoArmyGuard:        true,
+		AutoResourceTracking: true,
+	})
+	if got.InterfaceLevel != "simple" {
+		t.Fatalf("InterfaceLevel=%q want simple", got.InterfaceLevel)
+	}
+}
+
+func TestMemberInterfaceLevelPersistsAdvanced(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "members", "advanced-profile.json")
+	want := defaultMemberSettings()
+	want.InterfaceLevel = "advanced"
+
+	if err := saveMemberProfileFile(path, want); err != nil {
+		t.Fatalf("saveMemberProfileFile: %v", err)
+	}
+	got, ok := loadMemberProfileFile(path)
+	if !ok {
+		t.Fatal("expected advanced member profile to load")
+	}
+	if got.InterfaceLevel != "advanced" {
+		t.Fatalf("InterfaceLevel=%q want advanced", got.InterfaceLevel)
+	}
+}
+
+func TestMemberInterfaceLevelCannotPersistDeveloper(t *testing.T) {
+	got := sanitizeMemberSettings(MemberSettings{
+		InterfaceLevel:    "developer",
+		SpeedProfile:      "fast",
+		MaxAttacksPerHour: 16,
+		BreakEveryAttacks: 6,
+		BreakMinutes:      2,
+	})
+	if got.InterfaceLevel != "simple" {
+		t.Fatalf("member profile stored forbidden interface level %q", got.InterfaceLevel)
 	}
 }
