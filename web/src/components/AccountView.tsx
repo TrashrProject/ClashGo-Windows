@@ -720,7 +720,13 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 type="button"
                 disabled={memberSaving}
                 onClick={() => {
-                  const next = applySpeedPreset(memberSettings, 'normal');
+                  const next = {
+                    ...applySpeedPreset(memberSettings, 'normal'),
+                    adaptive_search: true,
+                    auto_profile_sync: true,
+                    auto_army_guard: true,
+                    auto_resource_tracking: true,
+                  };
                   setMemberSettings(next);
                   void saveMemberSettings(next);
                 }}
