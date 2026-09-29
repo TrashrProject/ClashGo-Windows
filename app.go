@@ -532,6 +532,8 @@ func (a *App) saveStatsSoon() {
 func mergeStats(acc, current bot.BotStats) bot.BotStats {
 	res := bot.BotStats{
 		AttacksCompleted:  acc.AttacksCompleted + current.AttacksCompleted,
+		SessionAttacks:    current.SessionAttacks,
+		SessionAttackCap:  current.SessionAttackCap,
 		SearchSkips:       acc.SearchSkips + current.SearchSkips,
 		TotalGold:         acc.TotalGold + current.TotalGold,
 		TotalElixir:       acc.TotalElixir + current.TotalElixir,
