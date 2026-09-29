@@ -1012,16 +1012,18 @@ function App() {
       : false
   ), [systemDiagnostics]);
 
-  const startReady = licenseAccessReady && Boolean(playerTag) && windowsPreflightReady;
+  // The Clash player tag enriches the member experience (HDV profile,
+  // village data, automatic farm profile) but it is intentionally advisory.
+  // Backend readiness follows the same rule, so the sidebar must not block a
+  // perfectly usable bot session only because no public player tag is linked.
+  const startReady = licenseAccessReady && windowsPreflightReady;
   const startBlockedReason = !licenseAccessReady
     ? 'Active ta licence dans Mon ClashGO.'
-    : !playerTag
-      ? 'Lie ton compte Clash dans Mon ClashGO.'
-      : !systemDiagnostics
-        ? 'Vérification de l’environnement Windows en cours…'
-        : !windowsPreflightReady
-          ? 'Vérifie BlueStacks et ADB dans Paramètres > État Windows.'
-          : '';
+    : !systemDiagnostics
+      ? 'Vérification de l’environnement Windows en cours…'
+      : !windowsPreflightReady
+        ? 'Vérifie BlueStacks et ADB dans Paramètres > État Windows.'
+        : '';
 
   const readinessIssues = useMemo(() => {
     if (!systemDiagnostics) return [] as string[];
