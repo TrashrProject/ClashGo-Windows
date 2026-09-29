@@ -56,10 +56,6 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
   const [saveStatus, setSaveStatus] = React.useState<SaveStatus>('idle');
-
-  React.useEffect(() => {
-    try { localStorage.setItem('clashgo_automation_page', advancedPage); } catch {}
-  }, [advancedPage]);
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const [advancedPage, setAdvancedPage] = React.useState<'search' | 'army' | 'behavior'>(() => {
     try {
@@ -69,6 +65,10 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
       return 'search';
     }
   });
+
+  React.useEffect(() => {
+    try { localStorage.setItem('clashgo_automation_page', advancedPage); } catch {}
+  }, [advancedPage]);
   const [simpleModeBusy, setSimpleModeBusy] = React.useState(false);
   const [lastSaveError, setLastSaveError] = React.useState<string | null>(null);
   const dropdownRef = React.useRef<HTMLDivElement>(null);
