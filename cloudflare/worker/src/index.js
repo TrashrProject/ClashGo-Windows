@@ -882,6 +882,10 @@ async function router(request, env) {
       }
       return json({ incidents: rows });
     }
+    if (request.method === "GET" && path === "/v1/developer/history") {
+      if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
+      return json({ events: await listLicenseEvents(env, 500) });
+    }
 
     const adminOnly = () => {
       if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
