@@ -300,6 +300,18 @@ function App() {
     try { localStorage.setItem('clashgo_member_page', accountPage); } catch {}
   }, [accountPage]);
 
+  useEffect(() => {
+    if (tab !== 'settings' && tab !== 'developer') return;
+    void GetLogs()
+      .then((values) => setLogs(values ?? []))
+      .catch((err: unknown) => console.warn('Log refresh failed:', err));
+    if (tab === 'settings') {
+      void GetSystemDiagnostics()
+        .then((value) => setSystemDiagnostics(value as SystemDiagnostics))
+        .catch((err: unknown) => console.warn('GetSystemDiagnostics failed:', err));
+    }
+  }, [tab]);
+
   // Config states
   const [goldThreshold, setGoldThreshold] = useState(400000);
   const [elixirThreshold, setElixirThreshold] = useState(400000);
