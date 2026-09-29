@@ -3754,9 +3754,17 @@ func (b *Bot) Health() game.SystemHealth {
 }
 
 func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
+	if cfg == nil {
+		return
+	}
 	b.cfg = cfg
 	if b.attackExec != nil {
 		b.attackExec.UpdateConfig(&cfg.Attack)
+	}
+	if b.governor != nil {
+		// Preserve the rolling attack timestamps and circuit-breaker state
+		// while applying member pacing changes live.
+		b.governor.UpdateConfig(cfg.Automation)
 	}
 
 	if b.navigator != nil {
