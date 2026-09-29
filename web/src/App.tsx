@@ -1052,6 +1052,10 @@ function App() {
 
   const handleStart = async () => {
     if (startInFlightRef.current || isRunning || isStarting) return;
+    if (updateInstallBusy) {
+      setBotError('Une mise à jour ClashGO est en cours d’installation. Attends le redémarrage avant de lancer le bot.');
+      return;
+    }
     startInFlightRef.current = true;
     setBotError('');
     setBotDiagnosticPath('');
@@ -1101,6 +1105,10 @@ function App() {
 
   const handleStartQuickTestSession = async () => {
     if (testSessionInFlightRef.current || startInFlightRef.current || isRunning || isStarting) return;
+    if (updateInstallBusy) {
+      setBotError('Une mise à jour ClashGO est en cours d’installation. La session test pourra démarrer après le redémarrage.');
+      return;
+    }
     testSessionInFlightRef.current = true;
     setBotError('');
     setBotDiagnosticPath('');
@@ -1147,6 +1155,10 @@ function App() {
 
   const handleStartTestSession = async () => {
     if (testSessionInFlightRef.current || startInFlightRef.current || isRunning || isStarting) return;
+    if (updateInstallBusy) {
+      setBotError('Une mise à jour ClashGO est en cours d’installation. La session de validation pourra démarrer après le redémarrage.');
+      return;
+    }
     testSessionInFlightRef.current = true;
     setBotError('');
     setBotDiagnosticPath('');
@@ -1279,6 +1291,8 @@ function App() {
     setUpdateStatus(s);
   };
 
+  const updateInstallBusy = updateStatus?.state === 'installing' || updateStatus?.state === 'restarting';
+
   const dashboardProps = useMemo(() => ({
     stats,
     history,
@@ -1344,12 +1358,14 @@ function App() {
   // enforce (license, runtime assets, BlueStacks/ADB, strategy and member
   // pacing). The Clash account remains advisory and never blocks startup.
   const blockingStartupCheck = startupCheck?.checks.find((check) => !check.ok && check.blocking !== false);
-  const startReady = startupCheck
+  const startReady = !updateInstallBusy && (startupCheck
     ? startupCheck.ready
-    : licenseAccessReady && windowsPreflightReady;
-  const startBlockedReason = blockingStartupCheck
-    ? `${blockingStartupCheck.label} : ${blockingStartupCheck.message}`
-    : !licenseAccessReady
+    : licenseAccessReady && windowsPreflightReady);
+  const startBlockedReason = updateInstallBusy
+    ? 'Mise à jour en cours · ClashGO va redémarrer automatiquement.'
+    : blockingStartupCheck
+      ? `${blockingStartupCheck.label} : ${blockingStartupCheck.message}`
+      : !licenseAccessReady
       ? 'Active ta licence dans Mon ClashGO.'
       : !systemDiagnostics
         ? 'Vérification de l’environnement Windows en cours…'
