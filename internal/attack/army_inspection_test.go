@@ -8,8 +8,8 @@ import (
 
 func inspectionSlot(name, category string, x int) *TrackedSlot {
 	s := &TrackedSlot{
+		TroopSlot:  TroopSlot{Category: category},
 		UnitName:   name,
-		Category:   category,
 		Confidence: 0.95,
 	}
 	s.X = x
