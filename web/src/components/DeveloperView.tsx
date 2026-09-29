@@ -84,6 +84,8 @@ const DeveloperView: React.FC = () => {
   const [licenses, setLicenses] = React.useState<LicenseRow[]>([]);
   const [role, setRole] = React.useState<LicenseState['role']>('');
   const [currentLicenseHint, setCurrentLicenseHint] = React.useState('');
+  const [currentMachineID, setCurrentMachineID] = React.useState('');
+  const [currentLicenseHint, setCurrentLicenseHint] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [actionID, setActionID] = React.useState('');
@@ -236,6 +238,12 @@ const DeveloperView: React.FC = () => {
 
   const recentErrors = incidents.filter((x) => x.level === 'error' || x.level === 'fatal' || x.level === 'panic');
   const activeLicenses = licenses.filter((x) => x.active !== false).length;
+  const isCurrentAdminLicense = (item: LicenseRow): boolean =>
+    isAdmin &&
+    Boolean(currentLicenseHint) &&
+    Boolean(currentMachineID) &&
+    item.hint === currentLicenseHint &&
+    item.machine_id === currentMachineID;
   const normalizedSearch = search.trim().toLowerCase();
   const filteredLicenses = licenses.filter((item) => {
     if (licenseFilter === 'active' && item.active === false) return false;
@@ -522,6 +530,11 @@ const DeveloperView: React.FC = () => {
                     <span className="px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-[9px] font-black uppercase tracking-widest text-zinc-500">
                       {planLabel(item.plan)}
                     </span>
+                    {isCurrentAdminLicense(item) && (
+                      <span className="px-2 py-1 rounded-lg bg-sky-500/10 text-[9px] font-black uppercase tracking-widest text-sky-500">
+                        Cette licence
+                      </span>
+                    )}
                     {Boolean(currentLicenseHint && item.hint === currentLicenseHint) && (
                       <span className="px-2 py-1 rounded-lg bg-sky-500/10 text-[9px] font-black uppercase tracking-widest text-sky-500">
                         Cette licence
