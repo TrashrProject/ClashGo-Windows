@@ -816,6 +816,18 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
         )}
       </section>
 
+      {memberPage === 'village' && !profile && (
+        <section className="rounded-[2rem] border border-dashed border-zinc-200 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 p-8 text-center">
+          <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-400">
+            <span className="material-symbols-outlined">sync</span>
+          </div>
+          <h4 className="mt-4 text-lg font-black text-zinc-950 dark:text-white">Profil en attente de synchronisation</h4>
+          <p className="mx-auto mt-2 max-w-lg text-sm font-semibold text-zinc-500">
+            ClashGO récupérera automatiquement les informations du village dès que le service de compte sera disponible.
+          </p>
+        </section>
+      )}
+
       {memberPage === 'village' && profile && (
         <>
           <section className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
@@ -833,6 +845,22 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               </div>
             ))}
           </section>
+
+          {(!currentArmy || currentArmy.units.length === 0) && (
+            <section className="rounded-[2rem] border border-dashed border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
+              <div className="flex items-center gap-4">
+                <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-400">
+                  <span className="material-symbols-outlined">groups</span>
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-zinc-950 dark:text-white">Armée pas encore détectée</h4>
+                  <p className="mt-1 text-xs font-semibold text-zinc-500">
+                    La composition apparaîtra ici automatiquement lors d’un prochain cycle de farm.
+                  </p>
+                </div>
+              </div>
+            </section>
+          )}
 
           {currentArmy && currentArmy.units.length > 0 && (
             <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
@@ -885,6 +913,22 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                   </div>
                 </details>
               )}
+            </section>
+          )}
+
+          {!farmProfile && (
+            <section className="rounded-[2rem] border border-dashed border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
+              <div className="flex items-center gap-4">
+                <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-400">
+                  <span className="material-symbols-outlined">auto_awesome</span>
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-zinc-950 dark:text-white">Plan de farm en préparation</h4>
+                  <p className="mt-1 text-xs font-semibold text-zinc-500">
+                    ClashGO sélectionnera automatiquement le profil adapté à ton HDV dès que la synchronisation sera complète.
+                  </p>
+                </div>
+              </div>
             </section>
           )}
 
