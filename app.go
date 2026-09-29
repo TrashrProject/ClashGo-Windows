@@ -2346,6 +2346,16 @@ func (a *App) applyMemberAutomationForCurrentLicense() error {
 		return saveMemberAutomationFile(a.memberAutomationPath(), memberAutomationFromConfig(cfg))
 	}
 	applyMemberAutomationToConfig(cfg, profile)
+
+	// In Simple mode the linked member account remains authoritative for the
+	// farm HDV. applyMemberAccountForCurrentLicense() has already restored this
+	// licence's cached Clash profile before this function is called, so this
+	// re-applies only the existing automatic defaults using the correct member
+	// cache. Advanced mode keeps the member's explicitly saved farm selection.
+	if cfg.Automation.SimpleMode {
+		applySimpleAutomationDefaults(cfg)
+	}
+
 	if err := config.Save("config.json", cfg); err != nil {
 		return err
 	}
