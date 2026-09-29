@@ -169,6 +169,14 @@ async function activateLicense(request, env) {
     return json({ message: "license has expired" }, 403);
   }
   if (license.machine_id && license.machine_id !== machine) {
+    const deniedAt = new Date().toISOString();
+    await env.DB.prepare(`
+      UPDATE licenses
+      SET denied_activations = COALESCE(denied_activations, 0) + 1,
+          last_denied_at = ?1,
+          last_denied_machine = ?2
+      WHERE id = ?3
+    `).bind(deniedAt, machine, license.id).run();
     return json({ message: "license is already activated on another machine" }, 409);
   }
 
@@ -271,6 +279,7 @@ async function listLicenses(env) {
     SELECT
       l.id, l.hint, l.role, l.active, l.machine_id, l.created_at, l.last_seen_at, l.app_version,
       l.plan, l.duration_days, l.activated_at, l.expires_at, l.customer_id,
+      l.denied_activations, l.last_denied_at, l.last_denied_machine,
       c.display_name AS customer_name, c.contact AS customer_contact, c.notes AS customer_notes,
       c.payment_status AS payment_status, c.total_paid_cents AS total_paid_cents, c.next_due_at AS next_due_at
     FROM licenses l
