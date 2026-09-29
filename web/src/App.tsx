@@ -1298,6 +1298,7 @@ function App() {
               playerTag={playerTag}
               interfaceLevel={interfaceLevel}
               initialPage={accountPage}
+              testSessionActive={testSessionActive}
               onInterfaceLevelChange={handleInterfaceLevelChange}
               onAccountChanged={(tag) => {
                 setPlayerTag(tag);
