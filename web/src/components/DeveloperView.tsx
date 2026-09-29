@@ -1169,6 +1169,31 @@ const DeveloperView: React.FC = () => {
 
                     {renewingID === String(item.id) && item.plan !== 'lifetime' && (
                       <div className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/70 p-3">
+                        <div className="mb-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {([
+                            ['free_2d', '+2 jours'],
+                            ['week_1', '+1 semaine'],
+                            ['month_1', '+1 mois'],
+                            ['lifetime', 'À vie'],
+                          ] as const).map(([plan, label]) => {
+                            const selected = (renewPlans[String(item.id)] || item.plan) === plan;
+                            return (
+                              <button
+                                key={plan}
+                                type="button"
+                                onClick={() => setRenewPlans((current) => ({ ...current, [String(item.id)]: plan }))}
+                                className={
+                                  'h-9 rounded-lg border px-3 text-[9px] font-black uppercase tracking-wider transition ' +
+                                  (selected
+                                    ? 'border-zinc-950 bg-zinc-950 text-white dark:border-white dark:bg-white dark:text-zinc-950'
+                                    : 'border-zinc-200 bg-white text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400')
+                                }
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
                           <label>
                             <div className="mb-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">Montant encaissé (€)</div>
