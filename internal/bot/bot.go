@@ -255,6 +255,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 	}
 
 	attackExec := attack.NewExecutor(client, cal, &cfg.Attack, log.Logger)
+	attackExec.SetArmyGuardEnabled(cfg.Automation.AutoArmyGuard)
 
 	var templates *game.TemplateStore
 	templates, err = game.NewTemplateStore(paths.Resolve("templates"))
@@ -1937,6 +1938,51 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		decision := intelligence.EvaluateTarget(intelligence.Target{
 			Gold: loot.Gold, Elixir: loot.Elixir, DarkElixir: loot.DarkElixir,
 		}, effectiveRules)
+
+		if decision.Accept && b.cfg.Automation.AutoArmyGuard {
+			armySnapshot, guardErr := b.attackExec.InspectArmyGuard(screen)
+			switch {
+			case guardErr != nil:
+				// Detection failure is never treated as proof of a bad army.
+				// Keep farming and surface the diagnostic instead of creating
+				// a false reject loop.
+				b.logger.Warn().Err(guardErr).Msg("army guard unavailable; failing open for this target")
+				if b.telemetry != nil {
+					b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
+						"kind": "army_guard_unavailable",
+						"error": guardErr.Error(),
+					})
+				}
+			case armySnapshot.Uncertain:
+				b.logger.Warn().
+					Strs("warnings", armySnapshot.Warnings).
+					Msg("army guard uncertain; allowing target")
+				if b.telemetry != nil {
+					b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
+						"kind": "army_guard_uncertain",
+						"warnings": armySnapshot.Warnings,
+					})
+				}
+			case !armySnapshot.Ready:
+				// No troop has been deployed yet. Convert the otherwise-good
+				// target into a normal search rejection so the proven Next
+				// transition path handles it without spending an attack.
+				decision.Accept = false
+				decision.Reason = "army composition does not match farm profile"
+				decision.Flags = append(decision.Flags, "army_guard")
+				b.logger.Warn().
+					Strs("warnings", armySnapshot.Warnings).
+					Msg("army guard rejected target before deployment")
+				if b.telemetry != nil {
+					b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
+						"kind": "army_guard_rejected_target",
+						"warnings": armySnapshot.Warnings,
+					})
+				}
+			default:
+				b.logger.Debug().Msg("army guard confirmed farm composition")
+			}
+		}
 		if adaptivePercent < 100 && b.telemetry != nil {
 			b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
 				"mode": "AdaptiveSearch",
@@ -3768,6 +3814,7 @@ func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 	b.cfg = cfg
 	if b.attackExec != nil {
 		b.attackExec.UpdateConfig(&cfg.Attack)
+		b.attackExec.SetArmyGuardEnabled(cfg.Automation.AutoArmyGuard)
 	}
 	if b.governor != nil {
 		// Preserve the rolling attack timestamps and circuit-breaker state
