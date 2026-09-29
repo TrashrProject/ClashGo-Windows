@@ -1976,7 +1976,19 @@ func (a *App) applyMemberAccountForCurrentLicense() error {
 	if err := config.Save("config.json", cfg); err != nil {
 		return err
 	}
-	clearCachedPlayerProfileIfDifferent(tag)
+
+	// Restore the member's last successful public Clash profile so HDV/farm
+	// information is immediately available even when the account service is
+	// offline. Migrate the legacy shared cache into the current member profile
+	// only when its player tag matches.
+	memberCache := a.memberPlayerProfilePath()
+	if profile, ok := loadPlayerProfileFile(memberCache); ok && strings.EqualFold(strings.TrimSpace(profile.Tag), tag) {
+		_ = savePlayerProfileFile(accountProfileCachePath(), profile)
+	} else if legacy, ok := loadPlayerProfileFile(accountProfileCachePath()); ok && strings.EqualFold(strings.TrimSpace(legacy.Tag), tag) {
+		_ = savePlayerProfileFile(memberCache, legacy)
+	} else {
+		clearCachedPlayerProfileIfDifferent(tag)
+	}
 
 	a.mu.Lock()
 	if a.bot != nil {
@@ -2188,8 +2200,14 @@ func (a *App) ClearAccount() error {
 	}
 
 	// Remove cached public profile only after both member identity stores are
-	// durable. Keep the running bot synchronized with the persisted account.
+	// durable. The explicit unlink also removes this member's private cache;
+	// deactivation alone keeps it so the same licence can recover offline.
 	_ = os.Remove(accountProfileCachePath())
+	if memberCache := a.memberPlayerProfilePath(); memberCache != "" {
+		_ = os.Remove(memberCache)
+		_ = os.Remove(memberCache + ".bak")
+		_ = os.Remove(memberCache + ".tmp")
+	}
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
 	}
