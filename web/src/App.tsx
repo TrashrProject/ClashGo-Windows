@@ -54,6 +54,9 @@ import {
   SaveMemberInterfaceLevel,
   SetMemberSpeedProfile,
   ExtendSessionAttacks,
+  GetScheduledSessionStop,
+  CancelScheduledSessionStop,
+  ScheduleSessionStop,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
 import { InterfaceLevel, TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent, AttackReplayView, SessionReportView, BotStats, AttackReport } from './types';
@@ -272,6 +275,7 @@ function App() {
   const [isStarting, setIsStarting] = useState(false);
   const [gracefulStopPending, setGracefulStopPending] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [scheduledStopAt, setScheduledStopAt] = useState('');
   const [history, setHistory] = useState<AttackReport[]>([]);
   const [resourceHistory, setResourceHistory] = useState<VillageResourceSnapshot[]>([]);
   const [currentArmy, setCurrentArmy] = useState<CurrentArmyStatus | null>(null);
@@ -843,6 +847,7 @@ function App() {
     };
 
     const unsubBotError = safeEventsOn("bot_error", (payload: unknown) => {
+      setScheduledStopAt('');
       setIsPaused(false);
       setGracefulStopPending(false);
       setTestSessionActive(false);
@@ -852,6 +857,7 @@ function App() {
       refreshBootReport();
     });
     const unsubBotInitFailed = safeEventsOn("bot_init_failed", (payload: unknown) => {
+      setScheduledStopAt('');
       setIsPaused(false);
       setGracefulStopPending(false);
       setTestSessionActive(false);
@@ -869,6 +875,7 @@ function App() {
       refreshBootReport();
     });
     const unsubBotStopped = safeEventsOn("bot_stopped", (payload: unknown) => {
+      setScheduledStopAt('');
       setIsPaused(false);
       setGracefulStopPending(false);
       setTestSessionActive(false);
@@ -896,6 +903,7 @@ function App() {
     });
 
     const unsubBotBootCancelled = safeEventsOn("bot_boot_cancelled", (payload: unknown) => {
+      setScheduledStopAt('');
       setIsPaused(false);
       setGracefulStopPending(false);
       setIsStarting(false);
@@ -943,6 +951,19 @@ function App() {
       window.setTimeout(() => setMemberNotice(''), 4000);
     });
 
+    const unsubScheduledStop = safeEventsOn("scheduled_session_stop", (payload: unknown) => {
+      if (payload && typeof payload === 'object' && 'at' in payload) {
+        const at = (payload as { at?: unknown }).at;
+        if (typeof at === 'string') setScheduledStopAt(at);
+      }
+    });
+    const unsubScheduledStopCancelled = safeEventsOn("scheduled_session_stop_cancelled", () => {
+      setScheduledStopAt('');
+    });
+    const unsubScheduledStopTriggered = safeEventsOn("scheduled_session_stop_triggered", () => {
+      setScheduledStopAt('');
+    });
+
     return () => {
       clearInterval(fastInterval);
       clearInterval(logInterval);
@@ -967,6 +988,9 @@ function App() {
       unsubGracefulCompleted();
       unsubBotPaused();
       unsubBotResumed();
+      unsubScheduledStop();
+      unsubScheduledStopCancelled();
+      unsubScheduledStopTriggered();
     };
   }, [syncMemberScopedView]);
 
@@ -1099,6 +1123,29 @@ function App() {
       setStartupCheckRunning(false);
     }
   }, []);
+
+  const handleScheduleStop = async (minutes: 30 | 60 | 120) => {
+    if (!isRunning) return;
+    try {
+      const at = await ScheduleSessionStop(minutes);
+      setScheduledStopAt(String(at || ''));
+      setMemberNotice('Arrêt propre programmé dans ' + (minutes < 60 ? minutes + ' min' : (minutes / 60) + ' h') + '.');
+      window.setTimeout(() => setMemberNotice(''), 4500);
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const handleCancelScheduledStop = async () => {
+    try {
+      await CancelScheduledSessionStop();
+      setScheduledStopAt('');
+      setMemberNotice('Arrêt programmé annulé.');
+      window.setTimeout(() => setMemberNotice(''), 3500);
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
 
   const handleExtendSession = async (extra: 10 | 25) => {
     if (!isRunning) return;
@@ -1818,6 +1865,9 @@ function App() {
               onStartWithPreset={(preset) => void handleStartWithPreset(preset)}
               onSpeedChange={(profile) => void handleLiveSpeedChange(profile)}
               onExtendSession={(extra) => void handleExtendSession(extra)}
+              onScheduleStop={(minutes) => void handleScheduleStop(minutes)}
+              onCancelScheduledStop={() => void handleCancelScheduledStop()}
+              scheduledStopAt={scheduledStopAt}
               onStartTestSession={handleStartTestSession}
               onStartQuickTestSession={handleStartQuickTestSession}
               onStop={handleStop}
