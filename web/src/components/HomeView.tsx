@@ -16,6 +16,9 @@ interface HomeViewProps {
   onStartTestSession: () => void;
   onStartQuickTestSession: () => void;
   onStop: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  paused: boolean;
   onStopAfterAttack: () => void;
   gracefulStopPending: boolean;
   onOpenAutomation: () => void;
@@ -243,7 +246,7 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, sessionReport, testSessionActive, running, starting,
-    onStart, onStartWithPreset, onSpeedChange, onStartTestSession, onStartQuickTestSession, onStop, onStopAfterAttack, gracefulStopPending, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
+    onStart, onStartWithPreset, onSpeedChange, onStartTestSession, onStartQuickTestSession, onStop, onPause, onResume, paused, onStopAfterAttack, gracefulStopPending, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
     licenseReady, licenseRequired, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
     memberName, licensePlan, licenseExpiresAt, latestBootReport, currentArmy,
@@ -489,11 +492,13 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     return 'BlueStacks met plus de temps que prévu · ClashGO applique ses récupérations automatiques…';
   }, [starting, startupElapsedSeconds]);
 
-  const botLabel = starting ? 'Démarrage…' : running ? 'Bot en cours' : 'Bot arrêté';
+  const botLabel = starting ? 'Démarrage…' : running ? (paused ? 'Bot en pause' : 'Bot en cours') : 'Bot arrêté';
   const botSub = starting
     ? startupPhase
     : running
-      ? 'L’automatisation est active. Tu peux laisser ClashGO travailler.'
+      ? (paused
+          ? 'La session reste ouverte au village. Appuie sur Reprendre pour continuer.'
+          : 'L’automatisation est active. Tu peux laisser ClashGO travailler.')
       : 'Vérifie les quatre états ci-dessous puis lance le bot.';
 
   const statusDot = running
@@ -636,7 +641,9 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">Vitesse en direct</div>
-              <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white">Profil actuel · {runtimeSpeedLabel}</div>
+              <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white">
+                Profil actuel · {runtimeSpeedLabel}{paused ? ' · en pause' : ''}
+              </div>
               <div className="mt-1 text-[11px] font-semibold text-zinc-500">Le changement s’applique au bot en cours sans modifier la limite de session.</div>
             </div>
             <div className="flex gap-2">
@@ -667,6 +674,42 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                 );
               })}
             </div>
+          </div>
+        </section>
+      )}
+
+      {running && !testSessionActive && (
+        <section className={
+          'rounded-[1.5rem] border p-4 shadow-premium dark:shadow-none ' +
+          (paused
+            ? 'border-amber-300/40 bg-amber-50/70 dark:border-amber-800/40 dark:bg-amber-950/10'
+            : 'border-zinc-100 bg-white dark:border-zinc-800 dark:bg-zinc-900')
+        }>
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+              <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">Contrôle de session</div>
+              <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white">
+                {paused ? 'Session en pause' : 'Pause sans fermer ClashGO'}
+              </div>
+              <div className="mt-1 text-[11px] font-semibold text-zinc-500">
+                {paused
+                  ? 'Aucune nouvelle attaque ne sera lancée. Le suivi reste actif.'
+                  : 'Si une attaque est en cours, la pause prend effet au retour au village.'}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={paused ? onResume : onPause}
+              disabled={starting || gracefulStopPending}
+              className={
+                'rounded-xl px-5 py-2.5 text-[9px] font-black uppercase tracking-widest transition disabled:opacity-40 ' +
+                (paused
+                  ? 'bg-emerald-500 text-zinc-950 hover:bg-emerald-400'
+                  : 'bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 dark:text-amber-400')
+              }
+            >
+              {paused ? 'REPRENDRE' : 'PAUSE APRÈS L’ATTAQUE'}
+            </button>
           </div>
         </section>
       )}
