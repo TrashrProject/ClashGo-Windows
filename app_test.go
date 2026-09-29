@@ -181,6 +181,9 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 	if got.AttacksCompleted != 4 || got.TotalGold != 3_000_000 || got.TotalElixir != 2_000_000 {
 		t.Fatalf("additive counters not merged: %+v", got)
 	}
+	if got.SessionAttacks != 2 || got.SessionAttackCap != 10 {
+		t.Fatalf("session progress must remain live-only, got attacks=%d cap=%d", got.SessionAttacks, got.SessionAttackCap)
+	}
 	if got.SpeedProfile != "Fast" || got.HealthScore != 94 || got.Anomalies != 2 {
 		t.Fatalf("runtime intelligence metrics lost: %+v", got)
 	}
@@ -219,6 +222,26 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 	}
 }
 
+
+func TestMergeStatsSeparatesLifetimeAndCurrentSessionAttacks(t *testing.T) {
+	acc := bot.BotStats{AttacksCompleted: 120}
+	current := bot.BotStats{
+		AttacksCompleted: 3,
+		SessionAttacks:   3,
+		SessionAttackCap: 10,
+	}
+
+	got := mergeStats(acc, current)
+	if got.AttacksCompleted != 123 {
+		t.Fatalf("lifetime attacks=%d want 123", got.AttacksCompleted)
+	}
+	if got.SessionAttacks != 3 {
+		t.Fatalf("session attacks=%d want 3", got.SessionAttacks)
+	}
+	if got.SessionAttackCap != 10 {
+		t.Fatalf("session cap=%d want 10", got.SessionAttackCap)
+	}
+}
 
 func TestStartupReadinessRequiresLicenseWhenEnforced(t *testing.T) {
 	dir := t.TempDir()
