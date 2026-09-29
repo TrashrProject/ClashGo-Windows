@@ -104,7 +104,7 @@ jobs:
           npm run build
           if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
           Pop-Location
-          go test -tags "customenv,gocv_specific_modules" ./internal/... ./pkg/...
+          go test -tags "customenv,gocv_specific_modules" . ./internal/... ./pkg/...
           if ($LASTEXITCODE -ne 0) { throw "backend tests failed" }
 
       - name: Build beta portable bundle
