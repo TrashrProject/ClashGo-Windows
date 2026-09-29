@@ -168,6 +168,7 @@ const getInitialSidebarExpanded = (): boolean => {
 
 function App() {
   const [tab, setTab] = useState<TabType>('dashboard');
+  const [accountPage, setAccountPage] = useState<'account' | 'settings' | 'village'>('account');
   const [stats, setStats] = useState<bot.BotStats>(new bot.BotStats({
     attacks_completed: 0,
     search_skips: 0,
@@ -1151,7 +1152,14 @@ function App() {
               onStart={handleStart}
               onStop={handleStop}
               onOpenAutomation={() => setTab('config')}
-              onOpenAccount={() => setTab('account')}
+              onOpenAccount={() => {
+                setAccountPage('account');
+                setTab('account');
+              }}
+              onOpenMemberSettings={() => {
+                setAccountPage('settings');
+                setTab('account');
+              }}
               onOpenSettings={() => setTab('settings')}
               licenseReady={licenseAccessReady}
               memberName={licenseMemberName}
@@ -1170,6 +1178,7 @@ function App() {
             <AccountView
               playerTag={playerTag}
               interfaceLevel={interfaceLevel}
+              initialPage={accountPage}
               onInterfaceLevelChange={handleInterfaceLevelChange}
               onAccountChanged={(tag) => {
                 setPlayerTag(tag);
