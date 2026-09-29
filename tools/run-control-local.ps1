@@ -16,8 +16,15 @@ New-Item -ItemType Directory -Force -Path (Split-Path -Parent $DataPath) | Out-N
 
 if ($RegenerateAdminKey -or -not (Test-Path $secretPath)) {
     $bytes = New-Object byte[] 32
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-    $adminKey = ([Convert]::ToHexString($bytes)).ToLowerInvariant()
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    } finally {
+        $rng.Dispose()
+    }
+    # Compatible with Windows PowerShell / .NET Framework where
+    # RandomNumberGenerator.Fill and Convert.ToHexString are unavailable.
+    $adminKey = ([System.BitConverter]::ToString($bytes)).Replace("-", "").ToLowerInvariant()
     Set-Content -LiteralPath $secretPath -Value $adminKey -Encoding ascii -NoNewline
 } else {
     $adminKey = (Get-Content -LiteralPath $secretPath -Raw).Trim()
