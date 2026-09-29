@@ -22,6 +22,11 @@ concurrency:
 
 jobs:
   build:
+    # feature/intelligence-v2 already runs the full Windows Beta Release
+    # workflow on every push. Skipping this duplicate PR build avoids two
+    # Windows/OpenCV/Wails jobs competing for runners while keeping normal PR
+    # validation intact for every other branch.
+    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'feature/intelligence-v2' }}
     runs-on: windows-latest
     env:
       BUILD_VERSION: ${{ github.event.inputs.version || '0.6.0-windows-beta' }}
