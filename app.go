@@ -39,6 +39,7 @@ type App struct {
 	stopping    bool
 	lastStats   bot.BotStats
 	lastActivity []telemetry.Event
+	gracefulStopRequested bool
 
 	// Logs are high-frequency and unrelated to bot lifecycle ownership.
 	// Keep them off the main App mutex so console traffic cannot delay
@@ -1296,7 +1297,24 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			copy(a.cachedHistory, history)
 			a.cachedHistoryMu.Unlock()
 
+			shouldStopGracefully := false
+			a.mu.Lock()
+			if a.gracefulStopRequested && len(history) > 0 && history[0].ReturnHomeDurationMS > 0 {
+				a.gracefulStopRequested = false
+				shouldStopGracefully = true
+			}
+			a.mu.Unlock()
+
 			a.saveStatsSoon()
+
+			if shouldStopGracefully {
+				if a.ctx != nil {
+					runtime.EventsEmit(a.ctx, "graceful_stop_completed", map[string]any{
+						"message": "Attaque terminée · retour au village confirmé · arrêt de ClashGO.",
+					})
+				}
+				go a.StopBot()
+			}
 
 			if a.ctx != nil {
 				runtime.EventsEmit(a.ctx, "attack_history_updated", history)
@@ -1518,8 +1536,38 @@ func (a *App) clearStartStateLocked() {
 // the next NewAsyncWriter — acceptable, since the previous code path
 // had the same constraint and the new behaviour is strictly an
 // improvement on the slow path.
+func (a *App) StopAfterCurrentAttack() BotStatus {
+	a.mu.Lock()
+	if a.stopping {
+		a.mu.Unlock()
+		return BotStatus{Running: false, Message: "Arrêt déjà en cours"}
+	}
+	if a.bot == nil {
+		starting := a.cancel != nil
+		a.mu.Unlock()
+		if starting {
+			return a.StopBot()
+		}
+		return BotStatus{Running: false, Message: "Bot non démarré"}
+	}
+	if !a.bot.IsSequenceRunning() {
+		a.mu.Unlock()
+		return a.StopBot()
+	}
+	a.gracefulStopRequested = true
+	a.mu.Unlock()
+
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "graceful_stop_scheduled", map[string]any{
+			"message": "Arrêt programmé après le retour au village.",
+		})
+	}
+	return BotStatus{Running: true, Message: "Arrêt programmé après l’attaque en cours"}
+}
+
 func (a *App) StopBot() BotStatus {
 	a.mu.Lock()
+	a.gracefulStopRequested = false
 
 	if a.stopping {
 		a.mu.Unlock()
