@@ -573,6 +573,61 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]any{"licenses": rows})
 	})
 
+	mux.HandleFunc("POST /v1/developer/licenses", func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
+		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
+		adminLicense, ok := control.authorizeDeveloper(key, machineID)
+		if !ok || adminLicense.Role != "admin" {
+			writeJSON(w, http.StatusForbidden, map[string]string{"message": "admin license required"})
+			return
+		}
+		var in struct {
+			Role  string `json:"role"`
+			Plan  string `json:"plan"`
+			Count int    `json:"count"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
+			return
+		}
+		if in.Count <= 0 {
+			in.Count = 1
+		}
+		if in.Count > 25 {
+			in.Count = 25
+		}
+		role := validRole(in.Role)
+		plan, durationDays := validPlan(in.Plan)
+		keys := make([]string, 0, in.Count)
+
+		control.mu.Lock()
+		for i := 0; i < in.Count; i++ {
+			generated, err := newLicenseKey()
+			if err != nil {
+				control.mu.Unlock()
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "key generation failed"})
+				return
+			}
+			hash := hashLicense(generated)
+			control.data.Licenses[hash] = &licenseRecord{
+				ID:           licenseIDFromHash(hash),
+				Hint:         licenseHint(generated),
+				Role:         role,
+				Active:       true,
+				CreatedAt:    time.Now().UTC(),
+				Plan:         plan,
+				DurationDays: durationDays,
+			}
+			keys = append(keys, generated)
+		}
+		_ = control.saveLocked()
+		control.mu.Unlock()
+
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"role": role, "plan": plan, "duration_days": durationDays, "licenses": keys,
+		})
+	})
+
 	mux.HandleFunc("POST /v1/admin/licenses", func(w http.ResponseWriter, r *http.Request) {
 		if !adminAuthorized(r, adminKey) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "admin authorization required"})
