@@ -310,8 +310,15 @@ async function updateCustomer(request, env) {
 
 async function listIncidents(env, limit = 500) {
   const result = await env.DB.prepare(`
-    SELECT id, at, received_at, license_hint, role, machine_id, app_version, level, message
-    FROM incidents ORDER BY received_at DESC LIMIT ?1
+    SELECT
+      i.id, i.at, i.received_at, i.license_hint, i.role, i.machine_id,
+      i.app_version, i.level, i.message,
+      c.id AS customer_id, c.display_name AS customer_name, c.contact AS customer_contact
+    FROM incidents i
+    LEFT JOIN licenses l ON l.id = i.license_id
+    LEFT JOIN customers c ON c.id = l.customer_id
+    ORDER BY i.received_at DESC
+    LIMIT ?1
   `).bind(limit).all();
   return result.results || [];
 }
