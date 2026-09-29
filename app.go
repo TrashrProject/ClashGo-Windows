@@ -1301,6 +1301,32 @@ func applyMemberSpeedProfile(cfg *config.BotConfig, profile string) {
 	}
 }
 
+func sanitizeMemberSettings(settings MemberSettings) MemberSettings {
+	settings.SpeedProfile = normalizeSpeedProfile(settings.SpeedProfile)
+
+	if settings.MaxAttacksPerHour < 1 {
+		settings.MaxAttacksPerHour = 1
+	}
+	if settings.MaxAttacksPerHour > 24 {
+		settings.MaxAttacksPerHour = 24
+	}
+
+	if settings.BreakEveryAttacks < 0 {
+		settings.BreakEveryAttacks = 0
+	}
+	if settings.BreakEveryAttacks > 20 {
+		settings.BreakEveryAttacks = 20
+	}
+
+	if settings.BreakMinutes < 0 {
+		settings.BreakMinutes = 0
+	}
+	if settings.BreakMinutes > 30 {
+		settings.BreakMinutes = 30
+	}
+	return settings
+}
+
 func (a *App) GetMemberSettings() MemberSettings {
 	cfg := config.LoadOrDefault("config.json")
 	profile := normalizeSpeedProfile(cfg.Automation.SpeedProfile)
@@ -1320,31 +1346,12 @@ func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	settings = sanitizeMemberSettings(settings)
 	cfg := config.LoadOrDefault("config.json")
 	applyMemberSpeedProfile(cfg, settings.SpeedProfile)
 
-	if settings.MaxAttacksPerHour < 1 {
-		settings.MaxAttacksPerHour = 1
-	}
-	if settings.MaxAttacksPerHour > 24 {
-		settings.MaxAttacksPerHour = 24
-	}
 	cfg.Automation.MaxAttacksPerHour = settings.MaxAttacksPerHour
-
-	if settings.BreakEveryAttacks < 0 {
-		settings.BreakEveryAttacks = 0
-	}
-	if settings.BreakEveryAttacks > 20 {
-		settings.BreakEveryAttacks = 20
-	}
 	cfg.Automation.BreakEveryAttacks = settings.BreakEveryAttacks
-
-	if settings.BreakMinutes < 0 {
-		settings.BreakMinutes = 0
-	}
-	if settings.BreakMinutes > 30 {
-		settings.BreakMinutes = 30
-	}
 	cfg.Automation.BreakDuration = config.Duration{Duration: time.Duration(settings.BreakMinutes) * time.Minute}
 
 	cfg.Search.AdaptiveSearch = settings.AdaptiveSearch
