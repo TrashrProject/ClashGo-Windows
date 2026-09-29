@@ -402,3 +402,55 @@ func TestMemberAccountFileRecoversBackup(t *testing.T) {
 		t.Fatalf("recovered primary tag=%q want=%q", restored.PlayerTag, want)
 	}
 }
+
+
+func TestMemberAccountFileRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "member.account.json")
+	if err := saveMemberAccountFile(path, "#ABC123"); err != nil {
+		t.Fatalf("saveMemberAccountFile failed: %v", err)
+	}
+	tag, ok := loadMemberAccountFile(path)
+	if !ok {
+		t.Fatal("expected member account file to load")
+	}
+	if tag != "#ABC123" {
+		t.Fatalf("tag=%q want #ABC123", tag)
+	}
+}
+
+func TestMemberAccountFileRecoversFromBackup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "member.account.json")
+	backup := path + ".bak"
+
+	good, err := json.Marshal(memberAccountProfile{PlayerTag: "#SAFE123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backup, good, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{broken-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tag, ok := loadMemberAccountFile(path)
+	if !ok {
+		t.Fatal("expected backup recovery to succeed")
+	}
+	if tag != "#SAFE123" {
+		t.Fatalf("recovered tag=%q want #SAFE123", tag)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("self-healed primary missing: %v", err)
+	}
+	var healed memberAccountProfile
+	if err := json.Unmarshal(data, &healed); err != nil {
+		t.Fatalf("self-healed primary invalid: %v", err)
+	}
+	if healed.PlayerTag != "#SAFE123" {
+		t.Fatalf("self-healed tag=%q want #SAFE123", healed.PlayerTag)
+	}
+}
