@@ -291,3 +291,49 @@ func TestLicenseLoadRecoversBackup(t *testing.T) {
 		t.Fatalf("backup metadata mismatch: %+v", svc.state)
 	}
 }
+
+
+func TestSetBaseURLSwitchesNextActivationImmediately(t *testing.T) {
+	oldHits := 0
+	oldServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		oldHits++
+		http.Error(w, "old server should not be used", http.StatusTeapot)
+	}))
+	defer oldServer.Close()
+
+	newHits := 0
+	newServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		newHits++
+		if r.URL.Path != "/v1/license/activate" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"role":"member","member_name":"Live Switch","offline_until":"2099-01-01T00:00:00Z","plan":"month_1","expires_at":"2099-01-01T00:00:00Z"}`))
+	}))
+	defer newServer.Close()
+
+	svc := &Service{
+		baseURL:    oldServer.URL,
+		appVersion: "test",
+		httpClient: newServer.Client(),
+		path:       filepath.Join(t.TempDir(), "license.json"),
+	}
+	svc.SetBaseURL("  " + newServer.URL + "/ ")
+
+	state, err := svc.Activate(context.Background(), "CGO-ABCDEF-GHIJKL-MNOPQR-STUVWX")
+	if err != nil {
+		t.Fatalf("Activate after SetBaseURL: %v", err)
+	}
+	if !state.Activated || state.MemberName != "Live Switch" {
+		t.Fatalf("unexpected activation state: %+v", state)
+	}
+	if oldHits != 0 {
+		t.Fatalf("old control server received %d request(s)", oldHits)
+	}
+	if newHits != 1 {
+		t.Fatalf("new control server received %d requests, want 1", newHits)
+	}
+	if got := svc.baseURLSnapshot(); got != newServer.URL {
+		t.Fatalf("baseURLSnapshot=%q want %q", got, newServer.URL)
+	}
+}
