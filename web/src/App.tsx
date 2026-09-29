@@ -1918,6 +1918,7 @@ function App() {
               activity={activity}
               sessionReport={sessionReport}
               testSessionActive={testSessionActive}
+              showValidationTools={interfaceLevel !== 'simple'}
               running={isRunning}
               starting={isStarting}
               onStart={handleStart}
