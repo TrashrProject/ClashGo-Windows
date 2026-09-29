@@ -786,7 +786,7 @@ function App() {
       setStartupCheckRunning(false);
 
       if (!typedReadiness.ready) {
-        const firstBlocked = typedReadiness.checks.find((check) => !check.ok);
+        const firstBlocked = typedReadiness.checks.find((check) => !check.ok && check.blocking !== false);
         const blockedMessage = firstBlocked
           ? `${firstBlocked.label} : ${firstBlocked.message}`
           : 'La configuration ClashGO n’est pas prête.';
@@ -835,7 +835,7 @@ function App() {
       setStartupCheckRunning(false);
 
       if (!typedReadiness.ready) {
-        const firstBlocked = typedReadiness.checks.find((check) => !check.ok);
+        const firstBlocked = typedReadiness.checks.find((check) => !check.ok && check.blocking !== false);
         setBotError(firstBlocked
           ? `${firstBlocked.label} : ${firstBlocked.message}`
           : 'La configuration ClashGO n’est pas prête.');
