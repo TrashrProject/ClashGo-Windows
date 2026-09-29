@@ -2184,6 +2184,7 @@ func (a *App) applyMemberAccountForCurrentLicense() error {
 }
 
 type MemberAutomationProfile struct {
+	SimpleMode          *bool                         `json:"simple_mode,omitempty"`
 	SearchEnabled       bool                          `json:"search_enabled"`
 	MinLootGold         int                           `json:"min_loot_gold"`
 	MinLootElixir       int                           `json:"min_loot_elixir"`
@@ -2202,7 +2203,9 @@ func memberAutomationFromConfig(cfg *config.BotConfig) MemberAutomationProfile {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
+	simpleMode := cfg.Automation.SimpleMode
 	profile := MemberAutomationProfile{
+		SimpleMode:        &simpleMode,
 		SearchEnabled:     cfg.Search.Enabled,
 		MinLootGold:       cfg.Search.MinLootGold,
 		MinLootElixir:     cfg.Search.MinLootElixir,
@@ -2244,6 +2247,9 @@ func applyMemberAutomationToConfig(cfg *config.BotConfig, profile MemberAutomati
 		return
 	}
 	profile = sanitizeMemberAutomationProfile(profile)
+	if profile.SimpleMode != nil {
+		cfg.Automation.SimpleMode = *profile.SimpleMode
+	}
 	cfg.Search.Enabled = profile.SearchEnabled
 	cfg.Search.MinLootGold = profile.MinLootGold
 	cfg.Search.MinLootElixir = profile.MinLootElixir
@@ -2376,6 +2382,15 @@ func (a *App) applyMemberAutomationForCurrentLicense() error {
 		// Upgrade migration: the first active licence adopts the user's current
 		// advanced automation choices exactly once.
 		return saveMemberAutomationFile(a.memberAutomationPath(), memberAutomationFromConfig(cfg))
+	}
+	if profile.SimpleMode == nil {
+		// Profiles written before automatic/manual mode became independent from
+		// the UI level inherit today's behavior once, then persist it.
+		current := cfg.Automation.SimpleMode
+		profile.SimpleMode = &current
+		if err := saveMemberAutomationFile(a.memberAutomationPath(), profile); err != nil {
+			return err
+		}
 	}
 	applyMemberAutomationToConfig(cfg, profile)
 
@@ -2548,7 +2563,20 @@ func (a *App) SetSimpleMode(enabled bool) error {
 	if enabled {
 		applySimpleAutomationDefaults(cfg)
 	}
+
+	automationPath := a.memberAutomationPath()
+	oldAutomation, hadOldAutomation := loadMemberAutomationFile(automationPath)
+	if err := a.persistMemberAutomation(cfg); err != nil {
+		return err
+	}
 	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldAutomation {
+			_ = saveMemberAutomationFile(automationPath, oldAutomation)
+		} else if automationPath != "" {
+			_ = os.Remove(automationPath)
+			_ = os.Remove(automationPath + ".bak")
+			_ = os.Remove(automationPath + ".tmp")
+		}
 		return err
 	}
 	if a.bot != nil {
