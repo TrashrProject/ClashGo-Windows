@@ -287,6 +287,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [memberPresetDeleteConfirm, setMemberPresetDeleteConfirm] = React.useState<number | null>(null);
   const memberSaveLockRef = React.useRef(false);
   const memberPresetLockRef = React.useRef(false);
+  const activeLicenseHintRef = React.useRef<string>('');
   const [memberPage, setMemberPage] = React.useState<'account' | 'settings' | 'village'>(initialPage);
 
   React.useEffect(() => {
@@ -544,8 +545,13 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       setLicenseState(typed);
       if (typed.activated && (typed.role === 'developer' || typed.role === 'admin')) {
         onInterfaceLevelChange('developer');
-      } else if (typed.activated && interfaceLevel === 'developer') {
-        onInterfaceLevelChange('simple');
+      } else if (typed.activated) {
+        try {
+          const savedLevel = await GetMemberInterfaceLevel();
+          onInterfaceLevelChange(savedLevel === 'advanced' ? 'advanced' : 'simple');
+        } catch {
+          if (interfaceLevel === 'developer') onInterfaceLevelChange('simple');
+        }
       }
     } catch (e) {
       setLicenseError(e instanceof Error ? e.message : String(e));
@@ -633,14 +639,54 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   React.useEffect(() => {
     const off = safeLicenseEventsOn('license_state', (payload) => {
       if (!payload || typeof payload !== 'object') return;
+
+      const nextHint = payload.license_hint || '';
+      const previousHint = activeLicenseHintRef.current;
+      const identityChanged = Boolean(previousHint && nextHint && previousHint !== nextHint);
+      const deactivated = !payload.activated;
+
+      if (identityChanged || deactivated) {
+        // Clear every member-facing transient immediately so a licence switch
+        // cannot show the previous member's village, presets or success/error
+        // messages while the new scoped state is loading.
+        setProfile(null);
+        setResources(null);
+        setFarmProfile(null);
+        setCurrentArmy(null);
+        setMemberPresets([]);
+        setMemberPresetNames({});
+        setMemberUndoAvailable(false);
+        setMemberMessage('');
+        setMemberSaveError('');
+        setMessage('');
+        setError('');
+        setAccountLinkMessage('');
+        setConfirmDeactivate(false);
+        setConfirmUnlink(false);
+      }
+
+      activeLicenseHintRef.current = nextHint;
       setLicenseState(payload);
+
       if (payload.activated) {
         void refreshMemberSettings();
       } else {
         setMemberSettings(null);
       }
+
       if (payload.activated && (payload.role === 'developer' || payload.role === 'admin')) {
         onInterfaceLevelChange('developer');
+      } else if (payload.activated) {
+        // Never persist a fallback "simple" over this member's saved level.
+        // Clamp visually first, then restore the per-license preference.
+        if (interfaceLevel === 'developer') {
+          onInterfaceLevelChange('simple');
+        }
+        void GetMemberInterfaceLevel()
+          .then((saved: unknown) => onInterfaceLevelChange(saved === 'advanced' ? 'advanced' : 'simple'))
+          .catch(() => {
+            if (interfaceLevel === 'developer') onInterfaceLevelChange('simple');
+          });
       } else if (interfaceLevel === 'developer') {
         onInterfaceLevelChange('simple');
       }
