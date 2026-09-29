@@ -1631,8 +1631,7 @@ func (a *App) GetLicensePolicy() LicensePolicy {
 	// Licensing becomes mandatory only when a real control endpoint has been
 	// explicitly configured for the build/runtime. The localhost fallback is
 	// intentionally development-only and must never lock beta testers out.
-	explicit := strings.TrimSpace(os.Getenv("CLASHGO_CONTROL_API_URL")) != "" ||
-		strings.TrimSpace(controlServiceURL) != ""
+	explicit := clashControlServiceConfigured(cfg)
 
 	return LicensePolicy{
 		Enforced:          explicit,
@@ -1644,6 +1643,76 @@ func (a *App) GetLicensePolicy() LicensePolicy {
 			return ""
 		}(),
 	}
+}
+
+type ControlServiceConfig struct {
+	ServiceURL      string `json:"service_url,omitempty"`
+	Configured      bool   `json:"configured"`
+	Embedded        bool   `json:"embedded"`
+	RequiresRestart bool   `json:"requires_restart"`
+}
+
+func (a *App) GetControlServiceConfig() ControlServiceConfig {
+	cfg := config.LoadOrDefault("config.json")
+	embedded := embeddedControlServiceURL()
+	if embedded != "" {
+		return ControlServiceConfig{
+			ServiceURL: embedded,
+			Configured: true,
+			Embedded: true,
+		}
+	}
+	raw := strings.TrimRight(strings.TrimSpace(cfg.Account.ControlURL), "/")
+	return ControlServiceConfig{
+		ServiceURL: raw,
+		Configured: raw != "",
+	}
+}
+
+func normalizeControlServiceURL(raw string) (string, error) {
+	raw = strings.TrimRight(strings.TrimSpace(raw), "/")
+	if raw == "" {
+		return "", fmt.Errorf("control service URL is required")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return "", fmt.Errorf("invalid control service URL")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if parsed.Scheme != "https" {
+		local := host == "localhost" || host == "127.0.0.1" || host == "::1"
+		if parsed.Scheme != "http" || !local {
+			return "", fmt.Errorf("control service URL must use https")
+		}
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("control service URL must not contain credentials, query parameters or fragments")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func (a *App) SetBetaControlServiceURL(raw string) (ControlServiceConfig, error) {
+	if embeddedControlServiceURL() != "" {
+		return a.GetControlServiceConfig(), fmt.Errorf("the control service is embedded in this build")
+	}
+	if a.botSessionActiveOrStarting() {
+		return a.GetControlServiceConfig(), fmt.Errorf("stop ClashGO automation before changing the control service")
+	}
+	normalized, err := normalizeControlServiceURL(raw)
+	if err != nil {
+		return a.GetControlServiceConfig(), err
+	}
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Account.ControlURL = normalized
+	if err := config.Save("config.json", cfg); err != nil {
+		return a.GetControlServiceConfig(), err
+	}
+	return ControlServiceConfig{
+		ServiceURL: normalized,
+		Configured: true,
+		RequiresRestart: true,
+	}, nil
 }
 
 // GetLicenseState exposes safe activation metadata to the UI. The full
@@ -2198,16 +2267,35 @@ func clashAccountServiceConfigured(cfg *config.BotConfig) bool {
 	return cfg != nil && strings.TrimSpace(cfg.Account.ProxyURL) != ""
 }
 
-func clashControlServiceURL(cfg *config.BotConfig) string {
+func embeddedControlServiceURL() string {
 	if raw := strings.TrimSpace(os.Getenv("CLASHGO_CONTROL_API_URL")); raw != "" {
 		return strings.TrimRight(raw, "/")
 	}
 	if raw := strings.TrimSpace(controlServiceURL); raw != "" {
 		return strings.TrimRight(raw, "/")
 	}
-	// Local development reuses the combined Go service. Production builds
-	// normally embed the Cloudflare Worker URL independently.
+	return ""
+}
+
+func clashControlServiceURL(cfg *config.BotConfig) string {
+	if raw := embeddedControlServiceURL(); raw != "" {
+		return raw
+	}
+	if cfg != nil {
+		if raw := strings.TrimSpace(cfg.Account.ControlURL); raw != "" {
+			return strings.TrimRight(raw, "/")
+		}
+	}
+	// Local development reuses the combined Go service when no dedicated
+	// control endpoint has been configured.
 	return clashAccountServiceURL(cfg)
+}
+
+func clashControlServiceConfigured(cfg *config.BotConfig) bool {
+	if embeddedControlServiceURL() != "" {
+		return true
+	}
+	return cfg != nil && strings.TrimSpace(cfg.Account.ControlURL) != ""
 }
 
 // GetAccountConfig returns safe account metadata only. End users never see,
