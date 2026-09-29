@@ -3527,6 +3527,9 @@ func (a *App) SetSimpleMode(enabled bool) error {
 // SaveAccountConfig stores only the player's tag. The Clash API credential
 // lives on the ClashGO account service, never in the distributed EXE.
 func (a *App) SaveAccountConfig(playerTag string) error {
+	if a.botSessionActiveOrStarting() {
+		return fmt.Errorf("stop ClashGO before changing the linked Clash account")
+	}
 	tag, err := normalizePlayerTag(playerTag)
 	if err != nil {
 		return err
@@ -3564,6 +3567,9 @@ func (a *App) SaveAccountConfig(playerTag string) error {
 // ClearAccount removes the local player link. No developer credential is
 // stored on the client anymore, so unlinking is intentionally lightweight.
 func (a *App) ClearAccount() error {
+	if a.botSessionActiveOrStarting() {
+		return fmt.Errorf("stop ClashGO before unlinking the Clash account")
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
