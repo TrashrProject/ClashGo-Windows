@@ -168,6 +168,9 @@ const DeveloperView: React.FC = () => {
   const [customerName, setCustomerName] = React.useState('');
   const [customerContact, setCustomerContact] = React.useState('');
   const [customerNotes, setCustomerNotes] = React.useState('');
+  const [creationAmount, setCreationAmount] = React.useState('');
+  const [creationPaymentStatus, setCreationPaymentStatus] = React.useState<'paid' | 'pending' | 'offered' | 'free'>('paid');
+  const [creationPaymentNote, setCreationPaymentNote] = React.useState('');
   const [generatedKey, setGeneratedKey] = React.useState('');
   const [copied, setCopied] = React.useState(false);
   const [search, setSearch] = React.useState('');
@@ -238,12 +241,20 @@ const DeveloperView: React.FC = () => {
     setGeneratedKey('');
     setCopied(false);
     try {
+      const normalizedAmount = creationAmount.trim().replace(',', '.');
+      const parsedAmount = normalizedAmount === '' ? 0 : Number(normalizedAmount);
+      if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+        throw new Error('Montant invalide.');
+      }
       const result = await CreateAdminLicense({
         role: newRole,
         plan: newPlan,
         customer_name: customerName.trim(),
         customer_contact: customerContact.trim(),
         customer_notes: customerNotes.trim(),
+        amount_cents: Math.round(parsedAmount * 100),
+        payment_status: creationPaymentStatus,
+        note: creationPaymentNote.trim(),
       } as any);
       const keys = (result as { licenses?: string[] })?.licenses || [];
       if (keys.length === 0) throw new Error('Aucune clé retournée par le serveur.');
@@ -260,6 +271,9 @@ const DeveloperView: React.FC = () => {
       setCustomerName('');
       setCustomerContact('');
       setCustomerNotes('');
+      setCreationAmount('');
+      setCreationPaymentStatus('paid');
+      setCreationPaymentNote('');
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -647,6 +661,55 @@ const DeveloperView: React.FC = () => {
               className="w-full resize-none rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-4 py-3 text-sm font-semibold outline-none focus:border-zinc-400"
             />
           </label>
+
+          <details className="mt-3 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+            <summary className="cursor-pointer list-none flex items-center justify-between gap-3 bg-zinc-50 dark:bg-zinc-950/50 px-4 py-3">
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Suivi paiement manuel</div>
+                <div className="mt-1 text-[10px] font-semibold text-zinc-400">Optionnel · aucun paiement n’est traité par ClashGO</div>
+              </div>
+              <span className="material-symbols-outlined text-base text-zinc-400">expand_more</span>
+            </summary>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-4">
+              <label>
+                <div className="mb-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">Montant encaissé (€)</div>
+                <input
+                  value={creationAmount}
+                  onChange={(e) => setCreationAmount(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="Ex. 9,99"
+                  className="h-10 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 text-xs font-bold outline-none"
+                />
+              </label>
+              <label>
+                <div className="mb-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">Statut</div>
+                <select
+                  value={creationPaymentStatus}
+                  onChange={(e) => {
+                    const next = e.target.value as typeof creationPaymentStatus;
+                    setCreationPaymentStatus(next);
+                    if (next === 'offered' || next === 'free') setCreationAmount('');
+                  }}
+                  className="h-10 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-[9px] font-black uppercase outline-none"
+                >
+                  <option value="paid">Payé</option>
+                  <option value="pending">En attente</option>
+                  <option value="offered">Offert</option>
+                  <option value="free">Free</option>
+                </select>
+              </label>
+              <label>
+                <div className="mb-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">Note paiement</div>
+                <input
+                  value={creationPaymentNote}
+                  onChange={(e) => setCreationPaymentNote(e.target.value)}
+                  maxLength={1000}
+                  placeholder="Optionnel"
+                  className="h-10 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 text-xs font-semibold outline-none"
+                />
+              </label>
+            </div>
+          </details>
 
           <button
             type="button"
