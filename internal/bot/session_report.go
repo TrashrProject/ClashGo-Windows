@@ -305,26 +305,26 @@ func BuildSessionReport(sessionID string, history []AttackReport, stats BotStats
 	// behavior. They never change config automatically.
 	if report.FullDeployRate < 95 {
 		report.Recommendations = append(report.Recommendations,
-			"Deployment reliability is below 95%; keep deployment safety/timing protected before attempting faster tap cadence.")
+			"La fiabilité du déploiement est sous 95 % ; conserve les protections de sécurité et de timing avant d’accélérer davantage la cadence.")
 	}
 	if report.SafeCorridorRate < 98 {
 		report.Recommendations = append(report.Recommendations,
-			"Safe corridor certification is below 98%; inspect red-zone/HUD diagnostics before changing deploy geometry.")
+			"La validation du corridor sûr est sous 98 % ; vérifie les diagnostics zone rouge/HUD avant de modifier la géométrie de déploiement.")
 	}
 	if report.OptimizationTarget != "" {
 		report.Recommendations = append(report.Recommendations,
-			fmt.Sprintf("Largest tunable stage this session: %s.", strings.ReplaceAll(report.OptimizationTarget, "_", " ")))
+			fmt.Sprintf("Étape optimisable la plus longue de cette session : %s.", strings.ReplaceAll(report.OptimizationTarget, "_", " ")))
 	}
 	if report.EarlyExitRate > 0 && report.EarlyBattleEndWaitMS > 0 && report.NaturalBattleEndWaitMS > 0 {
 		delta := report.NaturalBattleEndWaitMS - report.EarlyBattleEndWaitMS
 		if delta > 5000 {
 			report.Recommendations = append(report.Recommendations,
-				fmt.Sprintf("Observed early exits shortened battle-end wait by %.1fs on average; validate loot/stars tradeoff before lowering thresholds.", delta/1000))
+				fmt.Sprintf("Les sorties anticipées ont réduit l’attente de fin de combat de %.1fs en moyenne ; vérifie le compromis butin/étoiles avant de réduire les seuils.", delta/1000))
 		}
 	}
 	if report.ZeroTouchRate >= 98 && report.Attacks >= 10 {
 		report.Recommendations = append(report.Recommendations,
-			"Autonomy is stable at ≥98% zero-touch; session is suitable for longer unattended endurance testing.")
+			"L’autonomie est stable à ≥98 % sans intervention ; cette session est adaptée à un test d’endurance plus long sans surveillance.")
 	}
 	return report
 }
