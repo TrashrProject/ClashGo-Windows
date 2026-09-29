@@ -19,15 +19,15 @@ func TestGracefulStopReachedIgnoresOldCompletedAttack(t *testing.T) {
 	}
 }
 
-func TestGracefulStopReachedRequiresConfirmedReturnHome(t *testing.T) {
+func TestGracefulStopReachedStopsAfterFailedReturnHomeAttempt(t *testing.T) {
 	sequenceStart := time.Now().UTC().Truncate(time.Second)
 	report := bot.AttackReport{
 		Timestamp:            sequenceStart.Add(30 * time.Second).Format(time.RFC3339),
 		ReturnHomeDurationMS: 1200,
 		ReturnHomeSuccess:    false,
 	}
-	if gracefulStopReached([]bot.AttackReport{report}, sequenceStart.Unix()) {
-		t.Fatal("failed return-home must not complete graceful stop")
+	if !gracefulStopReached([]bot.AttackReport{report}, sequenceStart.Unix()) {
+		t.Fatal("completed return-home attempt must stop the requested session even when confirmation failed")
 	}
 }
 
