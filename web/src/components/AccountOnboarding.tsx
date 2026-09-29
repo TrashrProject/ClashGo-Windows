@@ -4,6 +4,17 @@ import { GetPlayerProfile, SaveAccountConfig } from '../../wailsjs/go/main/App';
 
 interface Props { onLinked: (tag: string) => void }
 
+const normalizePlayerTag = (value: string): string =>
+  value.trim().replace(/^#/, '').toUpperCase().replace(/\s+/g, '');
+
+const validatePlayerTag = (value: string): string => {
+  const normalized = normalizePlayerTag(value);
+  if (normalized.length < 5) return 'Le tag joueur semble trop court.';
+  if (normalized.length > 15) return 'Le tag joueur semble trop long.';
+  if (!/^[A-Z0-9]+$/.test(normalized)) return 'Le tag joueur doit contenir uniquement des lettres et des chiffres.';
+  return '';
+};
+
 const AccountOnboarding: React.FC<Props> = ({ onLinked }) => {
   const [tag, setTag] = React.useState('');
   const [busy, setBusy] = React.useState(false);
@@ -11,8 +22,14 @@ const AccountOnboarding: React.FC<Props> = ({ onLinked }) => {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const raw = tag.trim();
-    if (!raw) return;
+    const normalizedTag = normalizePlayerTag(tag);
+    if (!normalizedTag) return;
+    const validationError = validatePlayerTag(normalizedTag);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    const raw = '#' + normalizedTag;
     setBusy(true); setError('');
     try {
       await SaveAccountConfig(raw);
@@ -27,8 +44,7 @@ const AccountOnboarding: React.FC<Props> = ({ onLinked }) => {
         console.warn('Initial account sync deferred:', syncErr);
       }
 
-      const normalized = raw.startsWith('#') ? raw.toUpperCase() : '#' + raw.toUpperCase();
-      onLinked(normalized);
+      onLinked(raw);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -62,7 +78,10 @@ const AccountOnboarding: React.FC<Props> = ({ onLinked }) => {
         <label className="block mt-7 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Tag joueur</label>
         <div className="mt-2 relative">
           <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-zinc-400">#</span>
-          <input autoFocus value={tag.replace(/^#/, '')} onChange={e => setTag(e.target.value.replace(/^#/, '').toUpperCase())}
+          <input autoFocus value={tag.replace(/^#/, '')} onChange={e => {
+            setTag(normalizePlayerTag(e.target.value));
+            if (error) setError('');
+          }}
             placeholder="TAG JOUEUR" autoComplete="off"
             className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 pl-9 pr-4 py-4 text-lg font-mono font-black uppercase tracking-wider outline-none focus:ring-4 focus:ring-zinc-950/5 dark:focus:ring-white/5" />
         </div>
