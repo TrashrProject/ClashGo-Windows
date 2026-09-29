@@ -29,6 +29,8 @@ type ArmyInspectionSnapshot struct {
 	Warnings       []string             `json:"warnings,omitempty"`
 }
 
+const armyGuardMinCountConfidence = 0.70
+
 func buildArmyInspection(slots []*TrackedSlot, counts []TroopCount, profile *config.FarmProfile) ArmyInspectionSnapshot {
 	s := ArmyInspectionSnapshot{Timestamp: time.Now(), Ready: true}
 	observed := make(map[string]int)
@@ -78,7 +80,7 @@ func buildArmyInspection(slots []*TrackedSlot, counts []TroopCount, profile *con
 		// fails open instead of skipping a perfectly valid target because OCR
 		// missed the small xN label.
 		if (slot.Category == "Troop" || slot.Category == "Spell") &&
-			(!countSeen || countInfo.Confidence <= 0 || countInfo.Count <= 0) {
+			(!countSeen || countInfo.Confidence < armyGuardMinCountConfidence || countInfo.Count <= 0) {
 			quantityUnknown[name] = true
 		}
 	}
