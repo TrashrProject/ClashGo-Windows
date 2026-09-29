@@ -157,10 +157,28 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
       };
     }
     case 'speed_profile': {
-      const profile = String(event.fields?.profile || '');
+      const rawProfile = String(event.fields?.profile || event.fields?.mode || '').trim().toLowerCase();
+      const reason = String(event.fields?.reason || '').trim().toLowerCase();
+      const incident = String(event.fields?.incident || '').trim().toLowerCase();
       const perHour = n('max_attacks_per_hour');
       const perSession = n('max_attacks_per_session');
-      const label = profile === 'fast' ? 'Rapide' : profile === 'cautious' ? 'Prudente' : 'Normale';
+      const label =
+        rawProfile === 'fast' ? 'Rapide' :
+        rawProfile === 'cautious' || rawProfile === 'safe' ? 'Prudente' :
+        'Normale';
+
+      if (reason === 'safety_governor') {
+        const cause =
+          incident === 'device_recovery' ? 'récupération de BlueStacks / ADB' :
+          incident ? incident.split('_').join(' ') :
+          'stabilité de la session';
+        return {
+          title: 'Cadence sécurisée · ' + label,
+          detail: 'ClashGO a ralenti temporairement le rythme après ' + cause + '. Le profil reviendra automatiquement ensuite.',
+          icon: 'health_and_safety',
+        };
+      }
+
       return {
         title: 'Cadence ajustée · ' + label,
         detail: [
