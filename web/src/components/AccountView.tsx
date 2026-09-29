@@ -312,6 +312,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     try {
       const [state, policy] = await Promise.all([GetLicenseState(), GetLicensePolicy()]);
       setLicenseState(state as LicenseState);
+      activeLicenseHintRef.current = state?.license_hint || '';
       setLicensePolicy(policy as LicensePolicy);
       if (state?.activated && (state.role === 'developer' || state.role === 'admin')) {
         onInterfaceLevelChange('developer');
@@ -550,7 +551,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
           const savedLevel = await GetMemberInterfaceLevel();
           onInterfaceLevelChange(savedLevel === 'advanced' ? 'advanced' : 'simple');
         } catch {
-          if (interfaceLevel === 'developer') onInterfaceLevelChange('simple');
+          // App-level license handling already clamps privileged UI safely.
         }
       }
     } catch (e) {
@@ -677,18 +678,12 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       if (payload.activated && (payload.role === 'developer' || payload.role === 'admin')) {
         onInterfaceLevelChange('developer');
       } else if (payload.activated) {
-        // Never persist a fallback "simple" over this member's saved level.
-        // Clamp visually first, then restore the per-license preference.
-        if (interfaceLevel === 'developer') {
-          onInterfaceLevelChange('simple');
-        }
+        // App.tsx performs the immediate non-persistent security clamp.
+        // Here we only restore the persisted per-license preference so this
+        // component can never overwrite "advanced" during a role transition.
         void GetMemberInterfaceLevel()
           .then((saved: unknown) => onInterfaceLevelChange(saved === 'advanced' ? 'advanced' : 'simple'))
-          .catch(() => {
-            if (interfaceLevel === 'developer') onInterfaceLevelChange('simple');
-          });
-      } else if (interfaceLevel === 'developer') {
-        onInterfaceLevelChange('simple');
+          .catch(() => {});
       }
     });
     return off;
