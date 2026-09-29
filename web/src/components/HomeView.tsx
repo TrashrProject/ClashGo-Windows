@@ -17,6 +17,12 @@ interface HomeViewProps {
   accountLinked: boolean;
   windowsReady: boolean | null;
   readinessIssues: string[];
+  startupCheck: {
+    ready: boolean;
+    checks: Array<{ id: string; label: string; ok: boolean; message: string }>;
+  } | null;
+  startupCheckRunning: boolean;
+  onRunStartupCheck: () => void;
   memberName?: string;
   licensePlan?: string;
 }
@@ -90,7 +96,9 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, running, starting,
     onStart, onStop, onOpenAutomation, onOpenAccount, onOpenSettings,
-    licenseReady, accountLinked, windowsReady, readinessIssues, memberName, licensePlan,
+    licenseReady, accountLinked, windowsReady, readinessIssues,
+    startupCheck, startupCheckRunning, onRunStartupCheck,
+    memberName, licensePlan,
   } = props;
 
   const lastAttack = history && history.length > 0 ? history[0] : undefined;
@@ -275,6 +283,59 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           )}
         </section>
       )}
+
+      <section className="rounded-[1.75rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-premium dark:shadow-none">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div>
+            <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">Pré-contrôle</div>
+            <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">Tester ma configuration</div>
+            <div className="mt-1 text-xs font-semibold text-zinc-500">
+              Vérifie la licence, le compte Clash, les fichiers, BlueStacks, ADB, l’instance et la stratégie sans lancer d’attaque.
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={startupCheckRunning}
+            onClick={onRunStartupCheck}
+            className="shrink-0 rounded-xl bg-zinc-950 dark:bg-white px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950 disabled:opacity-40"
+          >
+            {startupCheckRunning ? 'Vérification…' : 'Tout vérifier'}
+          </button>
+        </div>
+
+        {startupCheck && (
+          <div className="mt-4">
+            <div className={
+              'rounded-xl px-4 py-3 text-sm font-black ' +
+              (startupCheck.ready
+                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                : 'bg-amber-500/10 text-amber-700 dark:text-amber-300')
+            }>
+              {startupCheck.ready
+                ? 'Configuration prête : ClashGO peut démarrer.'
+                : 'Un ou plusieurs points doivent être corrigés avant le démarrage.'}
+            </div>
+            <div className="mt-3 grid md:grid-cols-2 gap-2">
+              {startupCheck.checks.map((check) => (
+                <div key={check.id} className="rounded-xl border border-zinc-100 dark:border-zinc-800 p-3">
+                  <div className="flex items-start gap-3">
+                    <span className={
+                      'material-symbols-outlined text-base ' +
+                      (check.ok ? 'text-emerald-500' : 'text-rose-500')
+                    }>
+                      {check.ok ? 'check_circle' : 'cancel'}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-xs font-black text-zinc-950 dark:text-white">{check.label}</div>
+                      <div className="mt-0.5 text-[10px] font-semibold text-zinc-500">{check.message}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
 
       <section className="grid grid-cols-2 xl:grid-cols-4 gap-4">
         {[
