@@ -16,6 +16,7 @@ interface HomeViewProps {
   onOpenAutomation: () => void;
   onOpenAccount: () => void;
   onOpenMemberSettings: () => void;
+  onOpenVillage: () => void;
   onOpenSettings: () => void;
   licenseReady: boolean;
   accountLinked: boolean;
@@ -23,7 +24,7 @@ interface HomeViewProps {
   readinessIssues: string[];
   startupCheck: {
     ready: boolean;
-    checks: Array<{ id: string; label: string; ok: boolean; message: string; action?: string; action_label?: string }>;
+    checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
   } | null;
   startupCheckRunning: boolean;
   onRunStartupCheck: () => void;
@@ -160,7 +161,7 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, sessionReport, testSessionActive, running, starting,
-    onStart, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenSettings,
+    onStart, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
     licenseReady, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
     memberName, licensePlan, licenseExpiresAt, latestBootReport,
@@ -191,7 +192,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const runCheckAction = React.useCallback((action?: string) => {
     switch (action) {
       case 'account':
-        onOpenAccount();
+        onOpenVillage();
         break;
       case 'automation':
         onOpenAutomation();
@@ -205,7 +206,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
       default:
         break;
     }
-  }, [onOpenAccount, onOpenAutomation, onOpenMemberSettings, onOpenSettings]);
+  }, [onOpenAutomation, onOpenMemberSettings, onOpenSettings, onOpenVillage]);
 
   const botLabel = starting ? 'Démarrage…' : running ? 'Bot en cours' : 'Bot arrêté';
   const botSub = starting
@@ -310,8 +311,9 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           },
           {
             label: 'Compte Clash',
-            value: accountLinked ? 'Lié' : 'À lier',
+            value: accountLinked ? 'Lié' : 'Optionnel',
             ok: accountLinked,
+            optional: !accountLinked,
             icon: 'person',
           },
           {
@@ -334,7 +336,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
               <span className="material-symbols-outlined text-lg text-zinc-400">{item.icon}</span>
               <span className={
                 'w-2 h-2 rounded-full ' +
-                (item.ok ? 'bg-emerald-500' : item.pending ? 'bg-amber-400 animate-pulse' : 'bg-zinc-300 dark:bg-zinc-700')
+                (item.ok ? 'bg-emerald-500' : item.pending ? 'bg-amber-400 animate-pulse' : item.optional ? 'bg-amber-400' : 'bg-zinc-300 dark:bg-zinc-700')
               } />
             </div>
             <div className="mt-3 text-sm font-black text-zinc-950 dark:text-white">{item.value}</div>
@@ -354,17 +356,6 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
               </div>
               <button type="button" onClick={onOpenAccount} className="rounded-xl bg-zinc-950 dark:bg-white px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950">
                 Ouvrir Mon ClashGO
-              </button>
-            </div>
-          ) : !accountLinked ? (
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <div>
-                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">Étape suivante</div>
-                <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">Lier ton compte Clash</div>
-                <div className="mt-1 text-xs font-semibold text-zinc-500">Ton tag joueur permet à ClashGO de choisir automatiquement le bon profil HDV.</div>
-              </div>
-              <button type="button" onClick={onOpenAccount} className="rounded-xl bg-zinc-950 dark:bg-white px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950">
-                Lier mon compte
               </button>
             </div>
           ) : windowsReady === false ? (
@@ -417,12 +408,30 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                 )}
               </div>
             );
-          })() : windowsReady === true && startupCheck?.ready ? (
+          })() : windowsReady === true && startupCheck?.ready && !accountLinked ? (
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">Optionnel</div>
+                <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">Lier ton compte Clash</div>
+                <div className="mt-1 text-xs font-semibold text-zinc-500">
+                  ClashGO peut déjà démarrer avec ta configuration locale. Le tag joueur sert surtout à sélectionner automatiquement le profil HDV.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={onOpenVillage} className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-300">
+                  Lier mon compte
+                </button>
+                <button type="button" onClick={onStart} className="rounded-xl bg-emerald-500 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white">
+                  Démarrer sans le lier
+                </button>
+              </div>
+            </div>
+          ) : windowsReady === true && startupCheck?.ready ? (
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
                 <div className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-500">Tout est prêt</div>
                 <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">ClashGO peut démarrer</div>
-                <div className="mt-1 text-xs font-semibold text-zinc-500">Licence, compte Clash, Windows et configuration du bot sont validés.</div>
+                <div className="mt-1 text-xs font-semibold text-zinc-500">Licence, Windows et configuration du bot sont validés.</div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -509,7 +518,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
             <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">Pré-contrôle</div>
             <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">Tester ma configuration</div>
             <div className="mt-1 text-xs font-semibold text-zinc-500">
-              Vérifie la licence, le compte Clash, les fichiers, BlueStacks, ADB, l’instance et la stratégie sans lancer d’attaque.
+              Vérifie la licence, les fichiers, BlueStacks, ADB, l’instance et la stratégie sans lancer d’attaque. Le compte Clash reste facultatif.
             </div>
           </div>
           <button
@@ -540,9 +549,9 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                   <div className="flex items-start gap-3">
                     <span className={
                       'material-symbols-outlined text-base ' +
-                      (check.ok ? 'text-emerald-500' : 'text-rose-500')
+                      (check.ok ? 'text-emerald-500' : check.blocking === false ? 'text-amber-500' : 'text-rose-500')
                     }>
-                      {check.ok ? 'check_circle' : 'cancel'}
+                      {check.ok ? 'check_circle' : check.blocking === false ? 'info' : 'cancel'}
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-black text-zinc-950 dark:text-white">{check.label}</div>
