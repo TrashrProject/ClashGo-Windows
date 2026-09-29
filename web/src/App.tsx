@@ -38,6 +38,7 @@ import {
   ClearSkippedVersion,
   GetAccountConfig,
   GetLicenseState,
+  RefreshLicense,
   GetMemberInterfaceLevel,
   SetSimpleMode,
   StartTestSession,
@@ -673,6 +674,11 @@ function App() {
       void fetchCurrentArmy();
       void fetchSessionReport();
       void fetchDiagnostics();
+      void GetLicenseState()
+        .then((state) => {
+          if (state?.activated) void RefreshLicense();
+        })
+        .catch(() => {});
       if (tabRef.current === 'settings' || tabRef.current === 'developer') {
         void fetchLogs();
       }
