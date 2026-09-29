@@ -466,7 +466,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [playerTag]);
 
   React.useEffect(() => {
     void refresh();
@@ -582,6 +582,9 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       await ClearAccount();
       setConfirmUnlink(false);
       setProfile(null);
+      setAccountTagInput('');
+      setAccountLinkMessage('');
+      setError('');
       onAccountChanged('');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
