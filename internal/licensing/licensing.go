@@ -213,6 +213,21 @@ func (s *Service) MachineID() string {
 	return s.stored.MachineID
 }
 
+func (s *Service) ProfileID() string {
+	s.mu.RLock()
+	key := strings.TrimSpace(s.stored.Key)
+	s.mu.RUnlock()
+	if key == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(strings.ToUpper(key)))
+	encoded := hex.EncodeToString(sum[:])
+	if len(encoded) > 16 {
+		return encoded[:16]
+	}
+	return encoded
+}
+
 func (s *Service) Activate(ctx context.Context, key string) (State, error) {
 	key = strings.ToUpper(strings.TrimSpace(key))
 	if len(key) < 12 {
