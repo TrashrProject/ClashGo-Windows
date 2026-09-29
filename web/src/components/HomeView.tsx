@@ -338,6 +338,22 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     ? Math.max(0, Math.min(100, Math.round((sessionAttacks / sessionCap) * 100)))
     : 0;
 
+  const sessionETA = React.useMemo(() => {
+    if (sessionCap <= 0 || sessionAttacks >= sessionCap || paused) return '';
+    const samples = (history || [])
+      .slice(0, 8)
+      .map((rep) => Number(rep.full_routine_duration_ms || rep.cycle_duration_ms || 0))
+      .filter((ms) => Number.isFinite(ms) && ms > 0);
+    if (samples.length === 0) return '';
+    const averageMS = samples.reduce((sum, ms) => sum + ms, 0) / samples.length;
+    const remainingMS = Math.max(0, sessionCap - sessionAttacks) * averageMS;
+    const minutes = Math.max(1, Math.round(remainingMS / 60_000));
+    if (minutes < 60) return `≈ ${minutes} min restantes`;
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    return rest > 0 ? `≈ ${hours} h ${rest} min restantes` : `≈ ${hours} h restantes`;
+  }, [history, paused, sessionAttacks, sessionCap]);
+
   const lastSessionValidation = React.useMemo(() => {
     if (!sessionReport || sessionReport.attacks <= 0) return null;
     if (sessionReport.attacks < 5) {
@@ -985,7 +1001,9 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                 {sessionAttacks} / {sessionCap} attaques
               </div>
               <div className="mt-1 text-xs font-semibold text-zinc-500">
-                {Math.max(0, sessionCap - sessionAttacks)} attaque{Math.max(0, sessionCap - sessionAttacks) > 1 ? 's' : ''} restante{Math.max(0, sessionCap - sessionAttacks) > 1 ? 's' : ''} avant l’arrêt propre.{testSessionActive ? ' Tes réglages personnels seront ensuite restaurés.' : ''}
+                {Math.max(0, sessionCap - sessionAttacks)} attaque{Math.max(0, sessionCap - sessionAttacks) > 1 ? 's' : ''} restante{Math.max(0, sessionCap - sessionAttacks) > 1 ? 's' : ''} avant l’arrêt propre.
+                {paused ? ' Session en pause.' : sessionETA ? ' ' + sessionETA + '.' : ''}
+                {testSessionActive ? ' Tes réglages personnels seront ensuite restaurés.' : ''}
               </div>
             </div>
             <div className="text-2xl font-black tabular-nums text-zinc-950 dark:text-white">{sessionProgress}%</div>
