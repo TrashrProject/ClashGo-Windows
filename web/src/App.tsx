@@ -413,6 +413,28 @@ function App() {
       }
     });
 
+    const unsubLicense = safeEventsOn("license_state", (payload: { activated?: boolean; role?: string; error?: string }) => {
+      const role = payload?.role === 'admin'
+        ? 'admin'
+        : payload?.role === 'developer'
+          ? 'developer'
+          : payload?.activated
+            ? 'member'
+            : '';
+      setLicenseRole(role);
+
+      if (role === 'developer' || role === 'admin') {
+        setInterfaceLevel('developer');
+      } else {
+        setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
+        setTab((current) => current === 'developer' ? 'dashboard' : current);
+      }
+
+      if (payload?.activated === false) {
+        setLicenseAccessReady(false);
+      }
+    });
+
     // StartBot returns running=true immediately while the boot runs in
     // the background (BlueStacks launch + ADB connect can take minutes
     // on a cold start). When the boot fails, Go emits bot_error /
@@ -464,6 +486,7 @@ function App() {
       clearInterval(sessionReportInterval);
       clearInterval(diagnosticsInterval);
       unsubUpdater();
+      unsubLicense();
       unsubBotError();
       unsubBotInitFailed();
       unsubBotStarted();
