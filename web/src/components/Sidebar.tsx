@@ -16,6 +16,8 @@ interface SidebarProps {
   licenseRole: 'member' | 'developer' | 'admin' | '';
   memberName?: string;
   licensePlan?: string;
+  startReady: boolean;
+  startBlockedReason?: string;
 }
 
 const Sidebar: React.FC<SidebarProps> = React.memo(({
@@ -32,6 +34,8 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
   licenseRole,
   memberName,
   licensePlan,
+  startReady,
+  startBlockedReason,
 }) => {
   const menuItems: { id: TabType; label: string; icon: string; minLevel: InterfaceLevel }[] = [
     { id: 'dashboard', label: 'Accueil', icon: 'home', minLevel: 'simple' },
@@ -141,15 +145,27 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
           </button>
 
           <button
-            onClick={starting ? undefined : (running ? onStop : onStart)}
-            disabled={starting}
-            title={expanded ? undefined : (starting ? 'Démarrage du bot' : (running ? 'Arrêter le bot' : 'Démarrer le bot'))}
+            onClick={starting ? undefined : (running ? onStop : (startReady ? onStart : undefined))}
+            disabled={starting || (!running && !startReady)}
+            title={
+              expanded
+                ? (!running && !startReady ? startBlockedReason : undefined)
+                : (starting
+                    ? 'Démarrage du bot'
+                    : running
+                      ? 'Arrêter le bot'
+                      : startReady
+                        ? 'Démarrer le bot'
+                        : (startBlockedReason || 'Configuration incomplète'))
+            }
             className={`w-full h-12 rounded-2xl font-black text-[10px] tracking-[0.2em] transition-all duration-200 flex items-center relative overflow-hidden group/start ${
               starting
                 ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30 cursor-wait'
                 : running
                   ? 'bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/50 border border-rose-100 dark:border-rose-900/30'
-                  : 'bg-zinc-950 dark:bg-zinc-800 text-white dark:text-zinc-300 hover:bg-zinc-800 dark:hover:bg-zinc-700 shadow-premium dark:shadow-none border border-transparent dark:border-zinc-700/50'
+                  : !startReady
+                    ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-600 border border-zinc-200 dark:border-zinc-800 cursor-not-allowed'
+                    : 'bg-zinc-950 dark:bg-zinc-800 text-white dark:text-zinc-300 hover:bg-zinc-800 dark:hover:bg-zinc-700 shadow-premium dark:shadow-none border border-transparent dark:border-zinc-700/50'
             }`}
           >
             <div className="w-12 h-12 flex-shrink-0 flex items-center justify-center z-10 transition-transform duration-200 group-hover/start:scale-110">
@@ -158,7 +174,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
               </span>
             </div>
             <span className={`transition-[opacity,transform] duration-200 ease-out whitespace-nowrap z-10 ${expanded ? 'opacity-100 translate-x-0' : 'opacity-0 w-0 -translate-x-2 overflow-hidden'}`}>
-              {starting ? 'DÉMARRAGE...' : (running ? 'ARRÊTER' : 'DÉMARRER')}
+              {starting ? 'DÉMARRAGE...' : (running ? 'ARRÊTER' : startReady ? 'DÉMARRER' : 'À CONFIGURER')}
             </span>
           </button>
         </div>
