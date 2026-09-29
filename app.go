@@ -1774,7 +1774,7 @@ func (a *App) AdminUpdateLicenseCustomer(licenseID, customerName, customerContac
 	return err
 }
 
-func (a *App) AdminRenewLicense(licenseID, plan string) (map[string]any, error) {
+func (a *App) AdminRenewLicense(licenseID, plan string, amountCents int, paymentStatus, note string) (map[string]any, error) {
 	licenseID = strings.TrimSpace(licenseID)
 	if licenseID == "" {
 		return nil, fmt.Errorf("license id is required")
@@ -1785,9 +1785,24 @@ func (a *App) AdminRenewLicense(licenseID, plan string) (map[string]any, error) 
 	default:
 		return nil, fmt.Errorf("invalid license plan")
 	}
+	if amountCents < 0 {
+		amountCents = 0
+	}
+	if amountCents > 100000000 {
+		amountCents = 100000000
+	}
+	paymentStatus = strings.ToLower(strings.TrimSpace(paymentStatus))
+	switch paymentStatus {
+	case "paid", "pending", "offered", "free":
+	default:
+		paymentStatus = "unknown"
+	}
 	return a.adminControlPOST("/v1/developer/licenses/renew", map[string]any{
-		"license_id": licenseID,
-		"plan":       plan,
+		"license_id":      licenseID,
+		"plan":            plan,
+		"amount_cents":    amountCents,
+		"payment_status":  paymentStatus,
+		"note":            strings.TrimSpace(note),
 	})
 }
 
