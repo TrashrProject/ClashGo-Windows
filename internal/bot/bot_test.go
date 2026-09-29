@@ -3,8 +3,10 @@ package bot
 import (
 	"image"
 	"testing"
+	"time"
 
 	"github.com/Ducky705/ClashGO/internal/telemetry"
+	"github.com/Ducky705/ClashGO/internal/config"
 )
 
 func TestButtonROIConsistency(t *testing.T) {
@@ -109,5 +111,29 @@ func TestRecordMemberSettingsChangeAddsActivity(t *testing.T) {
 	}
 	if got := events[0].Fields["max_attacks_per_session"]; got != 100 {
 		t.Fatalf("max_attacks_per_session=%v want 100", got)
+	}
+}
+
+
+func TestSafePacingWindowDoesNotMutateMemberProfile(t *testing.T) {
+	b := &Bot{}
+	b.cfg = config.DefaultConfig()
+	b.cfg.Automation.SpeedProfile = "fast"
+
+	now := time.Now()
+	b.safePacingUntilUS.Store(now.Add(2 * time.Minute).UnixMicro())
+
+	if !safePacingActive(b.safePacingUntilUS.Load(), now.UnixMicro()) {
+		t.Fatal("expected temporary safe pacing window to be active")
+	}
+	if b.cfg.Automation.SpeedProfile != "fast" {
+		t.Fatalf("temporary safe pacing changed member profile to %q", b.cfg.Automation.SpeedProfile)
+	}
+
+	if safePacingActive(b.safePacingUntilUS.Load(), now.Add(3*time.Minute).UnixMicro()) {
+		t.Fatal("safe pacing should expire without changing the stored profile")
+	}
+	if b.cfg.Automation.SpeedProfile != "fast" {
+		t.Fatalf("expired safety window changed member profile to %q", b.cfg.Automation.SpeedProfile)
 	}
 }
