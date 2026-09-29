@@ -1605,9 +1605,8 @@ func (a *App) memberAccountPath() string {
 	return paths.ResolveConfig(filepath.Join("members", id+".account.json"))
 }
 
-func (a *App) persistMemberAccountTag(tag string) error {
-	path := a.memberAccountPath()
-	if path == "" {
+func saveMemberAccountFile(path, tag string) error {
+	if strings.TrimSpace(path) == "" {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -1618,23 +1617,80 @@ func (a *App) persistMemberAccountTag(tag string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+
+	tmpPath := path + ".tmp"
+	backupPath := path + ".bak"
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	_ = os.Remove(backupPath)
+	hadOriginal := false
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Rename(path, backupPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return err
+		}
+		hadOriginal = true
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backupPath, path)
+		}
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	_ = os.Remove(backupPath)
+	return nil
+}
+
+func loadMemberAccountFile(path string) (string, bool) {
+	if strings.TrimSpace(path) == "" {
+		return "", false
+	}
+	read := func(candidate string) (string, bool) {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			return "", false
+		}
+		var profile memberAccountProfile
+		if json.Unmarshal(data, &profile) != nil {
+			return "", false
+		}
+		return strings.TrimSpace(profile.PlayerTag), true
+	}
+
+	if tag, ok := read(path); ok {
+		return tag, true
+	}
+	if tag, ok := read(path + ".bak"); ok {
+		_ = saveMemberAccountFile(path, tag)
+		return tag, true
+	}
+	return "", false
+}
+
+func (a *App) persistMemberAccountTag(tag string) error {
+	return saveMemberAccountFile(a.memberAccountPath(), tag)
 }
 
 func (a *App) loadMemberAccountTag() (string, bool) {
-	path := a.memberAccountPath()
-	if path == "" {
-		return "", false
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", false
-	}
-	var profile memberAccountProfile
-	if json.Unmarshal(data, &profile) != nil {
-		return "", false
-	}
-	return strings.TrimSpace(profile.PlayerTag), true
+	return loadMemberAccountFile(a.memberAccountPath())
 }
 
 func clearCachedPlayerProfileIfDifferent(tag string) {
