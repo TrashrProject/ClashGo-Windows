@@ -1,8 +1,12 @@
 package support
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,12 +14,25 @@ import (
 	"time"
 )
 
+type testIdentity struct {
+	key     string
+	machine string
+}
+
+func (i *testIdentity) LicenseKey() string { return i.key }
+func (i *testIdentity) MachineID() string  { return i.machine }
+
+func newTestIdentity() *testIdentity {
+	return &testIdentity{key: "CGO-TESTAA-TESTBB-TESTCC-TESTDD", machine: "machine-a"}
+}
+
 func TestReporterDeduplicatesRepeatedErrors(t *testing.T) {
 	dir := t.TempDir()
 	r := &Reporter{
 		appVersion: "test",
 		queuePath:  filepath.Join(dir, "queue.jsonl"),
 		recent:     make(map[string]time.Time),
+		identity:   newTestIdentity(),
 	}
 
 	line := []byte(`{"level":"error","message":"same failure","surface":"frontend"}`)
@@ -42,6 +59,7 @@ func TestReporterKeepsDifferentErrors(t *testing.T) {
 		appVersion: "test",
 		queuePath:  filepath.Join(dir, "queue.jsonl"),
 		recent:     make(map[string]time.Time),
+		identity:   newTestIdentity(),
 	}
 
 	for _, line := range [][]byte{
@@ -122,6 +140,7 @@ func TestReporterQueueRewriteKeepsMultipleIncidents(t *testing.T) {
 		appVersion: "test",
 		queuePath:  filepath.Join(dir, "queue.jsonl"),
 		recent:     make(map[string]time.Time),
+		identity:   newTestIdentity(),
 	}
 
 	for _, msg := range []string{"one", "two", "three"} {
@@ -171,6 +190,7 @@ func TestReporterTruncatesOversizedMessageAndField(t *testing.T) {
 		appVersion: "test",
 		queuePath:  filepath.Join(dir, "queue.jsonl"),
 		recent:     make(map[string]time.Time),
+		identity:   newTestIdentity(),
 	}
 	longMessage := strings.Repeat("m", maxIncidentMessageBytes+500)
 	longField := strings.Repeat("x", maxIncidentFieldBytes+500)
@@ -197,5 +217,100 @@ func TestReporterTruncatesOversizedMessageAndField(t *testing.T) {
 	detail, _ := items[0].Fields["detail"].(string)
 	if len(detail) > maxIncidentFieldBytes+3 {
 		t.Fatalf("field was not truncated: %d bytes", len(detail))
+	}
+}
+
+
+func TestReporterDoesNotReattributeQueuedIncidentsAcrossLicenses(t *testing.T) {
+	dir := t.TempDir()
+	identity := newTestIdentity()
+
+	type receivedIncident struct {
+		license string
+		body    string
+	}
+	received := make([]receivedIncident, 0, 2)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		body, _ := io.ReadAll(req.Body)
+		received = append(received, receivedIncident{
+			license: req.Header.Get("X-ClashGO-License"),
+			body:    string(body),
+		})
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	r := &Reporter{
+		baseURL:    srv.URL,
+		appVersion: "test",
+		identity:   identity,
+		client:     srv.Client(),
+		queuePath:  filepath.Join(dir, "queue.jsonl"),
+		recent:     make(map[string]time.Time),
+	}
+
+	// Member A queues an error while offline / before the periodic flush.
+	if _, err := r.Write([]byte(`{"level":"error","message":"member A failure","surface":"backend"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Switch locally to member B. A's queued error must NOT be posted using B.
+	identity.key = "CGO-USERBB-AAAAAA-BBBBBB-CCCCCC"
+	identity.machine = "machine-a"
+	r.Flush(context.Background())
+	if len(received) != 0 {
+		t.Fatalf("member A incident was sent under member B: %#v", received)
+	}
+
+	// B can queue and flush its own incident even while A's remains pending.
+	if _, err := r.Write([]byte(`{"level":"error","message":"member B failure","surface":"backend"}`)); err != nil {
+		t.Fatal(err)
+	}
+	r.Flush(context.Background())
+	if len(received) != 1 {
+		t.Fatalf("received %d incidents, want only member B", len(received))
+	}
+	if received[0].license != identity.key || !strings.Contains(received[0].body, "member B failure") {
+		t.Fatalf("wrong member B upload: %#v", received[0])
+	}
+	if strings.Contains(received[0].body, "_queue_owner") {
+		t.Fatalf("local queue owner metadata leaked to server: %s", received[0].body)
+	}
+
+	pending := r.readQueueLocked()
+	if len(pending) != 1 || pending[0].Message != "member A failure" {
+		t.Fatalf("member A incident was not preserved for its owner: %#v", pending)
+	}
+
+	// Switching back to A permits only A's own queued incident to flush.
+	identity.key = "CGO-TESTAA-TESTBB-TESTCC-TESTDD"
+	r.Flush(context.Background())
+	if len(received) != 2 {
+		t.Fatalf("received %d incidents after switching back to A, want 2", len(received))
+	}
+	if received[1].license != identity.key || !strings.Contains(received[1].body, "member A failure") {
+		t.Fatalf("wrong member A upload: %#v", received[1])
+	}
+	if items := r.readQueueLocked(); len(items) != 0 {
+		t.Fatalf("queue not empty after both owners flushed: %#v", items)
+	}
+}
+
+func TestReporterDropsUnattributablePreActivationErrors(t *testing.T) {
+	dir := t.TempDir()
+	identity := &testIdentity{}
+	r := &Reporter{
+		appVersion: "test",
+		identity:   identity,
+		queuePath:  filepath.Join(dir, "queue.jsonl"),
+		recent:     make(map[string]time.Time),
+	}
+
+	if _, err := r.Write([]byte(`{"level":"error","message":"pre activation"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(r.queuePath); !os.IsNotExist(err) {
+		t.Fatalf("pre-activation error should not create an attributable queue: %v", err)
 	}
 }
