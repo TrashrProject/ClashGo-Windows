@@ -168,10 +168,10 @@ func TestBuildSessionReportRecommendationsProtectDeploymentSafety(t *testing.T) 
 	}
 	report := BuildSessionReport("s", rows, BotStats{}, time.Now())
 	joined := strings.Join(report.Recommendations, " | ")
-	if !strings.Contains(joined, "Deployment reliability is below 95%") {
+	if !strings.Contains(joined, "La fiabilité du déploiement est sous 95 %") {
 		t.Fatalf("missing deployment safety recommendation: %v", report.Recommendations)
 	}
-	if !strings.Contains(joined, "Safe corridor certification is below 98%") {
+	if !strings.Contains(joined, "La validation du corridor sûr est sous 98 %") {
 		t.Fatalf("missing corridor safety recommendation: %v", report.Recommendations)
 	}
 }
