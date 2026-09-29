@@ -56,7 +56,10 @@ type licenseRecord struct {
 	Plan        string    `json:"plan,omitempty"`
 	DurationDays int      `json:"duration_days,omitempty"`
 	ActivatedAt time.Time `json:"activated_at,omitempty"`
-	ExpiresAt   time.Time `json:"expires_at,omitempty"`
+	ExpiresAt       time.Time `json:"expires_at,omitempty"`
+	PaymentStatus   string    `json:"payment_status,omitempty"`
+	TotalPaidCents  int       `json:"total_paid_cents,omitempty"`
+	NextDueAt       time.Time `json:"next_due_at,omitempty"`
 }
 
 type supportIncident struct {
@@ -160,6 +163,21 @@ func validPlan(plan string) (string, int) {
 		return "month_1", 30
 	default:
 		return "lifetime", 0
+	}
+}
+
+func validPaymentStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "paid":
+		return "paid"
+	case "pending":
+		return "pending"
+	case "offered":
+		return "offered"
+	case "free":
+		return "free"
+	default:
+		return "unknown"
 	}
 }
 
@@ -755,8 +773,11 @@ func main() {
 			return
 		}
 		var in struct {
-			LicenseID string `json:"license_id"`
-			Plan      string `json:"plan,omitempty"`
+			LicenseID    string `json:"license_id"`
+			Plan         string `json:"plan,omitempty"`
+			AmountCents  int    `json:"amount_cents,omitempty"`
+			PaymentStatus string `json:"payment_status,omitempty"`
+			Note         string `json:"note,omitempty"`
 		}
 		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil || strings.TrimSpace(in.LicenseID) == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "license_id is required"})
@@ -792,6 +813,12 @@ func main() {
 			}
 			rec.ExpiresAt = base.Add(time.Duration(durationDays) * 24 * time.Hour)
 		}
+		if in.AmountCents < 0 {
+			in.AmountCents = 0
+		}
+		rec.PaymentStatus = validPaymentStatus(in.PaymentStatus)
+		rec.TotalPaidCents += in.AmountCents
+		rec.NextDueAt = rec.ExpiresAt
 		expiresAt := rec.ExpiresAt
 		_ = control.saveLocked()
 		control.mu.Unlock()
