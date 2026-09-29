@@ -51,6 +51,7 @@ type LicenseState = {
 type MemberSettings = {
   speed_profile: 'cautious' | 'normal' | 'fast';
   max_attacks_per_hour: number;
+  max_attacks_per_session: number;
   break_every_attacks: number;
   break_minutes: number;
   adaptive_search: boolean;
@@ -726,6 +727,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     auto_profile_sync: true,
                     auto_army_guard: true,
                     auto_resource_tracking: true,
+                    max_attacks_per_session: 100,
                   };
                   setMemberSettings(next);
                   void saveMemberSettings(next);
@@ -776,6 +778,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                   {isCustomPacing(memberSettings) ? ' · personnalisé' : ''}
                 </span>
                 <span>{memberSettings.max_attacks_per_hour} attaques/h max</span>
+                <span>{memberSettings.max_attacks_per_session} attaques / session</span>
                 <span>
                   {memberSettings.break_every_attacks > 0
                     ? `Pause ${memberSettings.break_minutes} min / ${memberSettings.break_every_attacks} attaques`
@@ -806,6 +809,28 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                       max={24}
                       value={memberSettings.max_attacks_per_hour}
                       onChange={(e) => setMemberSettings({ ...memberSettings, max_attacks_per_hour: Math.max(1, Math.min(24, Number(e.target.value) || 1)) })}
+                      onBlur={() => void saveMemberSettings(memberSettings)}
+                      className="w-20 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-center text-sm font-black"
+                    />
+                  </div>
+                </label>
+
+                <label className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-black text-zinc-950 dark:text-white">Attaques / session</div>
+                      <div className="text-[11px] font-semibold text-zinc-500">Arrêt propre du bot après cette limite</div>
+                    </div>
+                    <input
+                      type="number"
+                      disabled={memberSaving}
+                      min={1}
+                      max={500}
+                      value={memberSettings.max_attacks_per_session}
+                      onChange={(e) => setMemberSettings({
+                        ...memberSettings,
+                        max_attacks_per_session: Math.max(1, Math.min(500, Number(e.target.value) || 1)),
+                      })}
                       onBlur={() => void saveMemberSettings(memberSettings)}
                       className="w-20 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-center text-sm font-black"
                     />
