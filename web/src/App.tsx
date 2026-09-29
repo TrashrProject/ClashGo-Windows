@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import Sidebar from './components/Sidebar';
+import Sidebar, { InterfaceLevel } from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import Analytics from './components/Analytics';
 import ConfigView from './components/ConfigView';
@@ -108,6 +108,16 @@ const getInitialDarkMode = (): boolean => {
   }
 };
 
+const getInitialInterfaceLevel = (): InterfaceLevel => {
+  try {
+    const stored = localStorage.getItem('interfaceLevel');
+    if (stored === 'developer' || stored === 'advanced' || stored === 'simple') return stored;
+  } catch {
+    // Fall through to the newcomer-safe default.
+  }
+  return 'simple';
+};
+
 const getInitialSidebarExpanded = (): boolean => {
   try {
     const stored = localStorage.getItem('sidebarExpanded');
@@ -156,6 +166,7 @@ function App() {
   const [adbPort, setAdbPort] = useState(5555);
   const [darkMode, setDarkMode] = useState(getInitialDarkMode);
   const [sidebarExpanded, setSidebarExpanded] = useState(getInitialSidebarExpanded);
+  const [interfaceLevel, setInterfaceLevel] = useState<InterfaceLevel>(getInitialInterfaceLevel);
   const [playerTag, setPlayerTag] = useState('');
   const [accountReady, setAccountReady] = useState(false);
 
@@ -199,7 +210,9 @@ function App() {
         setStallTimer(conf.attack.stall_timer_seconds);
         setLootExitEnabled(conf.attack.loot_exit_enabled ?? false);
         setLootExitPercent(conf.attack.loot_exit_percent ?? 100);
-        setSimpleMode(conf.automation?.simple_mode ?? true);
+        const configuredSimpleMode = conf.automation?.simple_mode ?? true;
+        setSimpleMode(configuredSimpleMode);
+        setInterfaceLevel((current) => current === 'developer' ? current : (configuredSimpleMode ? 'simple' : 'advanced'));
         setIsRunning(running);
         setIsStarting(false);
         // Never let a null from the Go side reach the Config page — a
@@ -429,6 +442,17 @@ function App() {
     }
   }, [sidebarExpanded]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('interfaceLevel', interfaceLevel);
+    } catch (e) {
+      console.warn('Failed to save interface level:', e);
+    }
+    if (interfaceLevel === 'simple' && (tab === 'analytics' || tab === 'settings')) {
+      setTab('dashboard');
+    }
+  }, [interfaceLevel, tab]);
+
   const saveSettings = async () => {
     await SaveConfig(
       goldThreshold,
@@ -601,6 +625,9 @@ function App() {
     onSetSimpleMode: async (enabled: boolean) => {
       await SetSimpleMode(enabled);
       setSimpleMode(enabled);
+      if (interfaceLevel !== 'developer') {
+        setInterfaceLevel(enabled ? 'simple' : 'advanced');
+      }
     },
     onSave: async () => {
       // Errors intentionally bubble so ConfigView's save-status
