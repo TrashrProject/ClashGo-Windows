@@ -3955,6 +3955,9 @@ func (a *App) refreshHistory() {
 
 // SaveConfig updates config.json settings
 func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strategyFile string, searchEnabled bool, stall int, lootExitEnabled bool, lootExitPercent int) error {
+	if a.testSessionRestorePending() {
+		return fmt.Errorf("session test active: wait for it to finish before changing automation")
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -4028,6 +4031,9 @@ func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strat
 // profileJSON is used instead of a large Wails struct signature so the UI can
 // edit a profile freely without regenerating a bespoke binding for every field.
 func (a *App) SaveFarmComposition(enabled bool, townHall int, profileJSON string) error {
+	if a.testSessionRestorePending() {
+		return fmt.Errorf("session test active: wait for it to finish before changing farm composition")
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
