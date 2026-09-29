@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ApplyMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetUpdateStatus, GetVillageResources, RefreshLicense, SaveAccountConfig, SaveMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ApplyMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, RefreshLicense, SaveAccountConfig, SaveMemberSettings, UndoMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
@@ -243,6 +243,8 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [memberSaving, setMemberSaving] = React.useState(false);
   const [memberMessage, setMemberMessage] = React.useState('');
   const [memberSaveError, setMemberSaveError] = React.useState('');
+  const [memberUndoAvailable, setMemberUndoAvailable] = React.useState(false);
+  const [memberUndoBusy, setMemberUndoBusy] = React.useState(false);
   const [memberPage, setMemberPage] = React.useState<'account' | 'settings' | 'village'>(initialPage);
 
   React.useEffect(() => {
@@ -305,8 +307,12 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
 
   const refreshMemberSettings = React.useCallback(async () => {
     try {
-      const settings = await GetMemberSettings();
+      const [settings, canUndo] = await Promise.all([
+        GetMemberSettings(),
+        HasPreviousMemberSettings().catch(() => false),
+      ]);
       setMemberSettings(settings as MemberSettings);
+      setMemberUndoAvailable(Boolean(canUndo));
     } catch {
       // Member preferences are best-effort while the Wails bridge initializes.
     }
@@ -320,6 +326,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     try {
       const saved = await ApplyMemberPreset(preset);
       setMemberSettings(saved as MemberSettings);
+      setMemberUndoAvailable(true);
       setMemberMessage(
         preset === 'short'
           ? 'Session courte appliquée.'
@@ -349,6 +356,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     try {
       const saved = await SaveMemberSettings(next as any);
       setMemberSettings(saved as MemberSettings);
+      setMemberUndoAvailable(true);
       setMemberMessage('Réglages appliqués au bot.');
       onReadinessChanged?.();
     } catch (e) {
@@ -361,6 +369,25 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       }
     } finally {
       setMemberSaving(false);
+    }
+  };
+
+  const undoMemberSettings = async () => {
+    if (memberUndoBusy || memberSaving || testSessionActive || !memberUndoAvailable) return;
+    setMemberUndoBusy(true);
+    setMemberMessage('');
+    setMemberSaveError('');
+    try {
+      const restored = await UndoMemberSettings();
+      setMemberSettings(restored as MemberSettings);
+      setMemberUndoAvailable(true);
+      setMemberMessage('Dernière modification annulée. Tu peux recliquer pour rétablir l’état précédent.');
+      onReadinessChanged?.();
+    } catch (e) {
+      setMemberSaveError(e instanceof Error ? e.message : String(e));
+      setMemberUndoAvailable(false);
+    } finally {
+      setMemberUndoBusy(false);
     }
   };
 
@@ -415,6 +442,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       await DeactivateLicense();
       setConfirmDeactivate(false);
       setMemberSettings(null);
+      setMemberUndoAvailable(false);
       await refreshLicense();
       onInterfaceLevelChange('simple');
     } catch (e) {
@@ -948,7 +976,16 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 Ces réglages agissent réellement sur le bot et sont appliqués sans redémarrage. Les contrôles de sécurité restent actifs, même en mode Rapide.
               </p>
             </div>
-            <div className="flex justify-end">
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                disabled={!memberUndoAvailable || memberUndoBusy || memberSaving || testSessionActive}
+                onClick={() => void undoMemberSettings()}
+                className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-950 dark:hover:text-white disabled:opacity-30"
+                title={memberUndoAvailable ? 'Revenir à la configuration précédente' : 'Aucune modification précédente disponible'}
+              >
+                {memberUndoBusy ? 'Restauration…' : 'Annuler la dernière modification'}
+              </button>
               <button
                 type="button"
                 disabled={memberSaving || testSessionActive}
