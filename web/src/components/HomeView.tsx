@@ -142,7 +142,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   );
 
   const sessionCap = Math.max(0, Number(stats.session_attack_cap || 0));
-  const sessionAttacks = Math.max(0, Number(stats.attacks_completed || 0));
+  const sessionAttacks = Math.max(0, Number(stats.session_attacks || 0));
   const sessionProgress = sessionCap > 0
     ? Math.max(0, Math.min(100, Math.round((sessionAttacks / sessionCap) * 100)))
     : 0;
