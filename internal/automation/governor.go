@@ -24,6 +24,15 @@ func NewGovernor(cfg config.AutomationConfig) *Governor {
 	return &Governor{cfg: cfg}
 }
 
+func (g *Governor) UpdateConfig(cfg config.AutomationConfig) {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.cfg = cfg
+	g.mu.Unlock()
+}
+
 type Gate struct {
 	Wait   time.Duration
 	Reason string
