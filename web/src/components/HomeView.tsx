@@ -377,7 +377,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
               </button>
             </div>
           ) : windowsReady === true && startupCheck && !startupCheck.ready ? (() => {
-            const blocked = startupCheck.checks.find((check) => !check.ok);
+            const blocked = startupCheck.checks.find((check) => !check.ok && check.blocking !== false);
             return (
               <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                 <div>
