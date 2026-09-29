@@ -770,6 +770,11 @@ func main() {
 			plan = rec.Plan
 		}
 		plan, durationDays := validPlan(plan)
+		if rec.Plan == "lifetime" && plan != "lifetime" {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusConflict, map[string]string{"message": "lifetime license cannot be downgraded by renewal"})
+			return
+		}
 		rec.Plan = plan
 		rec.DurationDays = durationDays
 		rec.Active = true
@@ -1132,6 +1137,11 @@ func main() {
 			plan = rec.Plan
 		}
 		plan, durationDays := validPlan(plan)
+		if rec.Plan == "lifetime" && plan != "lifetime" {
+			control.mu.Unlock()
+			writeJSON(w, http.StatusConflict, map[string]string{"message": "lifetime license cannot be downgraded by renewal"})
+			return
+		}
 		rec.Plan = plan
 		rec.DurationDays = durationDays
 		rec.Active = true
