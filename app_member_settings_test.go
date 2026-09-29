@@ -161,3 +161,63 @@ func TestSanitizeMemberSettingsRaisesMinimumAttackRate(t *testing.T) {
 		t.Fatalf("BreakMinutes = %d, want 0", got.BreakMinutes)
 	}
 }
+
+
+func TestDefaultMemberSettingsAreSafeAndUsable(t *testing.T) {
+	got := defaultMemberSettings()
+	if got.SpeedProfile != "normal" {
+		t.Fatalf("SpeedProfile=%q want normal", got.SpeedProfile)
+	}
+	if got.MaxAttacksPerHour != 12 || got.BreakEveryAttacks != 5 || got.BreakMinutes != 3 {
+		t.Fatalf("unexpected default pacing: %+v", got)
+	}
+	if !got.AdaptiveSearch || !got.AutoProfileSync || !got.AutoArmyGuard || !got.AutoResourceTracking {
+		t.Fatalf("expected recommended automations enabled: %+v", got)
+	}
+}
+
+func TestApplyMemberSettingsToConfigPreservesUnrelatedFarmSettings(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Search.MinLootGold = 765432
+	cfg.Search.MinLootElixir = 654321
+	cfg.Search.MinLootDarkElixir = 4321
+	cfg.Attack.StrategyFile = "custom-strategy.yaml"
+	cfg.Upgrade.UpgradeWalls = true
+	cfg.Attack.LootExitEnabled = true
+	cfg.Attack.LootExitPercent = 77
+
+	settings := MemberSettings{
+		SpeedProfile:         "fast",
+		MaxAttacksPerHour:    14,
+		BreakEveryAttacks:    7,
+		BreakMinutes:         2,
+		AdaptiveSearch:       false,
+		AutoProfileSync:      true,
+		AutoArmyGuard:        true,
+		AutoResourceTracking: true,
+	}
+	applyMemberSettingsToConfig(cfg, settings)
+
+	if cfg.Automation.SpeedProfile != "fast" {
+		t.Fatalf("speed profile=%q want fast", cfg.Automation.SpeedProfile)
+	}
+	if cfg.Automation.MaxAttacksPerHour != 14 || cfg.Automation.BreakEveryAttacks != 7 {
+		t.Fatalf("member pacing not applied: %+v", cfg.Automation)
+	}
+	if cfg.Search.AdaptiveSearch {
+		t.Fatal("adaptive search preference was not applied")
+	}
+
+	if cfg.Search.MinLootGold != 765432 || cfg.Search.MinLootElixir != 654321 || cfg.Search.MinLootDarkElixir != 4321 {
+		t.Fatalf("member settings changed loot thresholds: %+v", cfg.Search)
+	}
+	if cfg.Attack.StrategyFile != "custom-strategy.yaml" {
+		t.Fatalf("member settings changed attack strategy: %q", cfg.Attack.StrategyFile)
+	}
+	if !cfg.Upgrade.UpgradeWalls {
+		t.Fatal("member settings changed wall-upgrade preference")
+	}
+	if !cfg.Attack.LootExitEnabled || cfg.Attack.LootExitPercent != 77 {
+		t.Fatalf("member settings changed loot-exit behavior: %+v", cfg.Attack)
+	}
+}
