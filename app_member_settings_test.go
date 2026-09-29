@@ -714,6 +714,59 @@ func TestNewLicenseRuntimeStateNeverInheritsSharedFiles(t *testing.T) {
 }
 
 
+func TestResetStatsPurgesCurrentMemberRuntimeSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	a := testLicensedApp(t, "CGO-RESET1-RESET2-RESET3-RESET4")
+
+	stateDir := a.memberRuntimeStateDir()
+	if err := os.MkdirAll(filepath.Join(stateDir, "output", "session_reports"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "output", "session_reports"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, rel := range []string{
+		"stats.json",
+		"attack_history.json",
+		filepath.Join("output", "session_reports", "latest.json"),
+	} {
+		shared := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(shared), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(shared, []byte("{\"stale\":true}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		archived := filepath.Join(stateDir, rel)
+		if err := os.MkdirAll(filepath.Dir(archived), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(archived, []byte("{\"stale\":true}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := a.ResetStats(); err != nil {
+		t.Fatalf("ResetStats failed: %v", err)
+	}
+
+	for _, rel := range []string{
+		"stats.json",
+		"attack_history.json",
+		filepath.Join("output", "session_reports", "latest.json"),
+	} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); !os.IsNotExist(err) {
+			t.Fatalf("shared %s survived reset, err=%v", rel, err)
+		}
+		if _, err := os.Stat(filepath.Join(stateDir, rel)); !os.IsNotExist(err) {
+			t.Fatalf("archived %s survived reset, err=%v", rel, err)
+		}
+	}
+}
+
 func TestArchiveMemberRuntimeStateRemovesDeletedArchivedFiles(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLASHGO_CONFIG_DIR", dir)
