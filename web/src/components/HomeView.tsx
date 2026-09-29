@@ -307,9 +307,11 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                   ? onStop
                   : blockingCheck?.action
                     ? () => runCheckAction(blockingCheck.action)
-                    : windowsBlocked
-                      ? onOpenSettings
-                      : onStart
+                    : blockingCheck
+                      ? onRunStartupCheck
+                      : windowsBlocked
+                        ? onOpenSettings
+                        : onStart
             }
             disabled={starting || startupCheckRunning}
             className={'h-14 px-7 rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all active:scale-[0.98] disabled:cursor-wait ' + actionClass}
