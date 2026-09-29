@@ -91,3 +91,32 @@ func TestFrontendWailsImportsMatchAppMethods(t *testing.T) {
 		t.Fatalf("frontend imports Wails methods not exposed by Go App:\\n%s", strings.Join(missing, "\\n"))
 	}
 }
+
+
+func TestFrontendSimpleModeTogglePersistsRuntimeAutomationMode(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("web", "src", "App.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(data)
+	if !strings.Contains(src, "SetSimpleMode,") {
+		t.Fatal("App.tsx no longer imports SetSimpleMode from the Wails binding")
+	}
+	if !strings.Contains(src, "await SetSimpleMode(enabled)") {
+		t.Fatal("automatic/simple mode toggle no longer persists the real Go automation mode")
+	}
+}
+
+func TestFrontendLiveLicenseEventRefreshesExpiry(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("web", "src", "App.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(data)
+	if !strings.Contains(src, "setLicenseExpiresAt(payload?.expires_at || '')") {
+		t.Fatal("live license_state event no longer refreshes the displayed expiry")
+	}
+	if !strings.Contains(src, "setLicenseAccessReady(Boolean(payload?.activated))") {
+		t.Fatal("live license_state event no longer updates member access state")
+	}
+}
