@@ -1,0 +1,15 @@
+{
+  "name": "clashgo-control-api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init:local": "wrangler d1 execute clashgo-control --local --file=./schema.sql",
+    "db:init:remote": "wrangler d1 execute clashgo-control --remote --file=./schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^4.39.0"
+  }
+}
