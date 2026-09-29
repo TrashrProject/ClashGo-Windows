@@ -1115,14 +1115,19 @@ function App() {
     simpleMode,
     onSetSimpleMode: async (enabled: boolean) => {
       const level: InterfaceLevel = enabled ? 'simple' : 'advanced';
-      // Persist the actual automation mode first; the interface level is only
-      // the presentation preference. Keeping both in sync avoids the UI saying
-      // "Automatique" while the Go runtime still uses the previous mode.
+      // The Go automation mode is authoritative. Reflect it immediately after
+      // the backend commit succeeds; the interface-level preference is a
+      // secondary convenience and must never leave the UI showing the opposite
+      // runtime mode if its own persistence fails.
       await SetSimpleMode(enabled);
-      await SaveMemberInterfaceLevel(level);
       setSimpleMode(enabled);
       if (interfaceLevel !== 'developer') {
         setInterfaceLevel(level);
+      }
+      try {
+        await SaveMemberInterfaceLevel(level);
+      } catch (err) {
+        console.warn('Automation mode changed but interface preference could not be saved:', err);
       }
       await refreshStartupReadiness();
     },
