@@ -17,6 +17,9 @@ interface HomeViewProps {
   onScheduleStop: (minutes: 30 | 60 | 120) => void;
   onCancelScheduledStop: () => void;
   scheduledStopAt: string;
+  sessionLootGoal: { gold: number; elixir: number; dark_elixir: number; active: boolean };
+  onSetLootGoal: (gold: number, elixir: number, dark: number) => void;
+  onClearLootGoal: () => void;
   onStartTestSession: () => void;
   onStartQuickTestSession: () => void;
   onStop: () => void;
@@ -250,7 +253,7 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, sessionReport, testSessionActive, running, starting,
-    onStart, onStartWithPreset, onSpeedChange, onExtendSession, onScheduleStop, onCancelScheduledStop, scheduledStopAt, onStartTestSession, onStartQuickTestSession, onStop, onPause, onResume, paused, onStopAfterAttack, gracefulStopPending, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
+    onStart, onStartWithPreset, onSpeedChange, onExtendSession, onScheduleStop, onCancelScheduledStop, scheduledStopAt, sessionLootGoal, onSetLootGoal, onClearLootGoal, onStartTestSession, onStartQuickTestSession, onStop, onPause, onResume, paused, onStopAfterAttack, gracefulStopPending, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
     licenseReady, licenseRequired, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
     memberName, licensePlan, licenseExpiresAt, latestBootReport, currentArmy,
@@ -347,6 +350,14 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     if (!Number.isFinite(at.getTime())) return '';
     return at.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   }, [scheduledStopAt]);
+
+  const sessionLootGoalLabel = React.useMemo(() => {
+    if (!sessionLootGoal.active) return '';
+    if (sessionLootGoal.gold > 0) return formatLoot(sessionLootGoal.gold) + ' or';
+    if (sessionLootGoal.elixir > 0) return formatLoot(sessionLootGoal.elixir) + ' élixir';
+    if (sessionLootGoal.dark_elixir > 0) return formatLoot(sessionLootGoal.dark_elixir) + ' élixir noir';
+    return '';
+  }, [sessionLootGoal]);
 
   const sessionETA = React.useMemo(() => {
     if (sessionCap <= 0 || sessionAttacks >= sessionCap || paused) return '';
@@ -775,6 +786,63 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
             >
               {paused ? 'REPRENDRE' : 'PAUSE APRÈS L’ATTAQUE'}
             </button>
+          </div>
+        </section>
+      )}
+
+      {running && !testSessionActive && (
+        <section className="rounded-[1.5rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-premium dark:shadow-none">
+          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+            <div>
+              <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">Objectif de butin</div>
+              <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white">
+                {sessionLootGoalLabel ? 'Arrêt à ' + sessionLootGoalLabel : 'Arrêter quand la session a assez rapporté'}
+              </div>
+              <div className="mt-1 text-[11px] font-semibold text-zinc-500">
+                ClashGO laisse l’attaque se terminer, confirme le retour au village puis arrête la session.
+              </div>
+            </div>
+
+            {sessionLootGoal.active ? (
+              <button
+                type="button"
+                onClick={onClearLootGoal}
+                className="rounded-xl border border-rose-200 dark:border-rose-900/50 px-4 py-2.5 text-[9px] font-black uppercase tracking-widest text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+              >
+                ANNULER L’OBJECTIF
+              </button>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSetLootGoal(5_000_000, 0, 0)}
+                  className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[9px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                >
+                  5M OR
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSetLootGoal(10_000_000, 0, 0)}
+                  className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[9px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                >
+                  10M OR
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSetLootGoal(0, 5_000_000, 0)}
+                  className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[9px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                >
+                  5M ÉLIXIR
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSetLootGoal(0, 0, 50_000)}
+                  className="rounded-xl bg-zinc-950 dark:bg-white px-3.5 py-2.5 text-[9px] font-black uppercase tracking-widest text-white dark:text-zinc-950"
+                >
+                  50K NOIR
+                </button>
+              </div>
+            )}
           </div>
         </section>
       )}
