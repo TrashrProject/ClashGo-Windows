@@ -148,6 +148,7 @@ async function activateLicense(request, env) {
 
   const key = clean(body.license_key).toUpperCase();
   const machine = clean(body.machine_id);
+  const machineName = clean(body.machine_name).slice(0, 80);
   const appVersion = clean(body.app_version);
   if (!key || !machine) {
     return json({ message: "license key and machine id are required" }, 400);
@@ -189,8 +190,8 @@ async function activateLicense(request, env) {
   }
 
   await env.DB.prepare(
-    "UPDATE licenses SET machine_id = ?1, last_seen_at = ?2, app_version = ?3, activated_at = ?4, expires_at = ?5 WHERE id = ?6"
-  ).bind(machine, now.toISOString(), appVersion, activatedAt, expiresAt, license.id).run();
+    "UPDATE licenses SET machine_id = ?1, machine_name = ?2, last_seen_at = ?3, app_version = ?4, activated_at = ?5, expires_at = ?6 WHERE id = ?7"
+  ).bind(machine, machineName || null, now.toISOString(), appVersion, activatedAt, expiresAt, license.id).run();
 
   if (license.customer_id) {
     await env.DB.prepare(
@@ -277,7 +278,7 @@ async function ingestIncident(request, env) {
 async function listLicenses(env) {
   const result = await env.DB.prepare(`
     SELECT
-      l.id, l.hint, l.role, l.active, l.machine_id, l.created_at, l.last_seen_at, l.app_version,
+      l.id, l.hint, l.role, l.active, l.machine_id, l.machine_name, l.created_at, l.last_seen_at, l.app_version,
       l.plan, l.duration_days, l.activated_at, l.expires_at, l.customer_id,
       l.denied_activations, l.last_denied_at, l.last_denied_machine,
       c.display_name AS customer_name, c.contact AS customer_contact, c.notes AS customer_notes,
@@ -517,7 +518,7 @@ async function customerDetail(env, customerId) {
   if (!customer) return null;
 
   const licenses = await env.DB.prepare(`
-    SELECT id, hint, role, active, machine_id, created_at, last_seen_at,
+    SELECT id, hint, role, active, machine_id, machine_name, created_at, last_seen_at,
            app_version, plan, duration_days, activated_at, expires_at
     FROM licenses
     WHERE customer_id = ?1
@@ -619,7 +620,7 @@ async function resetMachine(request, env, protectedLicenseId = "") {
   if (!current) return json({ message: "license not found" }, 404);
 
   const result = await env.DB.prepare(
-    "UPDATE licenses SET machine_id = NULL, last_seen_at = NULL, app_version = NULL WHERE id = ?1"
+    "UPDATE licenses SET machine_id = NULL, machine_name = NULL, last_seen_at = NULL, app_version = NULL WHERE id = ?1"
   ).bind(id).run();
   if (!result.meta?.changes) return json({ message: "license not found" }, 404);
 
