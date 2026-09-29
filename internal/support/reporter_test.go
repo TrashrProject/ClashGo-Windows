@@ -314,3 +314,33 @@ func TestReporterDropsUnattributablePreActivationErrors(t *testing.T) {
 		t.Fatalf("pre-activation error should not create an attributable queue: %v", err)
 	}
 }
+
+
+func TestReporterDeduplicationIsScopedPerLicense(t *testing.T) {
+	dir := t.TempDir()
+	identity := newTestIdentity()
+	r := &Reporter{
+		appVersion: "test",
+		identity:   identity,
+		queuePath:  filepath.Join(dir, "queue.jsonl"),
+		recent:     make(map[string]time.Time),
+	}
+
+	line := []byte(`{"level":"error","message":"same failure","surface":"frontend"}`)
+	if _, err := r.Write(line); err != nil {
+		t.Fatal(err)
+	}
+
+	identity.key = "CGO-USERBB-AAAAAA-BBBBBB-CCCCCC"
+	if _, err := r.Write(line); err != nil {
+		t.Fatal(err)
+	}
+
+	items := r.readQueueLocked()
+	if len(items) != 2 {
+		t.Fatalf("same error from two licenses should produce two incidents, got %d", len(items))
+	}
+	if items[0].QueueOwner == items[1].QueueOwner {
+		t.Fatal("incidents from different licenses share the same queue owner")
+	}
+}
