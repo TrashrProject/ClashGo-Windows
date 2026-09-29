@@ -28,7 +28,7 @@ type FarmProfile = {
   label: string;
   troop_capacity: number;
   spell_capacity: number;
-  troops: FarmUnit[];
+  troupes: FarmUnit[];
   spells: FarmUnit[];
   heroes: string[];
   siege: string;
@@ -88,11 +88,11 @@ type VillageResources = {
 
 type PlayerProfile = {
   tag: string; name: string; townHallLevel: number; expLevel: number;
-  trophies: number; bestTrophées: number; warStars: number;
+  trophies: number; bestTrophies: number; warStars: number;
   attackWins: number; defenseWins: number; donations: number; donationsReceived: number;
   clan?: { tag: string; name: string; clanLevel: number };
   league?: { id: number; name: string };
-  troops: Unit[]; heroes: Unit[]; spells: Unit[]; heroEquipment: Unit[];
+  troupes: Unit[]; heroes: Unit[]; spells: Unit[]; heroEquipment: Unit[];
 };
 
 interface AccountViewProps {
@@ -111,7 +111,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [profile, setProfile] = React.useState<PlayerProfile | null>(null);
   const [resources, setResources] = React.useState<VillageResources | null>(null);
   const [farmProfile, setFarmProfile] = React.useState<FarmProfile | null>(null);
-  const [currentArmée, setCurrentArmée] = React.useState<CurrentArmée | null>(null);
+  const [currentArmy, setCurrentArmée] = React.useState<CurrentArmée | null>(null);
   const [serviceConfigured, setServiceConfigured] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState('');
@@ -298,7 +298,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
 
   const homeTroops = (profile?.troops ?? []).filter(u => u.village === 'home');
   const homeHeroes = (profile?.heroes ?? []).filter(u => u.village === 'home');
-  const homeSorts = (profile?.spells ?? []).filter(u => u.village === 'home');
+  const homeSpells = (profile?.spells ?? []).filter(u => u.village === 'home');
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
@@ -709,7 +709,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               ['HDV', 'TH ' + profile.townHallLevel],
               ['XP', String(profile.expLevel)],
               ['Trophées', profile.trophies.toLocaleString()],
-              ['Record', profile.bestTrophées.toLocaleString()],
+              ['Record', profile.bestTrophies.toLocaleString()],
               ['Étoiles de guerre', profile.warStars.toLocaleString()],
               ['Ligue', profile.league?.name || '—'],
             ].map(([label, value]) => (
@@ -720,7 +720,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
             ))}
           </section>
 
-          {currentArmée && currentArmée.units.length > 0 && (
+          {currentArmy && currentArmy.units.length > 0 && (
             <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
               <div className="flex items-center justify-between gap-4 mb-5">
                 <div>
@@ -728,44 +728,44 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                   <div className="mt-1 flex flex-wrap items-center gap-3">
                     <h4 className="text-xl font-black text-zinc-950 dark:text-white">Composition détectée</h4>
                     <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border ${
-                      currentArmée.uncertain
+                      currentArmy.uncertain
                         ? 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
-                        : currentArmée.ready
+                        : currentArmy.ready
                           ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
                           : 'bg-rose-500/10 border-rose-500/20 text-rose-600 dark:text-rose-400'
                     }`}>
-                      {currentArmée.uncertain ? 'Vérification vision' : currentArmée.ready ? 'Composition conforme' : 'Composition différente'}
+                      {currentArmy.uncertain ? 'Vérification vision' : currentArmy.ready ? 'Composition conforme' : 'Composition différente'}
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-zinc-500">
                     Détectée automatiquement depuis la barre de troupes avant le déploiement.
-                    {currentArmée.target_label ? ` Target: ${currentArmée.target_label}.` : ''}
+                    {currentArmy.target_label ? ` Cible : ${currentArmy.target_label}.` : ''}
                   </p>
                 </div>
                 <div className="text-[10px] font-bold text-zinc-400">
-                  {new Date(currentArmée.timestamp).toLocaleTimeString()}
+                  {new Date(currentArmy.timestamp).toLocaleTimeString()}
                 </div>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
-                {currentArmée.units.map((unit, idx) => (
+                {currentArmy.units.map((unit, idx) => (
                   <div key={idx} className="rounded-xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-3 min-w-0">
-                    <div className="truncate text-xs font-black text-zinc-900 dark:text-white" title={unit.name || 'Unknown card'}>
-                      {unit.name || 'Unknown card'}
+                    <div className="truncate text-xs font-black text-zinc-900 dark:text-white" title={unit.name || 'Carte inconnue'}>
+                      {unit.name || 'Carte inconnue'}
                     </div>
                     <div className="mt-1 flex items-center justify-between gap-2 text-[10px] font-bold text-zinc-400">
                       <span>{unit.category}</span>
-                      <span className="tabular-nums">{unit.count > 0 ? '×' + unit.count : 'detected'}</span>
+                      <span className="tabular-nums">{unit.count > 0 ? '×' + unit.count : 'détecté'}</span>
                     </div>
                   </div>
                 ))}
               </div>
-              {!!currentArmée.warnings?.length && (
+              {!!currentArmy.warnings?.length && (
                 <details className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
                   <summary className="cursor-pointer text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                    Notes de détection ({currentArmée.warnings.length})
+                    Notes de détection ({currentArmy.warnings.length})
                   </summary>
                   <div className="mt-3 space-y-1">
-                    {currentArmée.warnings.map((warning, idx) => (
+                    {currentArmy.warnings.map((warning, idx) => (
                       <div key={idx} className="text-[11px] font-medium text-zinc-500">{warning}</div>
                     ))}
                   </div>
@@ -780,7 +780,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 <div>
                   <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">Plan de farm automatique</div>
                   <h4 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">{farmProfile.label}</h4>
-                  <p className="mt-1 text-xs font-medium text-zinc-500">Selected automatically from your linked HDV. No manual setup required.</p>
+                  <p className="mt-1 text-xs font-medium text-zinc-500">Sélectionné automatiquement selon ton HDV lié. Aucun réglage manuel nécessaire.</p>
                 </div>
                 <div className="flex gap-3 text-center">
                   <div className="rounded-xl bg-zinc-50 dark:bg-zinc-950/40 px-4 py-3">
@@ -795,10 +795,10 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               </div>
 
               <div className="mt-5 grid grid-cols-1 md:grid-cols-4 gap-3">
-                <PlanGroup title="Troops" items={farmProfile.troops.map(u => u.count + '× ' + u.name)} />
+                <PlanGroup title="Troupes" items={farmProfile.troops.map(u => u.count + '× ' + u.name)} />
                 <PlanGroup title="Sorts" items={farmProfile.spells.map(u => u.count + '× ' + u.name)} />
-                <PlanGroup title="Heroes" items={farmProfile.heroes} />
-                <PlanGroup title="Siege" items={farmProfile.siege ? [farmProfile.siege] : ['None']} />
+                <PlanGroup title="Héros" items={farmProfile.heroes} />
+                <PlanGroup title="Siège" items={farmProfile.siege ? [farmProfile.siege] : ['Aucun']} />
               </div>
             </section>
           )}
@@ -807,50 +807,50 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
             <div className="lg:col-span-2 rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
               <div className="flex items-center justify-between mb-5">
                 <div>
-                  <h4 className="text-xl font-black text-zinc-950 dark:text-white">Account progression</h4>
-                  <p className="text-xs text-zinc-500 mt-1">Unlocked levels from the official player profile.</p>
+                  <h4 className="text-xl font-black text-zinc-950 dark:text-white">Progression du compte</h4>
+                  <p className="text-xs text-zinc-500 mt-1">Niveaux débloqués depuis le profil officiel du joueur.</p>
                 </div>
-                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">{homeTroops.length} troops</span>
+                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">{homeTroops.length} troupes</span>
               </div>
               <div className="space-y-6">
-                <UnitGrid title="Heroes" units={homeHeroes} />
-                <UnitGrid title="Troops" units={homeTroops} />
-                <UnitGrid title="Sorts" units={homeSorts} />
+                <UnitGrid title="Héros" units={homeHeroes} />
+                <UnitGrid title="Troupes" units={homeTroops} />
+                <UnitGrid title="Sorts" units={homeSpells} />
               </div>
             </div>
 
             <div className="space-y-5">
               <div className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
                 <h4 className="text-lg font-black text-zinc-950 dark:text-white">Clan</h4>
-                <div className="mt-4 text-2xl font-black text-zinc-950 dark:text-white">{profile.clan?.name || 'No clan'}</div>
-                {profile.clan && <div className="mt-1 text-xs font-mono text-zinc-500">{profile.clan.tag} · Level {profile.clan.clanLevel}</div>}
+                <div className="mt-4 text-2xl font-black text-zinc-950 dark:text-white">{profile.clan?.name || 'Aucun clan'}</div>
+                {profile.clan && <div className="mt-1 text-xs font-mono text-zinc-500">{profile.clan.tag} · Niveau {profile.clan.clanLevel}</div>}
               </div>
 
               <div className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
                 <div className="flex items-center gap-2">
                   <span className="material-symbols-outlined text-amber-500">database</span>
-                  <h4 className="text-lg font-black text-zinc-950 dark:text-white">Live resources</h4>
+                  <h4 className="text-lg font-black text-zinc-950 dark:text-white">Ressources en direct</h4>
                 </div>
                 <p className="mt-2 text-xs font-medium text-zinc-500">
-                  Read automatically from the BlueStacks village HUD. No extra setup is required.
+                  Lues automatiquement depuis le village dans BlueStacks. Aucun réglage supplémentaire n’est nécessaire.
                 </p>
                 <div className="mt-4 space-y-2">
                   {[
                     ['Gold', resources?.gold_valid ? resources.gold : null],
                     ['Elixir', resources?.elixir_valid ? resources.elixir : null],
-                    ['Dark Elixir', resources?.dark_valid ? resources.dark_elixir : null],
+                    ['Élixir noir', resources?.dark_valid ? resources.dark_elixir : null],
                   ].map(([name, value]) => (
                     <div key={String(name)} className="flex justify-between items-center rounded-xl bg-zinc-50 dark:bg-zinc-950/40 px-4 py-3">
                       <span className="text-xs font-black text-zinc-500">{name}</span>
                       <span className="text-sm font-black text-zinc-950 dark:text-white tabular-nums">
-                        {typeof value === 'number' ? value.toLocaleString() : 'Waiting for village scan'}
+                        {typeof value === 'number' ? value.toLocaleString() : 'En attente du scan du village'}
                       </span>
                     </div>
                   ))}
                 </div>
                 {resources?.timestamp && (
                   <div className="mt-3 text-[10px] font-bold text-zinc-400">
-                    Last scan: {new Date(resources.timestamp).toLocaleTimeString()}
+                    Dernier scan : {new Date(resources.timestamp).toLocaleTimeString()}
                   </div>
                 )}
               </div>
@@ -876,7 +876,7 @@ const PlanGroup: React.FC<{ title: string; items: string[] }> = ({ title, items 
 const UnitGrid: React.FC<{ title: string; units: Unit[] }> = ({ title, units }) => (
   <div>
     <div className="mb-3 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">{title}</div>
-    {units.length === 0 ? <div className="text-xs text-zinc-400">No data</div> : (
+    {units.length === 0 ? <div className="text-xs text-zinc-400">Aucune donnée</div> : (
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
         {units.map(unit => (
           <div key={unit.name} className="rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/30 px-3 py-3 min-w-0">
