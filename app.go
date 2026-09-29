@@ -1268,6 +1268,7 @@ func applyMemberSpeedProfile(cfg *config.BotConfig, profile string) {
 	case "cautious":
 		cfg.Attack.DropDelay = config.Duration{Duration: 700 * time.Millisecond}
 		cfg.Attack.SpellDelay = config.Duration{Duration: 2200 * time.Millisecond}
+		cfg.Attack.MinSecondsBetweenAttacks = 45
 		cfg.Automation.MaxAttacksPerHour = 8
 		if cfg.Automation.BreakEveryAttacks <= 0 {
 			cfg.Automation.BreakEveryAttacks = 4
@@ -1278,6 +1279,7 @@ func applyMemberSpeedProfile(cfg *config.BotConfig, profile string) {
 	case "fast":
 		cfg.Attack.DropDelay = config.Duration{Duration: 300 * time.Millisecond}
 		cfg.Attack.SpellDelay = config.Duration{Duration: 1300 * time.Millisecond}
+		cfg.Attack.MinSecondsBetweenAttacks = 20
 		cfg.Automation.MaxAttacksPerHour = 16
 		if cfg.Automation.BreakEveryAttacks <= 0 {
 			cfg.Automation.BreakEveryAttacks = 6
@@ -1288,6 +1290,7 @@ func applyMemberSpeedProfile(cfg *config.BotConfig, profile string) {
 	default:
 		cfg.Attack.DropDelay = config.Duration{Duration: 500 * time.Millisecond}
 		cfg.Attack.SpellDelay = config.Duration{Duration: 2 * time.Second}
+		cfg.Attack.MinSecondsBetweenAttacks = 30
 		cfg.Automation.MaxAttacksPerHour = 12
 		if cfg.Automation.BreakEveryAttacks <= 0 {
 			cfg.Automation.BreakEveryAttacks = 5
