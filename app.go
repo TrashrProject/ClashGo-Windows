@@ -2734,7 +2734,7 @@ func (a *App) ApplySavedMemberPreset(slot int) (MemberSettings, error) {
 	store := loadMemberPresetStore(a.memberPresetStorePath())
 	for _, item := range store.Slots {
 		if item.Slot == slot {
-			return a.saveMemberSettings(item.Settings, true)
+			return a.saveMemberSettings(item.Settings, false)
 		}
 	}
 	return MemberSettings{}, fmt.Errorf("saved member preset not found")
