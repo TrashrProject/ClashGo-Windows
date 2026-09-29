@@ -1506,3 +1506,108 @@ func TestUnknownMemberPresetReturnsSanitizedOriginal(t *testing.T) {
 		t.Fatalf("unknown preset mutated settings: got=%+v want=%+v", got, want)
 	}
 }
+
+
+func TestTestSessionRestorePathIsPerLicense(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+
+	first := testLicensedApp(t, "CGO-TESTA1-TESTA2-TESTA3-TESTA4")
+	firstPath := first.testSessionRestorePath()
+	if firstPath == "" {
+		t.Fatal("expected first licensed test-session restore path")
+	}
+
+	// Replace the persisted activation with a different licence and build a
+	// fresh service, exactly as a local member switch would do.
+	secondPayload := map[string]any{
+		"license_key": "CGO-TESTB1-TESTB2-TESTB3-TESTB4",
+		"role":        "member",
+		"machine_id":  "test-machine",
+	}
+	data, err := json.Marshal(secondPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "license.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second := &App{license: licensing.New("", "test")}
+	secondPath := second.testSessionRestorePath()
+	if secondPath == "" {
+		t.Fatal("expected second licensed test-session restore path")
+	}
+	if firstPath == secondPath {
+		t.Fatalf("two licences share a test-session restore file: %q", firstPath)
+	}
+}
+
+func TestRestoreTestSessionSettingsRestoresExactMemberProfile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	a := testLicensedApp(t, "CGO-REST01-REST02-REST03-REST04")
+
+	original := MemberSettings{
+		InterfaceLevel:       "advanced",
+		SpeedProfile:         "fast",
+		MaxAttacksPerHour:    15,
+		MaxAttacksPerSession: 77,
+		BreakEveryAttacks:    8,
+		BreakMinutes:         6,
+		AdaptiveSearch:       false,
+		AutoProfileSync:      true,
+		AutoArmyGuard:        true,
+		AutoResourceTracking: true,
+	}
+	temporary := original
+	temporary.InterfaceLevel = "simple"
+	temporary.SpeedProfile = "normal"
+	temporary.MaxAttacksPerHour = 12
+	temporary.MaxAttacksPerSession = 10
+	temporary.BreakEveryAttacks = 5
+	temporary.BreakMinutes = 3
+	temporary.AdaptiveSearch = true
+
+	restorePath := a.testSessionRestorePath()
+	if err := saveMemberProfileFile(restorePath, original); err != nil {
+		t.Fatalf("save restore snapshot: %v", err)
+	}
+	if err := saveMemberProfileFile(a.memberProfilePath(), temporary); err != nil {
+		t.Fatalf("save temporary profile: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	applyMemberSettingsToConfig(cfg, temporary)
+	if err := config.Save("config.json", cfg); err != nil {
+		t.Fatalf("save temporary config: %v", err)
+	}
+
+	if err := a.restoreTestSessionSettings(); err != nil {
+		t.Fatalf("restoreTestSessionSettings: %v", err)
+	}
+
+	got, ok := a.loadMemberProfile()
+	if !ok {
+		t.Fatal("restored member profile missing")
+	}
+	want := sanitizeMemberSettings(original)
+	if got != want {
+		t.Fatalf("restored profile mismatch: got=%+v want=%+v", got, want)
+	}
+	if _, err := os.Stat(restorePath); !os.IsNotExist(err) {
+		t.Fatalf("restore snapshot survived successful restore: %v", err)
+	}
+	if _, err := os.Stat(restorePath + ".bak"); !os.IsNotExist(err) {
+		t.Fatalf("restore backup survived successful restore: %v", err)
+	}
+
+	cfgAfter := config.LoadOrDefault("config.json")
+	if cfgAfter.Automation.SpeedProfile != want.SpeedProfile ||
+		cfgAfter.Automation.MaxAttacksPerHour != want.MaxAttacksPerHour ||
+		cfgAfter.Attack.MaxAttackPerSession != want.MaxAttacksPerSession ||
+		cfgAfter.Automation.BreakEveryAttacks != want.BreakEveryAttacks ||
+		int(cfgAfter.Automation.BreakDuration.Duration/time.Minute) != want.BreakMinutes ||
+		cfgAfter.Search.AdaptiveSearch != want.AdaptiveSearch {
+		t.Fatalf("runtime config was not restored from member snapshot: %+v", cfgAfter.Automation)
+	}
+}
