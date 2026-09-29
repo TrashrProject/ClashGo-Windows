@@ -60,6 +60,9 @@ type licenseRecord struct {
 	PaymentStatus   string    `json:"payment_status,omitempty"`
 	TotalPaidCents  int       `json:"total_paid_cents,omitempty"`
 	NextDueAt       time.Time `json:"next_due_at,omitempty"`
+	DeniedActivations int       `json:"denied_activations,omitempty"`
+	LastDeniedAt      time.Time `json:"last_denied_at,omitempty"`
+	LastDeniedMachine string    `json:"last_denied_machine,omitempty"`
 }
 
 type supportIncident struct {
@@ -647,6 +650,10 @@ func main() {
 			return
 		}
 		if rec.MachineID != "" && rec.MachineID != in.MachineID {
+			rec.DeniedActivations++
+			rec.LastDeniedAt = now
+			rec.LastDeniedMachine = in.MachineID
+			_ = control.saveLocked()
 			control.mu.Unlock()
 			writeJSON(w, http.StatusConflict, map[string]string{"message": "license is already activated on another machine"})
 			return
