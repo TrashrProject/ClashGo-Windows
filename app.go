@@ -1817,6 +1817,36 @@ func applyMemberSpeedProfile(cfg *config.BotConfig, profile string) {
 	}
 }
 
+func applyMemberPreset(settings MemberSettings, preset string) (MemberSettings, error) {
+	preset = strings.ToLower(strings.TrimSpace(preset))
+	settings = sanitizeMemberSettings(settings)
+	settings.AdaptiveSearch = true
+
+	switch preset {
+	case "short":
+		settings.SpeedProfile = "normal"
+		settings.MaxAttacksPerHour = 12
+		settings.MaxAttacksPerSession = 10
+		settings.BreakEveryAttacks = 5
+		settings.BreakMinutes = 3
+	case "balanced":
+		settings.SpeedProfile = "normal"
+		settings.MaxAttacksPerHour = 12
+		settings.MaxAttacksPerSession = 50
+		settings.BreakEveryAttacks = 5
+		settings.BreakMinutes = 3
+	case "fast":
+		settings.SpeedProfile = "fast"
+		settings.MaxAttacksPerHour = 16
+		settings.MaxAttacksPerSession = 100
+		settings.BreakEveryAttacks = 6
+		settings.BreakMinutes = 2
+	default:
+		return settings, fmt.Errorf("unknown member preset %q", preset)
+	}
+	return sanitizeMemberSettings(settings), nil
+}
+
 func sanitizeMemberSettings(settings MemberSettings) MemberSettings {
 	switch strings.ToLower(strings.TrimSpace(settings.InterfaceLevel)) {
 	case "advanced":
@@ -2509,6 +2539,15 @@ func (a *App) SaveMemberInterfaceLevel(level string) error {
 		a.bot.UpdateConfig(cfg)
 	}
 	return nil
+}
+
+func (a *App) ApplyMemberPreset(preset string) (MemberSettings, error) {
+	current := a.GetMemberSettings()
+	next, err := applyMemberPreset(current, preset)
+	if err != nil {
+		return MemberSettings{}, err
+	}
+	return a.SaveMemberSettings(next)
 }
 
 func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error) {
