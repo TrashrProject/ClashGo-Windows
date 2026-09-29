@@ -3105,7 +3105,11 @@ func (a *App) restoreTestSessionSettings() error {
 	if !ok {
 		return nil
 	}
-	if _, err := a.SaveMemberSettings(settings); err != nil {
+	// Internal restoration must be allowed while the runtime is tearing down.
+	// Public member edits stay blocked during a test session, but the cleanup
+	// path is precisely what owns the temporary profile and must be able to
+	// put the member's previous settings back before teardown completes.
+	if _, err := a.saveMemberSettings(settings, true); err != nil {
 		return err
 	}
 	removeTestSessionRestoreFiles(path)
@@ -3166,13 +3170,19 @@ func (a *App) ApplyMemberPreset(preset string) (MemberSettings, error) {
 }
 
 func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error) {
+	return a.saveMemberSettings(settings, false)
+}
+
+func (a *App) saveMemberSettings(settings MemberSettings, internalRestore bool) (MemberSettings, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	// A temporary 10-attack test owns the pacing profile until it finishes.
-	// Reject concurrent member edits instead of accepting changes that would
-	// then be overwritten by the crash-safe restoration snapshot.
-	if a.testSessionRestorePending() && (a.bot != nil || a.cancel != nil || a.stopping) {
+	// Reject concurrent USER edits instead of accepting changes that would
+	// then be overwritten by the crash-safe restoration snapshot. Internal
+	// cleanup is intentionally exempt so Stop/autonomous completion can
+	// restore the exact previous profile while a.stopping is still true.
+	if !internalRestore && a.testSessionRestorePending() && (a.bot != nil || a.cancel != nil || a.stopping) {
 		return MemberSettings{}, fmt.Errorf("session test active: wait for it to finish before changing member settings")
 	}
 
@@ -3205,13 +3215,15 @@ func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error
 
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
-		a.bot.RecordMemberSettingsChange(
-			settings.SpeedProfile,
-			settings.MaxAttacksPerHour,
-			settings.MaxAttacksPerSession,
-			settings.BreakEveryAttacks,
-			settings.BreakMinutes,
-		)
+		if !internalRestore {
+			a.bot.RecordMemberSettingsChange(
+				settings.SpeedProfile,
+				settings.MaxAttacksPerHour,
+				settings.MaxAttacksPerSession,
+				settings.BreakEveryAttacks,
+				settings.BreakMinutes,
+			)
+		}
 	}
 	return a.GetMemberSettings(), nil
 }
