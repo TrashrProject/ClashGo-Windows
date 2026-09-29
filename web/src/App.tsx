@@ -1364,6 +1364,7 @@ function App() {
             <SettingsView
               stats={stats}
               isRunning={isRunning}
+              isStarting={isStarting}
               adbPort={adbPort}
               darkMode={darkMode}
               setDarkMode={setDarkMode}
