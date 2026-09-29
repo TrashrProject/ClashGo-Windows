@@ -35,7 +35,7 @@ func TestCloudflareDeveloperAdminContractMatchesDesktop(t *testing.T) {
 	}
 
 	mutatingRoutes := []string{
-		`path === "/v1/developer/licenses"`,
+		`request.method === "POST" && path === "/v1/developer/licenses"`,
 		"/v1/developer/licenses/reset-machine",
 		"/v1/developer/licenses/set-role",
 		"/v1/developer/licenses/set-active",
