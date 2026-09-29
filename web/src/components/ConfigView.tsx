@@ -33,6 +33,15 @@ interface ConfigViewProps {
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
+const friendlyAutomationError = (value: unknown): string => {
+  const raw = value instanceof Error ? value.message : String(value || '');
+  const text = raw.toLowerCase();
+  if (text.includes('session test active')) {
+    return 'Une session test est en cours. Attends sa fin ou arrête-la avant de modifier l’automatisation.';
+  }
+  return raw || 'Impossible d’enregistrer les réglages.';
+};
+
 // Range bounds for the numeric fields. Out-of-range values get a red
 // ring + aria-invalid so the user sees the problem before saving.
 const THRESHOLD_MAX = 10_000_000;
@@ -112,7 +121,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
       }, 1800);
     } catch (err) {
       setSaveStatus('error');
-      setLastSaveError(err instanceof Error ? err.message : String(err));
+      setLastSaveError(friendlyAutomationError(err));
       errorTimerRef.current = window.setTimeout(() => {
         setSaveStatus('idle');
         setLastSaveError(null);
