@@ -316,20 +316,22 @@ function App() {
         .catch((err: unknown) => console.warn('GetSystemDiagnostics failed:', err));
     }
     if (tab === 'dashboard') {
-      void Promise.all([GetAttackHistory(), GetCurrentArmy(), GetSessionReport()])
-        .then(([h, army, report]) => {
+      void Promise.all([GetAttackHistory(), GetCurrentArmy(), GetSessionReport(), GetActivity()])
+        .then(([h, army, report, activityValue]) => {
           setHistory((h ?? []) as unknown as AttackReport[]);
           setCurrentArmy((army || null) as unknown as CurrentArmyStatus | null);
+          setActivity((activityValue ?? []) as unknown as ActivityEvent[]);
           const typed = report as unknown as SessionReportView;
           setSessionReport(typed && (typed.attacks || 0) > 0 ? typed : null);
         })
         .catch((err: unknown) => console.warn('Home refresh failed:', err));
     }
     if (tab === 'activity') {
-      void Promise.all([GetAttackHistory(), GetLatestAttackReplay(), GetSessionReport()])
-        .then(([h, latest, report]) => {
+      void Promise.all([GetAttackHistory(), GetLatestAttackReplay(), GetSessionReport(), GetActivity()])
+        .then(([h, latest, report, activityValue]) => {
           setHistory((h ?? []) as unknown as AttackReport[]);
           setReplay((latest ?? { available: false, complete: false, events: [] }) as unknown as AttackReplayView);
+          setActivity((activityValue ?? []) as unknown as ActivityEvent[]);
           const typed = report as unknown as SessionReportView;
           setSessionReport(typed && (typed.attacks || 0) > 0 ? typed : null);
         })
