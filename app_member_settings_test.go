@@ -666,3 +666,27 @@ func TestNewLicenseRuntimeStateNeverInheritsSharedFiles(t *testing.T) {
 		t.Fatalf("new member state marker missing: %v", err)
 	}
 }
+
+
+func TestArchiveMemberRuntimeStateRemovesDeletedArchivedFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	a := testLicensedApp(t, "CGO-DELETE-STATE1-STATE2-STATE3")
+
+	stateDir := a.memberRuntimeStateDir()
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(stateDir, "stats.json")
+	if err := os.WriteFile(stale, []byte(`{"attacks_completed":99}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Shared stats are intentionally absent, as after ResetStats.
+	if err := a.archiveMemberRuntimeState(false); err != nil {
+		t.Fatalf("archiveMemberRuntimeState failed: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale archived stats should be removed, stat err=%v", err)
+	}
+}
