@@ -42,6 +42,7 @@ type profileCache struct {
 
 
 type licenseRecord struct {
+	ID         string    `json:"id"`
 	Hint       string    `json:"hint"`
 	Role       string    `json:"role"`
 	Active     bool      `json:"active"`
@@ -105,6 +106,13 @@ func (s *controlStore) saveLocked() error {
 func hashLicense(key string) string {
 	sum := sha256.Sum256([]byte(strings.ToUpper(strings.TrimSpace(key))))
 	return hex.EncodeToString(sum[:])
+}
+
+func licenseIDFromHash(hash string) string {
+	if len(hash) > 16 {
+		return hash[:16]
+	}
+	return hash
 }
 
 func licenseHint(key string) string {
@@ -481,9 +489,13 @@ func main() {
 		}
 		control.mu.RLock()
 		rows := make([]licenseRecord, 0, len(control.data.Licenses))
-		for _, rec := range control.data.Licenses {
+		for hash, rec := range control.data.Licenses {
 			if rec != nil {
-				rows = append(rows, *rec)
+				cp := *rec
+				if cp.ID == "" {
+					cp.ID = licenseIDFromHash(hash)
+				}
+				rows = append(rows, cp)
 			}
 		}
 		control.mu.RUnlock()
@@ -516,7 +528,9 @@ func main() {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "key generation failed"})
 				return
 			}
-			control.data.Licenses[hashLicense(key)] = &licenseRecord{
+			keyHash := hashLicense(key)
+			control.data.Licenses[keyHash] = &licenseRecord{
+				ID: licenseIDFromHash(keyHash),
 				Hint: licenseHint(key),
 				Role: role,
 				Active: true,
@@ -536,9 +550,13 @@ func main() {
 		}
 		control.mu.RLock()
 		rows := make([]licenseRecord, 0, len(control.data.Licenses))
-		for _, rec := range control.data.Licenses {
+		for hash, rec := range control.data.Licenses {
 			if rec != nil {
-				rows = append(rows, *rec)
+				cp := *rec
+				if cp.ID == "" {
+					cp.ID = licenseIDFromHash(hash)
+				}
+				rows = append(rows, cp)
 			}
 		}
 		control.mu.RUnlock()
@@ -564,13 +582,33 @@ func main() {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "admin authorization required"})
 			return
 		}
-		var in struct { LicenseKey string `json:"license_key"` }
+		var in struct {
+			LicenseID  string `json:"license_id"`
+			LicenseKey string `json:"license_key,omitempty"`
+		}
 		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
 			return
 		}
 		control.mu.Lock()
-		rec := control.data.Licenses[hashLicense(in.LicenseKey)]
+		var rec *licenseRecord
+		if strings.TrimSpace(in.LicenseID) != "" {
+			for hash, candidate := range control.data.Licenses {
+				if candidate == nil {
+					continue
+				}
+				id := candidate.ID
+				if id == "" {
+					id = licenseIDFromHash(hash)
+				}
+				if id == strings.TrimSpace(in.LicenseID) {
+					rec = candidate
+					break
+				}
+			}
+		} else if strings.TrimSpace(in.LicenseKey) != "" {
+			rec = control.data.Licenses[hashLicense(in.LicenseKey)]
+		}
 		if rec == nil {
 			control.mu.Unlock()
 			writeJSON(w, http.StatusNotFound, map[string]string{"message": "license not found"})
@@ -589,13 +627,33 @@ func main() {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "admin authorization required"})
 			return
 		}
-		var in struct { LicenseKey string `json:"license_key"` }
+		var in struct {
+			LicenseID  string `json:"license_id"`
+			LicenseKey string `json:"license_key,omitempty"`
+		}
 		if json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in) != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid request"})
 			return
 		}
 		control.mu.Lock()
-		rec := control.data.Licenses[hashLicense(in.LicenseKey)]
+		var rec *licenseRecord
+		if strings.TrimSpace(in.LicenseID) != "" {
+			for hash, candidate := range control.data.Licenses {
+				if candidate == nil {
+					continue
+				}
+				id := candidate.ID
+				if id == "" {
+					id = licenseIDFromHash(hash)
+				}
+				if id == strings.TrimSpace(in.LicenseID) {
+					rec = candidate
+					break
+				}
+			}
+		} else if strings.TrimSpace(in.LicenseKey) != "" {
+			rec = control.data.Licenses[hashLicense(in.LicenseKey)]
+		}
 		if rec == nil {
 			control.mu.Unlock()
 			writeJSON(w, http.StatusNotFound, map[string]string{"message": "license not found"})
