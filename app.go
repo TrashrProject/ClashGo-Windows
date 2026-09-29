@@ -189,6 +189,7 @@ var memberRuntimeStateFiles = []string{
 	"village_resources.json",
 	"village_resource_history.json",
 	"current_army.json",
+	filepath.Join("logs", "last_boot_report.json"),
 	filepath.Join("output", "session_reports", "latest.json"),
 }
 
