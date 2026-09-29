@@ -20,6 +20,9 @@ import {
   StartBot,
   StopBot,
   StopAfterCurrentAttack,
+  IsPaused,
+  ResumeBot,
+  PauseBot,
   IsRunning,
   ResetStats,
   GetConfig,
@@ -267,6 +270,7 @@ function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [gracefulStopPending, setGracefulStopPending] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [history, setHistory] = useState<AttackReport[]>([]);
   const [resourceHistory, setResourceHistory] = useState<VillageResourceSnapshot[]>([]);
   const [currentArmy, setCurrentArmy] = useState<CurrentArmyStatus | null>(null);
@@ -838,6 +842,7 @@ function App() {
     };
 
     const unsubBotError = safeEventsOn("bot_error", (payload: unknown) => {
+      setIsPaused(false);
       setGracefulStopPending(false);
       setTestSessionActive(false);
       setIsStarting(false);
@@ -846,6 +851,7 @@ function App() {
       refreshBootReport();
     });
     const unsubBotInitFailed = safeEventsOn("bot_init_failed", (payload: unknown) => {
+      setIsPaused(false);
       setGracefulStopPending(false);
       setTestSessionActive(false);
       setIsStarting(false);
@@ -854,6 +860,7 @@ function App() {
       refreshBootReport();
     });
     const unsubBotStarted = safeEventsOn("bot_started", () => {
+      setIsPaused(false);
       setGracefulStopPending(false);
       setIsStarting(false);
       setIsRunning(true);
@@ -861,6 +868,7 @@ function App() {
       refreshBootReport();
     });
     const unsubBotStopped = safeEventsOn("bot_stopped", (payload: unknown) => {
+      setIsPaused(false);
       setGracefulStopPending(false);
       setTestSessionActive(false);
       setIsStarting(false);
@@ -887,6 +895,7 @@ function App() {
     });
 
     const unsubBotBootCancelled = safeEventsOn("bot_boot_cancelled", (payload: unknown) => {
+      setIsPaused(false);
       setGracefulStopPending(false);
       setIsStarting(false);
       setIsRunning(false);
@@ -921,6 +930,18 @@ function App() {
       window.setTimeout(() => setMemberNotice(''), 6000);
     });
 
+    const unsubBotPaused = safeEventsOn("bot_paused", (payload: unknown) => {
+      setIsPaused(true);
+      const message = normalizeBotErrorMessage(payload, 'Pause activée.');
+      setMemberNotice(message);
+    });
+    const unsubBotResumed = safeEventsOn("bot_resumed", (payload: unknown) => {
+      setIsPaused(false);
+      const message = normalizeBotErrorMessage(payload, 'Session reprise.');
+      setMemberNotice(message);
+      window.setTimeout(() => setMemberNotice(''), 4000);
+    });
+
     return () => {
       clearInterval(fastInterval);
       clearInterval(logInterval);
@@ -943,6 +964,8 @@ function App() {
       unsubStatsUpdated();
       unsubGracefulScheduled();
       unsubGracefulCompleted();
+      unsubBotPaused();
+      unsubBotResumed();
     };
   }, [syncMemberScopedView]);
 
@@ -1265,6 +1288,34 @@ function App() {
       setIsRunning(res.running);
     } catch (err) {
       console.error('Stop failed:', err);
+    }
+  };
+
+  const handlePause = async () => {
+    if (!isRunning || isPaused) return;
+    try {
+      const res = await PauseBot();
+      if (res.running) {
+        setIsPaused(true);
+        setMemberNotice(res.message || 'Pause activée.');
+        window.setTimeout(() => setMemberNotice(''), 5000);
+      }
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const handleResume = async () => {
+    if (!isRunning || !isPaused) return;
+    try {
+      const res = await ResumeBot();
+      if (res.running) {
+        setIsPaused(false);
+        setMemberNotice(res.message || 'Session reprise.');
+        window.setTimeout(() => setMemberNotice(''), 5000);
+      }
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
     }
   };
 
@@ -1755,6 +1806,9 @@ function App() {
               onStartTestSession={handleStartTestSession}
               onStartQuickTestSession={handleStartQuickTestSession}
               onStop={handleStop}
+              onPause={handlePause}
+              onResume={handleResume}
+              paused={isPaused}
               onStopAfterAttack={handleStopAfterAttack}
               gracefulStopPending={gracefulStopPending}
               onOpenAutomation={() => setTab('config')}
