@@ -14,6 +14,9 @@ interface HomeViewProps {
   onStartWithPreset: (preset: 'short' | 'balanced' | 'fast') => void;
   onSpeedChange: (profile: 'cautious' | 'normal' | 'fast') => void;
   onExtendSession: (extra: 10 | 25) => void;
+  onScheduleStop: (minutes: 30 | 60 | 120) => void;
+  onCancelScheduledStop: () => void;
+  scheduledStopAt: string;
   onStartTestSession: () => void;
   onStartQuickTestSession: () => void;
   onStop: () => void;
@@ -247,7 +250,7 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, sessionReport, testSessionActive, running, starting,
-    onStart, onStartWithPreset, onSpeedChange, onExtendSession, onStartTestSession, onStartQuickTestSession, onStop, onPause, onResume, paused, onStopAfterAttack, gracefulStopPending, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
+    onStart, onStartWithPreset, onSpeedChange, onExtendSession, onScheduleStop, onCancelScheduledStop, scheduledStopAt, onStartTestSession, onStartQuickTestSession, onStop, onPause, onResume, paused, onStopAfterAttack, gracefulStopPending, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
     licenseReady, licenseRequired, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
     memberName, licensePlan, licenseExpiresAt, latestBootReport, currentArmy,
@@ -337,6 +340,13 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const sessionProgress = sessionCap > 0
     ? Math.max(0, Math.min(100, Math.round((sessionAttacks / sessionCap) * 100)))
     : 0;
+
+  const scheduledStopLabel = React.useMemo(() => {
+    if (!scheduledStopAt) return '';
+    const at = new Date(scheduledStopAt);
+    if (!Number.isFinite(at.getTime())) return '';
+    return at.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }, [scheduledStopAt]);
 
   const sessionETA = React.useMemo(() => {
     if (sessionCap <= 0 || sessionAttacks >= sessionCap || paused) return '';
@@ -765,6 +775,48 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
             >
               {paused ? 'REPRENDRE' : 'PAUSE APRÈS L’ATTAQUE'}
             </button>
+          </div>
+        </section>
+      )}
+
+      {running && !testSessionActive && (
+        <section className="rounded-[1.5rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-premium dark:shadow-none">
+          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+            <div>
+              <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">Minuteur de session</div>
+              <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white">
+                {scheduledStopLabel ? 'Arrêt propre prévu à ' + scheduledStopLabel : 'Programmer la fin de session'}
+              </div>
+              <div className="mt-1 text-[11px] font-semibold text-zinc-500">
+                À l’heure choisie, ClashGO termine l’attaque en cours puis revient au village avant de s’arrêter.
+              </div>
+            </div>
+            {scheduledStopLabel ? (
+              <button
+                type="button"
+                onClick={onCancelScheduledStop}
+                className="rounded-xl border border-rose-200 dark:border-rose-900/50 px-4 py-2.5 text-[9px] font-black uppercase tracking-widest text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+              >
+                ANNULER LE MINUTEUR
+              </button>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {([
+                  [30, '30 MIN'],
+                  [60, '1 H'],
+                  [120, '2 H'],
+                ] as const).map(([minutes, label]) => (
+                  <button
+                    key={minutes}
+                    type="button"
+                    onClick={() => onScheduleStop(minutes)}
+                    className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 text-[9px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </section>
       )}
