@@ -314,6 +314,52 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     window.setTimeout(() => setSessionCopyState('idle'), 2500);
   }, [sessionReport, lastSessionValidation]);
 
+  const validationNextStep = React.useMemo(() => {
+    if (running || starting || testSessionActive || !startupCheck?.ready || windowsReady !== true) return null;
+
+    if (!sessionReport || sessionReport.attacks <= 0) {
+      return {
+        tone: 'sky' as const,
+        icon: 'science',
+        title: 'Étape conseillée · test express',
+        detail: 'Commence par 3 attaques pour valider rapidement le démarrage, le déploiement et le retour au village.',
+        action: 'quick' as const,
+        actionLabel: 'Lancer le test 3',
+      };
+    }
+
+    if (sessionReport.attacks <= 3) {
+      return {
+        tone: 'sky' as const,
+        icon: 'experiment',
+        title: 'Test express terminé',
+        detail: 'Passe maintenant à 10 attaques pour vérifier la stabilité sur plusieurs cycles.',
+        action: 'standard' as const,
+        actionLabel: 'Passer au test 10',
+      };
+    }
+
+    if (lastSessionValidation?.ok) {
+      return {
+        tone: 'emerald' as const,
+        icon: 'verified',
+        title: 'Validation terminée',
+        detail: 'Les indicateurs techniques sont propres. Tu peux lancer ta session normale.',
+        action: 'normal' as const,
+        actionLabel: 'Lancer la session normale',
+      };
+    }
+
+    return {
+      tone: 'amber' as const,
+      icon: 'warning',
+      title: 'Reste en validation',
+      detail: lastSessionValidation?.detail || 'Vérifie les indicateurs avant de lancer une session longue.',
+      action: 'standard' as const,
+      actionLabel: 'Relancer le test 10',
+    };
+  }, [lastSessionValidation, running, sessionReport, starting, startupCheck?.ready, testSessionActive, windowsReady]);
+
   const runCheckAction = React.useCallback((action?: string) => {
     switch (action) {
       case 'license_account':
@@ -762,6 +808,57 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           </div>
         ))}
       </section>
+
+      {!running && !starting && validationNextStep && (
+        <section className={
+          'rounded-[1.75rem] border p-5 shadow-premium dark:shadow-none ' +
+          (validationNextStep.tone === 'emerald'
+            ? 'border-emerald-200/70 bg-emerald-50/70 dark:border-emerald-900/40 dark:bg-emerald-950/10'
+            : validationNextStep.tone === 'amber'
+              ? 'border-amber-200/70 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/10'
+              : 'border-sky-200/70 bg-sky-50/70 dark:border-sky-900/40 dark:bg-sky-950/10')
+        }>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="flex items-start gap-3 min-w-0">
+              <span className={
+                'material-symbols-outlined mt-0.5 text-xl ' +
+                (validationNextStep.tone === 'emerald'
+                  ? 'text-emerald-500'
+                  : validationNextStep.tone === 'amber'
+                    ? 'text-amber-500'
+                    : 'text-sky-500')
+              }>
+                {validationNextStep.icon}
+              </span>
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">Parcours de validation</div>
+                <div className="mt-1 text-base font-black text-zinc-950 dark:text-white">{validationNextStep.title}</div>
+                <div className="mt-1 text-xs font-semibold text-zinc-500">{validationNextStep.detail}</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={
+                validationNextStep.action === 'quick'
+                  ? onStartQuickTestSession
+                  : validationNextStep.action === 'standard'
+                    ? onStartTestSession
+                    : onStart
+              }
+              className={
+                'shrink-0 rounded-xl px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white transition active:scale-[0.98] ' +
+                (validationNextStep.tone === 'emerald'
+                  ? 'bg-emerald-500 hover:bg-emerald-400'
+                  : validationNextStep.tone === 'amber'
+                    ? 'bg-amber-500 hover:bg-amber-400'
+                    : 'bg-sky-500 hover:bg-sky-400')
+              }
+            >
+              {validationNextStep.actionLabel}
+            </button>
+          </div>
+        </section>
+      )}
 
       {!running && !starting && sessionReport && sessionReport.attacks > 0 && (
         <section className="rounded-[2rem] border border-emerald-200/70 dark:border-emerald-900/40 bg-emerald-50/60 dark:bg-emerald-950/10 p-5 shadow-premium dark:shadow-none">
