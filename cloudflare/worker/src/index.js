@@ -337,6 +337,47 @@ async function setLicenseActive(request, env) {
   return json({ ok: true, active: active === 1 });
 }
 
+
+async function renewLicense(request, env) {
+  let body;
+  try { body = await readJSON(request, 65536); }
+  catch { return json({ message: "invalid request" }, 400); }
+
+  const id = clean(body.license_id);
+  if (!id) return json({ message: "license_id is required" }, 400);
+
+  const current = await env.DB.prepare(
+    "SELECT id, plan, duration_days, expires_at, activated_at, active FROM licenses WHERE id = ?1"
+  ).bind(id).first();
+  if (!current) return json({ message: "license not found" }, 404);
+
+  const requestedPlan = clean(body.plan);
+  const planInfo = requestedPlan ? normalizePlan(requestedPlan) : normalizePlan(current.plan);
+
+  if (planInfo.plan === "lifetime") {
+    await env.DB.prepare(
+      "UPDATE licenses SET plan = 'lifetime', duration_days = NULL, expires_at = NULL, active = 1 WHERE id = ?1"
+    ).bind(id).run();
+    return json({ ok: true, plan: "lifetime", expires_at: null });
+  }
+
+  const now = new Date();
+  const currentExpiry = current.expires_at ? new Date(current.expires_at) : null;
+  const base = currentExpiry && currentExpiry > now ? currentExpiry : now;
+  const expiresAt = new Date(base.getTime() + planInfo.days * 24 * 60 * 60 * 1000).toISOString();
+
+  await env.DB.prepare(
+    "UPDATE licenses SET plan = ?1, duration_days = ?2, expires_at = ?3, active = 1 WHERE id = ?4"
+  ).bind(planInfo.plan, planInfo.days, expiresAt, id).run();
+
+  return json({
+    ok: true,
+    plan: planInfo.plan,
+    duration_days: planInfo.days,
+    expires_at: expiresAt,
+  });
+}
+
 async function router(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -382,6 +423,9 @@ async function router(request, env) {
     }
     if (request.method === "POST" && path === "/v1/admin/licenses/set-active") {
       return setLicenseActive(request, env);
+    }
+    if (request.method === "POST" && path === "/v1/admin/licenses/renew") {
+      return renewLicense(request, env);
     }
   }
 
