@@ -3351,6 +3351,18 @@ func (a *App) restoreTestSessionSettings() error {
 	return nil
 }
 
+func buildTemporaryTestSettings(original MemberSettings, limit int) (MemberSettings, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	settings, err := applyMemberPreset(original, "short")
+	if err != nil {
+		return MemberSettings{}, err
+	}
+	settings.MaxAttacksPerSession = limit
+	return sanitizeMemberSettings(settings), nil
+}
+
 func (a *App) startTemporaryTestSession(limit int, gold, elixir, dark int, upgradeWalls bool, searchEnabled bool) BotStatus {
 	if limit < 1 {
 		limit = 1
@@ -3373,12 +3385,11 @@ func (a *App) startTemporaryTestSession(limit int, gold, elixir, dark int, upgra
 		return BotStatus{Running: false, Message: "Impossible de sauvegarder les réglages avant le test : " + err.Error()}
 	}
 
-	testSettings, err := applyMemberPreset(original, "short")
+	testSettings, err := buildTemporaryTestSettings(original, limit)
 	if err != nil {
 		removeTestSessionRestoreFiles(path)
 		return BotStatus{Running: false, Message: err.Error()}
 	}
-	testSettings.MaxAttacksPerSession = limit
 	if _, err := a.SaveMemberSettings(testSettings); err != nil {
 		removeTestSessionRestoreFiles(path)
 		return BotStatus{Running: false, Message: "Impossible de préparer la session test : " + err.Error()}
