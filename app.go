@@ -869,7 +869,7 @@ func farmProfileStatus(cfg *config.BotConfig) (bool, string) {
 }
 
 func (a *App) GetStartupReadiness() StartupReadiness {
-	checks := make([]StartupCheckItem, 0, 7)
+	checks := make([]StartupCheckItem, 0, 12)
 	add := func(id, label string, ok bool, message, action, actionLabel string) {
 		checks = append(checks, newStartupCheckItem(id, label, ok, message, action, actionLabel))
 	}
@@ -959,6 +959,81 @@ func (a *App) GetStartupReadiness() StartupReadiness {
 
 	pacingOK, pacingMessage := memberRuntimeConfigReady(cfg)
 	add("member_pacing", "Cadence membre", pacingOK, pacingMessage, "member_settings", "Ouvrir Réglages bot")
+
+	army := a.GetCurrentArmy()
+	if army == nil {
+		checks = append(checks, newStartupAdvisoryItem(
+			"army_snapshot",
+			"Armée",
+			false,
+			"Pas encore détectée · ClashGO la vérifiera automatiquement avant l’attaque",
+			"village",
+			"Voir l’armée",
+		))
+	} else {
+		age := time.Since(army.Timestamp)
+		fresh := age >= 0 && age <= 10*time.Minute
+		switch {
+		case army.Ready && !army.Uncertain && fresh:
+			checks = append(checks, newStartupAdvisoryItem(
+				"army_snapshot",
+				"Armée",
+				true,
+				fmt.Sprintf("Armée prête · %d type(s) détecté(s)", len(army.Units)),
+				"village",
+				"Voir l’armée",
+			))
+		case !fresh:
+			checks = append(checks, newStartupAdvisoryItem(
+				"army_snapshot",
+				"Armée",
+				false,
+				"Détection ancienne · ClashGO la relira automatiquement avant l’attaque",
+				"village",
+				"Actualiser l’état",
+			))
+		default:
+			msg := "Composition à confirmer avant attaque"
+			if len(army.Warnings) > 0 {
+				msg = army.Warnings[0]
+			}
+			checks = append(checks, newStartupAdvisoryItem(
+				"army_snapshot",
+				"Armée",
+				false,
+				msg,
+				"village",
+				"Voir l’armée",
+			))
+		}
+	}
+
+	if resources := a.GetVillageResources(); resources != nil {
+		age := time.Since(resources.Timestamp)
+		fresh := age >= 0 && age <= 10*time.Minute
+		checks = append(checks, newStartupAdvisoryItem(
+			"resources_snapshot",
+			"Ressources",
+			fresh,
+			func() string {
+				if fresh {
+					return fmt.Sprintf("Village lu récemment · Or %d · Élixir %d", resources.Gold, resources.Elixir)
+				}
+				return "Dernière lecture ancienne · actualisation automatique au prochain passage au village"
+			}(),
+			"village",
+			"Voir le village",
+		))
+	} else {
+		checks = append(checks, newStartupAdvisoryItem(
+			"resources_snapshot",
+			"Ressources",
+			false,
+			"Pas encore lues · actualisation automatique au prochain passage au village",
+			"village",
+			"Voir le village",
+		))
+	}
 
 	ready := true
 	for _, check := range checks {
