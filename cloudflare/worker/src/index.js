@@ -244,11 +244,68 @@ async function ingestIncident(request, env) {
 
 async function listLicenses(env) {
   const result = await env.DB.prepare(`
-    SELECT id, hint, role, active, machine_id, created_at, last_seen_at, app_version,
-           plan, duration_days, activated_at, expires_at
-    FROM licenses ORDER BY created_at DESC LIMIT 1000
+    SELECT
+      l.id, l.hint, l.role, l.active, l.machine_id, l.created_at, l.last_seen_at, l.app_version,
+      l.plan, l.duration_days, l.activated_at, l.expires_at, l.customer_id,
+      c.display_name AS customer_name, c.contact AS customer_contact
+    FROM licenses l
+    LEFT JOIN customers c ON c.id = l.customer_id
+    ORDER BY l.created_at DESC LIMIT 1000
   `).all();
   return result.results || [];
+}
+
+async function listCustomers(env) {
+  const result = await env.DB.prepare(`
+    SELECT
+      c.id, c.display_name, c.contact, c.notes, c.created_at, c.updated_at,
+      COUNT(l.id) AS license_count,
+      SUM(CASE WHEN l.active = 1 THEN 1 ELSE 0 END) AS active_license_count,
+      MAX(l.last_seen_at) AS last_seen_at
+    FROM customers c
+    LEFT JOIN licenses l ON l.customer_id = c.id
+    GROUP BY c.id
+    ORDER BY c.updated_at DESC
+    LIMIT 1000
+  `).all();
+  return result.results || [];
+}
+
+async function createCustomer(body, env) {
+  const name = clean(body.display_name);
+  if (!name) return { error: json({ message: "display_name is required" }, 400) };
+  const now = new Date().toISOString();
+  const id = randomHex(8);
+  await env.DB.prepare(`
+    INSERT INTO customers (id, display_name, contact, notes, created_at, updated_at)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+  `).bind(id, name.slice(0, 120), clean(body.contact).slice(0, 180), clean(body.notes).slice(0, 1000), now).run();
+  return { customer: { id, display_name: name.slice(0,120), contact: clean(body.contact).slice(0,180), notes: clean(body.notes).slice(0,1000), created_at: now, updated_at: now } };
+}
+
+async function createCustomerRequest(request, env) {
+  let body;
+  try { body = await readJSON(request, 65536); }
+  catch { return json({ message: "invalid request" }, 400); }
+  const result = await createCustomer(body, env);
+  if (result.error) return result.error;
+  return json({ customer: result.customer }, 201);
+}
+
+async function updateCustomer(request, env) {
+  let body;
+  try { body = await readJSON(request, 65536); }
+  catch { return json({ message: "invalid request" }, 400); }
+  const id = clean(body.customer_id);
+  const name = clean(body.display_name);
+  if (!id || !name) return json({ message: "customer_id and display_name are required" }, 400);
+  const result = await env.DB.prepare(`
+    UPDATE customers
+    SET display_name = ?1, contact = ?2, notes = ?3, updated_at = ?4
+    WHERE id = ?5
+  `).bind(name.slice(0,120), clean(body.contact).slice(0,180), clean(body.notes).slice(0,1000), new Date().toISOString(), id).run();
+  if (!result.meta?.changes) return json({ message: "customer not found" }, 404);
+  return json({ ok: true });
 }
 
 async function listIncidents(env, limit = 500) {
@@ -268,18 +325,33 @@ async function createLicenses(request, env) {
   const created = [];
   const now = new Date().toISOString();
 
+  let customerId = clean(body.customer_id);
+  if (!customerId && clean(body.customer_name)) {
+    const customerResult = await createCustomer({
+      display_name: body.customer_name,
+      contact: body.customer_contact,
+      notes: body.customer_notes,
+    }, env);
+    if (customerResult.error) return customerResult.error;
+    customerId = customerResult.customer.id;
+  }
+  if (customerId) {
+    const exists = await env.DB.prepare("SELECT id FROM customers WHERE id = ?1").bind(customerId).first();
+    if (!exists) return json({ message: "customer not found" }, 404);
+  }
+
   for (let i = 0; i < count; i++) {
     const key = newLicenseKey();
     const hash = await sha256(key);
     const id = hash.slice(0, 16);
     await env.DB.prepare(`
       INSERT INTO licenses (
-        id, license_hash, hint, role, active, created_at, plan, duration_days
-      ) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7)
-    `).bind(id, hash, licenseHint(key), role, now, licensePlan.plan, licensePlan.days).run();
+        id, license_hash, hint, role, active, created_at, plan, duration_days, customer_id
+      ) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7, ?8)
+    `).bind(id, hash, licenseHint(key), role, now, licensePlan.plan, licensePlan.days, customerId || null).run();
     created.push(key);
   }
-  return json({ role, plan: licensePlan.plan, duration_days: licensePlan.days, licenses: created }, 201);
+  return json({ role, plan: licensePlan.plan, duration_days: licensePlan.days, customer_id: customerId || null, licenses: created }, 201);
 }
 
 async function resetMachine(request, env) {
@@ -378,6 +450,24 @@ async function renewLicense(request, env) {
   });
 }
 
+async function assignCustomer(request, env) {
+  let body;
+  try { body = await readJSON(request, 65536); }
+  catch { return json({ message: "invalid request" }, 400); }
+  const licenseId = clean(body.license_id);
+  const customerId = clean(body.customer_id);
+  if (!licenseId) return json({ message: "license_id is required" }, 400);
+  if (customerId) {
+    const exists = await env.DB.prepare("SELECT id FROM customers WHERE id = ?1").bind(customerId).first();
+    if (!exists) return json({ message: "customer not found" }, 404);
+  }
+  const result = await env.DB.prepare(
+    "UPDATE licenses SET customer_id = ?1 WHERE id = ?2"
+  ).bind(customerId || null, licenseId).run();
+  if (!result.meta?.changes) return json({ message: "license not found" }, 404);
+  return json({ ok: true, customer_id: customerId || null });
+}
+
 async function router(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -409,6 +499,15 @@ async function router(request, env) {
     if (request.method === "GET" && path === "/v1/admin/incidents") {
       return json({ incidents: await listIncidents(env, 500) });
     }
+    if (request.method === "GET" && path === "/v1/admin/customers") {
+      return json({ customers: await listCustomers(env) });
+    }
+    if (request.method === "POST" && path === "/v1/admin/customers") {
+      return createCustomerRequest(request, env);
+    }
+    if (request.method === "POST" && path === "/v1/admin/customers/update") {
+      return updateCustomer(request, env);
+    }
     if (request.method === "POST" && path === "/v1/admin/licenses") {
       return createLicenses(request, env);
     }
@@ -426,6 +525,9 @@ async function router(request, env) {
     }
     if (request.method === "POST" && path === "/v1/admin/licenses/renew") {
       return renewLicense(request, env);
+    }
+    if (request.method === "POST" && path === "/v1/admin/licenses/assign-customer") {
+      return assignCustomer(request, env);
     }
   }
 
