@@ -1756,6 +1756,8 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	if !b.seqRunning.CompareAndSwap(false, true) {
 		return
 	}
+	b.setRuntimePhase(PhaseAttackNavigation)
+	defer b.setRuntimePhase(PhaseIdle)
 	b.seqStartedAtUnix.Store(time.Now().Unix())
 	defer b.seqStartedAtUnix.Store(0)
 	defer b.seqRunning.Store(false)
@@ -1846,6 +1848,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 	preparationDurationMS = time.Since(preparationStarted).Milliseconds()
 
+	b.setRuntimePhase(PhaseSearching)
 	b.logger.Info().
 		Int64("prep_ms", preparationDurationMS).
 		Msg("search started")
@@ -1964,8 +1967,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 		screen, err := b.client.CaptureToMat()
 		if err != nil {
-			return
+			b.logger.Warn().Err(err).Msg("search capture failed; supervisor will recover if heartbeat stalls")
+			continue
 		}
+		b.captureHeartbeat.Store(time.Now().UnixNano())
 
 		state, _ := b.classify(screen)
 		if state != game.StateBattle {
@@ -2092,6 +2097,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				b.telemetry.Emit(telemetry.EventAttackStarted, map[string]any{"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir, "search_ms": attackStartedAt.Sub(searchStart).Milliseconds(), "skips": sequenceSkips})
 			}
 			b.attackExec.SetInitialLoot(loot.Gold, loot.Elixir, loot.DarkElixir)
+			b.setRuntimePhase(PhaseDeploying)
 			deployStarted := time.Now()
 			if strat, err := strategy.ParseYAML(b.cfg.Attack.StrategyFile); err == nil {
 				stratName = strat.Name
@@ -2137,6 +2143,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			} else {
 				b.logger.Info().Msg("all live deployable troop slots verified empty")
 			}
+			b.setRuntimePhase(PhaseBattle)
 			screen.Close()
 			break
 		}
