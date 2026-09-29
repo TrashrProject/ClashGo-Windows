@@ -52,7 +52,7 @@ Write-Host ""
 Write-Host $key -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Dans ClashGO :" -ForegroundColor Yellow
-Write-Host "1. Paramètres > Général > Serveur ClashGO : $Server"
+Write-Host "1. Paramètres > Diagnostic > Configuration bêta > Serveur de licences : $Server"
 Write-Host "2. Enregistre l'adresse."
 Write-Host "3. Active ClashGO avec la clé ADMIN ci-dessus."
 Write-Host "4. Le menu Administration apparaîtra automatiquement."
