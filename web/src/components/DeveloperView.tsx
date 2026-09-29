@@ -100,6 +100,7 @@ const DeveloperView: React.FC = () => {
   const [search, setSearch] = React.useState('');
   const [licenseFilter, setLicenseFilter] = React.useState<'all' | 'active' | 'revoked'>('all');
   const [renewPlans, setRenewPlans] = React.useState<Record<string, 'free_2d' | 'week_1' | 'month_1' | 'lifetime'>>({});
+  const generatedKeyTimerRef = React.useRef<number | null>(null);
 
   const isAdmin = role === 'admin';
 
@@ -126,7 +127,13 @@ const DeveloperView: React.FC = () => {
   React.useEffect(() => {
     void refresh();
     const id = window.setInterval(() => void refresh(), 30000);
-    return () => window.clearInterval(id);
+    return () => {
+      window.clearInterval(id);
+      if (generatedKeyTimerRef.current !== null) {
+        window.clearTimeout(generatedKeyTimerRef.current);
+        generatedKeyTimerRef.current = null;
+      }
+    };
   }, [refresh]);
 
   const createLicense = async () => {
@@ -148,9 +155,13 @@ const DeveloperView: React.FC = () => {
       if (keys.length === 0) throw new Error('Aucune clé retournée par le serveur.');
       setGeneratedKey(keys[0]);
       setNotice('Licence créée. Copie la clé maintenant : elle sera masquée automatiquement dans 2 minutes.');
-      window.setTimeout(() => {
+      if (generatedKeyTimerRef.current !== null) {
+        window.clearTimeout(generatedKeyTimerRef.current);
+      }
+      generatedKeyTimerRef.current = window.setTimeout(() => {
         setGeneratedKey('');
         setCopied(false);
+        generatedKeyTimerRef.current = null;
       }, 120000);
       setCustomerName('');
       setCustomerContact('');
@@ -378,6 +389,10 @@ const DeveloperView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
+                    if (generatedKeyTimerRef.current !== null) {
+                      window.clearTimeout(generatedKeyTimerRef.current);
+                      generatedKeyTimerRef.current = null;
+                    }
                     setGeneratedKey('');
                     setCopied(false);
                   }}
