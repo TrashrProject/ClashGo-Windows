@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS licenses (
   duration_days INTEGER,
   activated_at TEXT,
   expires_at TEXT,
+  denied_activations INTEGER NOT NULL DEFAULT 0,
+  last_denied_at TEXT,
+  last_denied_machine TEXT,
   FOREIGN KEY (customer_id) REFERENCES customers(id)
 );
 
