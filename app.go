@@ -1344,6 +1344,7 @@ func persistPlayerProfile(profile *ClashPlayerProfile) {
 // also enables the dependent automatic behaviors so users do not have to hunt
 // through multiple settings pages to obtain a coherent setup.
 type MemberSettings struct {
+	InterfaceLevel       string `json:"interface_level,omitempty"`
 	SpeedProfile         string `json:"speed_profile"`
 	MaxAttacksPerHour    int    `json:"max_attacks_per_hour"`
 	BreakEveryAttacks    int    `json:"break_every_attacks"`
@@ -1410,6 +1411,12 @@ func applyMemberSpeedProfile(cfg *config.BotConfig, profile string) {
 }
 
 func sanitizeMemberSettings(settings MemberSettings) MemberSettings {
+	switch strings.ToLower(strings.TrimSpace(settings.InterfaceLevel)) {
+	case "advanced":
+		settings.InterfaceLevel = "advanced"
+	default:
+		settings.InterfaceLevel = "simple"
+	}
 	settings.SpeedProfile = normalizeSpeedProfile(settings.SpeedProfile)
 
 	if settings.MaxAttacksPerHour < 1 {
@@ -1437,6 +1444,7 @@ func sanitizeMemberSettings(settings MemberSettings) MemberSettings {
 
 func defaultMemberSettings() MemberSettings {
 	return MemberSettings{
+		InterfaceLevel:       "simple",
 		SpeedProfile:         "normal",
 		MaxAttacksPerHour:    12,
 		BreakEveryAttacks:    5,
@@ -1743,7 +1751,12 @@ func (a *App) applyMemberAccountForCurrentLicense() error {
 func (a *App) GetMemberSettings() MemberSettings {
 	cfg := config.LoadOrDefault("config.json")
 	profile := normalizeSpeedProfile(cfg.Automation.SpeedProfile)
+	interfaceLevel := "simple"
+	if saved, ok := a.loadMemberProfile(); ok && saved.InterfaceLevel == "advanced" {
+		interfaceLevel = "advanced"
+	}
 	return MemberSettings{
+		InterfaceLevel:       interfaceLevel,
 		SpeedProfile:         profile,
 		MaxAttacksPerHour:    cfg.Automation.MaxAttacksPerHour,
 		BreakEveryAttacks:    cfg.Automation.BreakEveryAttacks,
@@ -1755,10 +1768,42 @@ func (a *App) GetMemberSettings() MemberSettings {
 	}
 }
 
+func (a *App) GetMemberInterfaceLevel() string {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return ""
+	}
+	if settings, ok := a.loadMemberProfile(); ok {
+		return sanitizeMemberSettings(settings).InterfaceLevel
+	}
+	return "simple"
+}
+
+func (a *App) SaveMemberInterfaceLevel(level string) error {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return nil
+	}
+	level = strings.ToLower(strings.TrimSpace(level))
+	if level != "simple" && level != "advanced" {
+		return fmt.Errorf("member interface level must be simple or advanced")
+	}
+
+	settings, ok := a.loadMemberProfile()
+	if !ok {
+		settings = a.GetMemberSettings()
+	}
+	settings.InterfaceLevel = level
+	return a.persistMemberProfile(settings)
+}
+
 func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	if strings.TrimSpace(settings.InterfaceLevel) == "" {
+		if existing, ok := a.loadMemberProfile(); ok {
+			settings.InterfaceLevel = existing.InterfaceLevel
+		}
+	}
 	settings = sanitizeMemberSettings(settings)
 	cfg := config.LoadOrDefault("config.json")
 	applyMemberSettingsToConfig(cfg, settings)
