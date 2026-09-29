@@ -2636,6 +2636,15 @@ func (a *App) SaveMemberInterfaceLevel(level string) error {
 	return a.persistMemberProfile(settings)
 }
 
+func (a *App) ApplyMemberPreset(preset string) (MemberSettings, error) {
+	current := a.GetMemberSettings()
+	next, err := applyMemberPreset(current, preset)
+	if err != nil {
+		return MemberSettings{}, err
+	}
+	return a.SaveMemberSettings(next)
+}
+
 func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
