@@ -87,6 +87,7 @@ jobs:
         run: |
           node --check cloudflare/worker/src/index.js
           node tools/check-control-api-parity.mjs
+          node tools/check-ui-localization-safety.mjs
           cd web
           npm ci
           node --input-type=module <<'NODE'
