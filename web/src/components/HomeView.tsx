@@ -144,12 +144,35 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
         icon: 'speed',
       };
     }
-    case 'anomaly':
+    case 'anomaly': {
+      const kind = String(event.fields?.kind || '').toLowerCase();
+      if (kind === 'army_guard_rejected_target') {
+        return {
+          title: 'Base ignorée · armée non conforme',
+          detail: 'ClashGO a protégé la session avant tout déploiement et poursuit la recherche.',
+          icon: 'shield',
+        };
+      }
+      if (kind === 'army_guard_uncertain') {
+        return {
+          title: 'Contrôle armée incertain',
+          detail: 'La lecture n’était pas assez fiable pour bloquer l’attaque. ClashGO a continué prudemment.',
+          icon: 'rule',
+        };
+      }
+      if (kind === 'army_guard_unavailable') {
+        return {
+          title: 'Contrôle armée indisponible',
+          detail: 'Le contrôle n’a pas pu conclure. L’attaque n’a pas été bloquée sur une lecture incertaine.',
+          icon: 'shield_question',
+        };
+      }
       return {
         title: 'Correction automatique',
         detail: 'Une anomalie a été détectée et prise en charge.',
         icon: 'monitor_heart',
       };
+    }
     default:
       return {
         title: event.type.split('_').join(' '),
