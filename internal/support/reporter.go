@@ -31,9 +31,21 @@ type incident struct {
 }
 
 const (
-	maxQueuedIncidents = 500
-	maxIncidentAge     = 30 * 24 * time.Hour
+	maxQueuedIncidents      = 500
+	maxIncidentAge          = 30 * 24 * time.Hour
+	maxIncidentMessageBytes = 4000
+	maxIncidentFieldBytes   = 8000
 )
+
+func truncateText(value string, max int) string {
+	if max <= 0 || len(value) <= max {
+		return value
+	}
+	if max == 1 {
+		return value[:1]
+	}
+	return value[:max-1] + "…"
+}
 
 type Reporter struct {
 	baseURL    string
@@ -88,7 +100,7 @@ func (r *Reporter) Write(p []byte) (int, error) {
 	ev := incident{
 		At: time.Now().UTC().Format(time.RFC3339Nano),
 		Level: level,
-		Message: message,
+		Message: truncateText(message, maxIncidentMessageBytes),
 		AppVersion: r.appVersion,
 		Fields: sanitizeFields(raw),
 	}
@@ -142,9 +154,47 @@ func sanitizeFields(in map[string]any) map[string]any {
 		if strings.Contains(lk, "token") || strings.Contains(lk, "password") || strings.Contains(lk, "secret") || strings.Contains(lk, "license") || strings.Contains(lk, "authorization") {
 			continue
 		}
+		if text, ok := v.(string); ok {
+			out[k] = truncateText(text, maxIncidentFieldBytes)
+			continue
+		}
 		out[k] = v
 	}
 	return out
+}
+
+func (r *Reporter) writeQueueLocked(items []incident) bool {
+	if len(items) == 0 {
+		_ = os.Remove(r.queuePath)
+		return true
+	}
+	tmp := r.queuePath + ".tmp"
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return false
+	}
+	for _, item := range items {
+		b, _ := json.Marshal(item)
+		if _, err := out.Write(append(b, '\n')); err != nil {
+			_ = out.Close()
+			_ = os.Remove(tmp)
+			return false
+		}
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return false
+	}
+
+	// os.Rename does not replace an existing destination reliably on Windows.
+	// The queue is already protected by r.mu, so remove the old destination
+	// immediately before swapping the freshly-written temp file into place.
+	_ = os.Remove(r.queuePath)
+	if err := os.Rename(tmp, r.queuePath); err != nil {
+		_ = os.Remove(tmp)
+		return false
+	}
+	return true
 }
 
 func (r *Reporter) enqueue(ev incident) {
@@ -156,22 +206,7 @@ func (r *Reporter) enqueue(ev incident) {
 	pending = append(pending, ev)
 	pending = trimQueue(pending, time.Now().UTC())
 
-	tmp := r.queuePath + ".tmp"
-	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-	if err != nil {
-		return
-	}
-	for _, item := range pending {
-		b, _ := json.Marshal(item)
-		_, _ = out.Write(append(b, '\n'))
-	}
-	if err := out.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return
-	}
-	if err := os.Rename(tmp, r.queuePath); err != nil {
-		_ = os.Remove(tmp)
-	}
+	r.writeQueueLocked(pending)
 }
 
 func trimQueue(items []incident, now time.Time) []incident {
@@ -265,15 +300,5 @@ func (r *Reporter) Flush(ctx context.Context) {
 		_ = os.Remove(r.queuePath)
 		return
 	}
-	tmp := r.queuePath + ".tmp"
-	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-	if err != nil {
-		return
-	}
-	for _, ev := range keep {
-		b, _ := json.Marshal(ev)
-		_, _ = out.Write(append(b, '\n'))
-	}
-	_ = out.Close()
-	_ = os.Rename(tmp, r.queuePath)
+	r.writeQueueLocked(keep)
 }
