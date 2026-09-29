@@ -355,14 +355,16 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       ]);
       setMemberSettings(settings as MemberSettings);
       setMemberUndoAvailable(Boolean(canUndo));
-      setMemberPresets((presets || []) as MemberPresetSlot[]);
-      setMemberPresetNames((current) => {
-        const next = { ...current };
-        for (const preset of (presets || []) as MemberPresetSlot[]) {
-          if (!next[preset.slot]) next[preset.slot] = preset.name || `Profil ${preset.slot}`;
-        }
-        return next;
-      });
+      const loadedPresets = (presets || []) as MemberPresetSlot[];
+      setMemberPresets(loadedPresets);
+      // Rebuild slot names from the active licence only. Merging with the
+      // previous React state could leak an unsaved/profile label from the
+      // member that was active before a licence switch.
+      const nextNames: Record<number, string> = {};
+      for (const preset of loadedPresets) {
+        nextNames[preset.slot] = preset.name || `Profil ${preset.slot}`;
+      }
+      setMemberPresetNames(nextNames);
     } catch {
       // Member preferences are best-effort while the Wails bridge initializes.
     }
