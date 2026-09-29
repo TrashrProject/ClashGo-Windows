@@ -83,6 +83,17 @@ type Bot struct {
 	lastReturnHomeUS    atomic.Int64
 	safePacingUntilUS   atomic.Int64
 
+	// Xingchen-style runtime supervision: independent heartbeat, phase/state
+	// tracking, and single-flight recovery/restart guards.
+	captureHeartbeat atomic.Int64
+	runtimeState atomic.Int32
+	runtimeStateSince atomic.Int64
+	runtimeProgress atomic.Int64
+	runtimePhase atomic.Int32
+	runtimePhaseSince atomic.Int64
+	recoveryInFlight atomic.Bool
+	restartInFlight atomic.Bool
+
 	chestDismissInFlight  atomic.Bool
 	rewardDismissInFlight atomic.Bool
 	splashDismissInFlight atomic.Bool
@@ -400,10 +411,19 @@ func (b *Bot) Start() error {
 	b.client.Tap(focusX, focusY)
 	b.client.JitteredSleep(250 * time.Millisecond)
 
+	now := time.Now()
+	b.captureHeartbeat.Store(now.UnixNano())
+	b.runtimeState.Store(int32(game.StateUnknown))
+	b.runtimeStateSince.Store(now.UnixNano())
+	b.runtimeProgress.Store(now.UnixNano())
+	b.runtimePhase.Store(int32(PhaseIdle))
+	b.runtimePhaseSince.Store(now.UnixNano())
+
 	go func() {
 		defer close(b.captureDone)
 		b.captureLoop()
 	}()
+	go b.runtimeSupervisorLoop()
 	return nil
 }
 
@@ -577,6 +597,9 @@ func (b *Bot) captureLoop() {
 			}
 			lastCapture = time.Now()
 			b.lastCapture = lastCapture
+			if err == nil && !screen.Empty() && screen.Cols() >= 2 && screen.Rows() >= 2 {
+				b.captureHeartbeat.Store(lastCapture.UnixNano())
+			}
 
 			if err != nil || screen.Empty() || screen.Cols() < 2 || screen.Rows() < 2 {
 				screen.Close()
@@ -630,9 +653,11 @@ func (b *Bot) captureLoop() {
 // Called after real forward progress (successful clicks/state transitions)
 // so the stuck-check distinguishes "spinning" from "working".
 func (b *Bot) recordActivity() {
+	now := time.Now()
 	b.watchdogMu.Lock()
-	b.lastAction = time.Now()
+	b.lastAction = now
 	b.watchdogMu.Unlock()
+	b.runtimeProgress.Store(now.UnixNano())
 }
 
 func (b *Bot) recordSequenceStart() {
@@ -766,6 +791,12 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 }
 
 func (b *Bot) restartGame() {
+	if !b.restartInFlight.CompareAndSwap(false, true) {
+		b.logger.Debug().Msg("restart already in progress; suppressing duplicate request")
+		return
+	}
+	defer b.restartInFlight.Store(false)
+
 	pkg := b.cfg.Device.PackageName
 	if pkg == "" {
 		pkg = "com.supercell.clashofclans"
@@ -835,6 +866,12 @@ func (b *Bot) safePacingForced() bool {
 }
 
 func (b *Bot) recoverEmulator() {
+	if !b.recoveryInFlight.CompareAndSwap(false, true) {
+		b.logger.Debug().Msg("device recovery already in progress; suppressing duplicate request")
+		return
+	}
+	defer b.recoveryInFlight.Store(false)
+
 	b.recoveryAttempts.Add(1)
 	b.forceSafePacing("device_recovery", 2*time.Minute)
 	if b.telemetry != nil {
@@ -1094,6 +1131,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		now := time.Now()
 		previousState := gc.State
 		gc.UpdateState(state, now)
+		b.observeRuntimeState(state, now)
 		if b.telemetry != nil && previousState != state {
 			b.telemetry.Emit(telemetry.EventStateChanged, map[string]any{"from": previousState.String(), "to": state.String(), "score": score})
 		}
