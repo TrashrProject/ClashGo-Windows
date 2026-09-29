@@ -121,8 +121,27 @@ func (s *Service) load() {
 	if json.Unmarshal(b, &st) != nil {
 		return
 	}
+
+	legacyPlaintext := secretNeedsMigration(st.Key)
+	key, err := unprotectSecret(st.Key)
+	if err != nil {
+		s.stored = storedLicense{}
+		s.state = State{
+			Activated: false,
+			Error:     "stored license could not be decrypted",
+		}
+		return
+	}
+	st.Key = strings.ToUpper(strings.TrimSpace(key))
 	s.stored = st
 	s.state = s.stateFromStored(st)
+
+	// Migrate legacy plaintext license.json files transparently. The in-memory
+	// representation remains plaintext because it is needed for server
+	// validation; only the on-disk copy is protected.
+	if legacyPlaintext && st.Key != "" {
+		_ = s.saveLocked()
+	}
 }
 
 func (s *Service) stateFromStored(st storedLicense) State {
@@ -143,7 +162,15 @@ func (s *Service) saveLocked() error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(s.stored, "", "  ")
+
+	disk := s.stored
+	protectedKey, err := protectSecret(disk.Key)
+	if err != nil {
+		return fmt.Errorf("protect license secret: %w", err)
+	}
+	disk.Key = protectedKey
+
+	b, err := json.MarshalIndent(disk, "", "  ")
 	if err != nil {
 		return err
 	}
