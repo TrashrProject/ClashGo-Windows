@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"testing"
@@ -285,5 +286,68 @@ func TestStartupReadinessRequiresLicenseWhenEnforced(t *testing.T) {
 	}
 	if readiness.Ready {
 		t.Fatal("startup readiness should not be ready without required license")
+	}
+}
+
+
+func TestBotSessionActiveOrStartingDetectsBootPlaceholder(t *testing.T) {
+	a := &App{}
+	if a.botSessionActiveOrStarting() {
+		t.Fatal("empty app unexpectedly reports an active bot session")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.mu.Lock()
+	a.botCtx = ctx
+	a.cancel = cancel
+	a.mu.Unlock()
+
+	if !a.botSessionActiveOrStarting() {
+		t.Fatal("in-flight startup was not detected as an active bot session")
+	}
+}
+
+func TestWaitForBotTeardownWaitsForStartupCancellation(t *testing.T) {
+	a := &App{}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.mu.Lock()
+	a.botCtx = ctx
+	a.cancel = cancel
+	a.mu.Unlock()
+
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		cancel()
+		a.mu.Lock()
+		a.cancel = nil
+		a.botCtx = nil
+		a.mu.Unlock()
+	}()
+
+	start := time.Now()
+	if err := a.waitForBotTeardown(time.Second); err != nil {
+		t.Fatalf("waitForBotTeardown failed: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < 50*time.Millisecond {
+		t.Fatalf("waitForBotTeardown returned before startup placeholder cleared: %s", elapsed)
+	}
+}
+
+func TestWaitForBotTeardownTimesOutOnStuckStartup(t *testing.T) {
+	a := &App{}
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.mu.Lock()
+	a.cancel = cancel
+	a.mu.Unlock()
+
+	start := time.Now()
+	err := a.waitForBotTeardown(70 * time.Millisecond)
+	if err == nil {
+		t.Fatal("expected stuck startup wait to time out")
+	}
+	if elapsed := time.Since(start); elapsed < 60*time.Millisecond {
+		t.Fatalf("timeout returned too early: %s", elapsed)
 	}
 }
