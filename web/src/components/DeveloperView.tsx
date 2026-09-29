@@ -176,7 +176,9 @@ const DeveloperView: React.FC = () => {
   const [creationPaymentStatus, setCreationPaymentStatus] = React.useState<'paid' | 'pending' | 'offered' | 'free'>('paid');
   const [creationPaymentNote, setCreationPaymentNote] = React.useState('');
   const [generatedKey, setGeneratedKey] = React.useState('');
+  const [generatedMeta, setGeneratedMeta] = React.useState<{ plan: string; role: string; customerName: string } | null>(null);
   const [copied, setCopied] = React.useState(false);
+  const [clientMessageCopied, setClientMessageCopied] = React.useState(false);
   const [search, setSearch] = React.useState('');
   const [licenseFilter, setLicenseFilter] = React.useState<'all' | 'active' | 'revoked' | 'expired' | 'expiring' | 'unactivated'>('all');
   const [renewPlans, setRenewPlans] = React.useState<Record<string, 'free_2d' | 'week_1' | 'month_1' | 'lifetime'>>({});
@@ -263,13 +265,16 @@ const DeveloperView: React.FC = () => {
       const keys = (result as { licenses?: string[] })?.licenses || [];
       if (keys.length === 0) throw new Error('Aucune clé retournée par le serveur.');
       setGeneratedKey(keys[0]);
+      setGeneratedMeta({ plan: newPlan, role: newRole, customerName: customerName.trim() });
       setNotice('Licence créée. Copie la clé maintenant : elle sera masquée automatiquement dans 2 minutes.');
       if (generatedKeyTimerRef.current !== null) {
         window.clearTimeout(generatedKeyTimerRef.current);
       }
       generatedKeyTimerRef.current = window.setTimeout(() => {
         setGeneratedKey('');
+        setGeneratedMeta(null);
         setCopied(false);
+        setClientMessageCopied(false);
         generatedKeyTimerRef.current = null;
       }, 120000);
       setCustomerName('');
@@ -411,6 +416,33 @@ const DeveloperView: React.FC = () => {
     await copyText(generatedKey);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  const copyClientMessage = async () => {
+    if (!generatedKey || !generatedMeta) return;
+    const hello = generatedMeta.customerName ? `Bonjour ${generatedMeta.customerName},` : 'Bonjour,';
+    const roleLabel = generatedMeta.role === 'developer'
+      ? 'Developer'
+      : generatedMeta.role === 'admin'
+        ? 'Admin'
+        : 'Membre';
+    const message = [
+      hello,
+      '',
+      `Voici ta licence ClashGO · ${planLabel(generatedMeta.plan)} · ${roleLabel}`,
+      generatedKey,
+      '',
+      'Activation :',
+      '1. Ouvre ClashGO sur ton PC.',
+      '2. Entre cette clé sur l’écran d’activation.',
+      '3. La licence se lie automatiquement à ce PC.',
+      '',
+      'La durée commence à la première activation.',
+      'Une licence est liée à un seul PC à la fois. Si tu changes de PC, contacte-moi pour la réinitialiser.',
+    ].join('\n');
+    await copyText(message);
+    setClientMessageCopied(true);
+    window.setTimeout(() => setClientMessageCopied(false), 1800);
   };
 
   const recentErrors = incidents.filter((x) => x.level === 'error' || x.level === 'fatal' || x.level === 'panic');
@@ -734,7 +766,14 @@ const DeveloperView: React.FC = () => {
                   onClick={() => void copyGeneratedKey()}
                   className="h-11 shrink-0 rounded-xl bg-emerald-500 px-5 text-[10px] font-black uppercase tracking-widest text-white"
                 >
-                  {copied ? 'Copiée ✓' : 'Copier'}
+                  {copied ? 'Copiée ✓' : 'Copier la clé'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void copyClientMessage()}
+                  className="h-11 shrink-0 rounded-xl border border-emerald-500/40 bg-white/60 dark:bg-zinc-950/30 px-5 text-[10px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-300"
+                >
+                  {clientMessageCopied ? 'Message copié ✓' : 'Copier le message client'}
                 </button>
                 <button
                   type="button"
@@ -744,7 +783,9 @@ const DeveloperView: React.FC = () => {
                       generatedKeyTimerRef.current = null;
                     }
                     setGeneratedKey('');
+                    setGeneratedMeta(null);
                     setCopied(false);
+                    setClientMessageCopied(false);
                   }}
                   className="h-11 shrink-0 rounded-xl border border-emerald-500/30 px-4 text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400"
                 >
