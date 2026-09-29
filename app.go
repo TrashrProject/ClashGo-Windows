@@ -3390,7 +3390,11 @@ func (a *App) startTemporaryTestSession(limit int, gold, elixir, dark int, upgra
 		removeTestSessionRestoreFiles(path)
 		return BotStatus{Running: false, Message: err.Error()}
 	}
-	if _, err := a.SaveMemberSettings(testSettings); err != nil {
+	// Temporary validation settings must never become a user-facing edit:
+	// do not overwrite the one-step Undo snapshot and do not record a member
+	// settings-change activity event. The crash-safe restore file above remains
+	// the sole authority for returning to the exact pre-test profile.
+	if _, err := a.saveMemberSettings(testSettings, true); err != nil {
 		removeTestSessionRestoreFiles(path)
 		return BotStatus{Running: false, Message: "Impossible de préparer la session test : " + err.Error()}
 	}
@@ -3429,7 +3433,7 @@ func (a *App) saveMemberSettings(settings MemberSettings, internalRestore bool) 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// A temporary 10-attack test owns the pacing profile until it finishes.
+	// A temporary validation session owns the pacing profile until it finishes.
 	// Reject concurrent USER edits instead of accepting changes that would
 	// then be overwritten by the crash-safe restoration snapshot. Internal
 	// cleanup is intentionally exempt so Stop/autonomous completion can
