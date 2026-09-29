@@ -5,8 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Ducky705/ClashGO/internal/bot"
 	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/licensing"
+	"github.com/Ducky705/ClashGO/internal/telemetry"
 	"encoding/json"
 	"os"
 	"path/filepath"
