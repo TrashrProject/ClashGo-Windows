@@ -1442,3 +1442,67 @@ func TestMemberRuntimeStateIsolatesBootReport(t *testing.T) {
 		t.Fatalf("boot report crossed member boundary: got=%s want=%s", got, want)
 	}
 }
+
+
+func TestShortMemberPresetIsIsolated(t *testing.T) {
+	original := MemberSettings{
+		InterfaceLevel:       "advanced",
+		SpeedProfile:         "fast",
+		MaxAttacksPerHour:    16,
+		MaxAttacksPerSession: 250,
+		BreakEveryAttacks:    9,
+		BreakMinutes:         7,
+		AdaptiveSearch:       false,
+		AutoProfileSync:      false,
+		AutoArmyGuard:        false,
+		AutoResourceTracking: false,
+	}
+
+	got, err := applyMemberPreset(original, "short")
+	if err != nil {
+		t.Fatalf("applyMemberPreset(short): %v", err)
+	}
+	if got.InterfaceLevel != "advanced" {
+		t.Fatalf("short preset changed interface level: %q", got.InterfaceLevel)
+	}
+	if got.SpeedProfile != "normal" || got.MaxAttacksPerHour != 12 || got.MaxAttacksPerSession != 10 {
+		t.Fatalf("unexpected short-session pacing: %+v", got)
+	}
+	if got.BreakEveryAttacks != 5 || got.BreakMinutes != 3 {
+		t.Fatalf("unexpected short-session break policy: %+v", got)
+	}
+	if !got.AdaptiveSearch {
+		t.Fatal("short preset must enable adaptive search")
+	}
+	// The test preset must not silently enable account/army/resource automations
+	// that the member explicitly disabled.
+	if got.AutoProfileSync || got.AutoArmyGuard || got.AutoResourceTracking {
+		t.Fatalf("short preset changed unrelated automation toggles: %+v", got)
+	}
+}
+
+func TestUnknownMemberPresetReturnsSanitizedOriginal(t *testing.T) {
+	original := MemberSettings{
+		InterfaceLevel:       "advanced",
+		SpeedProfile:         "fast",
+		MaxAttacksPerHour:    16,
+		MaxAttacksPerSession: 33,
+		BreakEveryAttacks:    6,
+		BreakMinutes:         2,
+		AdaptiveSearch:       false,
+		AutoProfileSync:      true,
+		AutoArmyGuard:        true,
+		AutoResourceTracking: true,
+	}
+	got, err := applyMemberPreset(original, "does-not-exist")
+	if err == nil {
+		t.Fatal("expected unknown preset to fail")
+	}
+	want := sanitizeMemberSettings(original)
+	// applyMemberPreset intentionally enables adaptive search before the switch;
+	// on an invalid preset that partial mutation must not leak back to callers.
+	want.AdaptiveSearch = false
+	if got != want {
+		t.Fatalf("unknown preset mutated settings: got=%+v want=%+v", got, want)
+	}
+}
