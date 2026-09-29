@@ -1634,6 +1634,96 @@ func (a *App) GetDeveloperLicenses() ([]map[string]any, error) {
 	return a.developerControlGET("/v1/developer/licenses")
 }
 
+type AdminLicenseRequest struct {
+	Role            string `json:"role"`
+	Plan            string `json:"plan"`
+	CustomerName    string `json:"customer_name,omitempty"`
+	CustomerContact string `json:"customer_contact,omitempty"`
+}
+
+type AdminLicenseResult struct {
+	Role         string   `json:"role"`
+	Plan         string   `json:"plan"`
+	DurationDays int      `json:"duration_days"`
+	Licenses     []string `json:"licenses"`
+}
+
+func (a *App) CreateAdminLicense(input AdminLicenseRequest) (AdminLicenseResult, error) {
+	if a.license == nil {
+		return AdminLicenseResult{}, fmt.Errorf("license service is not initialized")
+	}
+	state := a.license.GetState()
+	if !state.Activated || state.Role != licensing.RoleAdmin {
+		return AdminLicenseResult{}, fmt.Errorf("admin license required")
+	}
+
+	role := strings.ToLower(strings.TrimSpace(input.Role))
+	switch role {
+	case "member", "developer", "admin":
+	default:
+		role = "member"
+	}
+	plan := strings.ToLower(strings.TrimSpace(input.Plan))
+	switch plan {
+	case "free_2d", "week_1", "month_1", "lifetime":
+	default:
+		plan = "month_1"
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"role":             role,
+		"plan":             plan,
+		"count":            1,
+		"customer_name":    strings.TrimSpace(input.CustomerName),
+		"customer_contact": strings.TrimSpace(input.CustomerContact),
+	})
+	if err != nil {
+		return AdminLicenseResult{}, err
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	baseURL := clashControlServiceURL(cfg)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, baseURL+"/v1/developer/licenses", bytes.NewReader(payload))
+	if err != nil {
+		return AdminLicenseResult{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-ClashGO-License", a.license.LicenseKey())
+	req.Header.Set("X-ClashGO-Machine", a.license.MachineID())
+	req.Header.Set("User-Agent", "ClashGO/"+version)
+
+	resp, err := (&http.Client{Timeout: 12 * time.Second}).Do(req)
+	if err != nil {
+		return AdminLicenseResult{}, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+	if err != nil {
+		return AdminLicenseResult{}, err
+	}
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		var apiErr struct {
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(body, &apiErr)
+		if strings.TrimSpace(apiErr.Message) == "" {
+			apiErr.Message = resp.Status
+		}
+		return AdminLicenseResult{}, fmt.Errorf("license creation failed: %s", apiErr.Message)
+	}
+
+	var result AdminLicenseResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		return AdminLicenseResult{}, fmt.Errorf("decode license creation response: %w", err)
+	}
+	if len(result.Licenses) == 0 {
+		return AdminLicenseResult{}, fmt.Errorf("license service returned no key")
+	}
+	return result, nil
+}
+
 // GetConfig returns the current config.json settings
 func (a *App) GetConfig() *config.BotConfig {
 	cfg := config.LoadOrDefault("config.json")
