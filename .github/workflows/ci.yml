@@ -90,8 +90,11 @@ jobs:
           console.log(`TS/TSX syntax OK: ${files.length} files`);
           NODE
 
+      - name: Build frontend
+        working-directory: web
+        run: npm run build
+
       # The Windows Beta workflow remains authoritative for generated Wails
-      # bindings, full TypeScript/Vite type checking, GoCV/OpenCV and packaging.
-      # The TypeScript transpile pass above parses each file independently:
-      # it is a fast syntax guard that catches malformed TS/TSX without module
-      # resolution or generated Wails bindings.
+      # bindings regeneration, GoCV/OpenCV and Windows packaging. Core CI now
+      # also executes the real frontend build so type/import regressions fail
+      # quickly without waiting for the heavy Windows runner.
