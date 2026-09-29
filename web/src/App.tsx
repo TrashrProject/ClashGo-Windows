@@ -1012,18 +1012,23 @@ function App() {
       : false
   ), [systemDiagnostics]);
 
-  // The Clash player tag enriches the member experience (HDV profile,
-  // village data, automatic farm profile) but it is intentionally advisory.
-  // Backend readiness follows the same rule, so the sidebar must not block a
-  // perfectly usable bot session only because no public player tag is linked.
-  const startReady = licenseAccessReady && windowsPreflightReady;
-  const startBlockedReason = !licenseAccessReady
-    ? 'Active ta licence dans Mon ClashGO.'
-    : !systemDiagnostics
-      ? 'Vérification de l’environnement Windows en cours…'
-      : !windowsPreflightReady
-        ? 'Vérifie BlueStacks et ADB dans Paramètres > État Windows.'
-        : '';
+  // The backend pre-control is the source of truth whenever available.
+  // This keeps the sidebar button aligned with the exact checks StartBot will
+  // enforce (license, runtime assets, BlueStacks/ADB, strategy and member
+  // pacing). The Clash account remains advisory and never blocks startup.
+  const blockingStartupCheck = startupCheck?.checks.find((check) => !check.ok && check.blocking !== false);
+  const startReady = startupCheck
+    ? startupCheck.ready
+    : licenseAccessReady && windowsPreflightReady;
+  const startBlockedReason = blockingStartupCheck
+    ? `${blockingStartupCheck.label} : ${blockingStartupCheck.message}`
+    : !licenseAccessReady
+      ? 'Active ta licence dans Mon ClashGO.'
+      : !systemDiagnostics
+        ? 'Vérification de l’environnement Windows en cours…'
+        : !windowsPreflightReady
+          ? 'Vérifie BlueStacks et ADB dans Paramètres > État Windows.'
+          : '';
 
   const readinessIssues = useMemo(() => {
     if (!systemDiagnostics) return [] as string[];
