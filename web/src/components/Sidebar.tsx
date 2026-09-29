@@ -31,7 +31,8 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
     { id: 'account', label: 'License', icon: 'license', minLevel: 'simple' },
     { id: 'activity', label: 'Activity', icon: 'timeline', minLevel: 'advanced' },
     { id: 'analytics', label: 'Statistics', icon: 'monitoring', minLevel: 'advanced' },
-    { id: 'settings', label: interfaceLevel === 'developer' ? 'Developer & Settings' : 'Settings', icon: 'settings', minLevel: 'advanced' },
+    { id: 'settings', label: 'Settings', icon: 'settings', minLevel: 'advanced' },
+    { id: 'developer', label: 'Support', icon: 'support_agent', minLevel: 'developer' },
   ];
 
   const levelRank: Record<InterfaceLevel, number> = {
