@@ -1734,6 +1734,7 @@ type MemberSettings struct {
 	InterfaceLevel       string `json:"interface_level,omitempty"`
 	SpeedProfile         string `json:"speed_profile"`
 	MaxAttacksPerHour    int    `json:"max_attacks_per_hour"`
+	MaxAttacksPerSession int    `json:"max_attacks_per_session"`
 	BreakEveryAttacks    int    `json:"break_every_attacks"`
 	BreakMinutes         int    `json:"break_minutes"`
 	AdaptiveSearch       bool   `json:"adaptive_search"`
@@ -1813,6 +1814,16 @@ func sanitizeMemberSettings(settings MemberSettings) MemberSettings {
 		settings.MaxAttacksPerHour = 24
 	}
 
+	// Zero is the migration value for profiles written before this setting
+	// existed. Keep their historical ClashGO default instead of turning an
+	// old profile into a one-attack session.
+	if settings.MaxAttacksPerSession <= 0 {
+		settings.MaxAttacksPerSession = 100
+	}
+	if settings.MaxAttacksPerSession > 500 {
+		settings.MaxAttacksPerSession = 500
+	}
+
 	if settings.BreakEveryAttacks < 0 {
 		settings.BreakEveryAttacks = 0
 	}
@@ -1834,6 +1845,7 @@ func defaultMemberSettings() MemberSettings {
 		InterfaceLevel:       "simple",
 		SpeedProfile:         "normal",
 		MaxAttacksPerHour:    12,
+		MaxAttacksPerSession: 100,
 		BreakEveryAttacks:    5,
 		BreakMinutes:         3,
 		AdaptiveSearch:       true,
@@ -1850,6 +1862,7 @@ func applyMemberSettingsToConfig(cfg *config.BotConfig, settings MemberSettings)
 	settings = sanitizeMemberSettings(settings)
 	applyMemberSpeedProfile(cfg, settings.SpeedProfile)
 	cfg.Automation.MaxAttacksPerHour = settings.MaxAttacksPerHour
+	cfg.Attack.MaxAttackPerSession = settings.MaxAttacksPerSession
 	cfg.Automation.BreakEveryAttacks = settings.BreakEveryAttacks
 	cfg.Automation.BreakDuration = config.Duration{Duration: time.Duration(settings.BreakMinutes) * time.Minute}
 	cfg.Search.AdaptiveSearch = settings.AdaptiveSearch
@@ -2378,6 +2391,7 @@ func (a *App) GetMemberSettings() MemberSettings {
 		InterfaceLevel:       interfaceLevel,
 		SpeedProfile:         profile,
 		MaxAttacksPerHour:    cfg.Automation.MaxAttacksPerHour,
+		MaxAttacksPerSession: cfg.Attack.MaxAttackPerSession,
 		BreakEveryAttacks:    cfg.Automation.BreakEveryAttacks,
 		BreakMinutes:         int(cfg.Automation.BreakDuration.Duration / time.Minute),
 		AdaptiveSearch:       cfg.Search.AdaptiveSearch,
@@ -2428,6 +2442,7 @@ func (a *App) SaveMemberInterfaceLevel(level string) error {
 				InterfaceLevel:       level,
 				SpeedProfile:         normalizeSpeedProfile(cfg.Automation.SpeedProfile),
 				MaxAttacksPerHour:    cfg.Automation.MaxAttacksPerHour,
+				MaxAttacksPerSession: cfg.Attack.MaxAttackPerSession,
 				BreakEveryAttacks:    cfg.Automation.BreakEveryAttacks,
 				BreakMinutes:         int(cfg.Automation.BreakDuration.Duration / time.Minute),
 				AdaptiveSearch:       cfg.Search.AdaptiveSearch,
