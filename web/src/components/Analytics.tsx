@@ -161,7 +161,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const recent = (history ?? []).slice(0, 5);
     const baseline = (history ?? []).slice(5, 20);
     if (recent.length < 3 || baseline.length < 5) {
-      return { status: 'Apprentissage', reasons: ['Need more attacks for a stable baseline'] };
+      return { status: 'Apprentissage', reasons: ['Il faut davantage d’attaques pour établir une référence fiable'] };
     }
 
     const summarize = (rows: AttackReport[]) => {
@@ -189,15 +189,15 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const reasons: string[] = [];
     const slower = (a: number, b: number, pct: number) => b > 0 && a > b * (1 + pct / 100);
 
-    if (slower(now.search, before.search, 35)) reasons.push('Search time is >35% slower than baseline');
-    if (slower(now.deploy, before.deploy, 35)) reasons.push('Deployment time is >35% slower than baseline');
-    if (slower(now.capture, before.capture, 40)) reasons.push('ADB capture latency is >40% slower');
-    if (slower(now.scan, before.scan, 50)) reasons.push('Loot OCR is >50% slower');
-    if (before.completeRate - now.completeRate >= 20) reasons.push('Full-deploy rate dropped by at least 20 points');
+    if (slower(now.search, before.search, 35)) reasons.push('La recherche est plus de 35 % plus lente que la référence');
+    if (slower(now.deploy, before.deploy, 35)) reasons.push('Le déploiement est plus de 35 % plus lent que la référence');
+    if (slower(now.capture, before.capture, 40)) reasons.push('La capture ADB est plus de 40 % plus lente');
+    if (slower(now.scan, before.scan, 50)) reasons.push('La lecture du butin est plus de 50 % plus lente');
+    if (before.completeRate - now.completeRate >= 20) reasons.push('Le taux de déploiement complet a baissé d’au moins 20 points');
 
     return {
-      status: reasons.length === 0 ? 'Healthy' : 'Watch',
-      reasons: reasons.length === 0 ? ['Recent attacks are within the learned baseline'] : reasons,
+      status: reasons.length === 0 ? 'Healthy' : 'À surveiller',
+      reasons: reasons.length === 0 ? ['Les attaques récentes restent dans la plage de référence apprise'] : reasons,
     };
   }, [history]);
 
@@ -507,13 +507,13 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const starDrop = n.avgStars - e.avgStars;
 
     let status = 'neutral';
-    let message = 'Early exits are not clearly better or worse yet.';
+    let message = 'Les sorties anticipées ne montrent pas encore d’avantage clair.';
     if (deltaYieldPct >= 8 && reliabilityDrop <= 5 && starDrop <= 0.25) {
       status = 'promising';
-      message = 'Observed early exits improve G+E/hour without a meaningful reliability drop.';
+      message = 'Les sorties anticipées observées améliorent Or+Élixir/heure sans baisse notable de fiabilité.';
     } else if (deltaYieldPct <= -8 || reliabilityDrop >= 15 || starDrop >= 0.5) {
       status = 'caution';
-      message = 'Observed early exits currently trade away too much yield, stars, or reliability.';
+      message = 'Les sorties anticipées observées coûtent actuellement trop de rendement, d’étoiles ou de fiabilité.';
     }
 
     return { status, message, natural: n, early: e, deltaYieldPct };
@@ -1211,7 +1211,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       legacy,
       pipe,
       legacyRate: tapTotal > 0 ? legacy * 100 / tapTotal : 0,
-      captureHealth: adbEvents === 0 ? 'Apprentissage' : adbErrorRate <= 0.5 ? 'Excellent' : adbErrorRate <= 2 ? 'Watch' : 'Degraded',
+      captureHealth: adbEvents === 0 ? 'Apprentissage' : adbErrorRate <= 0.5 ? 'Excellent' : adbErrorRate <= 2 ? 'À surveiller' : 'Dégradé',
     };
   }, [stats, history]);
 
@@ -1272,7 +1272,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
     const grade = score >= 98 ? 'Elite'
       : score >= 95 ? 'Excellent'
       : score >= 90 ? 'Strong'
-      : score >= 80 ? 'Watch'
+      : score >= 80 ? 'À surveiller'
       : 'Apprentissage';
 
     return {
@@ -1303,7 +1303,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       opportunities.push({
         key: 'tap',
         label: 'Transport clic Windows',
-        evidence: `${reactiveTap.toFixed(0)}ms reactive · ${tapTransport.total > 0 ? `${tapTransport.legacyRate.toFixed(0)}% legacy` : 'route learning'}`,
+        evidence: `${reactiveTap.toFixed(0)}ms reactive · ${tapTransport.total > 0 ? `${tapTransport.legacyRate.toFixed(0)}% legacy` : 'route en apprentissage'}`,
         next: reactiveTap >= 100
           ? 'High enough to justify a Windows-safe transport experiment with instant fallback.'
           : 'Tap transport is already relatively cheap; keep the proven deployment cadence.',
@@ -1589,7 +1589,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Score de fiabilité</div>
             <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">La vitesse ne sert à rien sans fiabilité</h3>
-            <p className="text-sm text-zinc-500 mt-1">Explicit technical gates. “Watch” means the measured rate is below the shown reliability target — no automatic behavior changes.</p>
+            <p className="text-sm text-zinc-500 mt-1">Seuils techniques explicites. « À surveiller » signifie que la mesure est sous l’objectif de fiabilité affiché, sans modifier automatiquement le comportement.</p>
           </div>
           <span className="material-symbols-outlined text-zinc-400">verified_user</span>
         </div>
@@ -1601,7 +1601,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
                   <div className={`text-[8px] font-black uppercase tracking-wider ${!metric.sampled ? 'text-zinc-400' : pass ? 'text-emerald-500' : 'text-amber-500'}`}>
-                    {!metric.sampled ? 'Apprentissage' : pass ? 'Pass' : 'Watch'}
+                    {!metric.sampled ? 'Apprentissage' : pass ? 'Validé' : 'À surveiller'}
                   </div>
                 </div>
                 <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.display}</div>
@@ -1644,7 +1644,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Conseiller d’optimisation</div>
             <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">
-              {optimizationAdvisor.top ? optimizationAdvisor.top.label : 'Learning the runtime'}
+              {optimizationAdvisor.top ? optimizationAdvisor.top.label : 'Analyse du fonctionnement en cours'}
             </h3>
             <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">
               Measured technical bottlenecks only. Never changes red-zone geometry, troop order, strategy or tap cadence automatically.
@@ -1731,7 +1731,7 @@ Best optimization target: {pipeline.dominantTunable.label}
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Analyse de fin de combat</div>
             <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Quand ClashGO termine le combat</h3>
-            <p className="text-sm text-zinc-500 mt-1">Observation only. Early exits still obey full-deployment verification and End Battle button checks.</p>
+            <p className="text-sm text-zinc-500 mt-1">Observation uniquement. Les sorties anticipées respectent toujours la vérification du déploiement complet et du bouton de fin de combat.</p>
           </div>
           <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
             {battleExitIntelligence.attacks} measured battles
@@ -1787,9 +1787,9 @@ Best optimization target: {pipeline.dominantTunable.label}
           <div className="max-w-3xl">
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Conseiller de sortie anticipée</div>
             <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">
-              {battleExitAdvisor.status === 'promising' ? 'Promising for faster farm' :
-               battleExitAdvisor.status === 'caution' ? 'Caution: current exits hurt results' :
-               battleExitAdvisor.status === 'learning' ? 'Learning your battle profile' : 'No clear advantage yet'}
+              {battleExitAdvisor.status === 'promising' ? 'Prometteur pour accélérer le farm' :
+               battleExitAdvisor.status === 'caution' ? 'Attention : les sorties actuelles dégradent les résultats' :
+               battleExitAdvisor.status === 'learning' ? 'Apprentissage de ton profil de combat' : 'Aucun avantage clair pour le moment'}
             </h3>
             <p className="text-sm text-zinc-500 mt-1">{battleExitAdvisor.message}</p>
             <p className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 mt-3">
@@ -2624,7 +2624,7 @@ Best optimization target: {pipeline.dominantTunable.label}
               <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">{performanceGuard.status}</h3>
             </div>
             <span className="material-symbols-outlined text-zinc-400">
-              {performanceGuard.status === 'Healthy' ? 'verified' : performanceGuard.status === 'Watch' ? 'monitor_heart' : 'school'}
+              {performanceGuard.status === 'Healthy' ? 'verified' : performanceGuard.status === 'À surveiller' ? 'monitor_heart' : 'school'}
             </span>
           </div>
           <div className="mt-5 space-y-2">
