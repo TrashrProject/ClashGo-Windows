@@ -64,6 +64,10 @@ type AccountConfig struct {
 	// ProxyURL points to the ClashGO account service. End users never need
 	// a Clash developer key; the server owns that credential.
 	ProxyURL string `json:"proxy_url,omitempty"`
+	// ControlURL is a beta/development override for the license/support
+	// control service. Production builds should embed controlServiceURL;
+	// the embedded value always takes precedence over this local override.
+	ControlURL string `json:"control_url,omitempty"`
 	// LegacyAPIKey is kept only so older config.json files still unmarshal.
 	// The desktop app no longer uses or exposes it.
 	LegacyAPIKey string `json:"api_key,omitempty"`
