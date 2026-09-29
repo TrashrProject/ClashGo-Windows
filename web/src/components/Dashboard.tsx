@@ -94,7 +94,14 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
   const [copiedIdx, setCopiedIdx] = React.useState<number | null>(null);
   const [historyFilter, setHistoryFilter] = React.useState<'all' | 'complete' | 'partial'>('all');
   const [historyLimit, setHistoryLimit] = React.useState(10);
-  const [activityPage, setActivityPage] = React.useState<'summary' | 'history' | 'console'>('summary');
+  const [activityPage, setActivityPage] = React.useState<'summary' | 'history' | 'console'>(() => {
+    try {
+      const saved = localStorage.getItem('clashgo_activity_page');
+      return saved === 'history' || saved === 'console' ? saved : 'summary';
+    } catch {
+      return 'summary';
+    }
+  });
   const copiedTimerRef = React.useRef<number | null>(null);
   const uptimeHours = stats.uptime / (1e9 * 3600);
 
@@ -216,6 +223,10 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
     };
     return { events, width: maxX, height: maxY, categoryClass };
   }, [replay]);
+
+  React.useEffect(() => {
+    try { localStorage.setItem('clashgo_activity_page', activityPage); } catch {}
+  }, [activityPage]);
 
   React.useEffect(() => {
     try {
