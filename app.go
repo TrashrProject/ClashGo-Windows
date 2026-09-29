@@ -1,6 +1,6 @@
 package main
 
-// Build marker: beta pipeline validation after BlueStacks first-search throttling.
+// Build marker: beta pipeline validation after Xingchen-style runtime supervisor integration.
 import (
 	"bytes"
 	"context"
