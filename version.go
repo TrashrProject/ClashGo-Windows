@@ -16,6 +16,10 @@ var (
 	// therefore only enter their player tag; they never configure service
 	// URLs or developer credentials.
 	accountServiceURL = ""
+	// controlServiceURL is the public licensing/support API. It is kept
+	// separate from the Clash profile proxy so either service can move
+	// independently without breaking the other.
+	controlServiceURL = ""
 	// updateChannel is injected at build time ("stable" or "beta").
 	updateChannel = "stable"
 )
