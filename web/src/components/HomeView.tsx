@@ -30,6 +30,15 @@ interface HomeViewProps {
   memberName?: string;
   licensePlan?: string;
   licenseExpiresAt?: string;
+  latestBootReport: {
+    started_at?: string;
+    completed_at?: string;
+    outcome?: string;
+    final_error?: string;
+    suggested_action?: string;
+    recovery_used?: string[];
+    attempts?: number;
+  } | null;
 }
 
 const licenseRemainingLabel = (expiresAt?: string): { label: string; urgent: boolean } => {
@@ -42,6 +51,29 @@ const licenseRemainingLabel = (expiresAt?: string): { label: string; urgent: boo
   if (hours <= 24) return { label: 'Expire aujourd’hui', urgent: true };
   const days = Math.ceil(hours / 24);
   return { label: `${days} j restants`, urgent: days <= 3 };
+};
+
+const friendlyBootAction = (value?: string): string => {
+  const raw = String(value || '').trim();
+  const text = raw.toLowerCase();
+  if (!raw) return 'Réessaie. ClashGO relancera automatiquement les récupérations sûres.';
+  if (text.includes('adb')) return 'Vérifie que BlueStacks est lancé et que l’accès ADB est disponible.';
+  if (text.includes('restart bluestacks') || text.includes('relaunch bluestacks')) return 'Redémarre BlueStacks puis relance ClashGO.';
+  if (text.includes('wait') || text.includes('initializing')) return 'Attends quelques secondes que BlueStacks termine son démarrage puis réessaie.';
+  if (text.includes('clash of clans') || text.includes('startapp')) return 'Ouvre Clash of Clans une fois dans BlueStacks puis relance le bot.';
+  if (text.includes('screen') || text.includes('capture')) return 'Affiche le village dans BlueStacks puis relance le pré-contrôle.';
+  return raw;
+};
+
+const friendlyBootError = (value?: string): string => {
+  const raw = String(value || '').trim();
+  const text = raw.toLowerCase();
+  if (!raw) return 'Le dernier démarrage n’a pas abouti.';
+  if (text.includes('adb')) return 'La connexion ADB avec BlueStacks n’a pas pu être établie.';
+  if (text.includes('boot') && text.includes('timeout')) return 'BlueStacks n’a pas terminé son démarrage à temps.';
+  if (text.includes('capture') || text.includes('screen')) return 'ClashGO n’a pas réussi à lire correctement l’écran du jeu.';
+  if (text.includes('clash of clans') || text.includes('startapp')) return 'Clash of Clans n’a pas pu être lancé correctement.';
+  return raw.length > 180 ? raw.slice(0, 177) + '…' : raw;
 };
 
 const formatLoot = (value: number): string => {
@@ -131,7 +163,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     onStart, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenSettings,
     licenseReady, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
-    memberName, licensePlan, licenseExpiresAt,
+    memberName, licensePlan, licenseExpiresAt, latestBootReport,
   } = props;
 
   const lastAttack = history && history.length > 0 ? history[0] : undefined;
@@ -433,6 +465,40 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
               className="h-full rounded-full bg-emerald-500 transition-[width] duration-500"
               style={{ width: sessionProgress + '%' }}
             />
+          </div>
+        </section>
+      )}
+
+      {latestBootReport && latestBootReport.outcome && latestBootReport.outcome !== 'ok' && (
+        <section className="rounded-[1.75rem] border border-amber-200 dark:border-amber-900/50 bg-amber-50/80 dark:bg-amber-950/20 p-5">
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-lg text-amber-500">warning</span>
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-600 dark:text-amber-400">Dernier démarrage</div>
+              </div>
+              <div className="mt-2 text-base font-black text-zinc-950 dark:text-white">
+                {friendlyBootError(latestBootReport.final_error)}
+              </div>
+              <div className="mt-2 text-xs font-semibold leading-5 text-zinc-600 dark:text-zinc-400">
+                {friendlyBootAction(latestBootReport.suggested_action)}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-wider text-zinc-400">
+                {latestBootReport.attempts && latestBootReport.attempts > 0 && (
+                  <span>{latestBootReport.attempts} tentative{latestBootReport.attempts > 1 ? 's' : ''}</span>
+                )}
+                {(latestBootReport.recovery_used?.length || 0) > 0 && (
+                  <span>· récupération auto utilisée</span>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="shrink-0 rounded-xl border border-amber-300 dark:border-amber-800 px-4 py-2.5 text-[9px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300"
+            >
+              Voir le diagnostic
+            </button>
           </div>
         </section>
       )}
