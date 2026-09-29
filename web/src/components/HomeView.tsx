@@ -1,6 +1,6 @@
 import React from 'react';
 import { ActivityEvent, AttackReport, BotStats } from '../types';
-import { formatUptime } from '../utils';
+import { formatTemps actif } from '../utils';
 
 interface HomeViewProps {
   stats: BotStats;
@@ -10,8 +10,11 @@ interface HomeViewProps {
   starting: boolean;
   onStart: () => void;
   onStop: () => void;
-  onOpenAutomation: () => void;
-  onOpenAccount: () => void;
+  onOpenAutomatisation: () => void;
+  onOpenMon ClashGO: () => void;
+  licenseReady: boolean;
+  accountLinked: boolean;
+  windowsReady: boolean | null;
 }
 
 const formatLoot = (value: number): string => {
@@ -24,7 +27,8 @@ const formatLoot = (value: number): string => {
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, running, starting,
-    onStart, onStop, onOpenAutomation, onOpenAccount,
+    onStart, onStop, onOpenAutomatisation, onOpenMon ClashGO,
+    licenseReady, accountLinked, windowsReady,
   } = props;
 
   const lastAttack = history && history.length > 0 ? history[0] : undefined;
@@ -35,12 +39,12 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     [activity],
   );
 
-  const botLabel = starting ? 'Starting…' : running ? 'Bot running' : 'Bot stopped';
+  const botLabel = starting ? 'Démarrage…' : running ? 'Bot en cours' : 'Bot arrêté';
   const botSub = starting
-    ? 'ClashGO is preparing BlueStacks and the automation runtime.'
+    ? 'ClashGO prépare BlueStacks et l’automatisation.'
     : running
-      ? 'Automation is active. You can leave ClashGO running.'
-      : 'Everything is ready when you are.';
+      ? 'L’automatisation est active. Tu peux laisser ClashGO travailler.'
+      : 'Vérifie les quatre états ci-dessous puis lance le bot.';
 
   const statusDot = running
     ? 'bg-emerald-400 animate-pulse'
@@ -72,17 +76,60 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
             disabled={starting}
             className={'h-14 px-7 rounded-2xl font-black text-xs uppercase tracking-[0.2em] transition-all active:scale-[0.98] disabled:cursor-wait ' + actionClass}
           >
-            {starting ? 'Starting…' : running ? 'Stop bot' : 'Start bot'}
+            {starting ? 'DÉMARRAGE…' : running ? 'ARRÊTER LE BOT' : 'DÉMARRER LE BOT'}
           </button>
         </div>
       </section>
 
+      <section className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        {[
+          {
+            label: 'Licence',
+            value: licenseReady ? 'Prête' : 'À activer',
+            ok: licenseReady,
+            icon: 'license',
+          },
+          {
+            label: 'Compte Clash',
+            value: accountLinked ? 'Lié' : 'À lier',
+            ok: accountLinked,
+            icon: 'person',
+          },
+          {
+            label: 'Windows / BlueStacks',
+            value: windowsReady === null ? 'Vérification…' : windowsReady ? 'Prêt' : 'À vérifier',
+            ok: windowsReady === true,
+            pending: windowsReady === null,
+            icon: 'computer',
+          },
+          {
+            label: 'Bot',
+            value: starting ? 'Démarrage' : running ? 'Actif' : 'En attente',
+            ok: running,
+            pending: starting,
+            icon: 'smart_toy',
+          },
+        ].map((item) => (
+          <div key={item.label} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <span className="material-symbols-outlined text-lg text-zinc-400">{item.icon}</span>
+              <span className={
+                'w-2 h-2 rounded-full ' +
+                (item.ok ? 'bg-emerald-500' : item.pending ? 'bg-amber-400 animate-pulse' : 'bg-zinc-300 dark:bg-zinc-700')
+              } />
+            </div>
+            <div className="mt-3 text-sm font-black text-zinc-950 dark:text-white">{item.value}</div>
+            <div className="mt-1 text-[9px] font-black uppercase tracking-[0.18em] text-zinc-400">{item.label}</div>
+          </div>
+        ))}
+      </section>
+
       <section className="grid grid-cols-2 xl:grid-cols-4 gap-4">
         {[
-          { label: 'Attacks', value: String(stats.attacks_completed || 0), icon: 'swords' },
-          { label: 'Gold', value: formatLoot(stats.total_gold || 0), icon: 'paid' },
+          { label: 'Attaques', value: String(stats.attacks_completed || 0), icon: 'swords' },
+          { label: 'Or', value: formatLoot(stats.total_gold || 0), icon: 'paid' },
           { label: 'Elixir', value: formatLoot(stats.total_elixir || 0), icon: 'water_drop' },
-          { label: 'Uptime', value: formatUptime(stats.uptime || 0), icon: 'schedule' },
+          { label: 'Temps actif', value: formatTemps actif(stats.uptime || 0), icon: 'schedule' },
         ].map((item) => (
           <div key={item.label} className="rounded-[1.75rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-premium dark:shadow-none">
             <span className="material-symbols-outlined text-lg text-zinc-400">{item.icon}</span>
@@ -96,14 +143,14 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
         <div className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Last attack</div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Dernière attaque</div>
               <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">
-                {lastAttack ? String(lastAttack.stars) + '★ · ' + (lastAttack.strategy || 'Strategy') : 'No attack yet'}
+                {lastAttack ? String(lastAttack.stars) + '★ · ' + (lastAttack.strategy || 'Stratégie') : 'Aucune attaque pour le moment'}
               </h3>
             </div>
             {lastAttack && (
               <span className={'px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest ' + (lastAttack.deploy_success ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500')}>
-                {lastAttack.deploy_success ? 'Complete' : 'Partial'}
+                {lastAttack.deploy_success ? 'Complète' : 'Partielle'}
               </span>
             )}
           </div>
@@ -111,9 +158,9 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           {lastAttack ? (
             <div className="mt-5 grid grid-cols-3 gap-3">
               {[
-                ['Gold', lastAttack.gold_stolen],
+                ['Or', lastAttack.gold_stolen],
                 ['Elixir', lastAttack.elixir_stolen],
-                ['Dark', lastAttack.dark_elixir_stolen],
+                ['Élixir noir', lastAttack.dark_elixir_stolen],
               ].map(([label, value]) => (
                 <div key={String(label)} className="rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 p-4">
                   <div className="text-lg font-black">{formatLoot(Number(value))}</div>
@@ -122,25 +169,25 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
               ))}
             </div>
           ) : (
-            <p className="mt-4 text-sm font-semibold text-zinc-500">Your first farming result will appear here automatically.</p>
+            <p className="mt-4 text-sm font-semibold text-zinc-500">Le résultat de ta première attaque apparaîtra ici automatiquement.</p>
           )}
         </div>
 
         <div className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
-          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Quick actions</div>
-          <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Everything useful in two clicks</h3>
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Accès rapides</div>
+          <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">L’essentiel en deux clics</h3>
           <div className="mt-5 grid gap-3">
-            <button type="button" onClick={onOpenAutomation} className="w-full flex items-center justify-between rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 px-4 py-4 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
+            <button type="button" onClick={onOpenAutomatisation} className="w-full flex items-center justify-between rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 px-4 py-4 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
               <span>
-                <span className="block text-sm font-black text-zinc-950 dark:text-white">Automation</span>
-                <span className="block mt-0.5 text-xs font-semibold text-zinc-500">Loot targets, army and attack behavior</span>
+                <span className="block text-sm font-black text-zinc-950 dark:text-white">Automatisation</span>
+                <span className="block mt-0.5 text-xs font-semibold text-zinc-500">Butin ciblé, armée et comportement d’attaque</span>
               </span>
               <span className="material-symbols-outlined text-zinc-400">chevron_right</span>
             </button>
-            <button type="button" onClick={onOpenAccount} className="w-full flex items-center justify-between rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 px-4 py-4 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
+            <button type="button" onClick={onOpenMon ClashGO} className="w-full flex items-center justify-between rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 px-4 py-4 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
               <span>
-                <span className="block text-sm font-black text-zinc-950 dark:text-white">Account</span>
-                <span className="block mt-0.5 text-xs font-semibold text-zinc-500">Village profile and ClashGO access</span>
+                <span className="block text-sm font-black text-zinc-950 dark:text-white">Mon ClashGO</span>
+                <span className="block mt-0.5 text-xs font-semibold text-zinc-500">Licence, réglages membre et profil du village</span>
               </span>
               <span className="material-symbols-outlined text-zinc-400">chevron_right</span>
             </button>
@@ -150,7 +197,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
 
       {recentActivity.length > 0 && (
         <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
-          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Recent activity</div>
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Activité récente</div>
           <div className="mt-4 grid md:grid-cols-3 gap-3">
             {recentActivity.map((event, index) => (
               <div key={event.at + '-' + index} className="rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 px-4 py-3">
