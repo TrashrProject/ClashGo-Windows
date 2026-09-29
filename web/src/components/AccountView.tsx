@@ -783,12 +783,16 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   };
 
   const unlink = async () => {
-    if (automationActive) return;
+    if (accountActionLockRef.current || automationActive) return;
+    accountActionLockRef.current = true;
     setBusy(true);
     try {
       await ClearAccount();
       setConfirmUnlink(false);
       setProfile(null);
+      setResources(null);
+      setFarmProfile(null);
+      setCurrentArmy(null);
       setAccountTagInput('');
       setAccountLinkMessage('');
       setError('');
@@ -796,6 +800,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     } catch (e) {
       setError(friendlyAccountActionError(e));
     } finally {
+      accountActionLockRef.current = false;
       setBusy(false);
     }
   };
