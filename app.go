@@ -1640,7 +1640,7 @@ func (a *App) developerControlGET(path string) ([]map[string]any, error) {
 		return nil, err
 	}
 	var rows []map[string]any
-	for _, key := range []string{"incidents", "licenses"} {
+	for _, key := range []string{"incidents", "licenses", "events"} {
 		if raw, ok := envelope[key]; ok {
 			if err := json.Unmarshal(raw, &rows); err != nil {
 				return nil, err
@@ -1657,6 +1657,17 @@ func (a *App) GetDeveloperIncidents() ([]map[string]any, error) {
 
 func (a *App) GetDeveloperLicenses() ([]map[string]any, error) {
 	return a.developerControlGET("/v1/developer/licenses")
+}
+
+func (a *App) GetAdminLicenseHistory() ([]map[string]any, error) {
+	if a.license == nil {
+		return nil, fmt.Errorf("license service is not initialized")
+	}
+	state := a.license.GetState()
+	if !state.Activated || state.Role != licensing.RoleAdmin {
+		return nil, fmt.Errorf("admin license required")
+	}
+	return a.developerControlGET("/v1/developer/history")
 }
 
 func (a *App) adminControlPOST(path string, payload any) (map[string]any, error) {
