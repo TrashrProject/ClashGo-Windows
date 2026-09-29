@@ -711,6 +711,8 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   }, [refresh]);
 
   React.useEffect(() => {
+    if (memberPage !== 'village') return;
+
     let active = true;
     const loadResources = async () => {
       try {
@@ -727,7 +729,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       active = false;
       window.clearInterval(id);
     };
-  }, []);
+  }, [memberPage]);
 
   React.useEffect(() => {
     if (profile || busy || !playerTag || !serviceConfigured) return;
