@@ -502,3 +502,69 @@ func TestMemberInterfaceLevelCannotPersistDeveloper(t *testing.T) {
 		t.Fatalf("member profile stored forbidden interface level %q", got.InterfaceLevel)
 	}
 }
+
+
+func TestPlayerProfileFileRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "members", "profile.player.json")
+	want := &ClashPlayerProfile{
+		Tag:           "#ABC123",
+		Name:          "Member",
+		TownHallLevel: 17,
+		ExpLevel:      250,
+		Trophies:      5200,
+	}
+	if err := savePlayerProfileFile(path, want); err != nil {
+		t.Fatalf("savePlayerProfileFile: %v", err)
+	}
+	got, ok := loadPlayerProfileFile(path)
+	if !ok {
+		t.Fatal("expected cached player profile to load")
+	}
+	if got.Tag != want.Tag || got.Name != want.Name || got.TownHallLevel != want.TownHallLevel {
+		t.Fatalf("loaded player profile mismatch: got=%+v want=%+v", got, want)
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("temporary player profile survived successful save: %v", err)
+	}
+}
+
+func TestPlayerProfileFileRecoversBackup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "members", "profile.player.json")
+	want := &ClashPlayerProfile{
+		Tag:           "#BACKUP1",
+		Name:          "Recovered",
+		TownHallLevel: 16,
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	blob, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".bak", blob, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := loadPlayerProfileFile(path)
+	if !ok {
+		t.Fatal("expected backup player profile to recover")
+	}
+	if got.Tag != want.Tag || got.TownHallLevel != want.TownHallLevel {
+		t.Fatalf("recovered player profile mismatch: got=%+v want=%+v", got, want)
+	}
+	primary, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("recovered primary missing: %v", err)
+	}
+	var restored ClashPlayerProfile
+	if err := json.Unmarshal(primary, &restored); err != nil {
+		t.Fatalf("recovered primary invalid json: %v", err)
+	}
+	if restored.Tag != want.Tag {
+		t.Fatalf("recovered primary tag=%q want=%q", restored.Tag, want.Tag)
+	}
+}
