@@ -765,6 +765,15 @@ function App() {
           {tab === 'account' && (
             <AccountView
               playerTag={playerTag}
+              interfaceLevel={interfaceLevel}
+              onInterfaceLevelChange={(level) => {
+                setInterfaceLevel(level);
+                if (level !== 'developer') {
+                  const simple = level === 'simple';
+                  setSimpleMode(simple);
+                  void SetSimpleMode(simple);
+                }
+              }}
               onAccountChanged={(tag) => {
                 setPlayerTag(tag);
                 if (tag) setTab('account');
