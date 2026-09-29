@@ -156,7 +156,7 @@
         x.display_name, x.contact, x.id, x.notes
       ].some(v => String(v || '').toLowerCase().includes(q)));
       const filteredIncidents = state.incidents.filter(x => !q || [
-        x.license_hint, x.machine_id, x.app_version, x.message, x.level
+        x.customer_name, x.customer_contact, x.license_hint, x.machine_id, x.app_version, x.message, x.level
       ].some(v => String(v || '').toLowerCase().includes(q)));
 
       $('licenses').innerHTML = filteredLicenses.length ? filteredLicenses.map(x => `
@@ -201,7 +201,11 @@
 
       $('incidents').innerHTML = filteredIncidents.length ? [...filteredIncidents].reverse().map(x => `
         <div class="row incident">
-          <div><div class="title">${escapeHtml(x.license_hint || 'Licence')}</div><div class="sub">${escapeHtml(x.app_version || '')}</div></div>
+          <div>
+            <div class="title">${escapeHtml(x.customer_name || x.license_hint || 'Client inconnu')}</div>
+            <div class="sub">${escapeHtml(x.customer_contact || x.license_hint || '')}</div>
+            <div class="sub">${escapeHtml(x.app_version || '')}</div>
+          </div>
           <div><span class="badge">${escapeHtml(x.level || 'error')}</span></div>
           <div><div class="sub">${escapeHtml(date(x.received_at || x.at))}</div><div class="sub">${escapeHtml(shortMachine(x.machine_id))}</div></div>
           <div class="message">${escapeHtml(x.message || 'Sans message')}</div>
