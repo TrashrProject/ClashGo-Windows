@@ -850,7 +850,9 @@ func (b *Bot) recoverEmulator() {
 		b.logger.Info().Msg("device still responsive; restarting game only")
 		b.restartGame()
 		b.recoverySuccesses.Add(1)
-		if b.telemetry != nil { b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "success"}) }
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "success", "method": "game_restart"})
+		}
 		return
 	}
 
@@ -861,7 +863,9 @@ func (b *Bot) recoverEmulator() {
 	if deviceOK() {
 		b.restartGame()
 		b.recoverySuccesses.Add(1)
-		if b.telemetry != nil { b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "success"}) }
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "success", "method": "adb_reconnect"})
+		}
 		return
 	}
 
@@ -874,7 +878,9 @@ func (b *Bot) recoverEmulator() {
 	if deviceOK() {
 		b.restartGame()
 		b.recoverySuccesses.Add(1)
-		if b.telemetry != nil { b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "success"}) }
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "success", "method": "adb_server_reset"})
+		}
 		return
 	}
 
@@ -895,11 +901,20 @@ func (b *Bot) recoverEmulator() {
 	}
 	if !recovered {
 		b.logger.Error().Msg("device remained unreachable after BlueStacks recovery window; deferring until next watchdog cycle")
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventRecovery, map[string]any{
+				"stage": "failed", "method": "bluestacks_relaunch",
+			})
+		}
 		return
 	}
 	b.restartGame()
 	b.recoverySuccesses.Add(1)
-	if b.telemetry != nil { b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "success", "bluestacks_restart": true}) }
+	if b.telemetry != nil {
+		b.telemetry.Emit(telemetry.EventRecovery, map[string]any{
+			"stage": "success", "method": "bluestacks_relaunch", "bluestacks_restart": true,
+		})
+	}
 }
 
 // locateRewardPopup detects the seasonal/event "Pick a Reward!" modal.
