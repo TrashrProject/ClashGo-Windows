@@ -7,7 +7,8 @@
   <title>ClashGO Control Center</title>
   <link rel="stylesheet" href="../style.css" />
   <style>
-    .control{max-width:1180px;margin:0 auto;padding:88px 24px 80px}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:28px}.top h1{font-size:44px;letter-spacing:-.055em;margin:8px 0}.top p{color:#8b8b95;max-width:650px;line-height:1.6}.card{border:1px solid #27272a;background:#111113;border-radius:24px;padding:22px}.connect{display:grid;grid-template-columns:1.2fr 1fr auto;gap:10px}.input,.select{width:100%;height:44px;background:#0b0b0d;border:1px solid #303036;color:#e4e4e7;border-radius:12px;padding:0 13px;outline:none}.input:focus,.select:focus{border-color:#71717a}.button{height:44px;border:0;border-radius:12px;padding:0 16px;background:#f4f4f5;color:#09090b;font-weight:900;cursor:pointer}.button.secondary{background:#18181b;color:#d4d4d8;border:1px solid #303036}.button.danger{background:#2b1114;color:#fb7185;border:1px solid #4c1d24}.button:disabled{opacity:.4;cursor:not-allowed}.tabs{display:flex;gap:8px;margin:22px 0}.tab{background:#111113;border:1px solid #27272a;color:#71717a;border-radius:11px;padding:10px 14px;font-size:11px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}.tab.active{background:#f4f4f5;color:#09090b}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.stat{background:#111113;border:1px solid #27272a;border-radius:18px;padding:18px}.stat strong{display:block;font-size:28px}.stat span{font-size:9px;letter-spacing:.16em;color:#71717a;font-weight:900}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.searchbar{margin:18px 0}.customer-row{grid-template-columns:1.2fr 1fr .6fr .8fr}.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{background:#111113;border:1px solid #27272a;border-radius:18px;padding:18px}.metric strong{font-size:24px;display:block}.metric span{font-size:9px;color:#71717a;font-weight:900;letter-spacing:.14em}.history-row{grid-template-columns:1fr .9fr .8fr .8fr 1.4fr}.top-errors{margin-top:16px}.error-row{display:grid;grid-template-columns:.6fr .8fr .5fr 2fr;gap:12px;padding:12px 14px;border-bottom:1px solid #27272a}.error-row:last-child{border-bottom:0}@media(max-width:850px){.metric-grid{grid-template-columns:1fr 1fr}.history-row,.error-row{grid-template-columns:1fr}}.toolbar h2{font-size:18px;margin:0}.create{display:flex;gap:8px;flex-wrap:wrap}.rows{border:1px solid #27272a;border-radius:20px;overflow:hidden}.row{display:grid;grid-template-columns:1.2fr .8fr .8fr 1.3fr auto;gap:12px;align-items:center;padding:15px 17px;background:#111113;border-bottom:1px solid #27272a}.row:last-child{border-bottom:0}.row .title{font-weight:800;font-size:13px}.row .sub{font-size:10px;color:#71717a;margin-top:4px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.badge{display:inline-block;padding:6px 8px;border-radius:8px;background:#18181b;color:#a1a1aa;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.12em}.ok{color:#4ade80}.bad{color:#fb7185}.actions2{display:flex;gap:6px;justify-content:flex-end}.mini{height:34px;padding:0 10px;border-radius:9px;font-size:9px}.incident{grid-template-columns:.85fr .65fr 1fr 2.2fr}.message{font-size:12px;font-weight:700;color:#d4d4d8;word-break:break-word}.empty{padding:28px;text-align:center;color:#52525b;background:#111113}.error{margin-top:12px;border:1px solid #4c1d24;background:#2b1114;color:#fb7185;padding:12px 14px;border-radius:12px;font-size:12px;font-weight:700}.success{margin-top:12px;border:1px solid #14532d;background:#052e16;color:#4ade80;padding:12px 14px;border-radius:12px;font-size:12px;font-weight:700}.generated{margin-top:12px;background:#0b0b0d;border:1px solid #27272a;border-radius:14px;padding:14px}.generated code{display:block;padding:7px 0;color:#e4e4e7;font-size:12px;word-break:break-all}@media(max-width:850px){.connect{grid-template-columns:1fr}.stats{grid-template-columns:1fr}.row,.incident{grid-template-columns:1fr}.actions2{justify-content:flex-start}.top{flex-direction:column}}
+    .control{max-width:1180px;margin:0 auto;padding:88px 24px 80px}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:28px}.top h1{font-size:44px;letter-spacing:-.055em;margin:8px 0}.top p{color:#8b8b95;max-width:650px;line-height:1.6}.card{border:1px solid #27272a;background:#111113;border-radius:24px;padding:22px}.connect{display:grid;grid-template-columns:1.2fr 1fr auto;gap:10px}.input,.select{width:100%;height:44px;background:#0b0b0d;border:1px solid #303036;color:#e4e4e7;border-radius:12px;padding:0 13px;outline:none}.input:focus,.select:focus{border-color:#71717a}.button{height:44px;border:0;border-radius:12px;padding:0 16px;background:#f4f4f5;color:#09090b;font-weight:900;cursor:pointer}.button.secondary{background:#18181b;color:#d4d4d8;border:1px solid #303036}.button.danger{background:#2b1114;color:#fb7185;border:1px solid #4c1d24}.button:disabled{opacity:.4;cursor:not-allowed}.tabs{display:flex;gap:8px;margin:22px 0}.tab{background:#111113;border:1px solid #27272a;color:#71717a;border-radius:11px;padding:10px 14px;font-size:11px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}.tab.active{background:#f4f4f5;color:#09090b}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.stat{background:#111113;border:1px solid #27272a;border-radius:18px;padding:18px}.stat strong{display:block;font-size:28px}.stat span{font-size:9px;letter-spacing:.16em;color:#71717a;font-weight:900}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.searchbar{margin:18px 0}.customer-row{grid-template-columns:1.2fr 1fr .6fr .8fr}.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0}.metric{background:#111113;border:1px solid #27272a;border-radius:18px;padding:18px}.metric strong{font-size:24px;display:block}.metric span{font-size:9px;color:#71717a;font-weight:900;letter-spacing:.14em}.history-row{grid-template-columns:1fr .9fr .8fr .8fr 1.4fr}.top-errors{margin-top:16px}.error-row{display:grid;grid-template-columns:.6fr .8fr .5fr 2fr;gap:12px;padding:12px 14px;border-bottom:1px solid #27272a}.error-row:last-child{border-bottom:0}@media(max-width:850px){.metric-grid{grid-template-columns:1fr 1fr}.history-row,.error-row{grid-template-columns:1fr}}
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.72);backdrop-filter:blur(10px);display:grid;place-items:center;padding:20px;z-index:1000}.modal{width:min(1100px,100%);max-height:92vh;overflow:auto;background:#0d0d10;border:1px solid #2a2a30;border-radius:28px;padding:24px}.modal-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.close{width:40px;height:40px;border-radius:12px;border:1px solid #303036;background:#18181b;color:white;cursor:pointer}.detail-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:16px;margin-top:18px}.detail-card{border:1px solid #27272a;background:#111113;border-radius:20px;padding:18px}.detail-card h3{margin:0 0 12px;font-size:13px}.detail-list{display:grid;gap:10px}.detail-line{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid #202024;padding-bottom:8px}.detail-line:last-child{border-bottom:0}.detail-line span{color:#71717a;font-size:11px}.detail-line strong{font-size:12px;text-align:right}.customer-click{cursor:pointer}.customer-click:hover{background:#151518}.modal .rows{margin-top:10px}@media(max-width:850px){.detail-grid{grid-template-columns:1fr}.modal{padding:18px}}.toolbar h2{font-size:18px;margin:0}.create{display:flex;gap:8px;flex-wrap:wrap}.rows{border:1px solid #27272a;border-radius:20px;overflow:hidden}.row{display:grid;grid-template-columns:1.2fr .8fr .8fr 1.3fr auto;gap:12px;align-items:center;padding:15px 17px;background:#111113;border-bottom:1px solid #27272a}.row:last-child{border-bottom:0}.row .title{font-weight:800;font-size:13px}.row .sub{font-size:10px;color:#71717a;margin-top:4px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.badge{display:inline-block;padding:6px 8px;border-radius:8px;background:#18181b;color:#a1a1aa;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.12em}.ok{color:#4ade80}.bad{color:#fb7185}.actions2{display:flex;gap:6px;justify-content:flex-end}.mini{height:34px;padding:0 10px;border-radius:9px;font-size:9px}.incident{grid-template-columns:.85fr .65fr 1fr 2.2fr}.message{font-size:12px;font-weight:700;color:#d4d4d8;word-break:break-word}.empty{padding:28px;text-align:center;color:#52525b;background:#111113}.error{margin-top:12px;border:1px solid #4c1d24;background:#2b1114;color:#fb7185;padding:12px 14px;border-radius:12px;font-size:12px;font-weight:700}.success{margin-top:12px;border:1px solid #14532d;background:#052e16;color:#4ade80;padding:12px 14px;border-radius:12px;font-size:12px;font-weight:700}.generated{margin-top:12px;background:#0b0b0d;border:1px solid #27272a;border-radius:14px;padding:14px}.generated code{display:block;padding:7px 0;color:#e4e4e7;font-size:12px;word-break:break-all}@media(max-width:850px){.connect{grid-template-columns:1fr}.stats{grid-template-columns:1fr}.row,.incident{grid-template-columns:1fr}.actions2{justify-content:flex-start}.top{flex-direction:column}}
   </style>
 </head>
 <body>
@@ -113,11 +114,60 @@
       </div>
       <div id="incidents" class="rows"><div class="empty">Aucun incident chargé.</div></div>
     </section>
+    <div id="customerModal" class="modal-backdrop" hidden>
+      <div class="modal" onclick="event.stopPropagation()">
+        <div class="modal-head">
+          <div>
+            <div class="eyebrow">FICHE CLIENT</div>
+            <h2 id="detailName" style="margin:6px 0 0;font-size:30px">Client</h2>
+            <div id="detailContact" class="sub"></div>
+          </div>
+          <button id="closeCustomerModal" class="close">✕</button>
+        </div>
+        <div class="detail-grid">
+          <section class="detail-card">
+            <h3>Informations</h3>
+            <div class="detail-list">
+              <div class="detail-line"><span>Statut paiement</span><strong id="detailPayment">—</strong></div>
+              <div class="detail-line"><span>Total encaissé</span><strong id="detailTotal">—</strong></div>
+              <div class="detail-line"><span>Prochaine échéance</span><strong id="detailDue">—</strong></div>
+              <div class="detail-line"><span>Client depuis</span><strong id="detailSince">—</strong></div>
+            </div>
+            <div style="margin-top:14px">
+              <label class="eyebrow">NOTES INTERNES</label>
+              <textarea id="detailNotes" class="input" style="height:110px;padding-top:12px;margin-top:8px;resize:vertical"></textarea>
+              <div style="display:flex;gap:8px;margin-top:8px">
+                <select id="detailPaymentStatus" class="select">
+                  <option value="unknown">Non défini</option>
+                  <option value="paid">Payé</option>
+                  <option value="pending">En attente</option>
+                  <option value="offered">Offert</option>
+                  <option value="free">Free</option>
+                </select>
+                <button id="saveCustomerBtn" class="button">Enregistrer</button>
+              </div>
+            </div>
+          </section>
+          <section class="detail-card">
+            <h3>Résumé</h3>
+            <div class="detail-list">
+              <div class="detail-line"><span>Licences</span><strong id="detailLicenseCount">0</strong></div>
+              <div class="detail-line"><span>Incidents</span><strong id="detailIncidentCount">0</strong></div>
+              <div class="detail-line"><span>Dernière activité</span><strong id="detailLastSeen">—</strong></div>
+            </div>
+          </section>
+        </div>
+        <section class="detail-card" style="margin-top:16px"><h3>Licences</h3><div id="detailLicenses" class="rows"><div class="empty">Aucune licence.</div></div></section>
+        <section class="detail-card" style="margin-top:16px"><h3>Historique</h3><div id="detailHistory" class="rows"><div class="empty">Aucun historique.</div></div></section>
+        <section class="detail-card" style="margin-top:16px"><h3>Erreurs récentes</h3><div id="detailIncidents" class="rows"><div class="empty">Aucune erreur.</div></div></section>
+      </div>
+    </div>
+
   </main>
 
   <script>
     const $ = (id) => document.getElementById(id);
-    const state = { api: sessionStorage.getItem('clashgo_api') || '', admin: '', licenses: [], customers: [], incidents: [], history: [], summary: {}, search: '' };
+    const state = { api: sessionStorage.getItem('clashgo_api') || '', admin: '', licenses: [], customers: [], incidents: [], history: [], summary: {}, search: '', selectedCustomer: null };
 
     $('apiUrl').value = state.api;
 
@@ -242,7 +292,7 @@
       `).join('') : '<div class="empty">Aucune licence trouvée.</div>';
 
       $('customers').innerHTML = filteredCustomers.length ? filteredCustomers.map(x => `
-        <div class="row customer-row">
+        <div class="row customer-row customer-click" onclick="openCustomer('${escapeHtml(x.id || '')}')">
           <div><div class="title">${escapeHtml(x.display_name || 'Client')}</div><div class="sub">${escapeHtml(x.id || '')}</div></div>
           <div><div class="title">${escapeHtml(x.contact || 'Aucun contact')}</div><div class="sub">${escapeHtml(x.notes || '')}</div></div>
           <div><span class="badge">${escapeHtml(x.license_count || 0)} licence(s)</span></div>
@@ -326,11 +376,113 @@
       render();
     });
 
+
+    function money(cents) {
+      if (cents == null) return '—';
+      return (Number(cents) / 100).toFixed(2) + ' €';
+    }
+
+    function lastSeenFromLicenses(licenses) {
+      const values = (licenses || []).map(function(x){ return x.last_seen_at; }).filter(Boolean).map(Date.parse).filter(Number.isFinite);
+      if (!values.length) return '—';
+      return date(new Date(Math.max.apply(null, values)).toISOString());
+    }
+
+    function renderCustomerDetail(detail) {
+      const c = detail.customer || {};
+      const licenses = detail.licenses || [];
+      const history = detail.history || [];
+      const incidents = detail.incidents || [];
+      state.selectedCustomer = detail;
+
+      $('detailName').textContent = c.display_name || 'Client';
+      $('detailContact').textContent = c.contact || 'Aucun contact';
+      $('detailPayment').textContent = c.payment_status || 'unknown';
+      $('detailTotal').textContent = money(c.total_paid_cents || 0);
+      $('detailDue').textContent = date(c.next_due_at);
+      $('detailSince').textContent = date(c.created_at);
+      $('detailNotes').value = c.notes || '';
+      $('detailPaymentStatus').value = c.payment_status || 'unknown';
+      $('detailLicenseCount').textContent = licenses.length;
+      $('detailIncidentCount').textContent = incidents.length;
+      $('detailLastSeen').textContent = lastSeenFromLicenses(licenses);
+
+      $('detailLicenses').innerHTML = licenses.length ? licenses.map(function(x) {
+        return '<div class="row">' +
+          '<div><div class="title">' + escapeHtml(x.hint || x.id) + '</div><div class="sub">' + escapeHtml(x.id || '') + '</div></div>' +
+          '<div><span class="badge">' + escapeHtml(x.role || 'member') + '</span><div class="sub">' + escapeHtml(planLabel(x.plan)) + '</div></div>' +
+          '<div class="' + (x.active ? 'ok' : 'bad') + '" style="font-size:11px;font-weight:900">' + (x.active ? 'ACTIVE' : 'RÉVOQUÉE') + '</div>' +
+          '<div><div class="title">' + escapeHtml(shortMachine(x.machine_id)) + '</div><div class="sub">' + escapeHtml(x.app_version || 'Jamais connectée') + ' · ' + escapeHtml(date(x.last_seen_at)) + '</div></div>' +
+          '<div class="actions2">' +
+            (x.plan !== 'lifetime' ? '<button class="button secondary mini" onclick="renew(\'' + escapeHtml(x.id || '') + '\',\'' + escapeHtml(x.plan || 'month_1') + '\')">RENOUVELER</button>' : '') +
+            '<button class="button secondary mini" onclick="resetMachine(\'' + escapeHtml(x.id || '') + '\')">RESET PC</button>' +
+          '</div>' +
+        '</div>';
+      }).join('') : '<div class="empty">Aucune licence.</div>';
+
+      $('detailHistory').innerHTML = history.length ? history.map(function(x) {
+        return '<div class="row history-row">' +
+          '<div><span class="badge">' + escapeHtml(x.event_type || 'event') + '</span></div>' +
+          '<div><div class="title">' + escapeHtml(planLabel(x.plan)) + '</div><div class="sub">' + escapeHtml(x.payment_status || '') + '</div></div>' +
+          '<div><div class="title">' + money(x.amount_cents) + '</div></div>' +
+          '<div><div class="sub">' + escapeHtml(date(x.created_at)) + '</div><div class="sub">' + (x.expires_at ? 'Expire ' + escapeHtml(date(x.expires_at)) : '') + '</div></div>' +
+          '<div class="message">' + escapeHtml(x.note || '') + '</div>' +
+        '</div>';
+      }).join('') : '<div class="empty">Aucun historique.</div>';
+
+      $('detailIncidents').innerHTML = incidents.length ? incidents.map(function(x) {
+        return '<div class="row incident">' +
+          '<div><div class="title">' + escapeHtml(x.license_hint || 'Licence') + '</div><div class="sub">' + escapeHtml(x.app_version || '') + '</div></div>' +
+          '<div><span class="badge">' + escapeHtml(x.level || 'error') + '</span></div>' +
+          '<div><div class="sub">' + escapeHtml(date(x.received_at || x.at)) + '</div><div class="sub">' + escapeHtml(shortMachine(x.machine_id)) + '</div></div>' +
+          '<div class="message">' + escapeHtml(x.message || 'Sans message') + '</div>' +
+        '</div>';
+      }).join('') : '<div class="empty">Aucune erreur récente.</div>';
+    }
+
+    window.openCustomer = async function(id) {
+      if (!id) return;
+      try {
+        const detail = await request('/v1/admin/customer?id=' + encodeURIComponent(id));
+        renderCustomerDetail(detail);
+        $('customerModal').hidden = false;
+      } catch(e) { flash(e.message); }
+    };
+
+    $('closeCustomerModal').addEventListener('click', function() { $('customerModal').hidden = true; });
+    $('customerModal').addEventListener('click', function() { $('customerModal').hidden = true; });
+
+    $('saveCustomerBtn').addEventListener('click', async function() {
+      const detail = state.selectedCustomer;
+      if (!detail || !detail.customer || !detail.customer.id) return;
+      try {
+        await request('/v1/admin/customers/update', {
+          method:'POST',
+          body:JSON.stringify({
+            customer_id:detail.customer.id,
+            display_name:detail.customer.display_name,
+            contact:detail.customer.contact || '',
+            notes:$('detailNotes').value || '',
+            payment_status:$('detailPaymentStatus').value || 'unknown',
+            total_paid_cents:Number(detail.customer.total_paid_cents || 0),
+            next_due_at:detail.customer.next_due_at || null
+          })
+        });
+        const refreshed = await request('/v1/admin/customer?id=' + encodeURIComponent(detail.customer.id));
+        renderCustomerDetail(refreshed);
+        await loadAll();
+        flash('Fiche client enregistrée.', 'success');
+      } catch(e) { flash(e.message); }
+    });
+
     window.resetMachine = async (id) => {
       if (!id || !confirm('Délier cette licence de son PC actuel ?')) return;
       try {
         await request('/v1/admin/licenses/reset-machine',{method:'POST',body:JSON.stringify({license_id:id})});
         await loadAll();
+        if (state.selectedCustomer && state.selectedCustomer.customer && state.selectedCustomer.customer.id) {
+          renderCustomerDetail(await request('/v1/admin/customer?id=' + encodeURIComponent(state.selectedCustomer.customer.id)));
+        }
         flash('Machine réinitialisée.', 'success');
       } catch(e) { flash(e.message); }
     };
@@ -357,6 +509,9 @@
           })
         });
         await loadAll();
+        if (state.selectedCustomer && state.selectedCustomer.customer && state.selectedCustomer.customer.id) {
+          renderCustomerDetail(await request('/v1/admin/customer?id=' + encodeURIComponent(state.selectedCustomer.customer.id)));
+        }
         flash('Licence renouvelée jusqu’au ' + (out.expires_at ? date(out.expires_at) : 'à vie') + '.', 'success');
       } catch(e) { flash(e.message); }
     };
