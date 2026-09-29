@@ -87,14 +87,14 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
           at: ev.at,
           icon: 'bolt',
           title: 'Attaque lancée',
-          detail: `${(numberField(ev, 'search_ms') / 1000).toFixed(1)}s search · ${numberField(ev, 'skips')} skips`,
+          detail: `${(numberField(ev, 'search_ms') / 1000).toFixed(1)} s recherche · ${numberField(ev, 'skips')} ignorés`,
         });
       } else if (ev.type === 'attack_finished') {
         rows.push({
           at: ev.at,
           icon: 'military_tech',
           title: `Attaque terminée · ${numberField(ev, 'stars')}★`,
-          detail: `${numberField(ev, 'gold').toLocaleString()} G · ${(numberField(ev, 'deploy_ms') / 1000).toFixed(1)}s deploy · ${(numberField(ev, 'cycle_ms') / 1000).toFixed(0)}s cycle`,
+          detail: `${numberField(ev, 'gold').toLocaleString()} G · ${(numberField(ev, 'deploy_ms') / 1000).toFixed(1)} s déploiement · ${(numberField(ev, 'cycle_ms') / 1000).toFixed(0)} s cycle`,
         });
       } else if (ev.type === 'recovery') {
         rows.push({
@@ -115,9 +115,9 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         if (modeReason === 'safety_governor') {
           reason = `Protection de cadence${incident ? ` · ${incident.split('_').join(' ')}` : ''}`;
         } else if (nextTransitions >= 5 && nextFirstPass > 0 && nextFirstPass < 92) {
-          reason = `Next first-pass ${nextFirstPass.toFixed(0)}% · ${nextTransitions.toFixed(0)} samples`;
+          reason = `Premier passage suivant ${nextFirstPass.toFixed(0)}% · ${nextTransitions.toFixed(0)} échantillons`;
         } else if (reactiveCapture > 0) {
-          reason = `Reactive capture ${reactiveCapture.toFixed(0)}ms`;
+          reason = `Capture réactive ${reactiveCapture.toFixed(0)}ms`;
         }
         rows.push({
           at: ev.at,
@@ -131,7 +131,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
           at: ev.at,
           icon: ok ? 'home' : 'home_work',
           title: ok ? 'Village prêt' : 'Retour au village de secours',
-          detail: `${(numberField(ev, 'duration_ms') / 1000).toFixed(1)}s return-home path`,
+          detail: `${(numberField(ev, 'duration_ms') / 1000).toFixed(1)} s retour village`,
         });
       } else if (ev.type === 'anomaly') {
         const kind = textField(ev, 'kind') || 'performance_anomaly';
@@ -316,7 +316,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               </div>
               <div className="mt-2 text-[10px] font-bold text-zinc-500">
                 Point limitant : {(sessionReport.bottleneck || 'learning').split('_').join(' ')}
-                {sessionReport.optimization_target ? ` · optimize ${sessionReport.optimization_target.split('_').join(' ')}` : ''}
+                {sessionReport.optimization_target ? ` · optimiser ${sessionReport.optimization_target.split('_').join(' ')}` : ''}
                 {sessionReport.top_strategy ? ` · ${sessionReport.top_strategy}` : ''}
                 {sessionReport.top_deploy_side ? ` · ${sessionReport.top_deploy_side}` : ''}
               </div>
@@ -400,15 +400,15 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         <section className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none overflow-hidden">
           <div className="px-6 py-5 flex flex-wrap items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-800/70">
             <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Attack Replay</div>
-              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">{replay.strategy || 'Latest deployment'}</h3>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Replay de l’attaque</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">{replay.strategy || 'Dernier déploiement'}</h3>
             </div>
             <div className={`px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${
               replay.complete
                 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                 : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
             }`}>
-              {replay.complete ? 'Complete' : 'Partial'}
+              {replay.complete ? 'Complet' : 'Partiel'}
             </div>
           </div>
 
@@ -420,7 +420,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                 <div className="grid grid-cols-1 xl:grid-cols-[1.5fr_auto] gap-4 items-start">
                   <div className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-zinc-950 overflow-hidden relative">
                     <div className="absolute top-4 left-4 z-10">
-                      <div className="text-[9px] font-black uppercase tracking-[0.22em] text-zinc-500">Deploy Map</div>
+                      <div className="text-[9px] font-black uppercase tracking-[0.22em] text-zinc-500">Carte de déploiement</div>
                       <div className="mt-1 text-xs font-bold text-zinc-300">{replayMap.events.length} recorded deploy actions</div>
                     </div>
                     <svg
@@ -584,7 +584,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Attack History</h3>
+                  <h3 className="text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Historique des attaques</h3>
                   <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[9px] font-black uppercase tracking-widest border border-emerald-500/20">
                     Saved
                   </span>
@@ -599,7 +599,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               {([
                 ['all', 'Tout'],
                 ['complete', 'Full deploy'],
-                ['partial', 'Partial'],
+                ['partial', 'Partiel'],
               ] as const).map(([id, label]) => (
                 <button
                   key={id}
@@ -620,7 +620,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
             <div className="mt-5 grid grid-cols-1 xl:grid-cols-[1.5fr_1fr] gap-3">
               <div className="rounded-2xl bg-zinc-950 text-white dark:bg-zinc-800 p-4 flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <div className="text-[9px] uppercase tracking-[0.25em] font-black text-zinc-400 mb-1">Latest attack</div>
+                  <div className="text-[9px] uppercase tracking-[0.25em] font-black text-zinc-400 mb-1">Dernière attaque</div>
                   <div className="flex items-center gap-3 flex-wrap">
                     <span className="text-lg font-bold">{latestAttack.strategy || 'Unknown strategy'}</span>
                     <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
@@ -634,7 +634,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                       {latestAttack.deploy_success ? 'Deploy complete' : `${latestAttack.undeployed_slots} slot(s) left`}
                     </span>
                     <span className="px-2 py-1 rounded-lg bg-white/10 text-zinc-300 text-[9px] font-black uppercase tracking-wider">
-                      {(latestAttack.search_duration_ms / 1000 || 0).toFixed(1)}s search · {latestAttack.search_skips || 0} skips
+                      {(latestAttack.search_duration_ms / 1000 || 0).toFixed(1)} s recherche · {latestAttack.search_skips || 0} ignorés
                     </span>
                     <span className="px-2 py-1 rounded-lg bg-white/10 text-zinc-300 text-[9px] font-black uppercase tracking-wider">
                       score {latestAttack.target_score || 0}/100 · {latestAttack.runtime_mode || 'Unknown'}
@@ -643,7 +643,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                       {latestAttack.destruction_pct || 0}% · {(latestAttack.battle_end_reason || 'unknown').split('_').join(' ')}
                     </span>
                     <span className="px-2 py-1 rounded-lg bg-white/10 text-zinc-300 text-[9px] font-black uppercase tracking-wider">
-                      {latestAttack.full_routine_duration_ms > 0 ? `${(latestAttack.full_routine_duration_ms / 1000).toFixed(0)}s true loop` : `${(latestAttack.cycle_duration_ms / 1000).toFixed(0)}s cycle`}
+                      {latestAttack.full_routine_duration_ms > 0 ? `${(latestAttack.full_routine_duration_ms / 1000).toFixed(0)}s true loop` : `${(latestAttack.cycle_duration_ms / 1000).toFixed(0)} s cycle`}
                       {latestAttack.return_home_duration_ms > 0 ? ` · ${(latestAttack.return_home_duration_ms / 1000).toFixed(1)}s home` : ''}
                     </span>
                     {latestAttack.red_zone_valid && (
@@ -692,15 +692,15 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
 
               <div className="rounded-2xl border border-zinc-200 dark:border-zinc-700 p-4 grid grid-cols-3 gap-3 bg-white/70 dark:bg-zinc-900/60">
                 <div>
-                  <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Gold</div>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Or</div>
                   <div className="text-sm font-black text-amber-500 tabular-nums">{totalHistoryLoot.gold.toLocaleString()}</div>
                 </div>
                 <div>
-                  <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Elixir</div>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Élixir</div>
                   <div className="text-sm font-black text-fuchsia-500 tabular-nums">{totalHistoryLoot.elixir.toLocaleString()}</div>
                 </div>
                 <div>
-                  <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Dark</div>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Élixir noir</div>
                   <div className="text-sm font-black text-zinc-700 dark:text-zinc-200 tabular-nums">{totalHistoryLoot.de.toLocaleString()}</div>
                 </div>
               </div>
@@ -722,11 +722,11 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               <table className="w-full text-left border-collapse min-w-[1080px]">
                 <thead>
                   <tr className="bg-zinc-50/70 dark:bg-zinc-800/30">
-                    <th className="px-6 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Battle</th>
-                    <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Strategy</th>
-                    <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Loot</th>
-                    <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Deployment</th>
-                    <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Search</th>
+                    <th className="px-6 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Combat</th>
+                    <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Stratégie</th>
+                    <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Butin</th>
+                    <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Déploiement</th>
+                    <th className="px-4 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Recherche</th>
                     <th className="px-6 py-3 text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] text-right">Date</th>
                   </tr>
                 </thead>
@@ -806,13 +806,13 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                               : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
                           }`}>
                             <span className="material-symbols-outlined text-sm">{rep.deploy_success ? 'check_circle' : 'warning'}</span>
-                            {rep.deploy_success ? 'Complete' : `${rep.undeployed_slots} left`}
+                            {rep.deploy_success ? 'Complet' : `${rep.undeployed_slots} left`}
                           </div>
                           <div className="text-[9px] text-zinc-400 font-black uppercase tracking-wider mt-1.5 tabular-nums">
                             {((rep.deploy_duration_ms || 0) / 1000).toFixed(1)}s deploy
                           </div>
                           {!rep.parsed_results && (
-                            <div className="text-[9px] text-rose-500 font-black uppercase tracking-wider mt-1.5">Result OCR incomplete</div>
+                            <div className="text-[9px] text-rose-500 font-black uppercase tracking-wider mt-1.5">Lecture OCR du résultat incomplète</div>
                           )}
                         </td>
 
@@ -821,7 +821,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                             {((rep.search_duration_ms || 0) / 1000).toFixed(1)}s
                           </div>
                           <div className="text-[9px] font-black text-zinc-400 uppercase tracking-wider mt-1">
-                            {rep.search_skips || 0} skips · {((rep.full_routine_duration_ms || rep.cycle_duration_ms || 0) / 1000).toFixed(0)}s true loop
+                            {rep.search_skips || 0} ignorés · {((rep.full_routine_duration_ms || rep.cycle_duration_ms || 0) / 1000).toFixed(0)}s true loop
                           </div>
                           <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mt-1">
                             {rep.destruction_pct || 0}% · {(rep.battle_end_reason || 'unknown').split('_').join(' ')}
@@ -873,7 +873,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       {/* Summary Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
         {[
-          { label: 'Bases Searched', value: stats.search_skips + stats.attacks_completed, icon: 'search', detail: `${stats.search_skips} skips` },
+          { label: 'Bases Searched', value: stats.search_skips + stats.attacks_completed, icon: 'search', detail: `${stats.search_skips} ignorés` },
           { label: 'Attacks', value: stats.attacks_completed, icon: 'bolt' },
           { label: 'Total Revenue', value: `${((stats.total_gold + stats.total_elixir) / 1e6).toFixed(1)}M`, icon: 'trending_up' },
           { label: 'System Uptime', value: formatUptime(stats.uptime), icon: 'timer' }
@@ -904,7 +904,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               <div className="w-3 h-3 rounded-full bg-amber-500/20 border border-amber-500/40"></div>
               <div className="w-3 h-3 rounded-full bg-emerald-500/20 border border-emerald-500/40"></div>
             </div>
-            <span className="text-[10px] font-black text-zinc-600 dark:text-zinc-500 uppercase tracking-[0.3em]">System Console</span>
+            <span className="text-[10px] font-black text-zinc-600 dark:text-zinc-500 uppercase tracking-[0.3em]">Console système</span>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -991,7 +991,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
             {parsedLogs.length === 0 ? (
               <div className="flex items-center gap-4 text-zinc-400 dark:text-zinc-700 py-2">
                 <div className="w-2 h-2 bg-zinc-300 dark:bg-zinc-700 rounded-full animate-pulse"></div>
-                <span className="italic uppercase tracking-[0.3em] font-black text-[10px]">Initializing connection...</span>
+                <span className="italic uppercase tracking-[0.3em] font-black text-[10px]">Initialisation de la connexion…</span>
               </div>
             ) : filteredLogs.length === 0 ? (
               <div className="text-zinc-400 dark:text-zinc-700 py-2 text-[11px] font-bold uppercase tracking-[0.25em]">
