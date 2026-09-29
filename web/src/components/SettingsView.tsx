@@ -4,10 +4,10 @@ import { GetLatestAttackTrace } from '../../wailsjs/go/main/App';
 
 interface SettingsViewProps {
   stats: BotStats;
-  isRunning: boolean;
+  isLancé: boolean;
   adbPort: number;
   darkMode: boolean;
-  setDarkMode: (val: boolean) => void;
+  setSombreMode: (val: boolean) => void;
   onResetStats: () => void;
   appVersion: string;
   updateStatus: UpdateStatus;
@@ -19,7 +19,7 @@ interface SettingsViewProps {
 }
 
 const SettingsView: React.FC<SettingsViewProps> = React.memo(({
-  stats, isRunning, adbPort, darkMode, setDarkMode, onResetStats,
+  stats, isLancé, adbPort, darkMode, setSombreMode, onResetStats,
   appVersion, updateStatus, onCheckUpdates, onClearSkip, systemDiagnostics, onExportDiagnostics, onSetBlueStacksInstance,
 }) => {
   // Destructive action protection: the first click only ARMS the reset
@@ -45,7 +45,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
     setInstanceMessage('');
     try {
       await onSetBlueStacksInstance(instance);
-      setInstanceMessage(instance ? 'Instance saved' : 'Automatic selection enabled');
+      setInstanceMessage(instance ? 'Instance enregistrée' : 'Sélection automatique activée');
     } catch (err) {
       setInstanceMessage(err instanceof Error ? err.message : String(err));
     } finally {
@@ -60,7 +60,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
       const path = await onExportDiagnostics();
       setDiagnosticsPath(path);
     } catch {
-      setDiagnosticsPath('Export failed — check app.log');
+      setDiagnosticsPath('Échec de l’export — consulte app.log');
     } finally {
       setDiagnosticsBusy(false);
     }
@@ -82,7 +82,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   };
 
   const handleResetClick = () => {
-    if (isRunning) return;
+    if (isLancé) return;
     if (!resetArmed) {
       setResetArmed(true);
       resetTimerRef.current = window.setTimeout(() => setResetArmed(false), 4000);
@@ -94,18 +94,18 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   };
 
   const preferredInstance = systemDiagnostics?.emulator.instances?.find((i) => i.preferred);
-  const runtimeReady = systemDiagnostics?.assets_ready ?? false;
-  const playerReady = systemDiagnostics?.emulator.bluestacks_player_found ?? false;
-  const adbReady = systemDiagnostics?.emulator.adb_found ?? false;
-  const overallReady = runtimeReady && playerReady && adbReady && !!preferredInstance;
+  const runtimePrêt = systemDiagnostics?.assets_ready ?? false;
+  const playerPrêt = systemDiagnostics?.emulator.bluestacks_player_found ?? false;
+  const adbPrêt = systemDiagnostics?.emulator.adb_found ?? false;
+  const overallPrêt = runtimePrêt && playerPrêt && adbPrêt && !!preferredInstance;
 
   return (
     <div className="bg-white dark:bg-zinc-900 p-10 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none max-w-2xl mx-auto transition-all duration-500">
 
       <div className="flex justify-between items-center mb-12">
         <div>
-          <h3 className="text-2xl font-bold text-zinc-950 dark:text-white mb-2 tracking-tight">System Settings</h3>
-          <p className="text-sm text-zinc-500 dark:text-zinc-500 font-medium">Core application and connection status.</p>
+          <h3 className="text-2xl font-bold text-zinc-950 dark:text-white mb-2 tracking-tight">Paramètres système</h3>
+          <p className="text-sm text-zinc-500 dark:text-zinc-500 font-medium">État de l’application, de Windows et de la connexion BlueStacks.</p>
         </div>
         <div className="w-14 h-14 rounded-2xl bg-zinc-50 dark:bg-zinc-800 flex items-center justify-center border border-zinc-100 dark:border-zinc-700 shadow-sm transition-colors">
           <span className="material-symbols-outlined text-zinc-500 dark:text-zinc-500 text-2xl">memory</span>
@@ -116,19 +116,19 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
         <div className="bg-zinc-950 dark:bg-black text-white p-6 rounded-2xl border border-zinc-800 shadow-xl">
           <div className="flex items-center justify-between mb-5">
             <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Windows Readiness</div>
-              <div className="text-lg font-black mt-1">{overallReady ? 'Ready to launch' : 'Setup required'}</div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">État Windows</div>
+              <div className="text-lg font-black mt-1">{overallPrêt ? 'Prêt à démarrer' : 'Configuration requise'}</div>
             </div>
-            <div className={`w-3 h-3 rounded-full ${overallReady ? 'bg-emerald-400 shadow-[0_0_14px_rgba(52,211,153,.7)]' : 'bg-amber-400 animate-pulse'}`}></div>
+            <div className={`w-3 h-3 rounded-full ${overallPrêt ? 'bg-emerald-400 shadow-[0_0_14px_rgba(52,211,153,.7)]' : 'bg-amber-400 animate-pulse'}`}></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             {[
-              { label: 'Runtime assets', ok: runtimeReady, value: runtimeReady ? 'Ready' : `${systemDiagnostics?.missing_assets?.length ?? 0} missing` },
-              { label: 'BlueStacks 5', ok: playerReady, value: playerReady ? 'Detected' : 'Not found' },
-              { label: 'ADB', ok: adbReady, value: adbReady ? 'Detected' : 'Not found' },
-              { label: 'Instance', ok: !!preferredInstance, value: preferredInstance ? `${preferredInstance.name} · ${preferredInstance.adb_port}` : 'Not detected' },
-              { label: 'BlueStacks running', ok: systemDiagnostics?.emulator.bluestacks_running ?? false, value: systemDiagnostics?.emulator.bluestacks_running ? 'Running' : 'Stopped' },
-              { label: 'ADB access', ok: systemDiagnostics?.emulator.adb_enabled ?? false, value: systemDiagnostics?.emulator.adb_enabled ? 'Enabled' : (systemDiagnostics?.emulator.adb_setting_present ? 'Disabled · auto-fix on Start' : 'Check BlueStacks settings') },
+              { label: 'Fichiers nécessaires', ok: runtimePrêt, value: runtimePrêt ? 'Prêt' : `${systemDiagnostics?.missing_assets?.length ?? 0} manquant(s)` },
+              { label: 'BlueStacks 5', ok: playerPrêt, value: playerPrêt ? 'Détecté' : 'Introuvable' },
+              { label: 'ADB', ok: adbPrêt, value: adbPrêt ? 'Détecté' : 'Introuvable' },
+              { label: 'Instance', ok: !!preferredInstance, value: preferredInstance ? `${preferredInstance.name} · ${preferredInstance.adb_port}` : 'Non détectée' },
+              { label: 'BlueStacks lancé', ok: systemDiagnostics?.emulator.bluestacks_running ?? false, value: systemDiagnostics?.emulator.bluestacks_running ? 'Lancé' : 'Arrêté' },
+              { label: 'Accès ADB', ok: systemDiagnostics?.emulator.adb_enabled ?? false, value: systemDiagnostics?.emulator.adb_enabled ? 'Activé' : (systemDiagnostics?.emulator.adb_setting_present ? 'Désactivé · correction auto au démarrage' : 'Vérifier les réglages BlueStacks') },
             ].map((item) => (
               <div key={item.label} className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3 min-w-0">
                 <div className="flex items-center gap-2">
@@ -139,22 +139,22 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
               </div>
             ))}
           </div>
-          {systemDiagnostics && !runtimeReady && systemDiagnostics.missing_assets.length > 0 && (
+          {systemDiagnostics && !runtimePrêt && systemDiagnostics.missing_assets.length > 0 && (
             <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-[10px] font-mono text-amber-300 break-words">
-              Missing: {systemDiagnostics.missing_assets.join(', ')}
+              Manquant : {systemDiagnostics.missing_assets.join(', ')}
             </div>
           )}
 
-          {/* Automatic selection is the default. Manual instance choice is
+          {/* Automatique selection is the default. Manual instance choice is
               intentionally tucked away so normal users never need to touch it. */}
           <details className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/70 overflow-hidden">
             <summary className="cursor-pointer list-none p-4 flex items-center justify-between gap-4">
               <div className="min-w-0">
-                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">Advanced connection</div>
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">Connexion avancée</div>
                 <div className="text-[11px] text-zinc-300 mt-1">
                   BlueStacks instance · {systemDiagnostics?.configured_instance
-                    ? `Manual: ${systemDiagnostics.configured_instance}`
-                    : `Automatic: ${systemDiagnostics?.emulator.preferred_instance || 'detecting'}`}
+                    ? `Manuelle : ${systemDiagnostics.configured_instance}`
+                    : `Automatique : ${systemDiagnostics?.emulator.preferred_instance || 'détection…'}`}
                 </div>
               </div>
               <span className="material-symbols-outlined text-zinc-500">tune</span>
@@ -162,16 +162,16 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             <div className="border-t border-zinc-800 p-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="text-[11px] text-zinc-400 max-w-[250px]">
-                  Leave this on Automatic unless ClashGO detected the wrong BlueStacks instance.
+                  Laisse sur Automatique sauf si ClashGO a détecté la mauvaise instance BlueStacks.
                 </div>
                 <select
                   value={systemDiagnostics?.configured_instance || ''}
                   disabled={instanceBusy || !systemDiagnostics}
                   onChange={(e) => handleInstanceChange(e.target.value)}
                   className="max-w-[220px] rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-bold text-white outline-none focus:border-emerald-500 disabled:opacity-50"
-                  aria-label="BlueStacks instance selection"
+                  aria-label="Sélection de l’instance BlueStacks"
                 >
-                  <option value="">Automatic</option>
+                  <option value="">Automatique</option>
                   {(systemDiagnostics?.emulator.instances ?? []).map((inst) => (
                     <option key={inst.name} value={inst.name}>
                       {inst.name} · ADB {inst.adb_port}
@@ -186,12 +186,12 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           </details>
         </div>
 
-        {/* Dark Mode Toggle */}
+        {/* Sombre Mode Toggle */}
         <button
           type="button"
           role="switch"
           aria-checked={darkMode}
-          onClick={() => setDarkMode(!darkMode)}
+          onClick={() => setSombreMode(!darkMode)}
           className="w-full flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 p-6 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 hover:bg-white dark:hover:bg-zinc-800/60 hover:shadow-premium dark:hover:shadow-none transition-all duration-300 group cursor-pointer text-left"
         >
           <div className="flex items-center gap-5">
@@ -201,8 +201,8 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
               </span>
             </div>
             <div className="flex flex-col">
-              <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.2em] mb-0.5">App Theme</span>
-              <span className="text-sm font-bold text-zinc-950 dark:text-white">{darkMode ? 'Dark' : 'Light'}</span>
+              <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.2em] mb-0.5">Thème de l’application</span>
+              <span className="text-sm font-bold text-zinc-950 dark:text-white">{darkMode ? 'Sombre' : 'Clair'}</span>
             </div>
           </div>
           <div 
@@ -213,18 +213,18 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
         </button>
 
           {[
-            { label: 'Connection Status', value: stats.adb_health.consecutive_fails === 0 ? 'Optimal' : 'Interrupted', status: stats.adb_health.consecutive_fails === 0 ? 'success' : 'error', icon: 'hub', detail: stats.adb_health.last_error },
-            { label: 'ADB Port', value: adbPort.toString(), status: 'info', icon: 'router' },
-            { label: 'Capture Latency', value: isNaN(stats.adb_health.avg_capture_ms) ? '0ms' : `${stats.adb_health.avg_capture_ms.toFixed(1)}ms`, status: stats.adb_health.avg_capture_ms < 200 ? 'success' : 'info', icon: 'speed' },
-            { label: 'Capture Success', value: stats.adb_health.captures_total > 0 ? `${((stats.adb_health.captures_total / Math.max(1, stats.adb_health.captures_total + stats.adb_health.errors_total)) * 100).toFixed(1)}%` : '—', status: stats.adb_health.errors_total === 0 ? 'success' : 'info', icon: 'monitoring' },
-            { label: 'ADB Errors', value: stats.adb_health.errors_total.toLocaleString(), status: stats.adb_health.consecutive_fails > 0 ? 'error' : 'success', icon: 'error' },
+            { label: 'État de connexion', value: stats.adb_health.consecutive_fails === 0 ? 'Optimal' : 'Interrompu', status: stats.adb_health.consecutive_fails === 0 ? 'success' : 'error', icon: 'hub', detail: stats.adb_health.last_error },
+            { label: 'Port ADB', value: adbPort.toString(), status: 'info', icon: 'router' },
+            { label: 'Latence capture', value: isNaN(stats.adb_health.avg_capture_ms) ? '0ms' : `${stats.adb_health.avg_capture_ms.toFixed(1)}ms`, status: stats.adb_health.avg_capture_ms < 200 ? 'success' : 'info', icon: 'speed' },
+            { label: 'Captures réussies', value: stats.adb_health.captures_total > 0 ? `${((stats.adb_health.captures_total / Math.max(1, stats.adb_health.captures_total + stats.adb_health.errors_total)) * 100).toFixed(1)}%` : '—', status: stats.adb_health.errors_total === 0 ? 'success' : 'info', icon: 'monitoring' },
+            { label: 'Erreurs ADB', value: stats.adb_health.errors_total.toLocaleString(), status: stats.adb_health.consecutive_fails > 0 ? 'error' : 'success', icon: 'error' },
             // cpu_time_sec is device-independent (absolute CPU seconds since
             // start). cpu_cores is a fraction of one core; scaled by the host's
             // logical core count only to render a familiar 0-100% number.
-            { label: 'CPU Time', value: `${stats.cpu_time_sec.toFixed(1)}s`, status: 'info', icon: 'schedule' },
-            { label: 'CPU Usage', value: isNaN(stats.cpu_cores) ? '0%' : `${(stats.cpu_cores * (navigator.hardwareConcurrency || 1) * 100).toFixed(1)}%`, status: stats.cpu_cores < 0.5 ? 'success' : 'info', icon: 'memory' },
-            { label: 'Recovery Success', value: stats.recovery_attempts > 0 ? `${stats.recovery_successes}/${stats.recovery_attempts}` : '0/0', status: stats.recovery_attempts === stats.recovery_successes ? 'success' : 'info', icon: 'healing' },
-            { label: 'BlueStacks Restarts', value: stats.bluestacks_restarts.toLocaleString(), status: stats.bluestacks_restarts === 0 ? 'success' : 'info', icon: 'restart_alt' },
+            { label: 'Temps CPU', value: `${stats.cpu_time_sec.toFixed(1)}s`, status: 'info', icon: 'schedule' },
+            { label: 'Utilisation CPU', value: isNaN(stats.cpu_cores) ? '0%' : `${(stats.cpu_cores * (navigator.hardwareConcurrency || 1) * 100).toFixed(1)}%`, status: stats.cpu_cores < 0.5 ? 'success' : 'info', icon: 'memory' },
+            { label: 'Récupérations réussies', value: stats.recovery_attempts > 0 ? `${stats.recovery_successes}/${stats.recovery_attempts}` : '0/0', status: stats.recovery_attempts === stats.recovery_successes ? 'success' : 'info', icon: 'healing' },
+            { label: 'Redémarrages BlueStacks', value: stats.bluestacks_restarts.toLocaleString(), status: stats.bluestacks_restarts === 0 ? 'success' : 'info', icon: 'restart_alt' },
           ].map((item, i) => (
 
           <div key={i} className="flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-800/30 p-6 rounded-2xl border border-zinc-100/50 dark:border-zinc-800/50 hover:bg-white dark:hover:bg-zinc-800/60 hover:shadow-premium dark:hover:shadow-none transition-all duration-300 group">
@@ -249,11 +249,11 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           </div>
         ))}
 
-        {/* Update row — surfaces current version + a manual check
+        {/* Mise à jour row — surfaces current version + a manual check
             button so users can force a refresh without waiting for the
             6h background poller. Rendered as a keyboard-accessible
             div[role=button] because it contains a real <button>
-            (Resume notifications) — nesting buttons would be
+            (Réactiver les notifications) — nesting buttons would be
             invalid HTML. */}
         <div
           role="button"
@@ -277,13 +277,13 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             </div>
             <div className="flex flex-col">
               <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.2em] mb-0.5">
-                App Version
+                Version de l’application
               </span>
               <span className="text-sm font-bold tracking-tight text-zinc-950 dark:text-white tabular-nums">
                 v{appVersion || '0.0.0'}
                 {updateStatus.available && (
                   <span className="ml-3 text-[10px] font-black uppercase tracking-widest text-emerald-500">
-                    Update {updateStatus.latest_version} available
+                    Mise à jour {updateStatus.latest_version} disponible
                   </span>
                 )}
               </span>
@@ -294,9 +294,9 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
               <button
                 onClick={(e) => { e.stopPropagation(); onClearSkip(); }}
                 className="text-[10px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.2em] hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
-                title={`Resume notifications for v${updateStatus.skip_version}`}
+                title={`Réactiver les notifications for v${updateStatus.skip_version}`}
               >
-                Resume notifications
+                Réactiver les notifications
               </button>
             )}
             <span className="material-symbols-outlined text-zinc-300 dark:text-zinc-700 group-hover:translate-x-1 transition-transform">refresh</span>
@@ -315,9 +315,9 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
                 <span className="material-symbols-outlined text-zinc-500">bug_report</span>
               </div>
               <div>
-                <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Advanced diagnostics</div>
-                <div className="text-sm font-bold text-zinc-950 dark:text-white">Latest attack state trace</div>
-                <div className="text-[10px] text-zinc-400 mt-0.5">Only useful for troubleshooting — normal users can ignore this.</div>
+                <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Diagnostic avancé</div>
+                <div className="text-sm font-bold text-zinc-950 dark:text-white">Dernière trace d’attaque</div>
+                <div className="text-[10px] text-zinc-400 mt-0.5">Utile uniquement pour le dépannage. Un utilisateur normal peut ignorer cette section.</div>
               </div>
             </div>
             <span className={`material-symbols-outlined text-zinc-400 transition-transform ${traceOpen ? 'rotate-180' : ''}`}>expand_more</span>
@@ -326,18 +326,18 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
           {traceOpen && (
             <div className="border-t border-zinc-100 dark:border-zinc-800 p-5">
               <div className="flex items-center justify-between gap-3 mb-3">
-                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Structured army trace</span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Trace structurée de l’armée</span>
                 <button
                   type="button"
                   onClick={() => void handleLoadTrace()}
                   disabled={traceBusy}
                   className="px-3 py-2 rounded-lg bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-[10px] font-black disabled:opacity-40"
                 >
-                  {traceBusy ? 'Loading…' : 'Refresh trace'}
+                  {traceBusy ? 'Chargement…' : 'Actualiser'}
                 </button>
               </div>
               <pre className="max-h-64 overflow-auto rounded-xl bg-zinc-950 text-zinc-300 p-4 text-[10px] leading-relaxed font-mono whitespace-pre-wrap break-words">
-                {latestTrace || 'No attack trace yet. ClashGO creates one automatically after a farm-profile deployment.'}
+                {latestTrace || 'Aucune trace d’attaque pour le moment. ClashGO en crée automatiquement après un déploiement de farm.'}
               </pre>
             </div>
           )}
@@ -355,7 +355,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             </div>
             <div className="flex flex-col text-left min-w-0">
               <span className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-0.5">Support</span>
-              <span className="text-sm font-bold text-zinc-950 dark:text-white">{diagnosticsBusy ? 'Creating bundle…' : 'Export Diagnostics'}</span>
+              <span className="text-sm font-bold text-zinc-950 dark:text-white">{diagnosticsBusy ? 'Création du diagnostic…' : 'Exporter le diagnostic'}</span>
               {diagnosticsPath && <span className="text-[9px] font-mono text-zinc-500 truncate max-w-[360px]" title={diagnosticsPath}>{diagnosticsPath}</span>}
             </div>
           </div>
@@ -366,7 +366,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
         <div className="pt-8 mt-8 border-t border-zinc-50 dark:border-zinc-800/50">
            <button
              onClick={handleResetClick}
-             disabled={isRunning}
+             disabled={isLancé}
              aria-live="polite"
              className={`w-full flex justify-between items-center p-6 rounded-2xl border transition-all duration-300 group disabled:opacity-50 disabled:cursor-not-allowed ${
                resetArmed
@@ -383,7 +383,7 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
                <div className="flex flex-col text-left">
                  <span className={`text-[10px] font-black uppercase tracking-[0.2em] mb-0.5 ${resetArmed ? 'text-white/80' : 'text-rose-600 dark:text-rose-500'}`}>Danger Zone</span>
                  <span className={`text-sm font-bold ${resetArmed ? 'text-white' : 'text-rose-600 dark:text-rose-400'}`}>
-                   {isRunning ? 'Stop the bot before resetting' : (resetArmed ? 'Click again to confirm — wipes all stats' : 'Reset All Statistics')}
+                   {isLancé ? 'Stop the bot before resetting' : (resetArmed ? 'Cliquer encore pour confirmer — wipes all stats' : 'Reset All Statistics')}
                  </span>
                </div>
              </div>
