@@ -118,6 +118,9 @@ func (a *App) startup(ctx context.Context) {
 		if err := a.applyMemberProfileForCurrentLicense(); err != nil {
 			log.Warn().Err(err).Msg("failed to restore member settings profile")
 		}
+		if err := a.restoreTestSessionSettings(); err != nil {
+			log.Warn().Err(err).Msg("failed to recover interrupted test-session settings")
+		}
 		if err := a.applyMemberAccountForCurrentLicense(); err != nil {
 			log.Warn().Err(err).Msg("failed to restore member Clash account")
 		}
@@ -1050,6 +1053,9 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 				a.mu.Lock()
 				a.clearStartStateLocked()
 				a.mu.Unlock()
+				if err := a.restoreTestSessionSettings(); err != nil {
+					log.Error().Err(err).Msg("failed to restore member settings after cancelled test startup")
+				}
 				return
 			}
 
@@ -1067,6 +1073,9 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			a.mu.Lock()
 			a.clearStartStateLocked()
 			a.mu.Unlock()
+			if err := a.restoreTestSessionSettings(); err != nil {
+				log.Error().Err(err).Msg("failed to restore member settings after test startup failure")
+			}
 			return
 		}
 
@@ -1111,6 +1120,9 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			runtime.EventsEmit(a.ctx, "bot_boot_cancelled", map[string]interface{}{
 				"message": "Le démarrage du bot a été annulé.",
 			})
+			if err := a.restoreTestSessionSettings(); err != nil {
+				log.Error().Err(err).Msg("failed to restore member settings after discarded test startup")
+			}
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -1234,6 +1246,9 @@ func (a *App) watchBotRuntime(b *bot.Bot) {
 		}()
 		b.Stop()
 		a.saveStats()
+		if err := a.restoreTestSessionSettings(); err != nil {
+			log.Error().Err(err).Msg("failed to restore member settings after test session")
+		}
 		a.cachedHistoryMu.Lock()
 		a.cachedHistory = nil
 		a.cachedHistoryMu.Unlock()
@@ -1345,6 +1360,9 @@ func (a *App) StopBot() BotStatus {
 		}()
 		bot.Stop()
 		a.saveStats()
+		if err := a.restoreTestSessionSettings(); err != nil {
+			log.Error().Err(err).Msg("failed to restore member settings after stopped test session")
+		}
 		// Re-seed attack-history cache after teardown. If the user
 		// manually edited attack_history.json while the bot was
 		// stopped, the next React poll re-reads from disk instead
@@ -2634,6 +2652,84 @@ func (a *App) SaveMemberInterfaceLevel(level string) error {
 	}
 	settings.InterfaceLevel = level
 	return a.persistMemberProfile(settings)
+}
+
+func (a *App) testSessionRestorePath() string {
+	if a != nil && a.license != nil {
+		if id := strings.TrimSpace(a.license.ProfileID()); id != "" {
+			return paths.ResolveConfig(filepath.Join("members", id+".test-session.json"))
+		}
+	}
+	return paths.ResolveConfig("test-session-restore.json")
+}
+
+func removeTestSessionRestoreFiles(path string) {
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	_ = os.Remove(path)
+	_ = os.Remove(path + ".bak")
+	_ = os.Remove(path + ".tmp")
+}
+
+func (a *App) restoreTestSessionSettings() error {
+	if a == nil {
+		return nil
+	}
+	path := a.testSessionRestorePath()
+	settings, ok := loadMemberProfileFile(path)
+	if !ok {
+		return nil
+	}
+	if _, err := a.SaveMemberSettings(settings); err != nil {
+		return err
+	}
+	removeTestSessionRestoreFiles(path)
+	log.Info().Msg("temporary test-session settings restored")
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "member_test_session_restored", map[string]interface{}{
+			"message": "Les réglages membre précédents ont été restaurés.",
+		})
+	}
+	return nil
+}
+
+func (a *App) StartTestSession(gold, elixir, dark int, upgradeWalls bool, searchEnabled bool) BotStatus {
+	a.mu.Lock()
+	busy := a.bot != nil || a.cancel != nil || a.stopping
+	a.mu.Unlock()
+	if busy {
+		return BotStatus{Running: false, Message: "Une session ClashGO est déjà active ou en cours d’arrêt"}
+	}
+
+	// Recover an interrupted previous test before creating a new backup.
+	if err := a.restoreTestSessionSettings(); err != nil {
+		return BotStatus{Running: false, Message: "Impossible de restaurer les réglages avant le test : " + err.Error()}
+	}
+
+	original := a.GetMemberSettings()
+	path := a.testSessionRestorePath()
+	if err := saveMemberProfileFile(path, original); err != nil {
+		return BotStatus{Running: false, Message: "Impossible de sauvegarder les réglages avant le test : " + err.Error()}
+	}
+
+	testSettings, err := applyMemberPreset(original, "short")
+	if err != nil {
+		removeTestSessionRestoreFiles(path)
+		return BotStatus{Running: false, Message: err.Error()}
+	}
+	if _, err := a.SaveMemberSettings(testSettings); err != nil {
+		removeTestSessionRestoreFiles(path)
+		return BotStatus{Running: false, Message: "Impossible de préparer la session test : " + err.Error()}
+	}
+
+	status := a.StartBot(gold, elixir, dark, upgradeWalls, searchEnabled)
+	if !status.Running {
+		if err := a.restoreTestSessionSettings(); err != nil {
+			log.Error().Err(err).Msg("failed to restore member settings after rejected test session")
+		}
+	}
+	return status
 }
 
 func (a *App) ApplyMemberPreset(preset string) (MemberSettings, error) {
