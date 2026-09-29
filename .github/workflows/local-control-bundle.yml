@@ -11,7 +11,7 @@ on:
       - '.github/workflows/local-control-bundle.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -57,9 +57,32 @@ jobs:
           Ce bundle sert uniquement aux tests locaux de la beta.
           TXT
 
+      - name: Package bundle
+        shell: bash
+        run: |
+          cd dist
+          zip -r ClashGO-Local-Control-Windows.zip local-control
+          sha256sum ClashGO-Local-Control-Windows.zip > SHA256SUMS-local-control.txt
+
+      - name: Replace rolling local-control release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete control-local-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create control-local-latest \
+            dist/ClashGO-Local-Control-Windows.zip \
+            dist/SHA256SUMS-local-control.txt \
+            --target "${{ github.sha }}" \
+            --title "ClashGO Local Control Windows" \
+            --notes "Portable local license/control server for ClashGO beta testing. Double-click START-LOCAL-CONTROL.cmd after extracting."
+
       - name: Upload bundle
         uses: actions/upload-artifact@v4
         with:
           name: ClashGO-Local-Control-Windows
-          path: dist/local-control/**
+          path: |
+            dist/local-control/**
+            dist/ClashGO-Local-Control-Windows.zip
+            dist/SHA256SUMS-local-control.txt
           if-no-files-found: error
