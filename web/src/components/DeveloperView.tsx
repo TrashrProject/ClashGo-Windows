@@ -80,6 +80,23 @@ const shortMachine = (value?: string): string => {
   return value.slice(0, 10) + '…' + value.slice(-6);
 };
 
+const expiryLabel = (value?: string, now = Date.now()): string => {
+  if (!value) return 'À vie';
+  const expiry = new Date(value).getTime();
+  if (!Number.isFinite(expiry)) return 'Expiration inconnue';
+  const diff = expiry - now;
+  const day = 24 * 60 * 60 * 1000;
+  if (diff <= 0) {
+    const days = Math.max(0, Math.floor(Math.abs(diff) / day));
+    if (days === 0) return 'Expirée aujourd’hui';
+    return days === 1 ? 'Expirée depuis 1 jour' : `Expirée depuis ${days} jours`;
+  }
+  const days = Math.ceil(diff / day);
+  if (days === 1) return 'Expire demain';
+  if (days <= 7) return `Expire dans ${days} jours`;
+  return 'Expire le ' + dateLabel(value);
+};
+
 const isLicenseExpired = (item: LicenseRow, now = Date.now()): boolean => {
   if (!item.expires_at) return false;
   const expiry = new Date(item.expires_at).getTime();
@@ -612,7 +629,7 @@ const DeveloperView: React.FC = () => {
                     {licenseStatusLabel(item, now)}
                   </div>
                   <div className="mt-1 text-[10px] text-zinc-400">
-                    {item.expires_at ? 'Expire ' + dateLabel(item.expires_at) : 'Sans expiration'}
+                    {expiryLabel(item.expires_at, now)}
                   </div>
                   <div className="mt-1 text-[10px] text-zinc-400">{item.app_version || 'Jamais connectée'}</div>
                 </div>
