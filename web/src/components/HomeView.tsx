@@ -338,12 +338,44 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                 Voir le diagnostic
               </button>
             </div>
-          ) : windowsReady === true ? (
+          ) : windowsReady === true && startupCheck && !startupCheck.ready ? (() => {
+            const blocked = startupCheck.checks.find((check) => !check.ok);
+            return (
+              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                <div>
+                  <div className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">Dernier point à corriger</div>
+                  <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">
+                    {blocked?.label || 'Pré-contrôle ClashGO'}
+                  </div>
+                  <div className="mt-1 text-xs font-semibold text-zinc-500">
+                    {blocked?.message || 'Un élément doit encore être vérifié avant le démarrage.'}
+                  </div>
+                </div>
+                {blocked?.action ? (
+                  <button
+                    type="button"
+                    onClick={() => runCheckAction(blocked.action)}
+                    className="shrink-0 rounded-xl bg-zinc-950 dark:bg-white px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950"
+                  >
+                    {blocked.action_label || 'Corriger'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onRunStartupCheck}
+                    className="shrink-0 rounded-xl bg-zinc-950 dark:bg-white px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950"
+                  >
+                    Revérifier
+                  </button>
+                )}
+              </div>
+            );
+          })() : windowsReady === true && startupCheck?.ready ? (
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
                 <div className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-500">Tout est prêt</div>
                 <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">ClashGO peut démarrer</div>
-                <div className="mt-1 text-xs font-semibold text-zinc-500">Licence, compte Clash et environnement Windows sont prêts.</div>
+                <div className="mt-1 text-xs font-semibold text-zinc-500">Licence, compte Clash, Windows et configuration du bot sont validés.</div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -361,7 +393,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           ) : (
             <div className="flex items-center gap-3 text-sm font-semibold text-zinc-500">
               <span className="material-symbols-outlined animate-spin text-base">progress_activity</span>
-              Vérification de BlueStacks et ADB…
+              {windowsReady === null ? 'Vérification de BlueStacks et ADB…' : 'Pré-contrôle complet de ClashGO…'}
             </div>
           )}
         </section>
