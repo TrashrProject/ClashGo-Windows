@@ -220,7 +220,7 @@ async function ingestIncident(request, env) {
   catch { return json({ message: "invalid incident" }, 400); }
 
   const machine = clean(body.machine_id);
-  if (license.machine_id && machine && license.machine_id !== machine) {
+  if (!license.machine_id || !machine || license.machine_id !== machine) {
     return json({ message: "machine mismatch" }, 409);
   }
 
