@@ -2961,6 +2961,9 @@ func (a *App) DeleteMemberPreset(slot int) ([]MemberPresetSlot, error) {
 	if slot < 1 || slot > 3 {
 		return nil, fmt.Errorf("preset slot must be between 1 and 3")
 	}
+	if a.testSessionRestorePending() {
+		return nil, fmt.Errorf("session test active: wait for it to finish before deleting a preset")
+	}
 	store := loadMemberPresetStore(a.memberPresetStorePath())
 	next := make([]MemberPresetSlot, 0, len(store.Slots))
 	for _, item := range store.Slots {
