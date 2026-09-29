@@ -3205,20 +3205,39 @@ func (b *Bot) clickSequence() bool {
 	}
 	b.lastPrepTimings.FindMatchMS = time.Since(stepStarted).Milliseconds()
 	stepStarted = time.Now()
-	// Find Match opens a transition/menu. Give it a real state transition
-	// window instead of firing Army Arrow at a stale frame.
+	// Find Match may either open the army-selection flow OR immediately
+	// enter matchmaking, depending on the current CoC UI/account state.
+	// Do not keep probing Army Arrow after matchmaking has already started:
+	// those stale template retries caused needless framebuffer pressure and
+	// recovery churn on BlueStacks Windows.
 	armyReadyDeadline := time.Now().Add(4 * time.Second)
+	matchmakingStarted := false
 	for time.Now().Before(armyReadyDeadline) {
 		s, err := b.client.CaptureToMat()
 		if err == nil && !s.Empty() {
 			st, _ := b.classify(s)
 			s.Close()
-			if st == game.StateArmySelection || st == game.StateArmyCamp {
+			switch st {
+			case game.StateBattle, game.StateSearchMap, game.StateLoading:
+				matchmakingStarted = true
+				b.logger.Info().Str("state", st.String()).Msg("matchmaking already started; skipping Army Arrow / recipe selection")
+			case game.StateArmySelection, game.StateArmyCamp:
 				b.logger.Debug().Str("state", st.String()).Msg("army menu state confirmed before next click")
+			}
+			if matchmakingStarted || st == game.StateArmySelection || st == game.StateArmyCamp {
 				break
 			}
+		} else if !s.Empty() {
+			s.Close()
 		}
 		time.Sleep(prepPace.PrepPollPause)
+	}
+	if matchmakingStarted {
+		stepStarted = time.Now()
+		b.logger.Info().Msg("waiting for battle state (searching)...")
+		ready := b.waitForBattleState(60 * time.Second)
+		b.lastPrepTimings.MatchmakingReadyMS = time.Since(stepStarted).Milliseconds()
+		return ready
 	}
 
 	armyArrowClicked := false
