@@ -113,6 +113,18 @@ const snapshotAgeLabel = (timestamp?: string): string => {
   return `Il y a ${days} j`;
 };
 
+const friendlyAccountActionError = (value: unknown): string => {
+  const raw = value instanceof Error ? value.message : String(value || '');
+  const text = raw.toLowerCase();
+  if (text.includes('stop clashgo before changing')) {
+    return 'Arrête ClashGO avant de changer le compte joueur.';
+  }
+  if (text.includes('stop clashgo before unlinking')) {
+    return 'Arrête ClashGO avant de délier le compte joueur.';
+  }
+  return raw || 'Impossible de modifier le compte Clash.';
+};
+
 const friendlyLicenseError = (value?: string): string => {
   const raw = String(value || '');
   const text = raw.toLowerCase();
@@ -679,7 +691,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
         setAccountLinkMessage('Tag enregistré localement. Le bot reste utilisable ; la synchronisation du profil est optionnelle.');
       }
     } catch (e) {
-      setAccountLinkMessage(e instanceof Error ? e.message : String(e));
+      setAccountLinkMessage(friendlyAccountActionError(e));
     } finally {
       setAccountLinkBusy(false);
     }
@@ -697,7 +709,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       setError('');
       onAccountChanged('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyAccountActionError(e));
     } finally {
       setBusy(false);
     }
