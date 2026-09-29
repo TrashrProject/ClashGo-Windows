@@ -17,6 +17,26 @@ function normalizeRole(role) {
   return "member";
 }
 
+function normalizePlan(plan) {
+  const v = String(plan || "").trim().toLowerCase();
+  if (v === "free_2d") return { plan: "free_2d", days: 2 };
+  if (v === "week_1") return { plan: "week_1", days: 7 };
+  if (v === "month_1") return { plan: "month_1", days: 30 };
+  return { plan: "lifetime", days: null };
+}
+
+function expiryFromActivation(activatedAt, durationDays) {
+  if (!activatedAt || !durationDays) return null;
+  const start = new Date(activatedAt);
+  return new Date(start.getTime() + Number(durationDays) * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function isExpired(expiresAt) {
+  if (!expiresAt) return false;
+  const ts = Date.parse(expiresAt);
+  return Number.isFinite(ts) && Date.now() >= ts;
+}
+
 function clean(value) {
   return String(value || "").trim();
 }
@@ -106,7 +126,7 @@ async function readJSON(request, maxBytes = 262144) {
 async function findLicenseByKey(env, key) {
   const hash = await sha256(key);
   return await env.DB.prepare(
-    "SELECT id, hint, role, active, machine_id, created_at, last_seen_at, app_version FROM licenses WHERE license_hash = ?1"
+    "SELECT id, hint, role, active, machine_id, created_at, last_seen_at, app_version, plan, duration_days, activated_at, expires_at FROM licenses WHERE license_hash = ?1"
   ).bind(hash).first();
 }
 
@@ -115,7 +135,7 @@ async function requireDeveloper(request, env) {
   const machine = clean(request.headers.get("X-ClashGO-Machine"));
   if (!key || !machine) return null;
   const license = await findLicenseByKey(env, key);
-  if (!license || Number(license.active) !== 1) return null;
+  if (!license || Number(license.active) !== 1 || isExpired(license.expires_at)) return null;
   if (license.role !== "developer" && license.role !== "admin") return null;
   if (!license.machine_id || license.machine_id !== machine) return null;
   return license;
@@ -135,25 +155,43 @@ async function activateLicense(request, env) {
 
   const hash = await sha256(key);
   const license = await env.DB.prepare(
-    "SELECT id, hint, role, active, machine_id FROM licenses WHERE license_hash = ?1"
+    "SELECT id, hint, role, active, machine_id, plan, duration_days, activated_at, expires_at FROM licenses WHERE license_hash = ?1"
   ).bind(hash).first();
 
   if (!license || Number(license.active) !== 1) {
     return json({ message: "license is invalid or revoked" }, 403);
+  }
+  if (isExpired(license.expires_at)) {
+    return json({ message: "license has expired" }, 403);
   }
   if (license.machine_id && license.machine_id !== machine) {
     return json({ message: "license is already activated on another machine" }, 409);
   }
 
   const now = new Date();
+  let activatedAt = license.activated_at;
+  let expiresAt = license.expires_at;
+  if (!activatedAt) {
+    activatedAt = now.toISOString();
+    expiresAt = expiryFromActivation(activatedAt, license.duration_days);
+  }
+
   await env.DB.prepare(
-    "UPDATE licenses SET machine_id = ?1, last_seen_at = ?2, app_version = ?3 WHERE id = ?4"
-  ).bind(machine, now.toISOString(), appVersion, license.id).run();
+    "UPDATE licenses SET machine_id = ?1, last_seen_at = ?2, app_version = ?3, activated_at = ?4, expires_at = ?5 WHERE id = ?6"
+  ).bind(machine, now.toISOString(), appVersion, activatedAt, expiresAt, license.id).run();
+
+  let offlineUntil = new Date(now.getTime() + 72 * 60 * 60 * 1000);
+  if (expiresAt) {
+    const expiry = new Date(expiresAt);
+    if (expiry < offlineUntil) offlineUntil = expiry;
+  }
 
   return json({
     ok: true,
     role: license.role,
-    offline_until: new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
+    plan: license.plan || "lifetime",
+    expires_at: expiresAt,
+    offline_until: offlineUntil.toISOString(),
   });
 }
 
@@ -162,7 +200,7 @@ async function ingestIncident(request, env) {
   if (!key) return json({ message: "valid license required" }, 401);
 
   const license = await findLicenseByKey(env, key);
-  if (!license || Number(license.active) !== 1) {
+  if (!license || Number(license.active) !== 1 || isExpired(license.expires_at)) {
     return json({ message: "valid license required" }, 401);
   }
 
@@ -206,7 +244,8 @@ async function ingestIncident(request, env) {
 
 async function listLicenses(env) {
   const result = await env.DB.prepare(`
-    SELECT id, hint, role, active, machine_id, created_at, last_seen_at, app_version
+    SELECT id, hint, role, active, machine_id, created_at, last_seen_at, app_version,
+           plan, duration_days, activated_at, expires_at
     FROM licenses ORDER BY created_at DESC LIMIT 1000
   `).all();
   return result.results || [];
@@ -224,6 +263,7 @@ async function createLicenses(request, env) {
   let body = {};
   try { body = await readJSON(request, 65536); } catch {}
   const role = normalizeRole(body.role);
+  const licensePlan = normalizePlan(body.plan);
   const count = Math.max(1, Math.min(100, Number(body.count || 1)));
   const created = [];
   const now = new Date().toISOString();
@@ -233,12 +273,13 @@ async function createLicenses(request, env) {
     const hash = await sha256(key);
     const id = hash.slice(0, 16);
     await env.DB.prepare(`
-      INSERT INTO licenses (id, license_hash, hint, role, active, created_at)
-      VALUES (?1, ?2, ?3, ?4, 1, ?5)
-    `).bind(id, hash, licenseHint(key), role, now).run();
+      INSERT INTO licenses (
+        id, license_hash, hint, role, active, created_at, plan, duration_days
+      ) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7)
+    `).bind(id, hash, licenseHint(key), role, now, licensePlan.plan, licensePlan.days).run();
     created.push(key);
   }
-  return json({ role, licenses: created }, 201);
+  return json({ role, plan: licensePlan.plan, duration_days: licensePlan.days, licenses: created }, 201);
 }
 
 async function resetMachine(request, env) {
