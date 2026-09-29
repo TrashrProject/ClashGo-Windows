@@ -113,6 +113,12 @@ jobs:
           cd web
           npm run build
 
+      - name: Let rapid commits settle before Windows build
+        shell: bash
+        run: |
+          echo "Fast checks passed. Waiting briefly so rapid follow-up commits can replace this run before the expensive Windows build."
+          sleep 45
+
   beta:
     needs: gate
     runs-on: windows-latest
