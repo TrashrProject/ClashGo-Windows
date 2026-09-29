@@ -3784,11 +3784,15 @@ func (a *App) InstallAndRestart() error {
 		}
 	}
 
-	// Stop the bot only after the archive has been fully downloaded and
-	// verified, so normal automation is not interrupted during the download.
-	if a.IsRunning() {
-		log.Info().Msg("InstallAndRestart: stopping bot to drain ADB before exit")
+	// Stop an active bot OR cancel an in-flight boot only after the archive
+	// has been fully downloaded and verified. Never let the update helper race
+	// BlueStacks/ADB startup or a still-running teardown.
+	if a.botSessionActiveOrStarting() {
+		log.Info().Msg("InstallAndRestart: stopping active/starting bot before update")
 		_ = a.StopBot()
+		if err := a.waitForBotTeardown(20 * time.Second); err != nil {
+			return fmt.Errorf("wait for bot shutdown before update: %w", err)
+		}
 	}
 	a.saveStats()
 
