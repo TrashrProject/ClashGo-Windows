@@ -156,7 +156,7 @@ async function activateLicense(request, env) {
   const hash = await sha256(key);
   const license = await env.DB.prepare(`
     SELECT l.id, l.hint, l.role, l.active, l.machine_id, l.plan, l.duration_days,
-           l.activated_at, l.expires_at, c.display_name AS member_name
+           l.activated_at, l.expires_at, l.customer_id, c.display_name AS member_name
     FROM licenses l
     LEFT JOIN customers c ON c.id = l.customer_id
     WHERE l.license_hash = ?1
@@ -183,6 +183,12 @@ async function activateLicense(request, env) {
   await env.DB.prepare(
     "UPDATE licenses SET machine_id = ?1, last_seen_at = ?2, app_version = ?3, activated_at = ?4, expires_at = ?5 WHERE id = ?6"
   ).bind(machine, now.toISOString(), appVersion, activatedAt, expiresAt, license.id).run();
+
+  if (license.customer_id) {
+    await env.DB.prepare(
+      "UPDATE customers SET next_due_at = ?1, updated_at = ?2 WHERE id = ?3"
+    ).bind(expiresAt || null, now.toISOString(), license.customer_id).run();
+  }
 
   let offlineUntil = new Date(now.getTime() + 72 * 60 * 60 * 1000);
   if (expiresAt) {
@@ -409,6 +415,24 @@ async function createLicenses(request, env) {
     });
     created.push(key);
   }
+
+  const creationPaymentStatus = clean(body.payment_status);
+  const creationAmountCents = Math.max(0, Number(body.amount_cents || 0));
+  if (customerId && (creationPaymentStatus || creationAmountCents > 0)) {
+    await env.DB.prepare(`
+      UPDATE customers
+      SET payment_status = ?1,
+          total_paid_cents = total_paid_cents + ?2,
+          updated_at = ?3
+      WHERE id = ?4
+    `).bind(
+      creationPaymentStatus || "unknown",
+      creationAmountCents * count,
+      new Date().toISOString(),
+      customerId
+    ).run();
+  }
+
   return json({ role, plan: licensePlan.plan, duration_days: licensePlan.days, customer_id: customerId || null, licenses: created }, 201);
 }
 
