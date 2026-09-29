@@ -1235,6 +1235,133 @@ func persistPlayerProfile(profile *ClashPlayerProfile) {
 // SetSimpleMode toggles the one-click automation experience. Turning it on
 // also enables the dependent automatic behaviors so users do not have to hunt
 // through multiple settings pages to obtain a coherent setup.
+type MemberSettings struct {
+	SpeedProfile         string `json:"speed_profile"`
+	MaxAttacksPerHour    int    `json:"max_attacks_per_hour"`
+	BreakEveryAttacks    int    `json:"break_every_attacks"`
+	BreakMinutes         int    `json:"break_minutes"`
+	AdaptiveSearch       bool   `json:"adaptive_search"`
+	AutoProfileSync      bool   `json:"auto_profile_sync"`
+	AutoArmyGuard        bool   `json:"auto_army_guard"`
+	AutoResourceTracking bool   `json:"auto_resource_tracking"`
+}
+
+func normalizeSpeedProfile(profile string) string {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "cautious":
+		return "cautious"
+	case "fast":
+		return "fast"
+	default:
+		return "normal"
+	}
+}
+
+func applyMemberSpeedProfile(cfg *config.BotConfig, profile string) {
+	if cfg == nil {
+		return
+	}
+	profile = normalizeSpeedProfile(profile)
+	cfg.Automation.SpeedProfile = profile
+
+	switch profile {
+	case "cautious":
+		cfg.Attack.DropDelay = config.Duration{Duration: 700 * time.Millisecond}
+		cfg.Attack.SpellDelay = config.Duration{Duration: 2200 * time.Millisecond}
+		cfg.Automation.MaxAttacksPerHour = 8
+		if cfg.Automation.BreakEveryAttacks <= 0 {
+			cfg.Automation.BreakEveryAttacks = 4
+		}
+		if cfg.Automation.BreakDuration.Duration <= 0 {
+			cfg.Automation.BreakDuration = config.Duration{Duration: 4 * time.Minute}
+		}
+	case "fast":
+		cfg.Attack.DropDelay = config.Duration{Duration: 300 * time.Millisecond}
+		cfg.Attack.SpellDelay = config.Duration{Duration: 1300 * time.Millisecond}
+		cfg.Automation.MaxAttacksPerHour = 16
+		if cfg.Automation.BreakEveryAttacks <= 0 {
+			cfg.Automation.BreakEveryAttacks = 6
+		}
+		if cfg.Automation.BreakDuration.Duration <= 0 {
+			cfg.Automation.BreakDuration = config.Duration{Duration: 2 * time.Minute}
+		}
+	default:
+		cfg.Attack.DropDelay = config.Duration{Duration: 500 * time.Millisecond}
+		cfg.Attack.SpellDelay = config.Duration{Duration: 2 * time.Second}
+		cfg.Automation.MaxAttacksPerHour = 12
+		if cfg.Automation.BreakEveryAttacks <= 0 {
+			cfg.Automation.BreakEveryAttacks = 5
+		}
+		if cfg.Automation.BreakDuration.Duration <= 0 {
+			cfg.Automation.BreakDuration = config.Duration{Duration: 3 * time.Minute}
+		}
+	}
+}
+
+func (a *App) GetMemberSettings() MemberSettings {
+	cfg := config.LoadOrDefault("config.json")
+	profile := normalizeSpeedProfile(cfg.Automation.SpeedProfile)
+	return MemberSettings{
+		SpeedProfile:         profile,
+		MaxAttacksPerHour:    cfg.Automation.MaxAttacksPerHour,
+		BreakEveryAttacks:    cfg.Automation.BreakEveryAttacks,
+		BreakMinutes:         int(cfg.Automation.BreakDuration.Duration / time.Minute),
+		AdaptiveSearch:       cfg.Search.AdaptiveSearch,
+		AutoProfileSync:      cfg.Automation.AutoProfileSync,
+		AutoArmyGuard:        cfg.Automation.AutoArmyGuard,
+		AutoResourceTracking: cfg.Automation.AutoResourceTracking,
+	}
+}
+
+func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	cfg := config.LoadOrDefault("config.json")
+	applyMemberSpeedProfile(cfg, settings.SpeedProfile)
+
+	if settings.MaxAttacksPerHour < 1 {
+		settings.MaxAttacksPerHour = 1
+	}
+	if settings.MaxAttacksPerHour > 24 {
+		settings.MaxAttacksPerHour = 24
+	}
+	cfg.Automation.MaxAttacksPerHour = settings.MaxAttacksPerHour
+
+	if settings.BreakEveryAttacks < 0 {
+		settings.BreakEveryAttacks = 0
+	}
+	if settings.BreakEveryAttacks > 20 {
+		settings.BreakEveryAttacks = 20
+	}
+	cfg.Automation.BreakEveryAttacks = settings.BreakEveryAttacks
+
+	if settings.BreakMinutes < 0 {
+		settings.BreakMinutes = 0
+	}
+	if settings.BreakMinutes > 30 {
+		settings.BreakMinutes = 30
+	}
+	cfg.Automation.BreakDuration = config.Duration{Duration: time.Duration(settings.BreakMinutes) * time.Minute}
+
+	cfg.Search.AdaptiveSearch = settings.AdaptiveSearch
+	cfg.Automation.AutoProfileSync = settings.AutoProfileSync
+	cfg.Automation.AutoArmyGuard = settings.AutoArmyGuard
+	cfg.Automation.AutoResourceTracking = settings.AutoResourceTracking
+
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return MemberSettings{}, err
+	}
+	if err := os.WriteFile(paths.ResolveConfig("config.json"), data, 0600); err != nil {
+		return MemberSettings{}, err
+	}
+	return a.GetMemberSettings(), nil
+}
+
 func (a *App) SetSimpleMode(enabled bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
