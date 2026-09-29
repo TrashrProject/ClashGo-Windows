@@ -48,6 +48,7 @@ func TestApplyMemberSpeedProfile(t *testing.T) {
 			cfg.Search.MinLootDarkElixir = 4321
 			cfg.Attack.StrategyFile = "keep-me.yaml"
 			cfg.Attack.MaxAttackPerSession = 37
+			cfg.Upgrade.UpgradeWalls = true
 			cfg.Attack.UseQueen = true
 			cfg.Attack.LootExitEnabled = true
 
