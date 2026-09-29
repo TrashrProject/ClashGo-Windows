@@ -585,38 +585,58 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
             </details>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {([
-                ['adaptive_search', 'Recherche adaptative', 'Relâche progressivement les seuils après plusieurs villages ignorés.'],
-                ['auto_profile_sync', 'Profil automatique', 'Synchronise automatiquement le profil Clash lié.'],
-                ['auto_army_guard', 'Contrôle armée', 'Vérifie que l’armée correspond au plan avant une attaque.'],
-                ['auto_resource_tracking', 'Suivi ressources', 'Suit automatiquement les ressources du village.'],
-              ] as const).map(([key, label, description]) => (
-                <button
-                  key={key}
-                  type="button"
-                  disabled={memberSaving}
-                  onClick={() => {
-                    const next = { ...memberSettings, [key]: !memberSettings[key] } as MemberSettings;
-                    setMemberSettings(next);
-                    void saveMemberSettings(next);
-                  }}
-                  className="flex items-center justify-between gap-4 rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 text-left"
-                >
-                  <div>
-                    <div className="text-sm font-black text-zinc-950 dark:text-white">{label}</div>
-                    <div className="mt-1 text-[11px] font-semibold text-zinc-500">{description}</div>
+              <button
+                type="button"
+                disabled={memberSaving}
+                onClick={() => {
+                  const next = { ...memberSettings, adaptive_search: !memberSettings.adaptive_search };
+                  setMemberSettings(next);
+                  void saveMemberSettings(next);
+                }}
+                className="flex items-center justify-between gap-4 rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 text-left"
+              >
+                <div>
+                  <div className="text-sm font-black text-zinc-950 dark:text-white">Recherche adaptative</div>
+                  <div className="mt-1 text-[11px] font-semibold text-zinc-500">
+                    Relâche progressivement les seuils après plusieurs villages ignorés.
                   </div>
+                </div>
+                <span className={
+                  'shrink-0 w-10 h-6 rounded-full p-1 transition ' +
+                  (memberSettings.adaptive_search ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700')
+                }>
                   <span className={
-                    'shrink-0 w-10 h-6 rounded-full p-1 transition ' +
-                    (memberSettings[key] ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700')
-                  }>
-                    <span className={
-                      'block w-4 h-4 rounded-full bg-white transition-transform ' +
-                      (memberSettings[key] ? 'translate-x-4' : '')
-                    } />
-                  </span>
-                </button>
-              ))}
+                    'block w-4 h-4 rounded-full bg-white transition-transform ' +
+                    (memberSettings.adaptive_search ? 'translate-x-4' : '')
+                  } />
+                </span>
+              </button>
+
+              <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4">
+                <div className="text-sm font-black text-zinc-950 dark:text-white">Automatismes actifs</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {[
+                    ['Profil', memberSettings.auto_profile_sync],
+                    ['Armée', memberSettings.auto_army_guard],
+                    ['Ressources', memberSettings.auto_resource_tracking],
+                  ].map(([label, enabled]) => (
+                    <span
+                      key={String(label)}
+                      className={
+                        'rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wider ' +
+                        (enabled
+                          ? 'bg-emerald-500/10 text-emerald-500'
+                          : 'bg-zinc-100 text-zinc-400 dark:bg-zinc-800')
+                      }
+                    >
+                      {label} · {enabled ? 'AUTO' : 'OFF'}
+                    </span>
+                  ))}
+                </div>
+                <div className="mt-2 text-[11px] font-semibold text-zinc-500">
+                  Ces automatismes suivent le mode automatique ClashGO et ne nécessitent pas de réglage manuel ici.
+                </div>
+              </div>
             </div>
 
             {memberMessage && (
