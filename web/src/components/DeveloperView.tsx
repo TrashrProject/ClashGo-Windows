@@ -95,6 +95,8 @@ const DeveloperView: React.FC = () => {
   const [customerContact, setCustomerContact] = React.useState('');
   const [generatedKey, setGeneratedKey] = React.useState('');
   const [copied, setCopied] = React.useState(false);
+  const [search, setSearch] = React.useState('');
+  const [licenseFilter, setLicenseFilter] = React.useState<'all' | 'active' | 'revoked'>('all');
 
   const isAdmin = role === 'admin';
 
@@ -213,6 +215,32 @@ const DeveloperView: React.FC = () => {
 
   const recentErrors = incidents.filter((x) => x.level === 'error' || x.level === 'fatal' || x.level === 'panic');
   const activeLicenses = licenses.filter((x) => x.active !== false).length;
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredLicenses = licenses.filter((item) => {
+    if (licenseFilter === 'active' && item.active === false) return false;
+    if (licenseFilter === 'revoked' && item.active !== false) return false;
+    if (!normalizedSearch) return true;
+    return [
+      item.customer_name,
+      item.customer_contact,
+      item.hint,
+      item.id,
+      item.machine_id,
+      item.app_version,
+      item.role,
+      planLabel(item.plan),
+    ].some((value) => String(value || '').toLowerCase().includes(normalizedSearch));
+  });
+  const filteredIncidents = incidents.filter((item) => {
+    if (!normalizedSearch) return true;
+    return [
+      item.license_hint,
+      item.machine_id,
+      item.app_version,
+      item.level,
+      item.message,
+    ].some((value) => String(value || '').toLowerCase().includes(normalizedSearch));
+  });
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
@@ -344,7 +372,8 @@ const DeveloperView: React.FC = () => {
         </section>
       )}
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+        <div className="flex items-center gap-2">
         {([
           ['licenses', 'Licences'],
           ['incidents', 'Incidents'],
@@ -363,6 +392,30 @@ const DeveloperView: React.FC = () => {
             {label}
           </button>
         ))}
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="relative">
+            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-base text-zinc-400">search</span>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={tab === 'licenses' ? 'Client, contact, licence, PC…' : 'Licence, version, erreur…'}
+              className="h-10 w-full sm:w-72 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pl-9 pr-3 text-xs font-semibold outline-none focus:border-zinc-400"
+            />
+          </div>
+          {tab === 'licenses' && (
+            <select
+              value={licenseFilter}
+              onChange={(e) => setLicenseFilter(e.target.value as typeof licenseFilter)}
+              className="h-10 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 text-[10px] font-black uppercase tracking-wider text-zinc-500 outline-none"
+            >
+              <option value="all">Toutes</option>
+              <option value="active">Actives</option>
+              <option value="revoked">Révoquées</option>
+            </select>
+          )}
+        </div>
       </div>
 
       {notice && !generatedKey && (
@@ -384,7 +437,7 @@ const DeveloperView: React.FC = () => {
             <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Derniers incidents</h3>
           </div>
           <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {incidents.slice().reverse().map((item, index) => (
+            {filteredIncidents.slice().reverse().map((item, index) => (
               <div key={item.id || String(index)} className="p-5 flex flex-col lg:flex-row lg:items-start gap-4">
                 <div className="lg:w-44 shrink-0">
                   <div className="text-xs font-black text-zinc-900 dark:text-white">{item.license_hint || 'Licence inconnue'}</div>
@@ -409,7 +462,7 @@ const DeveloperView: React.FC = () => {
                 </div>
               </div>
             ))}
-            {!busy && incidents.length === 0 && (
+            {!busy && filteredIncidents.length === 0 && (
               <div className="p-8 text-center text-sm font-semibold text-zinc-400">Aucun incident reçu.</div>
             )}
           </div>
@@ -421,7 +474,7 @@ const DeveloperView: React.FC = () => {
             <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Licences & machines</h3>
           </div>
           <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {licenses.map((item, index) => (
+            {filteredLicenses.map((item, index) => (
               <div key={(item.id || item.hint || 'license') + index} className="p-5 flex flex-col lg:flex-row lg:items-center gap-4">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -502,7 +555,7 @@ const DeveloperView: React.FC = () => {
                 )}
               </div>
             ))}
-            {!busy && licenses.length === 0 && (
+            {!busy && filteredLicenses.length === 0 && (
               <div className="p-8 text-center text-sm font-semibold text-zinc-400">Aucune licence trouvée.</div>
             )}
           </div>
