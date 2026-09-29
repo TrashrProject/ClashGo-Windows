@@ -16,6 +16,8 @@ interface HomeViewProps {
   licenseReady: boolean;
   accountLinked: boolean;
   windowsReady: boolean | null;
+  memberName?: string;
+  licensePlan?: string;
 }
 
 const formatLoot = (value: number): string => {
@@ -87,7 +89,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, running, starting,
     onStart, onStop, onOpenAutomation, onOpenAccount, onOpenSettings,
-    licenseReady, accountLinked, windowsReady,
+    licenseReady, accountLinked, windowsReady, memberName, licensePlan,
   } = props;
 
   const lastAttack = history && history.length > 0 ? history[0] : undefined;
@@ -132,6 +134,16 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
             <h2 className="mt-3 text-3xl md:text-4xl font-black tracking-tight">{botLabel}</h2>
             <p className="mt-2 max-w-xl text-sm font-semibold text-zinc-400 dark:text-zinc-600">{botSub}</p>
             <div className="mt-4 flex flex-wrap gap-2">
+              {memberName && (
+                <span className="rounded-full border border-white/10 dark:border-zinc-200 bg-white/5 dark:bg-zinc-100 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600">
+                  Membre · {memberName}
+                </span>
+              )}
+              {licenseReady && (
+                <span className="rounded-full border border-white/10 dark:border-zinc-200 bg-white/5 dark:bg-zinc-100 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600">
+                  Plan · {licensePlan === 'free_2d' ? 'FREE 2J' : licensePlan === 'week_1' ? '1 SEMAINE' : licensePlan === 'month_1' ? '1 MOIS' : 'À VIE'}
+                </span>
+              )}
               <span className="rounded-full border border-white/10 dark:border-zinc-200 bg-white/5 dark:bg-zinc-100 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600">
                 Cadence · {stats.speed_profile === 'fast' ? 'Rapide' : stats.speed_profile === 'cautious' ? 'Prudente' : 'Normale'}
               </span>
