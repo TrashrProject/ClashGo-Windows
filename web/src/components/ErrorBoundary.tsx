@@ -68,6 +68,15 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
     this.setState({ copied: true });
   };
 
+  handleResetInterface = (): void => {
+    // UI-only recovery. Never touch config.json, the Clash account, license,
+    // updater state or bot data.
+    for (const key of ['darkMode', 'interfaceLevel', 'sidebarExpanded', 'terminalAutoScroll']) {
+      try { localStorage.removeItem(key); } catch { /* best-effort recovery */ }
+    }
+    window.location.reload();
+  };
+
   render() {
     if (this.state.error) {
       return (
@@ -99,6 +108,12 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
                 Relancer l’interface
               </button>
             </div>
+            <button
+              onClick={this.handleResetInterface}
+              className="h-10 w-full rounded-xl text-[9px] font-black uppercase tracking-[0.18em] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+            >
+              Réinitialiser uniquement les préférences d’interface
+            </button>
           </div>
         </div>
       );
