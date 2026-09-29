@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Ducky705/ClashGO/internal/config"
+	"github.com/Ducky705/ClashGO/internal/licensing"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -566,5 +567,102 @@ func TestPlayerProfileFileRecoversBackup(t *testing.T) {
 	}
 	if restored.Tag != want.Tag {
 		t.Fatalf("recovered primary tag=%q want=%q", restored.Tag, want.Tag)
+	}
+}
+
+
+func testLicensedApp(t *testing.T, key string) *App {
+	t.Helper()
+	dir := os.Getenv("CLASHGO_CONFIG_DIR")
+	if dir == "" {
+		t.Fatal("CLASHGO_CONFIG_DIR must be set before creating licensed test app")
+	}
+	payload := map[string]any{
+		"license_key": key,
+		"role": "member",
+		"machine_id": "test-machine",
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "license.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return &App{license: licensing.New("", "test")}
+}
+
+func TestMemberRuntimeStateArchiveAndRestore(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	a := testLicensedApp(t, "CGO-AAAAAA-BBBBBB-CCCCCC-DDDDDD")
+
+	originalStats := []byte(`{"attacks_completed":7,"total_gold":123456}`)
+	originalHistory := []byte(`[{"timestamp":"one","stars":3}]`)
+	if err := os.WriteFile(filepath.Join(dir, "stats.json"), originalStats, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "attack_history.json"), originalHistory, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.archiveMemberRuntimeState(true); err != nil {
+		t.Fatalf("archiveMemberRuntimeState failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "stats.json")); !os.IsNotExist(err) {
+		t.Fatalf("shared stats should be cleared after archive, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "attack_history.json")); !os.IsNotExist(err) {
+		t.Fatalf("shared history should be cleared after archive, err=%v", err)
+	}
+
+	// Simulate unrelated/stale shared files before restoring this member.
+	if err := os.WriteFile(filepath.Join(dir, "stats.json"), []byte(`{"attacks_completed":99}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.restoreMemberRuntimeState(false); err != nil {
+		t.Fatalf("restoreMemberRuntimeState failed: %v", err)
+	}
+
+	gotStats, err := os.ReadFile(filepath.Join(dir, "stats.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotStats) != string(originalStats) {
+		t.Fatalf("restored stats=%s want=%s", gotStats, originalStats)
+	}
+	gotHistory, err := os.ReadFile(filepath.Join(dir, "attack_history.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotHistory) != string(originalHistory) {
+		t.Fatalf("restored history=%s want=%s", gotHistory, originalHistory)
+	}
+}
+
+func TestNewLicenseRuntimeStateNeverInheritsSharedFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	a := testLicensedApp(t, "CGO-111111-222222-333333-444444")
+
+	if err := os.WriteFile(filepath.Join(dir, "stats.json"), []byte(`{"attacks_completed":42}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "attack_history.json"), []byte(`[{"timestamp":"other-member"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.restoreMemberRuntimeState(false); err != nil {
+		t.Fatalf("restoreMemberRuntimeState for new member failed: %v", err)
+	}
+	for _, name := range []string{"stats.json", "attack_history.json"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Fatalf("new member inherited shared %s, stat err=%v", name, err)
+		}
+	}
+
+	marker := filepath.Join(a.memberRuntimeStateDir(), ".initialized")
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("new member state marker missing: %v", err)
 	}
 }
