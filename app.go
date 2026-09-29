@@ -709,10 +709,12 @@ type BotStatus struct {
 }
 
 type StartupCheckItem struct {
-	ID      string `json:"id"`
-	Label   string `json:"label"`
-	OK      bool   `json:"ok"`
-	Message string `json:"message"`
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	OK          bool   `json:"ok"`
+	Message     string `json:"message"`
+	Action      string `json:"action,omitempty"`
+	ActionLabel string `json:"action_label,omitempty"`
 }
 
 type StartupReadiness struct {
@@ -751,25 +753,42 @@ func memberRuntimeConfigReady(cfg *config.BotConfig) (bool, string) {
 
 func (a *App) GetStartupReadiness() StartupReadiness {
 	checks := make([]StartupCheckItem, 0, 7)
-	add := func(id, label string, ok bool, message string) {
-		checks = append(checks, StartupCheckItem{ID: id, Label: label, OK: ok, Message: message})
+	add := func(id, label string, ok bool, message, action, actionLabel string) {
+		if ok {
+			action = ""
+			actionLabel = ""
+		}
+		checks = append(checks, StartupCheckItem{
+			ID: id, Label: label, OK: ok, Message: message,
+			Action: action, ActionLabel: actionLabel,
+		})
 	}
 
 	licenseOK := true
 	licenseMessage := "Mode beta local"
 	if a.GetLicensePolicy().Enforced {
-		licenseOK = a.license != nil && a.license.GetState().Activated
-		licenseMessage = "Licence valide"
-		if !licenseOK {
-			licenseMessage = "Licence absente, expirée ou invalide"
-			if a.license != nil {
-				if msg := strings.TrimSpace(a.license.GetState().Error); msg != "" {
-					licenseMessage = msg
+		licenseOK = false
+		licenseMessage = "Licence absente, expirée ou invalide"
+		if a.license != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+			state := a.license.Validate(ctx)
+			cancel()
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "license_state", state)
+			}
+			licenseOK = state.Activated
+			if licenseOK {
+				if strings.Contains(strings.ToLower(state.Error), "offline") {
+					licenseMessage = "Licence valide · mode hors ligne temporaire"
+				} else {
+					licenseMessage = "Licence valide"
 				}
+			} else if msg := strings.TrimSpace(state.Error); msg != "" {
+				licenseMessage = msg
 			}
 		}
 	}
-	add("license", "Licence", licenseOK, licenseMessage)
+	add("license", "Licence", licenseOK, licenseMessage, "account", "Ouvrir Mon ClashGO")
 
 	cfg := config.LoadOrDefault("config.json")
 	accountOK := strings.TrimSpace(cfg.Account.PlayerTag) != ""
@@ -777,7 +796,7 @@ func (a *App) GetStartupReadiness() StartupReadiness {
 	if !accountOK {
 		accountMessage = "Aucun tag joueur lié"
 	}
-	add("account", "Compte Clash", accountOK, accountMessage)
+	add("account", "Compte Clash", accountOK, accountMessage, "account", "Lier le compte")
 
 	diag := collectSystemDiagnostics()
 	add("assets", "Fichiers ClashGO", diag.AssetsReady, func() string {
@@ -788,7 +807,7 @@ func (a *App) GetStartupReadiness() StartupReadiness {
 			return "Manquants : " + strings.Join(diag.MissingAssets, ", ")
 		}
 		return "Certains fichiers nécessaires sont manquants"
-	}())
+	}(), "settings", "Voir le diagnostic")
 
 	if goruntime.GOOS == "windows" {
 		add("bluestacks", "BlueStacks 5", diag.Emulator.BlueStacksPlayerFound, func() string {
@@ -799,20 +818,20 @@ func (a *App) GetStartupReadiness() StartupReadiness {
 				return "BlueStacks est installé"
 			}
 			return "BlueStacks 5 n’est pas détecté"
-		}())
+		}(), "settings", "Configurer Windows")
 		add("adb", "ADB", diag.Emulator.ADBFound, func() string {
 			if diag.Emulator.ADBFound {
 				return "ADB est disponible"
 			}
 			return "ADB n’est pas détecté"
-		}())
+		}(), "settings", "Configurer ADB")
 		instanceOK := strings.TrimSpace(diag.Emulator.PreferredInstance) != ""
 		add("instance", "Instance", instanceOK, func() string {
 			if instanceOK {
 				return "Instance : " + diag.Emulator.PreferredInstance
 			}
 			return "Aucune instance BlueStacks utilisable"
-		}())
+		}(), "settings", "Choisir l’instance")
 	}
 
 	strategyPath := strings.TrimSpace(cfg.Attack.StrategyFile)
@@ -829,10 +848,10 @@ func (a *App) GetStartupReadiness() StartupReadiness {
 			strategyMessage = "Fichier de stratégie introuvable : " + filepath.Base(strategyPath)
 		}
 	}
-	add("strategy", "Stratégie", strategyOK, strategyMessage)
+	add("strategy", "Stratégie", strategyOK, strategyMessage, "automation", "Ouvrir Automatisation")
 
 	pacingOK, pacingMessage := memberRuntimeConfigReady(cfg)
-	add("member_pacing", "Cadence membre", pacingOK, pacingMessage)
+	add("member_pacing", "Cadence membre", pacingOK, pacingMessage, "member_settings", "Ouvrir Réglages bot")
 
 	ready := true
 	for _, check := range checks {
