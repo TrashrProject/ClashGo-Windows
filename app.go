@@ -1492,12 +1492,22 @@ func (a *App) ClearAccount() error {
 	cfg := config.LoadOrDefault("config.json")
 	cfg.Account.PlayerTag = ""
 	cfg.Account.LegacyAPIKey = ""
-	_ = os.Remove(accountProfileCachePath())
+
 	bytes, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0600)
+	if err := os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0600); err != nil {
+		return err
+	}
+
+	// Remove cached public profile only after the unlink is durable. Keep the
+	// running bot synchronized with the persisted account state.
+	_ = os.Remove(accountProfileCachePath())
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	return nil
 }
 
 // GetPlayerProfile asks the ClashGO account service for the linked player.
