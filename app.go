@@ -673,6 +673,101 @@ type BotStatus struct {
 	Message string `json:"message"`
 }
 
+type StartupCheckItem struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
+}
+
+type StartupReadiness struct {
+	Ready  bool               `json:"ready"`
+	Checks []StartupCheckItem `json:"checks"`
+}
+
+func (a *App) GetStartupReadiness() StartupReadiness {
+	checks := make([]StartupCheckItem, 0, 7)
+	add := func(id, label string, ok bool, message string) {
+		checks = append(checks, StartupCheckItem{ID: id, Label: label, OK: ok, Message: message})
+	}
+
+	licenseOK := true
+	licenseMessage := "Mode beta local"
+	if a.GetLicensePolicy().Enforced {
+		licenseOK = a.license != nil && a.license.GetState().Activated
+		licenseMessage = "Licence valide"
+		if !licenseOK {
+			licenseMessage = "Licence absente, expirée ou invalide"
+			if a.license != nil {
+				if msg := strings.TrimSpace(a.license.GetState().Error); msg != "" {
+					licenseMessage = msg
+				}
+			}
+		}
+	}
+	add("license", "Licence", licenseOK, licenseMessage)
+
+	cfg := config.LoadOrDefault("config.json")
+	accountOK := strings.TrimSpace(cfg.Account.PlayerTag) != ""
+	accountMessage := "Compte Clash lié"
+	if !accountOK {
+		accountMessage = "Aucun tag joueur lié"
+	}
+	add("account", "Compte Clash", accountOK, accountMessage)
+
+	diag := collectSystemDiagnostics()
+	add("assets", "Fichiers ClashGO", diag.AssetsReady, func() string {
+		if diag.AssetsReady {
+			return "Tous les fichiers nécessaires sont présents"
+		}
+		if len(diag.MissingAssets) > 0 {
+			return "Manquants : " + strings.Join(diag.MissingAssets, ", ")
+		}
+		return "Certains fichiers nécessaires sont manquants"
+	}())
+
+	if goruntime.GOOS == "windows" {
+		add("bluestacks", "BlueStacks 5", diag.Emulator.BlueStacksPlayerFound, func() string {
+			if diag.Emulator.BlueStacksPlayerFound {
+				if diag.Emulator.BlueStacksRunning {
+					return "BlueStacks est installé et démarré"
+				}
+				return "BlueStacks est installé"
+			}
+			return "BlueStacks 5 n’est pas détecté"
+		}())
+		add("adb", "ADB", diag.Emulator.ADBFound, func() string {
+			if diag.Emulator.ADBFound {
+				return "ADB est disponible"
+			}
+			return "ADB n’est pas détecté"
+		}())
+		instanceOK := strings.TrimSpace(diag.Emulator.PreferredInstance) != ""
+		add("instance", "Instance", instanceOK, func() string {
+			if instanceOK {
+				return "Instance : " + diag.Emulator.PreferredInstance
+			}
+			return "Aucune instance BlueStacks utilisable"
+		}())
+	}
+
+	strategyOK := strings.TrimSpace(cfg.Attack.StrategyFile) != ""
+	strategyMessage := "Stratégie configurée"
+	if !strategyOK {
+		strategyMessage = "Aucune stratégie d’attaque configurée"
+	}
+	add("strategy", "Stratégie", strategyOK, strategyMessage)
+
+	ready := true
+	for _, check := range checks {
+		if !check.OK {
+			ready = false
+			break
+		}
+	}
+	return StartupReadiness{Ready: ready, Checks: checks}
+}
+
 type AttackReplayPoint struct {
 	X int `json:"x"`
 	Y int `json:"y"`
