@@ -175,6 +175,17 @@ const safeLicenseEventsOn = (
   }
 };
 
+const safeEventsOn = <T,>(
+  eventName: string,
+  callback: (payload: T) => void,
+): (() => void) => {
+  try {
+    return EventsOn(eventName, callback);
+  } catch {
+    return () => {};
+  }
+};
+
 type VillageResources = {
   timestamp: string;
   gold: number;
