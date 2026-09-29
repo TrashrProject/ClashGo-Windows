@@ -1397,6 +1397,103 @@ func sanitizeMemberSettings(settings MemberSettings) MemberSettings {
 	return settings
 }
 
+func defaultMemberSettings() MemberSettings {
+	return MemberSettings{
+		SpeedProfile:         "normal",
+		MaxAttacksPerHour:    12,
+		BreakEveryAttacks:    5,
+		BreakMinutes:         3,
+		AdaptiveSearch:       true,
+		AutoProfileSync:      true,
+		AutoArmyGuard:        true,
+		AutoResourceTracking: true,
+	}
+}
+
+func applyMemberSettingsToConfig(cfg *config.BotConfig, settings MemberSettings) {
+	if cfg == nil {
+		return
+	}
+	settings = sanitizeMemberSettings(settings)
+	applyMemberSpeedProfile(cfg, settings.SpeedProfile)
+	cfg.Automation.MaxAttacksPerHour = settings.MaxAttacksPerHour
+	cfg.Automation.BreakEveryAttacks = settings.BreakEveryAttacks
+	cfg.Automation.BreakDuration = config.Duration{Duration: time.Duration(settings.BreakMinutes) * time.Minute}
+	cfg.Search.AdaptiveSearch = settings.AdaptiveSearch
+	cfg.Automation.AutoProfileSync = settings.AutoProfileSync
+	cfg.Automation.AutoArmyGuard = settings.AutoArmyGuard
+	cfg.Automation.AutoResourceTracking = settings.AutoResourceTracking
+}
+
+func (a *App) memberProfilePath() string {
+	if a == nil || a.license == nil {
+		return ""
+	}
+	id := strings.TrimSpace(a.license.ProfileID())
+	if id == "" {
+		return ""
+	}
+	return paths.ResolveConfig(filepath.Join("members", id+".json"))
+}
+
+func (a *App) persistMemberProfile(settings MemberSettings) error {
+	path := a.memberProfilePath()
+	if path == "" {
+		return nil
+	}
+	settings = sanitizeMemberSettings(settings)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+func (a *App) loadMemberProfile() (MemberSettings, bool) {
+	path := a.memberProfilePath()
+	if path == "" {
+		return MemberSettings{}, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return MemberSettings{}, false
+	}
+	var settings MemberSettings
+	if json.Unmarshal(data, &settings) != nil {
+		return MemberSettings{}, false
+	}
+	return sanitizeMemberSettings(settings), true
+}
+
+func (a *App) applyMemberProfileForCurrentLicense() error {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return nil
+	}
+	settings, ok := a.loadMemberProfile()
+	if !ok {
+		settings = defaultMemberSettings()
+		if err := a.persistMemberProfile(settings); err != nil {
+			return err
+		}
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	applyMemberSettingsToConfig(cfg, settings)
+	if err := config.Save("config.json", cfg); err != nil {
+		return err
+	}
+
+	a.mu.Lock()
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	a.mu.Unlock()
+	return nil
+}
+
 func (a *App) GetMemberSettings() MemberSettings {
 	cfg := config.LoadOrDefault("config.json")
 	profile := normalizeSpeedProfile(cfg.Automation.SpeedProfile)
