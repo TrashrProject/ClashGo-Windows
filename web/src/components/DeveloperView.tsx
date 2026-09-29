@@ -52,6 +52,9 @@ type LicenseRow = {
   payment_status?: string;
   total_paid_cents?: number;
   next_due_at?: string;
+  denied_activations?: number;
+  last_denied_at?: string;
+  last_denied_machine?: string;
 };
 
 type LicenseHistoryEvent = {
