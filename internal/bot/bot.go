@@ -2692,12 +2692,20 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	// grace then cancel) never interrupts an in-progress wall loop; the
 	// count itself was already incremented when the report was recorded.
 	if int(b.attackCount.Load()) >= b.cfg.Attack.MaxAttackPerSession {
+		attacks := b.attackCount.Load()
+		cap := b.cfg.Attack.MaxAttackPerSession
 		b.logger.Info().
-			Int32("attacks", b.attackCount.Load()).
-			Int("cap", b.cfg.Attack.MaxAttackPerSession).
+			Int32("attacks", attacks).
+			Int("cap", cap).
 			Msg("attack cap reached, scheduling graceful shutdown...")
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventSessionComplete, map[string]any{
+				"reason":  "attack_cap",
+				"attacks": attacks,
+				"cap":     cap,
+			})
+		}
 		go func() {
-
 			time.Sleep(2 * time.Second)
 			b.cancel()
 		}()
