@@ -2,6 +2,7 @@ param(
     [string]$Version = "0.6.7-windows-beta",
     [ValidateSet("stable","beta")][string]$Channel = "stable",
     [string]$AccountServiceURL = $env:CLASHGO_ACCOUNT_API_URL,
+    [string]$ControlServiceURL = $env:CLASHGO_CONTROL_API_URL,
     [switch]$SkipSync,
     [switch]$SkipTests
 )
@@ -98,6 +99,19 @@ $env:CGO_LDFLAGS = "-LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -l
         Write-Host "Embedding hosted account service URL for zero-config linking."
     } else {
         Write-Host "No hosted account service URL embedded; local development fallback will be used."
+    }
+    if ($ControlServiceURL) {
+        $control = $ControlServiceURL.Trim().TrimEnd("/")
+        if ($control -notmatch '^https?://') {
+            throw "ControlServiceURL must begin with http:// or https://"
+        }
+        if ($control -match '\s') {
+            throw "ControlServiceURL cannot contain spaces"
+        }
+        $ldflags += " -X main.controlServiceURL=$control"
+        Write-Host "Embedding hosted licensing/support service URL."
+    } else {
+        Write-Host "No hosted control service URL embedded; local development fallback will be used."
     }
     Write-Host "Building Wails Windows application..."
     wails build -clean -webview2 embed -o ClashGO.exe -tags $gocvTags -ldflags $ldflags
