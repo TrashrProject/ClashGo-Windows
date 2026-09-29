@@ -2370,7 +2370,6 @@ func applyMemberSpeedProfile(cfg *config.BotConfig, profile string) {
 func applyMemberPreset(settings MemberSettings, preset string) (MemberSettings, error) {
 	preset = strings.ToLower(strings.TrimSpace(preset))
 	settings = sanitizeMemberSettings(settings)
-	settings.AdaptiveSearch = true
 
 	switch preset {
 	case "short":
@@ -2379,18 +2378,21 @@ func applyMemberPreset(settings MemberSettings, preset string) (MemberSettings, 
 		settings.MaxAttacksPerSession = 10
 		settings.BreakEveryAttacks = 5
 		settings.BreakMinutes = 3
+		settings.AdaptiveSearch = true
 	case "balanced":
 		settings.SpeedProfile = "normal"
 		settings.MaxAttacksPerHour = 12
 		settings.MaxAttacksPerSession = 50
 		settings.BreakEveryAttacks = 5
 		settings.BreakMinutes = 3
+		settings.AdaptiveSearch = true
 	case "fast":
 		settings.SpeedProfile = "fast"
 		settings.MaxAttacksPerHour = 16
 		settings.MaxAttacksPerSession = 100
 		settings.BreakEveryAttacks = 6
 		settings.BreakMinutes = 2
+		settings.AdaptiveSearch = true
 	default:
 		return settings, fmt.Errorf("unknown member preset %q", preset)
 	}
