@@ -41,6 +41,7 @@ type LicenseState = {
   member_name?: string;
   license_hint?: string;
   machine_id?: string;
+  machine_name?: string;
   last_validated?: string;
   offline_until?: string;
   plan?: string;
@@ -1049,9 +1050,14 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 </div>
                 <div className="rounded-xl border border-white/10 dark:border-zinc-200/70 bg-white/5 dark:bg-zinc-100 px-3 py-2.5">
                   <div className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-500">Appareil</div>
-                  <div className="mt-1 text-xs font-black font-mono">
-                    {licenseState.machine_id ? licenseState.machine_id.slice(0, 8) + '…' : '—'}
+                  <div className="mt-1 text-xs font-black">
+                    {licenseState.machine_name || (licenseState.machine_id ? 'PC lié' : '—')}
                   </div>
+                  {licenseState.machine_id && (
+                    <div className="mt-0.5 text-[9px] font-mono font-bold text-zinc-500">
+                      {licenseState.machine_id.slice(0, 8)}…
+                    </div>
+                  )}
                 </div>
                 <div className="rounded-xl border border-white/10 dark:border-zinc-200/70 bg-white/5 dark:bg-zinc-100 px-3 py-2.5">
                   <div className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-500">Expiration</div>
