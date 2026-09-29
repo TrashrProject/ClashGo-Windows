@@ -58,6 +58,21 @@ type MemberSettings = {
   auto_resource_tracking: boolean;
 };
 
+const formatLicenseRemaining = (expiresAt?: string): string => {
+  if (!expiresAt) return 'À vie';
+  const expiry = new Date(expiresAt).getTime();
+  if (!Number.isFinite(expiry)) return 'Expiration inconnue';
+  const remaining = expiry - Date.now();
+  if (remaining <= 0) return 'Expirée';
+  const hours = Math.ceil(remaining / (60 * 60 * 1000));
+  if (hours <= 24) return 'Expire aujourd’hui';
+  const days = Math.ceil(hours / 24);
+  return days === 1 ? 'Reste 1 jour' : `Reste ${days} jours`;
+};
+
+const isOfflineGrace = (state: LicenseState | null): boolean =>
+  Boolean(state?.error && state.error.toLowerCase().includes('offline'));
+
 const applySpeedPreset = (settings: MemberSettings, profile: MemberSettings['speed_profile']): MemberSettings => {
   switch (profile) {
     case 'cautious':
@@ -396,8 +411,13 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 <div className="rounded-xl border border-white/10 dark:border-zinc-200/70 bg-white/5 dark:bg-zinc-100 px-3 py-2.5">
                   <div className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-500">Expiration</div>
                   <div className="mt-1 text-xs font-black">
-                    {licenseState.expires_at ? new Date(licenseState.expires_at).toLocaleDateString('fr-FR') : 'Jamais'}
+                    {formatLicenseRemaining(licenseState.expires_at)}
                   </div>
+                  {licenseState.expires_at && (
+                    <div className="mt-0.5 text-[9px] font-bold text-zinc-500">
+                      {new Date(licenseState.expires_at).toLocaleDateString('fr-FR')}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -436,9 +456,15 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
             </div>
           )}
         </div>
-        {(licenseError || licenseState?.error) && (
+        {(licenseError || (licenseState?.error && !isOfflineGrace(licenseState))) && (
           <div className="mt-4 rounded-xl bg-rose-500/10 px-4 py-3 text-xs font-bold text-rose-400 dark:text-rose-600">
             {licenseError || licenseState?.error}
+          </div>
+        )}
+        {isOfflineGrace(licenseState) && (
+          <div className="mt-4 flex items-center gap-3 rounded-xl bg-amber-500/10 px-4 py-3 text-xs font-bold text-amber-500">
+            <span className="material-symbols-outlined text-base">cloud_off</span>
+            Connexion au serveur de licence indisponible · accès temporaire hors ligne actif.
           </div>
         )}
       </section>
