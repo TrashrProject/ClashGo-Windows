@@ -1122,3 +1122,50 @@ func TestMemberInterfaceLevelDoesNotChangeAutomationMode(t *testing.T) {
 		t.Fatal("advanced interface unexpectedly disabled automatic bot mode")
 	}
 }
+
+
+func TestMemberRuntimeConfigReady(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Automation.SpeedProfile = "normal"
+	cfg.Automation.MaxAttacksPerHour = 12
+	cfg.Attack.MaxAttackPerSession = 50
+	cfg.Automation.BreakEveryAttacks = 5
+	cfg.Automation.BreakDuration = config.Duration{Duration: 3 * time.Minute}
+
+	ok, message := memberRuntimeConfigReady(cfg)
+	if !ok {
+		t.Fatalf("expected valid member runtime config, got %q", message)
+	}
+	if message == "" {
+		t.Fatal("expected readable pacing summary")
+	}
+
+	cfg.Automation.SpeedProfile = "turbo"
+	if ok, _ := memberRuntimeConfigReady(cfg); ok {
+		t.Fatal("invalid speed profile should fail readiness")
+	}
+
+	cfg.Automation.SpeedProfile = "normal"
+	cfg.Automation.MaxAttacksPerHour = 25
+	if ok, _ := memberRuntimeConfigReady(cfg); ok {
+		t.Fatal("out-of-range attacks/hour should fail readiness")
+	}
+
+	cfg.Automation.MaxAttacksPerHour = 12
+	cfg.Attack.MaxAttackPerSession = 0
+	if ok, _ := memberRuntimeConfigReady(cfg); ok {
+		t.Fatal("zero session cap should fail readiness")
+	}
+
+	cfg.Attack.MaxAttackPerSession = 50
+	cfg.Automation.BreakEveryAttacks = 21
+	if ok, _ := memberRuntimeConfigReady(cfg); ok {
+		t.Fatal("out-of-range break frequency should fail readiness")
+	}
+
+	cfg.Automation.BreakEveryAttacks = 5
+	cfg.Automation.BreakDuration = config.Duration{Duration: 31 * time.Minute}
+	if ok, _ := memberRuntimeConfigReady(cfg); ok {
+		t.Fatal("out-of-range break duration should fail readiness")
+	}
+}
