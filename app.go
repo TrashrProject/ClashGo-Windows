@@ -1536,6 +1536,47 @@ func (a *App) clearStartStateLocked() {
 // the next NewAsyncWriter — acceptable, since the previous code path
 // had the same constraint and the new behaviour is strictly an
 // improvement on the slow path.
+func (a *App) PauseBot() BotStatus {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.bot == nil {
+		if a.cancel != nil {
+			return BotStatus{Running: false, Message: "Le bot est encore en démarrage"}
+		}
+		return BotStatus{Running: false, Message: "Bot non démarré"}
+	}
+	a.bot.PauseAutomation()
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "bot_paused", map[string]any{
+			"message": "Pause demandée · ClashGO terminera l’attaque en cours avant de rester au village.",
+		})
+	}
+	return BotStatus{Running: true, Message: "Pause activée"}
+}
+
+func (a *App) ResumeBot() BotStatus {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.bot == nil {
+		return BotStatus{Running: false, Message: "Bot non démarré"}
+	}
+	a.bot.ResumeAutomation()
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "bot_resumed", map[string]any{
+			"message": "ClashGO reprend la session.",
+		})
+	}
+	return BotStatus{Running: true, Message: "Session reprise"}
+}
+
+func (a *App) IsPaused() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.bot != nil && a.bot.IsPaused()
+}
+
 func (a *App) StopAfterCurrentAttack() BotStatus {
 	a.mu.Lock()
 	if a.stopping {
