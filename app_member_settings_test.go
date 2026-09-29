@@ -1360,3 +1360,45 @@ func TestInterruptedTestSessionRecoveryIsIdempotent(t *testing.T) {
 		t.Fatalf("recovered settings changed after idempotent restore: %+v", got)
 	}
 }
+
+
+func TestMemberSettingsAreLockedWhileTemporaryTestSessionIsActive(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	a := testLicensedApp(t, "CGO-LOCK01-LOCK02-LOCK03-LOCK04")
+
+	original := defaultMemberSettings()
+	original.MaxAttacksPerSession = 42
+	if _, err := a.SaveMemberSettings(original); err != nil {
+		t.Fatalf("save original: %v", err)
+	}
+	if err := saveMemberProfileFile(a.testSessionRestorePath(), original); err != nil {
+		t.Fatalf("save test restore snapshot: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.mu.Lock()
+	a.botCtx = ctx
+	a.cancel = cancel
+	a.mu.Unlock()
+
+	edited := original
+	edited.MaxAttacksPerHour = 20
+	if _, err := a.SaveMemberSettings(edited); err == nil {
+		t.Fatal("expected member settings edit to be rejected while test session is active")
+	}
+
+	a.mu.Lock()
+	a.cancel = nil
+	a.botCtx = nil
+	a.mu.Unlock()
+
+	got := a.GetMemberSettings()
+	if got.MaxAttacksPerHour != original.MaxAttacksPerHour {
+		t.Fatalf("blocked edit leaked into config: got %d want %d", got.MaxAttacksPerHour, original.MaxAttacksPerHour)
+	}
+	if !a.testSessionRestorePending() {
+		t.Fatal("test-session restore snapshot was unexpectedly removed")
+	}
+}
