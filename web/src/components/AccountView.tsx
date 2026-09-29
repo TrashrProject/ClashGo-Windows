@@ -1205,13 +1205,17 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       <section className={(memberPage === 'village' ? '' : 'hidden ') + "rounded-[2.5rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-8 shadow-premium dark:shadow-none"}>
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
           <div className="min-w-0">
-            <div className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-400">Compte Clash lié</div>
+            <div className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-400">{playerTag ? 'Compte Clash lié' : 'Compte Clash optionnel'}</div>
             <div className="mt-2 flex flex-wrap items-baseline gap-3">
               <h3 className="text-3xl font-black text-zinc-950 dark:text-white">{profile?.name || playerTag || 'Aucun compte'}</h3>
               <span className="text-sm font-mono font-bold text-zinc-500">{profile?.tag || playerTag}</span>
             </div>
             <p className="mt-2 text-sm font-medium text-zinc-500">
-              {profile ? 'Compte synchronisé automatiquement par ClashGO. Aucune clé API développeur n’est nécessaire.' : 'Tag joueur enregistré. ClashGO synchronisera ce compte automatiquement.'}
+              {profile
+                ? 'Compte synchronisé automatiquement par ClashGO. Aucune clé API développeur n’est nécessaire.'
+                : playerTag
+                  ? 'Tag joueur enregistré. ClashGO synchronisera ce compte automatiquement dès que le service sera disponible.'
+                  : 'Tu peux lier ton tag joueur pour sélectionner automatiquement le profil HDV. ClashGO reste utilisable sans cette liaison.'}
             </p>
           </div>
           <details className="relative">
@@ -1274,7 +1278,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                   ? 'Connexion au compte ClashGO'
                   : serviceConfigured
                     ? 'Service de compte configuré'
-                    : 'Service de compte non configuré'}
+                    : 'Service de compte non configuré · optionnel'}
           </div>
         </div>
 
@@ -1283,7 +1287,9 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
             title={error || undefined}
             className={'mt-4 rounded-xl px-4 py-3 text-xs font-bold ' + (error ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' : 'bg-emerald-500/10 text-emerald-500')}
           >
-            {error ? 'La synchronisation est temporairement indisponible. ClashGO réessaiera automatiquement.' : message}
+            {error
+              ? 'La synchronisation du profil est temporairement indisponible. Le bot reste utilisable avec la configuration locale.'
+              : message}
           </div>
         )}
       </section>
@@ -1293,9 +1299,11 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
           <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-400">
             <span className="material-symbols-outlined">sync</span>
           </div>
-          <h4 className="mt-4 text-lg font-black text-zinc-950 dark:text-white">Profil en attente de synchronisation</h4>
+          <h4 className="mt-4 text-lg font-black text-zinc-950 dark:text-white">{playerTag ? 'Profil en attente de synchronisation' : 'Compte Clash non lié'}</h4>
           <p className="mx-auto mt-2 max-w-lg text-sm font-semibold text-zinc-500">
-            ClashGO récupérera automatiquement les informations du village dès que le service de compte sera disponible.
+            {playerTag
+              ? 'ClashGO récupérera automatiquement les informations du village dès que le service de compte sera disponible.'
+              : 'Cette liaison est facultative. Le bot peut utiliser la configuration locale et tu pourras ajouter ton tag plus tard.'}
           </p>
         </section>
       )}
