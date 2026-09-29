@@ -340,7 +340,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       setLicenseState(payload);
       if (payload.activated && (payload.role === 'developer' || payload.role === 'admin')) {
         onInterfaceLevelChange('developer');
-      } else if (payload.activated && interfaceLevel === 'developer') {
+      } else if (interfaceLevel === 'developer') {
         onInterfaceLevelChange('simple');
       }
     });
