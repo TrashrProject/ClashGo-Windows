@@ -79,6 +79,22 @@ const shortMachine = (value?: string): string => {
   return value.slice(0, 10) + '…' + value.slice(-6);
 };
 
+const isLicenseExpired = (item: LicenseRow, now = Date.now()): boolean => {
+  if (!item.expires_at) return false;
+  const expiry = new Date(item.expires_at).getTime();
+  return Number.isFinite(expiry) && expiry <= now;
+};
+
+const isLicenseUsable = (item: LicenseRow, now = Date.now()): boolean =>
+  item.active !== false && !isLicenseExpired(item, now);
+
+const licenseStatusLabel = (item: LicenseRow, now = Date.now()): string => {
+  if (item.active === false) return 'Révoquée';
+  if (isLicenseExpired(item, now)) return 'Expirée';
+  if (!item.machine_id && !item.activated_at) return 'Jamais activée';
+  return 'Active';
+};
+
 const DeveloperView: React.FC = () => {
   const [incidents, setIncidents] = React.useState<Incident[]>([]);
   const [licenses, setLicenses] = React.useState<LicenseRow[]>([]);
@@ -100,7 +116,7 @@ const DeveloperView: React.FC = () => {
   const [generatedKey, setGeneratedKey] = React.useState('');
   const [copied, setCopied] = React.useState(false);
   const [search, setSearch] = React.useState('');
-  const [licenseFilter, setLicenseFilter] = React.useState<'all' | 'active' | 'revoked' | 'expiring' | 'unactivated'>('all');
+  const [licenseFilter, setLicenseFilter] = React.useState<'all' | 'active' | 'revoked' | 'expired' | 'expiring' | 'unactivated'>('all');
   const [renewPlans, setRenewPlans] = React.useState<Record<string, 'free_2d' | 'week_1' | 'month_1' | 'lifetime'>>({});
   const generatedKeyTimerRef = React.useRef<number | null>(null);
 
@@ -237,8 +253,9 @@ const DeveloperView: React.FC = () => {
   };
 
   const recentErrors = incidents.filter((x) => x.level === 'error' || x.level === 'fatal' || x.level === 'panic');
-  const activeLicenses = licenses.filter((x) => x.active !== false).length;
   const now = Date.now();
+  const activeLicenses = licenses.filter((item) => isLicenseUsable(item, now)).length;
+  const expiredLicenses = licenses.filter((item) => item.active !== false && isLicenseExpired(item, now)).length;
   const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
   const expiringSoon = licenses.filter((item) => {
     if (item.active === false || !item.expires_at) return false;
@@ -256,9 +273,10 @@ const DeveloperView: React.FC = () => {
     item.machine_id === currentMachineID;
   const normalizedSearch = search.trim().toLowerCase();
   const filteredLicenses = licenses.filter((item) => {
-    if (licenseFilter === 'active' && item.active === false) return false;
+    if (licenseFilter === 'active' && !isLicenseUsable(item, now)) return false;
     if (licenseFilter === 'revoked' && item.active !== false) return false;
-    if (licenseFilter === 'unactivated' && (item.active === false || Boolean(item.machine_id) || Boolean(item.activated_at))) return false;
+    if (licenseFilter === 'expired' && !(item.active !== false && isLicenseExpired(item, now))) return false;
+    if (licenseFilter === 'unactivated' && (item.active === false || isLicenseExpired(item, now) || Boolean(item.machine_id) || Boolean(item.activated_at))) return false;
     if (licenseFilter === 'expiring') {
       const expiry = item.expires_at ? new Date(item.expires_at).getTime() : Number.NaN;
       if (item.active === false || !Number.isFinite(expiry) || expiry <= now || expiry - now > sevenDaysMs) return false;
@@ -313,11 +331,12 @@ const DeveloperView: React.FC = () => {
           </button>
         </div>
 
-        <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="mt-6 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           {[
             ['Licences', licenses.length],
-            ['Actives', activeLicenses],
+            ['Utilisables', activeLicenses],
             ['Expire < 7j', expiringSoon],
+            ['Expirées', expiredLicenses],
             ['Jamais activées', neverActivated],
             ['Erreurs', recentErrors.length],
           ].map(([label, value]) => (
@@ -473,6 +492,7 @@ const DeveloperView: React.FC = () => {
               <option value="all">Toutes</option>
               <option value="active">Actives</option>
               <option value="expiring">Expire &lt; 7j</option>
+              <option value="expired">Expirées</option>
               <option value="unactivated">Jamais activées</option>
               <option value="revoked">Révoquées</option>
             </select>
@@ -568,8 +588,15 @@ const DeveloperView: React.FC = () => {
                   )}
                 </div>
                 <div className="lg:text-right">
-                  <div className={'text-[10px] font-black uppercase tracking-widest ' + (item.active !== false ? 'text-emerald-500' : 'text-rose-500')}>
-                    {item.active !== false ? 'Active' : 'Révoquée'}
+                  <div className={
+                    'text-[10px] font-black uppercase tracking-widest ' +
+                    (item.active === false || isLicenseExpired(item, now)
+                      ? 'text-rose-500'
+                      : (!item.machine_id && !item.activated_at)
+                        ? 'text-amber-500'
+                        : 'text-emerald-500')
+                  }>
+                    {licenseStatusLabel(item, now)}
                   </div>
                   <div className="mt-1 text-[10px] text-zinc-400">
                     {item.expires_at ? 'Expire ' + dateLabel(item.expires_at) : 'Sans expiration'}
