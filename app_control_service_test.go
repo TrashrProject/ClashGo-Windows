@@ -87,3 +87,63 @@ func TestClashControlServiceFallbackDoesNotEnforceLicensing(t *testing.T) {
 		t.Fatal("account-service fallback must not enable license enforcement")
 	}
 }
+
+
+func TestStableBuildIgnoresLocalControlOverride(t *testing.T) {
+	oldEmbedded := controlServiceURL
+	oldChannel := updateChannel
+	oldVersion := version
+	defer func() {
+		controlServiceURL = oldEmbedded
+		updateChannel = oldChannel
+		version = oldVersion
+	}()
+
+	controlServiceURL = ""
+	t.Setenv("CLASHGO_CONTROL_API_URL", "")
+	updateChannel = "stable"
+	version = "1.0.0"
+
+	cfg := config.DefaultConfig()
+	cfg.Account.ControlURL = "https://attacker.example/"
+	cfg.Account.ProxyURL = "https://account.example/"
+
+	if betaControlOverrideAllowed() {
+		t.Fatal("stable build unexpectedly allows local control override")
+	}
+	if clashControlServiceConfigured(cfg) {
+		t.Fatal("stable build must ignore local control override for enforcement")
+	}
+	if got := clashControlServiceURL(cfg); got != "https://account.example" {
+		t.Fatalf("stable fallback=%q want account service fallback", got)
+	}
+}
+
+func TestBetaBuildAllowsLocalControlOverride(t *testing.T) {
+	oldEmbedded := controlServiceURL
+	oldChannel := updateChannel
+	oldVersion := version
+	defer func() {
+		controlServiceURL = oldEmbedded
+		updateChannel = oldChannel
+		version = oldVersion
+	}()
+
+	controlServiceURL = ""
+	t.Setenv("CLASHGO_CONTROL_API_URL", "")
+	updateChannel = "beta"
+	version = "1.0.0-beta.1"
+
+	cfg := config.DefaultConfig()
+	cfg.Account.ControlURL = "https://beta-control.example/"
+
+	if !betaControlOverrideAllowed() {
+		t.Fatal("beta build should allow local control override")
+	}
+	if !clashControlServiceConfigured(cfg) {
+		t.Fatal("beta local control override should enable enforcement")
+	}
+	if got := clashControlServiceURL(cfg); got != "https://beta-control.example" {
+		t.Fatalf("beta control URL=%q", got)
+	}
+}
