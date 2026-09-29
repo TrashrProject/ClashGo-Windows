@@ -1586,6 +1586,10 @@ func (a *App) applyMemberProfileForCurrentLicense() error {
 
 	cfg := config.LoadOrDefault("config.json")
 	applyMemberSettingsToConfig(cfg, settings)
+	cfg.Automation.SimpleMode = settings.InterfaceLevel != "advanced"
+	if cfg.Automation.SimpleMode {
+		applySimpleAutomationDefaults(cfg)
+	}
 	if err := config.Save("config.json", cfg); err != nil {
 		return err
 	}
@@ -1779,20 +1783,50 @@ func (a *App) GetMemberInterfaceLevel() string {
 }
 
 func (a *App) SaveMemberInterfaceLevel(level string) error {
-	if a == nil || a.license == nil || !a.license.GetState().Activated {
-		return nil
-	}
 	level = strings.ToLower(strings.TrimSpace(level))
 	if level != "simple" && level != "advanced" {
 		return fmt.Errorf("member interface level must be simple or advanced")
 	}
 
-	settings, ok := a.loadMemberProfile()
-	if !ok {
-		settings = a.GetMemberSettings()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Automation.SimpleMode = level == "simple"
+	if cfg.Automation.SimpleMode {
+		applySimpleAutomationDefaults(cfg)
 	}
-	settings.InterfaceLevel = level
-	return a.persistMemberProfile(settings)
+	if err := config.Save("config.json", cfg); err != nil {
+		return err
+	}
+
+	// Persist the UI preference only when a real member profile exists. Beta
+	// local mode still benefits from the global SimpleMode behavior above.
+	if a.license != nil && a.license.GetState().Activated {
+		settings, ok := a.loadMemberProfile()
+		if !ok {
+			settings = MemberSettings{
+				InterfaceLevel:       level,
+				SpeedProfile:         normalizeSpeedProfile(cfg.Automation.SpeedProfile),
+				MaxAttacksPerHour:    cfg.Automation.MaxAttacksPerHour,
+				BreakEveryAttacks:    cfg.Automation.BreakEveryAttacks,
+				BreakMinutes:         int(cfg.Automation.BreakDuration.Duration / time.Minute),
+				AdaptiveSearch:       cfg.Search.AdaptiveSearch,
+				AutoProfileSync:      cfg.Automation.AutoProfileSync,
+				AutoArmyGuard:        cfg.Automation.AutoArmyGuard,
+				AutoResourceTracking: cfg.Automation.AutoResourceTracking,
+			}
+		}
+		settings.InterfaceLevel = level
+		if err := a.persistMemberProfile(settings); err != nil {
+			return err
+		}
+	}
+
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	return nil
 }
 
 func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error) {
