@@ -228,6 +228,8 @@ function App() {
   } | null>(null);
   const [startupCheckRunning, setStartupCheckRunning] = useState(false);
   const startupCheckAutoRan = useRef(false);
+  const startInFlightRef = useRef(false);
+  const testSessionInFlightRef = useRef(false);
 
   // Config states
   const [goldThreshold, setGoldThreshold] = useState(400000);
@@ -731,6 +733,8 @@ function App() {
   }, [accountReady, licenseAccessReady, handleStartupCheck]);
 
   const handleStart = async () => {
+    if (startInFlightRef.current || isRunning || isStarting) return;
+    startInFlightRef.current = true;
     setBotError('');
     setBotDiagnosticPath('');
     try {
@@ -772,10 +776,14 @@ function App() {
       setIsStarting(false);
       setIsRunning(false);
       setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    } finally {
+      startInFlightRef.current = false;
     }
   };
 
   const handleStartTestSession = async () => {
+    if (testSessionInFlightRef.current || startInFlightRef.current || isRunning || isStarting) return;
+    testSessionInFlightRef.current = true;
     try {
       setBotError('');
       await ApplyMemberPreset('short');
@@ -783,7 +791,9 @@ function App() {
       await handleStart();
     } catch (err) {
       console.error('Test session start failed:', err);
-      setBotError(err instanceof Error ? err.message : String(err));
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    } finally {
+      testSessionInFlightRef.current = false;
     }
   };
 
