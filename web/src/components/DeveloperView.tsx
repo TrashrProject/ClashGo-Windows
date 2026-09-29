@@ -139,6 +139,16 @@ const shortMachine = (value?: string): string => {
   return value.slice(0, 10) + '…' + value.slice(-6);
 };
 
+const presenceState = (value?: string, now = Date.now()): { label: string; tone: string } => {
+  if (!value) return { label: 'Jamais connectée', tone: 'bg-zinc-100 text-zinc-400 dark:bg-zinc-800' };
+  const seen = new Date(value).getTime();
+  if (!Number.isFinite(seen)) return { label: 'État inconnu', tone: 'bg-zinc-100 text-zinc-400 dark:bg-zinc-800' };
+  const age = Math.max(0, now - seen);
+  if (age <= 7 * 60_000) return { label: 'En ligne', tone: 'bg-emerald-500/10 text-emerald-500' };
+  if (age <= 20 * 60_000) return { label: 'Vu récemment', tone: 'bg-amber-500/10 text-amber-500' };
+  return { label: 'Hors ligne', tone: 'bg-zinc-100 text-zinc-400 dark:bg-zinc-800' };
+};
+
 const expiryLabel = (value?: string, now = Date.now()): string => {
   if (!value) return 'À vie';
   const expiry = new Date(value).getTime();
@@ -1072,6 +1082,14 @@ const DeveloperView: React.FC = () => {
                     <span className="px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-[9px] font-black uppercase tracking-widest text-zinc-500">
                       {planLabel(item.plan)}
                     </span>
+                    {(() => {
+                      const presence = presenceState(item.last_seen_at);
+                      return (
+                        <span className={'px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ' + presence.tone}>
+                          {presence.label}
+                        </span>
+                      );
+                    })()}
                     {isCurrentAdminLicense(item) && (
                       <span className="px-2 py-1 rounded-lg bg-sky-500/10 text-[9px] font-black uppercase tracking-widest text-sky-500">
                         Cette licence
