@@ -3798,14 +3798,15 @@ func (b *Bot) HistorySnapshot() []AttackReport {
 
 // RecordMemberSettingsChange adds one low-volume, user-initiated settings
 // event to the activity feed. It does not affect the farming state machine.
-func (b *Bot) RecordMemberSettingsChange(profile string, maxAttacks, breakEvery, breakMinutes int) {
+func (b *Bot) RecordMemberSettingsChange(profile string, maxAttacksPerHour, maxAttacksPerSession, breakEvery, breakMinutes int) {
 	if b == nil || b.telemetry == nil {
 		return
 	}
 	b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
-		"profile":              profile,
-		"max_attacks_per_hour": maxAttacks,
-		"break_every_attacks":  breakEvery,
+		"profile":                 profile,
+		"max_attacks_per_hour":    maxAttacksPerHour,
+		"max_attacks_per_session": maxAttacksPerSession,
+		"break_every_attacks":     breakEvery,
 		"break_minutes":        breakMinutes,
 	})
 }
