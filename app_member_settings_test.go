@@ -299,3 +299,46 @@ func TestMemberProfileFileRecoversBackup(t *testing.T) {
 		}
 	}
 }
+
+
+func TestClearCachedPlayerProfileIfDifferentRemovesOtherMember(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+
+	profile := ClashPlayerProfile{Tag: "#OLD123", Name: "Old Member"}
+	data, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "account_profile.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	clearCachedPlayerProfileIfDifferent("#NEW456")
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected mismatched cached profile to be removed, stat err=%v", err)
+	}
+}
+
+func TestClearCachedPlayerProfileIfDifferentKeepsMatchingMember(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+
+	profile := ClashPlayerProfile{Tag: "#SAME123", Name: "Same Member"}
+	data, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "account_profile.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	clearCachedPlayerProfileIfDifferent("#same123")
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected matching cached profile to remain, err=%v", err)
+	}
+}
