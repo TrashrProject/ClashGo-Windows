@@ -1811,6 +1811,13 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	b.logger.Info().
 		Int64("prep_ms", preparationDurationMS).
 		Msg("search started")
+	if runtime.GOOS == "windows" {
+		// Give BlueStacks one quiet render window after entering matchmaking.
+		// Capturing immediately while HD-Player is switching from clouds/menu
+		// to the first opponent has produced native memory crashes on Pie64.
+		b.logger.Debug().Msg("Windows matchmaking settle: pausing before first search capture")
+		time.Sleep(1200 * time.Millisecond)
+	}
 	if b.telemetry != nil {
 		b.telemetry.Emit(telemetry.EventSearchStarted, nil)
 	}
