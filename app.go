@@ -1111,9 +1111,67 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 		runtime.EventsEmit(a.ctx, "bot_started", map[string]interface{}{
 			"message": "Le bot est en cours.",
 		})
+
+		// Watch the bot-owned runtime context. This is essential for autonomous
+		// stops such as the per-session attack cap: no UI action calls StopBot
+		// in that path, so without this watcher a.bot would stay non-nil and the
+		// frontend would keep showing "Bot en cours" after automation ended.
+		go a.watchBotRuntime(b)
 	}(bootCtx)
 
 	return BotStatus{Running: true, Message: "Initialisation du bot démarrée"}
+}
+
+func (a *App) watchBotRuntime(b *bot.Bot) {
+	if a == nil || b == nil {
+		return
+	}
+	<-b.Done()
+
+	a.mu.Lock()
+	// Manual StopBot clears a.bot before cancelling/tearing down. In that
+	// case it already owns cleanup, so this watcher must be a no-op.
+	if a.bot != b {
+		a.mu.Unlock()
+		return
+	}
+
+	current := b.Stats()
+	a.lastStats = mergeStats(a.lastStats, current)
+	a.bot = nil
+	a.cancel = nil
+	a.botCtx = nil
+	a.stopping = true
+	a.mu.Unlock()
+
+	log.Info().Msg("bot runtime ended autonomously; synchronizing application state")
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "bot_stopped", map[string]interface{}{
+			"message": "La session ClashGO est terminée.",
+			"automatic": true,
+		})
+	}
+
+	// Runtime cancellation is already visible immediately. Do heavier native
+	// teardown asynchronously so React never waits on OpenCV/ADB cleanup.
+	go func() {
+		defer func() {
+			a.mu.Lock()
+			a.stopping = false
+			a.mu.Unlock()
+			if r := recover(); r != nil {
+				log.Error().Interface("panic", r).Msg("recovered panic during autonomous bot teardown")
+			}
+		}()
+		b.Stop()
+		a.saveStats()
+		a.cachedHistoryMu.Lock()
+		a.cachedHistory = nil
+		a.cachedHistoryMu.Unlock()
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "stats_updated", a.GetStats())
+		}
+	}()
 }
 
 // clearStartStateLocked resets the start placeholder after a failed
