@@ -159,3 +159,22 @@ func TestUpdaterBackendStopsActiveOrStartingBotBeforeInstall(t *testing.T) {
 		t.Fatal("InstallAndRestart no longer waits for active/in-flight bot shutdown")
 	}
 }
+
+
+func TestFrontendSeparatesAccessFromRealLicenseActivation(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("web", "src", "App.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(data)
+	if !strings.Contains(src, "const [licenseActivated, setLicenseActivated]") {
+		t.Fatal("frontend no longer tracks real license activation separately from app access")
+	}
+	if !strings.Contains(src, "licenseActivated={licenseActivated}") {
+		t.Fatal("sidebar no longer receives the real license activation state")
+	}
+	if !strings.Contains(src, "licenseReady={licenseActivated}") ||
+		!strings.Contains(src, "licenseRequired={licenseEnforced}") {
+		t.Fatal("home license status no longer distinguishes beta access from enforced activation")
+	}
+}
