@@ -45,6 +45,10 @@ type LicenseRow = {
   expires_at?: string;
   customer_name?: string;
   customer_contact?: string;
+  customer_notes?: string;
+  payment_status?: string;
+  total_paid_cents?: number;
+  next_due_at?: string;
 };
 
 type LicenseHistoryEvent = {
