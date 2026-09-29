@@ -74,34 +74,34 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       if (ev.type === 'target_skipped' || ev.type === 'state_changed') continue;
 
       if (ev.type === 'search_started') {
-        rows.push({ at: ev.at, icon: 'search', title: 'Searching', detail: 'Looking for a profitable base' });
+        rows.push({ at: ev.at, icon: 'search', title: 'Recherche en cours', detail: 'Recherche d’un village rentable' });
       } else if (ev.type === 'target_found') {
         rows.push({
           at: ev.at,
           icon: 'target',
-          title: `Target accepted · ${numberField(ev, 'score')}/100`,
+          title: `Village accepté · ${numberField(ev, 'score')}/100`,
           detail: `${numberField(ev, 'gold').toLocaleString()} G · ${numberField(ev, 'elixir').toLocaleString()} E · ${numberField(ev, 'de').toLocaleString()} DE`,
         });
       } else if (ev.type === 'attack_started') {
         rows.push({
           at: ev.at,
           icon: 'bolt',
-          title: 'Attack started',
+          title: 'Attaque lancée',
           detail: `${(numberField(ev, 'search_ms') / 1000).toFixed(1)}s search · ${numberField(ev, 'skips')} skips`,
         });
       } else if (ev.type === 'attack_finished') {
         rows.push({
           at: ev.at,
           icon: 'military_tech',
-          title: `Attack finished · ${numberField(ev, 'stars')}★`,
+          title: `Attaque terminée · ${numberField(ev, 'stars')}★`,
           detail: `${numberField(ev, 'gold').toLocaleString()} G · ${(numberField(ev, 'deploy_ms') / 1000).toFixed(1)}s deploy · ${(numberField(ev, 'cycle_ms') / 1000).toFixed(0)}s cycle`,
         });
       } else if (ev.type === 'recovery') {
         rows.push({
           at: ev.at,
           icon: 'healing',
-          title: textField(ev, 'stage') === 'success' ? 'Recovery complete' : 'Recovery started',
-          detail: textField(ev, 'bluestacks_restart') ? 'BlueStacks restarted' : 'Automatic recovery',
+          title: textField(ev, 'stage') === 'success' ? 'Récupération terminée' : 'Récupération en cours',
+          detail: textField(ev, 'bluestacks_restart') ? 'BlueStacks redémarré' : 'Récupération automatique',
         });
       } else if (ev.type === 'speed_profile') {
         const mode = textField(ev, 'mode') || 'Balanced';
@@ -111,9 +111,9 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         const reactiveCapture = numberField(ev, 'fast_capture_ms');
         const modeReason = textField(ev, 'reason');
         const incident = textField(ev, 'incident');
-        let reason = 'Selected from current runtime health';
+        let reason = 'Sélectionné selon l’état actuel de la session';
         if (modeReason === 'safety_governor') {
-          reason = `Safety governor${incident ? ` · ${incident.split('_').join(' ')}` : ''}`;
+          reason = `Protection de cadence${incident ? ` · ${incident.split('_').join(' ')}` : ''}`;
         } else if (nextTransitions >= 5 && nextFirstPass > 0 && nextFirstPass < 92) {
           reason = `Next first-pass ${nextFirstPass.toFixed(0)}% · ${nextTransitions.toFixed(0)} samples`;
         } else if (reactiveCapture > 0) {
@@ -122,7 +122,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         rows.push({
           at: ev.at,
           icon: mode === 'Fast' ? 'speed' : mode === 'Safe' ? 'shield' : 'tune',
-          title: `${mode} farming mode`,
+          title: `Mode de farm ${mode === 'Fast' ? 'Rapide' : mode === 'Safe' ? 'Prudent' : mode === 'Balanced' ? 'Équilibré' : mode}`,
           detail: from ? `${from} → ${mode} · ${reason}` : reason,
         });
       } else if (ev.type === 'return_home') {
@@ -130,7 +130,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         rows.push({
           at: ev.at,
           icon: ok ? 'home' : 'home_work',
-          title: ok ? 'Village ready' : 'Return Home fallback',
+          title: ok ? 'Village prêt' : 'Retour au village de secours',
           detail: `${(numberField(ev, 'duration_ms') / 1000).toFixed(1)}s return-home path`,
         });
       } else if (ev.type === 'anomaly') {
@@ -149,7 +149,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         rows.push({
           at: ev.at,
           icon: 'monitor_heart',
-          title: kind === 'performance_regression' ? 'Performance regression' : 'Performance anomaly',
+          title: kind === 'performance_regression' ? 'Régression de performance' : 'Anomalie de performance',
           detail: regressionDetail || `${kind.split('_').join(' ')}${duration > 0 ? ` · ${(duration / 1000).toFixed(1)}s` : ''}`,
         });
       }
@@ -289,12 +289,12 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
   }, [history]);
 
   const severityChips: { id: LogSeverity | 'all'; label: string; active: string; dot: string }[] = [
-    { id: 'all', label: 'All', active: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white border-zinc-200 dark:border-zinc-700', dot: 'bg-zinc-400' },
+    { id: 'all', label: 'Tout', active: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white border-zinc-200 dark:border-zinc-700', dot: 'bg-zinc-400' },
     { id: 'debug', label: 'Debug', active: 'bg-violet-500/15 text-violet-600 dark:text-violet-400 border-violet-500/40', dot: 'bg-violet-500' },
     { id: 'info', label: 'Info', active: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white border-zinc-200 dark:border-zinc-700', dot: 'bg-zinc-400' },
-    { id: 'success', label: 'Success', active: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/40', dot: 'bg-emerald-500' },
-    { id: 'warn', label: 'Warn', active: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/40', dot: 'bg-amber-500' },
-    { id: 'error', label: 'Error', active: 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/40', dot: 'bg-rose-500' },
+    { id: 'success', label: 'Succès', active: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/40', dot: 'bg-emerald-500' },
+    { id: 'warn', label: 'Avert.', active: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/40', dot: 'bg-amber-500' },
+    { id: 'error', label: 'Erreur', active: 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/40', dot: 'bg-rose-500' },
   ];
 
   return (
@@ -305,17 +305,17 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         <section className="bg-zinc-950 dark:bg-white rounded-[2.5rem] shadow-premium-lg overflow-hidden">
           <div className="px-6 py-5 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-5">
             <div className="min-w-0">
-              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Session Brief</div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Résumé de session</div>
               <div className="mt-1 flex flex-wrap items-center gap-3">
                 <h3 className="text-xl font-black text-white dark:text-zinc-950 tracking-tight">
-                  {sessionReport.attacks} attack{sessionReport.attacks === 1 ? '' : 's'} · {sessionReport.speed_profile || 'Balanced'}
+                  {sessionReport.attacks} attaque{sessionReport.attacks === 1 ? '' : 's'} · {sessionReport.speed_profile || 'Équilibré'}
                 </h3>
                 <span className="px-2.5 py-1 rounded-full bg-white/10 dark:bg-zinc-950/10 text-[9px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
-                  Health {sessionReport.health_score || 0}/100
+                  Santé {sessionReport.health_score || 0}/100
                 </span>
               </div>
               <div className="mt-2 text-[10px] font-bold text-zinc-500">
-                Bottleneck: {(sessionReport.bottleneck || 'learning').split('_').join(' ')}
+                Point limitant : {(sessionReport.bottleneck || 'learning').split('_').join(' ')}
                 {sessionReport.optimization_target ? ` · optimize ${sessionReport.optimization_target.split('_').join(' ')}` : ''}
                 {sessionReport.top_strategy ? ` · ${sessionReport.top_strategy}` : ''}
                 {sessionReport.top_deploy_side ? ` · ${sessionReport.top_deploy_side}` : ''}
@@ -324,13 +324,13 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
 
             <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2 min-w-0 xl:min-w-[760px]">
               {[
-                { label: 'Gold / h', value: new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(sessionReport.gold_per_hour || 0) },
-                { label: 'Zero-touch', value: `${(sessionReport.zero_touch_rate || 0).toFixed(1)}%` },
-                { label: 'Avg stars', value: (sessionReport.average_stars || 0).toFixed(2) },
-                { label: 'Clean streak', value: `${sessionReport.current_zero_touch_streak || 0} / ${sessionReport.best_zero_touch_streak || 0}` },
-                { label: 'Battle end', value: sessionReport.average_battle_end_wait_ms > 0 ? `${(sessionReport.average_battle_end_wait_ms / 1000).toFixed(1)}s` : '—' },
-                { label: 'Early exits', value: `${(sessionReport.early_exit_rate || 0).toFixed(1)}%` },
-                { label: 'Best G+E', value: new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(sessionReport.best_attack?.gold_plus_elixir || 0) },
+                { label: 'Or / h', value: new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(sessionReport.gold_per_hour || 0) },
+                { label: 'Sans intervention', value: `${(sessionReport.zero_touch_rate || 0).toFixed(1)}%` },
+                { label: 'Étoiles moy.', value: (sessionReport.average_stars || 0).toFixed(2) },
+                { label: 'Série propre', value: `${sessionReport.current_zero_touch_streak || 0} / ${sessionReport.best_zero_touch_streak || 0}` },
+                { label: 'Fin combat', value: sessionReport.average_battle_end_wait_ms > 0 ? `${(sessionReport.average_battle_end_wait_ms / 1000).toFixed(1)}s` : '—' },
+                { label: 'Sorties anticipées', value: `${(sessionReport.early_exit_rate || 0).toFixed(1)}%` },
+                { label: 'Meilleur O+E', value: new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(sessionReport.best_attack?.gold_plus_elixir || 0) },
               ].map((metric) => (
                 <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 px-3 py-3">
                   <div className="text-[8px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
@@ -345,7 +345,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               <div className="rounded-[1.5rem] border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-4">
                 <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">
                   <span className="material-symbols-outlined text-base">diagnosis</span>
-                  Session Doctor
+                  Diagnostic de session
                 </div>
                 <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-2">
                   {(sessionReport.recommendations ?? []).slice(0, 3).map((recommendation, index) => (
@@ -364,15 +364,15 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       <section className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none overflow-hidden">
         <div className="px-6 py-5 flex items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-800/70">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Live activity</div>
-            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">What the bot is doing</h3>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Activité en direct</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Ce que fait le bot</h3>
           </div>
           <div className="px-3 py-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[9px] font-black uppercase tracking-widest text-zinc-500">
-            Health {stats.health_score ?? 100}/100
+            Santé {stats.health_score ?? 100}/100
           </div>
         </div>
         {highLevelActivity.length === 0 ? (
-          <div className="px-6 py-8 text-sm font-medium text-zinc-400">Waiting for the first farming action…</div>
+          <div className="px-6 py-8 text-sm font-medium text-zinc-400">En attente de la première action de farm…</div>
         ) : (
           <div className="divide-y divide-zinc-100 dark:divide-zinc-800/70">
             {highLevelActivity.map((item, index) => {
@@ -597,7 +597,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
 
             <div className="flex items-center gap-2">
               {([
-                ['all', 'All'],
+                ['all', 'Tout'],
                 ['complete', 'Full deploy'],
                 ['partial', 'Partial'],
               ] as const).map(([id, label]) => (
