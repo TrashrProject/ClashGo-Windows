@@ -357,6 +357,51 @@ func (c *Client) waitForCaptureBudget() {
 	c.lastCaptureStart = time.Now()
 }
 
+
+func (c *Client) captureBlueStacksPNGToMat() (gocv.Mat, error) {
+	emptyMat := func() gocv.Mat { return gocv.NewMat() }
+
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return emptyMat(), errors.New("client closed")
+	}
+	if c.transport == nil {
+		if err := c.connectTransport(); err != nil {
+			c.mu.Unlock()
+			return emptyMat(), err
+		}
+	}
+	transport := c.transport
+	c.mu.Unlock()
+
+	// File-backed capture deliberately separates Android framebuffer capture
+	// from the transport read. On BlueStacks/Windows this avoids streaming
+	// screencap pixels directly through the same ADB service while Clash is
+	// switching into matchmaking, which has been correlated with native
+	// HD-Player.exe crashes.
+	const remote = "/sdcard/clashgo-frame.png"
+	if _, err := transport.Exec("shell:screencap -p " + remote); err != nil {
+		return emptyMat(), fmt.Errorf("png screencap: %w", err)
+	}
+	raw, err := transport.Exec("exec:cat " + remote)
+	if err != nil {
+		return emptyMat(), fmt.Errorf("png readback: %w", err)
+	}
+	if len(raw) < 8 {
+		return emptyMat(), fmt.Errorf("png screencap too short: %d bytes", len(raw))
+	}
+	mat, err := gocv.IMDecode(raw, gocv.IMReadColor)
+	if err != nil {
+		return emptyMat(), fmt.Errorf("decode png screencap: %w", err)
+	}
+	if mat.Empty() {
+		mat.Close()
+		return emptyMat(), errors.New("decoded png screencap is empty")
+	}
+	return mat, nil
+}
+
 func (c *Client) CaptureToMat() (gocv.Mat, error) {
 	// ADB screencap is a single shared device resource. Serialize the whole
 	// operation so the background observer, search loop and attack verifier
@@ -373,6 +418,16 @@ func (c *Client) CaptureToMat() (gocv.Mat, error) {
 	emptyMat := func() gocv.Mat { return gocv.NewMat() }
 
 	start := time.Now()
+
+	if runtime.GOOS == "windows" && preferBlueStacksShellCapture(c.DeviceID) {
+		img, err := c.captureBlueStacksPNGToMat()
+		if err != nil {
+			c.recordHealthFailure(err)
+			return emptyMat(), err
+		}
+		c.recordHealthSuccess(time.Since(start))
+		return img, nil
+	}
 
 	c.mu.Lock()
 	if c.closed {
