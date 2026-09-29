@@ -1,5 +1,5 @@
 import React from 'react';
-import { GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetVillageResources } from '../../wailsjs/go/main/App';
+import { GetCompteConfig, GetCachedPlayerProfile, GetConfig, GetVillageRessources } from '../../wailsjs/go/main/App';
 
 type OverviewState = {
   tag: string;
@@ -17,6 +17,7 @@ type OverviewState = {
   breakEveryAttacks: number;
   breakDuration: string;
   recoveryPauseThreshold: number;
+  speedProfile: 'cautious' | 'normal' | 'fast';
 };
 
 const AutomationOverview: React.FC = React.memo(() => {
@@ -32,6 +33,7 @@ const AutomationOverview: React.FC = React.memo(() => {
     breakEveryAttacks: 0,
     breakDuration: '',
     recoveryPauseThreshold: 0,
+    speedProfile: 'normal',
   });
 
   React.useEffect(() => {
@@ -39,10 +41,10 @@ const AutomationOverview: React.FC = React.memo(() => {
     const load = async () => {
       try {
         const [account, profile, cfg, resources] = await Promise.all([
-          GetAccountConfig(),
+          GetCompteConfig(),
           GetCachedPlayerProfile(),
           GetConfig(),
-          GetVillageResources(),
+          GetVillageRessources(),
         ]);
         if (!active) return;
 
@@ -64,6 +66,9 @@ const AutomationOverview: React.FC = React.memo(() => {
           breakEveryAttacks: Number((cfg as any)?.automation?.break_every_attacks || 0),
           breakDuration: String((cfg as any)?.automation?.break_duration || ''),
           recoveryPauseThreshold: Number((cfg as any)?.automation?.recovery_pause_threshold || 0),
+          speedProfile: ((cfg as any)?.automation?.speed_profile === 'cautious' || (cfg as any)?.automation?.speed_profile === 'fast')
+            ? (cfg as any).automation.speed_profile
+            : 'normal',
         });
       } catch {
         // Dashboard stays usable while the backend is starting.
@@ -87,22 +92,22 @@ const AutomationOverview: React.FC = React.memo(() => {
         <div className="min-w-0">
           <div className="flex items-center gap-3">
             <div className={`w-3 h-3 rounded-full ${autoReady ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-            <div className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-500">Automatic setup</div>
+            <div className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-500">Configuration automatique</div>
           </div>
           <div className="mt-2 text-2xl font-black tracking-tight">
-            {autoReady ? 'ClashGO is configured automatically' : 'ClashGO is finishing setup'}
+            {autoReady ? 'ClashGO est configuré automatiquement' : 'ClashGO termine la configuration'}
           </div>
           <div className="mt-2 text-sm font-medium text-zinc-400">
-            {state.name || state.tag || 'Link your Clash account'}{state.th > 0 ? ` · HDV ${state.th}` : ''}
+            {state.name || state.tag || 'Lier ton compte Clash'}{state.th > 0 ? ` · HDV ${state.th}` : ''}
             {state.farmLabel ? ` · ${state.farmLabel}` : ''}
           </div>
         </div>
 
         <div className="grid grid-cols-3 gap-2 min-w-0 xl:min-w-[440px]">
           {[
-            ['Gold', state.gold],
-            ['Elixir', state.elixir],
-            ['Dark', state.dark],
+            ['Or', state.gold],
+            ['Élixir', state.elixir],
+            ['Élixir noir', state.dark],
           ].map(([label, value]) => (
             <div key={String(label)} className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-4 min-w-0">
               <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">{label}</div>
@@ -116,10 +121,10 @@ const AutomationOverview: React.FC = React.memo(() => {
 
       <div className="mt-5 pt-5 border-t border-zinc-800 flex flex-wrap items-center gap-2">
         {[
-          ['Account', accountReady],
-          ['Automatic mode', state.simpleMode],
-          ['Farm profile', farmReady],
-          ['Resources', state.gold !== null || state.elixir !== null],
+          ['Compte', accountReady],
+          ['Mode automatique', state.simpleMode],
+          ['Profil de farm', farmReady],
+          ['Ressources', state.gold !== null || state.elixir !== null],
         ].map(([label, ok]) => (
           <div key={String(label)} className={`px-3 py-2 rounded-xl border text-[10px] font-black uppercase tracking-wider ${
             ok
@@ -129,22 +134,31 @@ const AutomationOverview: React.FC = React.memo(() => {
             {ok ? '✓' : '…'} {label}
           </div>
         ))}
+        <div className="px-3 py-2 rounded-xl border border-violet-500/20 bg-violet-500/10 text-violet-300 text-[10px] font-black uppercase tracking-wider">
+          Vitesse {
+            state.speedProfile === 'cautious'
+              ? 'Prudente'
+              : state.speedProfile === 'fast'
+                ? 'Rapide'
+                : 'Normale'
+          }
+        </div>
         <div className="px-3 py-2 rounded-xl border border-sky-500/20 bg-sky-500/10 text-sky-300 text-[10px] font-black uppercase tracking-wider">
-          Governor {state.maxAttacksPerHour > 0 ? `≤ ${state.maxAttacksPerHour}/h` : 'unlimited'}
+          Limite {state.maxAttacksPerHour > 0 ? `≤ ${state.maxAttacksPerHour}/h` : 'illimitée'}
         </div>
         {state.breakEveryAttacks > 0 && (
           <div className="px-3 py-2 rounded-xl border border-sky-500/20 bg-sky-500/10 text-sky-300 text-[10px] font-black uppercase tracking-wider">
-            Break every {state.breakEveryAttacks} attacks{state.breakDuration ? ` · ${state.breakDuration}` : ''}
+            Pause toutes les {state.breakEveryAttacks} attaques{state.breakDuration ? ` · ${state.breakDuration}` : ''}
           </div>
         )}
         {state.recoveryPauseThreshold > 0 && (
           <div className="px-3 py-2 rounded-xl border border-sky-500/20 bg-sky-500/10 text-sky-300 text-[10px] font-black uppercase tracking-wider">
-            Recovery breaker ×{state.recoveryPauseThreshold}
+            Protection récupération ×{state.recoveryPauseThreshold}
           </div>
         )}
         {state.resourceTime && (
           <div className="ml-auto text-[10px] font-bold text-zinc-600">
-            Last village scan {new Date(state.resourceTime).toLocaleTimeString()}
+            Dernier scan du village {new Date(state.resourceTime).toLocaleTimeString()}
           </div>
         )}
       </div>
