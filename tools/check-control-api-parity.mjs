@@ -45,5 +45,20 @@ for (const marker of protections) {
   }
 }
 
+const antiSharingFields = [
+  'denied_activations',
+  'last_denied_at',
+  'last_denied_machine',
+];
+
+for (const field of antiSharingFields) {
+  for (const [name, source] of Object.entries(sources)) {
+    if (!source.includes(field)) {
+      console.error(`Missing anti-sharing telemetry in ${name}: ${field}`);
+      failed = true;
+    }
+  }
+}
+
 if (failed) process.exit(1);
-console.log(`Control API parity OK: ${requiredRoutes.length} shared routes and ${protections.length} safety guards.`);
+console.log(`Control API parity OK: ${requiredRoutes.length} shared routes, ${protections.length} safety guards and ${antiSharingFields.length} anti-sharing fields.`);
