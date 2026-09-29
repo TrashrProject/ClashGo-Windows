@@ -241,6 +241,8 @@ function App() {
   const [simpleMode, setSimpleMode] = useState(true);
 
   const syncMemberScopedView = useCallback(async (activated: boolean) => {
+    startupCheckAutoRan.current = false;
+    setStartupCheck(null);
     if (!activated) {
       setPlayerTag('');
       setHistory([]);
@@ -741,9 +743,10 @@ function App() {
 
       if (!typedReadiness.ready) {
         const firstBlocked = typedReadiness.checks.find((check) => !check.ok);
-        setBotError(firstBlocked
+        const blockedMessage = firstBlocked
           ? `${firstBlocked.label} : ${firstBlocked.message}`
-          : 'La configuration ClashGO n’est pas prête.');
+          : 'La configuration ClashGO n’est pas prête.';
+        setBotError(friendlyBotErrorMessage(blockedMessage));
         return;
       }
 
@@ -758,7 +761,7 @@ function App() {
         setIsStarting(false);
         setIsRunning(false);
         if (res.message) {
-          setBotError(res.message);
+          setBotError(friendlyBotErrorMessage(res.message));
         }
       }
     } catch (err) {
@@ -766,7 +769,7 @@ function App() {
       setStartupCheckRunning(false);
       setIsStarting(false);
       setIsRunning(false);
-      setBotError(err instanceof Error ? err.message : String(err));
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
     }
   };
 
