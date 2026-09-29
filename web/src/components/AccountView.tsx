@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetVillageResources, SaveMemberSettings } from '../../wailsjs/go/main/App';
+import { ActiverLicense, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetVillageResources, SaveMemberSettings } from '../../wailsjs/go/main/App';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
 type CurrentArmyUnit = {
@@ -161,7 +161,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     setLicenseBusy(true);
     setLicenseError('');
     try {
-      const state = await ActivateLicense(key);
+      const state = await ActiverLicense(key);
       const typed = state as LicenseState;
       setLicenseState(typed);
       setLicenseKey('');
@@ -294,10 +294,10 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-zinc-950 dark:bg-white p-6 md:p-7 text-white dark:text-zinc-950 shadow-premium-lg">
         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6">
           <div className="min-w-0">
-            <div className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-400 dark:text-zinc-500">ClashGO License</div>
+            <div className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-400 dark:text-zinc-500">Licence ClashGO</div>
             <div className="mt-2 flex flex-wrap items-center gap-3">
               <h3 className="text-2xl font-black">
-                {licenseState?.activated ? 'License active' : 'Activate ClashGO'}
+                {licenseState?.activated ? 'Licence active' : 'Activer ClashGO'}
               </h3>
               {licenseState?.activated && (
                 <span className="px-3 py-1 rounded-full bg-emerald-400/15 text-emerald-400 dark:text-emerald-600 text-[10px] font-black uppercase tracking-widest">
@@ -307,28 +307,28 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
             </div>
             <p className="mt-2 text-sm font-semibold text-zinc-400 dark:text-zinc-600">
               {licenseState?.activated
-                ? (licenseState.license_hint || 'License') + ' · linked to this machine'
-                : 'Enter the license key supplied by ClashGO. One license can be linked to one machine.'}
+                ? (licenseState.license_hint || 'Licence') + ' · liée à ce PC'
+                : 'Entre la clé reçue pour activer ton espace membre sur ce PC.'}
             </p>
             {licenseState?.activated && (
               <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
                 <span>
                   {licenseState.plan === 'free_2d'
-                    ? 'FREE · 2 days'
+                    ? 'FREE · 2 jours'
                     : licenseState.plan === 'week_1'
-                      ? '1 week'
+                      ? '1 semaine'
                       : licenseState.plan === 'month_1'
-                        ? '1 month'
-                        : 'Lifetime'}
+                        ? '1 mois'
+                        : 'À vie'}
                 </span>
                 {licenseState.expires_at && (
-                  <span>· Expires {new Date(licenseState.expires_at).toLocaleString()}</span>
+                  <span>· Expire le {new Date(licenseState.expires_at).toLocaleString()}</span>
                 )}
               </div>
             )}
             {licenseState?.offline_until && (
               <p className="mt-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                Offline access until {new Date(licenseState.offline_until).toLocaleString()}
+                Accès hors ligne jusqu’au {new Date(licenseState.offline_until).toLocaleString()}
               </p>
             )}
           </div>
@@ -340,7 +340,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               disabled={licenseBusy}
               className="shrink-0 px-5 py-3 rounded-xl border border-white/10 dark:border-zinc-200 text-[10px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600 hover:text-white dark:hover:text-zinc-950 disabled:opacity-40"
             >
-              Remove local license
+              Désactiver sur ce PC
             </button>
           ) : (
             <div className="w-full xl:w-auto flex flex-col sm:flex-row gap-2">
@@ -361,7 +361,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 disabled={licenseBusy || !licenseKey.trim()}
                 className="h-12 px-5 rounded-xl bg-white dark:bg-zinc-950 text-zinc-950 dark:text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-30"
               >
-                {licenseBusy ? 'Checking…' : 'Activate'}
+                {licenseBusy ? 'Vérification…' : 'Activer'}
               </button>
             </div>
           )}
@@ -379,7 +379,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Mon ClashGO</div>
               <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Réglages membre</h3>
               <p className="mt-2 text-sm font-semibold text-zinc-500 max-w-2xl">
-                Ces réglages modifient réellement le rythme du bot et ses automatismes. Tu peux les changer sans réactiver ta licence.
+                Ces réglages agissent réellement sur le bot et sont appliqués sans redémarrage. Les contrôles de sécurité restent actifs, même en mode Rapide.
               </p>
             </div>
 
@@ -520,10 +520,10 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Interface level</div>
-            <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Choose how much ClashGO shows you</h3>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Niveau d’interface</div>
+            <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Choisis le niveau de détails</h3>
             <p className="mt-2 text-sm font-semibold text-zinc-500 max-w-2xl">
-              Simple keeps only the essential screens. Advanced unlocks detailed activity, statistics and system settings.
+              Simple garde l’essentiel. Avancé affiche l’activité détaillée, les statistiques et les réglages système.
             </p>
           </div>
           <div className="flex gap-2 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 p-1.5">
@@ -546,15 +546,15 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
         </div>
         <div className="mt-4 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400">
           <span className="material-symbols-outlined text-sm">shield_person</span>
-          Developer tools will be tied to a real ClashGO account role later.
+          Les outils développeur sont accessibles uniquement avec une licence Developer ou Admin.
         </div>
       </section>
       <section className="rounded-[2.5rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-8 shadow-premium dark:shadow-none">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
           <div className="min-w-0">
-            <div className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-400">Linked Clash account</div>
+            <div className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-400">Compte Clash lié</div>
             <div className="mt-2 flex flex-wrap items-baseline gap-3">
-              <h3 className="text-3xl font-black text-zinc-950 dark:text-white">{profile?.name || playerTag || 'No account'}</h3>
+              <h3 className="text-3xl font-black text-zinc-950 dark:text-white">{profile?.name || playerTag || 'Aucun compte'}</h3>
               <span className="text-sm font-mono font-bold text-zinc-500">{profile?.tag || playerTag}</span>
             </div>
             <p className="mt-2 text-sm font-medium text-zinc-500">
@@ -563,11 +563,11 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
           </div>
           <details className="relative">
             <summary className="list-none cursor-pointer px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-black text-zinc-500 select-none">
-              Account options
+              Options du compte
             </summary>
             <div className="absolute right-0 mt-2 z-20 min-w-[190px] rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-2 shadow-xl">
               <button type="button" onClick={() => void unlink()} disabled={busy} className="w-full px-3 py-2.5 rounded-lg text-left text-xs font-black text-rose-500 hover:bg-rose-500/5 disabled:opacity-40">
-                Unlink account
+                Délier le compte
               </button>
             </div>
           </details>
