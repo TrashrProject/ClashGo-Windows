@@ -222,6 +222,7 @@ function App() {
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [botError, setBotError] = useState('');
   const [botDiagnosticPath, setBotDiagnosticPath] = useState('');
+  const [memberNotice, setMemberNotice] = useState('');
   const [startupCheck, setStartupCheck] = useState<{
     ready: boolean;
     checks: Array<{ id: string; label: string; ok: boolean; message: string }>;
@@ -608,6 +609,12 @@ function App() {
       void fetchHistory();
       void fetchSessionReport();
     });
+    const unsubMemberTestRestored = safeEventsOn("member_test_session_restored", (payload: unknown) => {
+      const message = normalizeBotErrorMessage(payload, 'Session test terminée · tes réglages personnels ont été restaurés.');
+      setMemberNotice(message || 'Session test terminée · tes réglages personnels ont été restaurés.');
+      window.setTimeout(() => setMemberNotice(''), 8000);
+    });
+
     const unsubBotBootCancelled = safeEventsOn("bot_boot_cancelled", (payload: unknown) => {
       setIsStarting(false);
       setIsRunning(false);
@@ -643,6 +650,7 @@ function App() {
       unsubBotInitFailed();
       unsubBotStarted();
       unsubBotStopped();
+      unsubMemberTestRestored();
       unsubBotBootCancelled();
       unsubAttackHistory();
       unsubStatsUpdated();
@@ -1148,6 +1156,28 @@ function App() {
                   className="shrink-0 rounded-xl border border-current/20 px-4 py-2 text-[10px] font-black uppercase tracking-widest"
                 >
                   Mon ClashGO
+                </button>
+              </div>
+            </section>
+          )}
+
+          {memberNotice && (
+            <section className="mb-4 no-drag rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-3 text-emerald-700 dark:text-emerald-300" role="status">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <span className="material-symbols-outlined text-lg">task_alt</span>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-[0.2em]">Session test</div>
+                    <div className="mt-0.5 text-sm font-semibold">{memberNotice}</div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMemberNotice('')}
+                  className="rounded-xl p-2 text-emerald-600/70 transition hover:bg-emerald-500/10 hover:text-emerald-700 dark:text-emerald-300"
+                  aria-label="Fermer le message"
+                >
+                  <span className="material-symbols-outlined text-lg">close</span>
                 </button>
               </div>
             </section>
