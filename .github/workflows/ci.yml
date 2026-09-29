@@ -39,6 +39,9 @@ jobs:
       - name: Validate Cloudflare control API syntax
         run: node --check cloudflare/worker/src/index.js
 
+      - name: Validate Wails frontend contract
+        run: node tools/check-wails-contract.mjs
+
       - name: Validate frontend TSX syntax
         working-directory: web
         shell: bash
