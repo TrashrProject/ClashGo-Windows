@@ -198,6 +198,16 @@ const getInitialSidebarExpanded = (): boolean => {
   }
 };
 
+const getInitialAccountPage = (): 'account' | 'settings' | 'village' => {
+  try {
+    const stored = localStorage.getItem('clashgo_member_page');
+    if (stored === 'settings' || stored === 'village') return stored;
+  } catch {
+    // Use the newcomer-safe account summary.
+  }
+  return 'account';
+};
+
 const createEmptyStats = (): BotStats => new bot.BotStats({
   attacks_completed: 0,
   search_skips: 0,
@@ -227,7 +237,7 @@ const createEmptyStats = (): BotStats => new bot.BotStats({
 function App() {
   const [tab, setTab] = useState<TabType>('dashboard');
   const tabRef = useRef<TabType>('dashboard');
-  const [accountPage, setAccountPage] = useState<'account' | 'settings' | 'village'>('account');
+  const [accountPage, setAccountPage] = useState<'account' | 'settings' | 'village'>(getInitialAccountPage);
   const [stats, setStats] = useState<BotStats>(() => createEmptyStats());
   const [isRunning, setIsRunning] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
@@ -285,6 +295,10 @@ function App() {
   useEffect(() => {
     tabRef.current = tab;
   }, [tab]);
+
+  useEffect(() => {
+    try { localStorage.setItem('clashgo_member_page', accountPage); } catch {}
+  }, [accountPage]);
 
   // Config states
   const [goldThreshold, setGoldThreshold] = useState(400000);
@@ -1550,6 +1564,7 @@ function App() {
                 if (tag) setTab('account');
               }}
               onReadinessChanged={() => { void refreshStartupReadiness(); }}
+              onPageChange={setAccountPage}
             />
           )}
           {tab === 'analytics' && <Analytics stats={stats} resourceHistory={resourceHistory} history={history as any} />}
