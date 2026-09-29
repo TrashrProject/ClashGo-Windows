@@ -181,6 +181,22 @@ async function activateLicense(request, env) {
     return json({ message: "license is already activated on another machine" }, 409);
   }
 
+  if ((license.plan || "") === "free_2d") {
+    const existingTrial = await env.DB.prepare(
+      "SELECT license_id FROM trial_claims WHERE machine_id = ?1"
+    ).bind(machine).first();
+
+    if (existingTrial && existingTrial.license_id !== license.id) {
+      return json({ message: "free trial already used on this machine" }, 403);
+    }
+
+    if (!existingTrial) {
+      await env.DB.prepare(
+        "INSERT INTO trial_claims (machine_id, license_id, claimed_at) VALUES (?1, ?2, ?3)"
+      ).bind(machine, license.id, new Date().toISOString()).run();
+    }
+  }
+
   const now = new Date();
   let activatedAt = license.activated_at;
   let expiresAt = license.expires_at;
