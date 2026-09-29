@@ -1,6 +1,34 @@
 import React from 'react';
 import { BotStats, UpdateStatus, SystemDiagnostics } from '../types';
-import { GetLatestAttackTrace } from '../../wailsjs/go/main/App';
+import { GetLatestAttackTrace, GetLatestBootReport } from '../../wailsjs/go/main/App';
+
+type BootReportView = {
+  started_at?: string;
+  completed_at?: string;
+  outcome?: string;
+  final_error?: string;
+  suggested_action?: string;
+  recovery_used?: string[];
+  attempts?: number;
+  steps?: Array<{
+    name?: string;
+    result?: string;
+    detail?: string;
+    duration_ns?: number;
+  }>;
+};
+
+const friendlyBootAction = (value?: string): string => {
+  const raw = String(value || '').trim();
+  const text = raw.toLowerCase();
+  if (!raw) return 'Relance le démarrage. ClashGO réessaiera automatiquement les récupérations les plus sûres.';
+  if (text.includes('adb') && text.includes('enabled')) return 'Vérifie que BlueStacks est lancé et que l’accès ADB est activé.';
+  if (text.includes('restart bluestacks') || text.includes('relaunch bluestacks')) return 'Redémarre BlueStacks puis relance ClashGO.';
+  if (text.includes('wait') || text.includes('initializing')) return 'Attends quelques secondes que BlueStacks termine son démarrage puis réessaie.';
+  if (text.includes('clash of clans') || text.includes('startapp')) return 'Ouvre Clash of Clans une fois dans BlueStacks puis relance le bot.';
+  if (text.includes('screen') || text.includes('capture')) return 'Vérifie que BlueStacks affiche bien le village puis réessaie.';
+  return raw;
+};
 
 interface SettingsViewProps {
   stats: BotStats;
@@ -33,10 +61,29 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   const [traceOpen, setTraceOpen] = React.useState(false);
   const [latestTrace, setLatestTrace] = React.useState('');
   const [traceBusy, setTraceBusy] = React.useState(false);
+  const [bootReport, setBootReport] = React.useState<BootReportView | null>(null);
   const resetTimerRef = React.useRef<number | null>(null);
 
   React.useEffect(() => () => {
     if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current);
+  }, []);
+
+  React.useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const report = await GetLatestBootReport();
+        if (active) setBootReport((report || null) as BootReportView | null);
+      } catch {
+        if (active) setBootReport(null);
+      }
+    };
+    void load();
+    const id = window.setInterval(load, 10000);
+    return () => {
+      active = false;
+      window.clearInterval(id);
+    };
   }, []);
 
   const handleInstanceChange = async (instance: string) => {
@@ -185,6 +232,36 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
             </div>
           </details>
         </div>
+
+        {bootReport?.outcome === 'failed' && (
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-5">
+            <div className="flex items-start gap-4">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-amber-500/10">
+                <span className="material-symbols-outlined text-amber-500">build_circle</span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">Dernier démarrage interrompu</div>
+                <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white">
+                  {friendlyBootAction(bootReport.suggested_action)}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2 text-[9px] font-bold uppercase tracking-wider text-zinc-500">
+                  <span>{bootReport.attempts || 0} tentative(s)</span>
+                  {(bootReport.recovery_used || []).length > 0 && (
+                    <span>· récupération auto utilisée</span>
+                  )}
+                </div>
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                    Voir le détail technique
+                  </summary>
+                  <div className="mt-3 rounded-xl bg-zinc-950 px-4 py-3 text-[10px] font-mono text-zinc-300 break-words">
+                    {bootReport.final_error || 'Aucune erreur détaillée enregistrée.'}
+                  </div>
+                </details>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Sombre Mode Toggle */}
         <button
