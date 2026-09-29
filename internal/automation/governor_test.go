@@ -53,3 +53,41 @@ func TestGovernorRecoveryCircuitBreaker(t *testing.T) {
 		t.Fatalf("same recovery incidents must not trigger twice: %+v", again)
 	}
 }
+
+
+func TestGovernorUpdateConfigPreservesAttackWindow(t *testing.T) {
+	g := NewGovernor(config.AutomationConfig{MaxAttacksPerHour: 12})
+	now := time.Now()
+
+	for i := 0; i < 8; i++ {
+		g.RecordAttack(now.Add(-time.Duration(i+1) * time.Minute))
+	}
+
+	// Tightening the live member profile must not erase the rolling history.
+	g.UpdateConfig(config.AutomationConfig{MaxAttacksPerHour: 8})
+
+	gate := g.Gate(now, 8, 0)
+	if gate.Reason != "hourly_attack_limit" {
+		t.Fatalf("expected preserved history to trigger new hourly limit, got %+v", gate)
+	}
+	if gate.Wait <= 0 {
+		t.Fatalf("expected a positive wait after live config update, got %s", gate.Wait)
+	}
+}
+
+func TestGovernorUpdateConfigChangesBreakPolicy(t *testing.T) {
+	g := NewGovernor(config.AutomationConfig{
+		BreakEveryAttacks: 5,
+		BreakDuration: config.Duration{Duration: 3 * time.Minute},
+	})
+
+	g.UpdateConfig(config.AutomationConfig{
+		BreakEveryAttacks: 2,
+		BreakDuration: config.Duration{Duration: 90 * time.Second},
+	})
+
+	gate := g.Gate(time.Now(), 2, 0)
+	if gate.Reason != "scheduled_break" || gate.Wait != 90*time.Second {
+		t.Fatalf("updated break policy was not applied live: %+v", gate)
+	}
+}
