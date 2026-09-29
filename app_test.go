@@ -218,3 +218,30 @@ func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
 		t.Fatalf("average stars=%v want 2.75", got.AverageStars)
 	}
 }
+
+
+func TestStartupReadinessRequiresLicenseWhenEnforced(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	t.Setenv("CLASHGO_CONTROL_API_URL", "https://control.example.test")
+
+	a := &App{}
+	readiness := a.GetStartupReadiness()
+
+	found := false
+	for _, check := range readiness.Checks {
+		if check.ID != "license" {
+			continue
+		}
+		found = true
+		if check.OK {
+			t.Fatal("license readiness should fail when enforcement is enabled and no license is active")
+		}
+	}
+	if !found {
+		t.Fatal("startup readiness did not include license check")
+	}
+	if readiness.Ready {
+		t.Fatal("startup readiness should not be ready without required license")
+	}
+}
