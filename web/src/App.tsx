@@ -278,6 +278,9 @@ function App() {
   const startupCheckAutoRan = useRef(false);
   const startInFlightRef = useRef(false);
   const testSessionInFlightRef = useRef(false);
+  // Prevent a slow previous-license restore from overwriting the UI after a
+  // fast deactivate/reactivate or member switch.
+  const memberSyncGenerationRef = useRef(0);
 
   useEffect(() => {
     tabRef.current = tab;
@@ -297,6 +300,7 @@ function App() {
   const [simpleMode, setSimpleMode] = useState(true);
 
   const syncMemberScopedView = useCallback(async (activated: boolean) => {
+    const generation = ++memberSyncGenerationRef.current;
     startupCheckAutoRan.current = false;
     setStartupCheck(null);
     if (!activated) {
@@ -333,6 +337,10 @@ function App() {
       GetSessionReport(),
       GetLatestBootReport(),
     ]);
+
+    if (generation !== memberSyncGenerationRef.current) {
+      return;
+    }
 
     if (configResult.status === 'fulfilled') {
       const conf = configResult.value;
