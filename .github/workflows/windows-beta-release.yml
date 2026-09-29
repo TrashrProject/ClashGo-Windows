@@ -1,7 +1,11 @@
 name: Windows Beta Release
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - Core CI
+    types:
+      - completed
     branches:
       - feature/intelligence-v2
   workflow_dispatch:
@@ -14,11 +18,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.current.outputs.build }}
+      sha: ${{ steps.current.outputs.sha }}
+    steps:
+      - name: Keep only the latest successful beta commit
+        id: current
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            sha="$(gh api repos/TrashrProject/ClashGo-Windows/branches/feature/intelligence-v2 --jq '.commit.sha')"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "sha=$sha" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "sha=$EVENT_SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          current="$(gh api repos/TrashrProject/ClashGo-Windows/branches/feature/intelligence-v2 --jq '.commit.sha')"
+          echo "sha=$EVENT_SHA" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_SHA" = "$current" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping stale beta commit $EVENT_SHA; current branch head is $current"
+          fi
+
   beta:
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
     runs-on: windows-latest
     timeout-minutes: 120
     env:
       BETA_VERSION: 0.6.8-beta.${{ github.run_number }}
+      BETA_SHA: ${{ needs.gate.outputs.sha }}
       CGO_CXXFLAGS: --std=c++11 -DNDEBUG
       CGO_CPPFLAGS: -IC:/opencv/build/install/include
       CGO_LDFLAGS: -LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -lopencv_imgproc4130 -lopencv_imgcodecs4130
@@ -29,7 +72,7 @@ jobs:
       - name: Checkout active beta branch
         uses: actions/checkout@v4
         with:
-          ref: feature/intelligence-v2
+          ref: ${{ env.BETA_SHA }}
           fetch-depth: 0
 
       - name: Setup Go
@@ -154,7 +197,7 @@ jobs:
           $manifest = [ordered]@{
             version = $version
             release_date = (Get-Date).ToUniversalTime().ToString("o")
-            notes = "Automatic beta build from feature/intelligence-v2 at $env:GITHUB_SHA"
+            notes = "Automatic beta build from feature/intelligence-v2 at $env:BETA_SHA"
             min_supported = "0.6.7-windows-beta"
             platforms = [ordered]@{
               windows = [ordered]@{
@@ -188,5 +231,5 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Could not replace previous beta-latest release" }
           }
 
-          gh release create beta-latest "${{ steps.manifest.outputs.zip }}" "${{ steps.manifest.outputs.setup }}" "dist\latest-beta.json" "dist\SHA256SUMS-beta.txt" --repo TrashrProject/ClashGo-Windows --title "ClashGO Windows Beta $env:BETA_VERSION" --notes "Automatic beta from feature/intelligence-v2 ($env:GITHUB_SHA)" --target "$env:GITHUB_SHA" --prerelease
+          gh release create beta-latest "${{ steps.manifest.outputs.zip }}" "${{ steps.manifest.outputs.setup }}" "dist\latest-beta.json" "dist\SHA256SUMS-beta.txt" --repo TrashrProject/ClashGo-Windows --title "ClashGO Windows Beta $env:BETA_VERSION" --notes "Automatic beta from feature/intelligence-v2 ($env:BETA_SHA)" --target "$env:BETA_SHA" --prerelease
           if ($LASTEXITCODE -ne 0) { throw "Could not publish beta-latest release" }
