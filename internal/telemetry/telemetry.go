@@ -26,6 +26,7 @@ const (
 	EventCaptureSample   EventType = "capture_sample"
 	EventSpeedProfile    EventType = "speed_profile"
 	EventReturnHome      EventType = "return_home"
+	EventSessionComplete EventType = "session_complete"
 	EventAnomaly         EventType = "anomaly"
 )
 
