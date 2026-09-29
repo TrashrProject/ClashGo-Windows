@@ -1,0 +1,58 @@
+name: Local Control Bundle
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: feature/intelligence-v2
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Test control server
+        run: go test ./cmd/account_proxy
+
+      - name: Build Windows control server
+        shell: bash
+        run: |
+          mkdir -p dist/local-control
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/local-control/clashgo-control-local.exe ./cmd/account_proxy
+          cp tools/start-local-control-binary.ps1 dist/local-control/START-LOCAL-CONTROL.ps1
+          cat > dist/local-control/START-LOCAL-CONTROL.cmd <<'CMD'
+          @echo off
+          cd /d "%~dp0"
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\START-LOCAL-CONTROL.ps1"
+          if errorlevel 1 pause
+          CMD
+          cat > dist/local-control/README.txt <<'TXT'
+          ClashGO Control Local Portable
+
+          1. Double-clique START-LOCAL-CONTROL.cmd
+          2. Une licence ADMIN locale est générée et copiée dans le presse-papiers.
+          3. Dans la beta ClashGO : Mon ClashGO > Mode test bêta.
+          4. Serveur : http://127.0.0.1:8787
+          5. Active ensuite la licence ADMIN affichée.
+
+          Ce bundle sert uniquement aux tests locaux de la beta.
+          TXT
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClashGO-Local-Control-Windows
+          path: dist/local-control/**
+          if-no-files-found: error
