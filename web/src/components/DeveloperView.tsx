@@ -617,30 +617,38 @@ const DeveloperView: React.FC = () => {
                       <option value="admin">Admin</option>
                     </select>
 
-                    <select
-                      value={renewPlans[String(item.id)] || ((item.plan === 'free_2d' || item.plan === 'week_1' || item.plan === 'month_1' || item.plan === 'lifetime') ? item.plan : 'month_1')}
-                      disabled={actionID === item.id}
-                      onChange={(e) => setRenewPlans((current) => ({
-                        ...current,
-                        [String(item.id)]: e.target.value as 'free_2d' | 'week_1' | 'month_1' | 'lifetime',
-                      }))}
-                      className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-2 text-[9px] font-black uppercase tracking-wider outline-none disabled:opacity-40"
-                      title="Formule appliquée au prochain renouvellement"
-                    >
-                      <option value="free_2d">+2 jours</option>
-                      <option value="week_1">+1 semaine</option>
-                      <option value="month_1">+1 mois</option>
-                      <option value="lifetime">À vie</option>
-                    </select>
+                    {item.plan !== 'lifetime' ? (
+                      <>
+                        <select
+                          value={renewPlans[String(item.id)] || ((item.plan === 'free_2d' || item.plan === 'week_1' || item.plan === 'month_1') ? item.plan : 'month_1')}
+                          disabled={actionID === item.id}
+                          onChange={(e) => setRenewPlans((current) => ({
+                            ...current,
+                            [String(item.id)]: e.target.value as 'free_2d' | 'week_1' | 'month_1' | 'lifetime',
+                          }))}
+                          className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-2 text-[9px] font-black uppercase tracking-wider outline-none disabled:opacity-40"
+                          title="Formule appliquée au prochain renouvellement"
+                        >
+                          <option value="free_2d">+2 jours</option>
+                          <option value="week_1">+1 semaine</option>
+                          <option value="month_1">+1 mois</option>
+                          <option value="lifetime">Passer à vie</option>
+                        </select>
 
-                    <button
-                      type="button"
-                      disabled={actionID === item.id}
-                      onClick={() => void renewLicense(item)}
-                      className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-40"
-                    >
-                      Renouveler
-                    </button>
+                        <button
+                          type="button"
+                          disabled={actionID === item.id}
+                          onClick={() => void renewLicense(item)}
+                          className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-40"
+                        >
+                          Renouveler
+                        </button>
+                      </>
+                    ) : (
+                      <span className="h-9 inline-flex items-center rounded-lg bg-emerald-500/10 px-3 text-[9px] font-black uppercase tracking-wider text-emerald-500">
+                        À vie
+                      </span>
+                    )}
 
                     <button
                       type="button"
