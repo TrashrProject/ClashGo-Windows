@@ -37,6 +37,8 @@ type Reporter struct {
 	client     *http.Client
 	queuePath  string
 	mu         sync.Mutex
+	recentMu   sync.Mutex
+	recent     map[string]time.Time
 	stop       chan struct{}
 }
 
@@ -47,6 +49,7 @@ func New(baseURL, appVersion string, identity IdentityProvider) *Reporter {
 		identity: identity,
 		client: &http.Client{Timeout: 8 * time.Second},
 		queuePath: paths.ResolveConfig("support/error-queue.jsonl"),
+		recent: make(map[string]time.Time),
 		stop: make(chan struct{}),
 	}
 	go r.flushLoop()
@@ -87,8 +90,44 @@ func (r *Reporter) Write(p []byte) (int, error) {
 	if r.identity != nil {
 		ev.MachineID = r.identity.MachineID()
 	}
+	if !r.shouldQueue(ev) {
+		return len(p), nil
+	}
 	r.enqueue(ev)
 	return len(p), nil
+}
+
+func (r *Reporter) shouldQueue(ev incident) bool {
+	now := time.Now()
+	surface := ""
+	if ev.Fields != nil {
+		if value, ok := ev.Fields["surface"].(string); ok {
+			surface = strings.TrimSpace(value)
+		}
+	}
+	key := ev.Level + "\x00" + strings.TrimSpace(ev.Message) + "\x00" + surface
+
+	r.recentMu.Lock()
+	defer r.recentMu.Unlock()
+	if r.recent == nil {
+		r.recent = make(map[string]time.Time)
+	}
+
+	const window = 2 * time.Minute
+	if last, ok := r.recent[key]; ok && now.Sub(last) < window {
+		return false
+	}
+	r.recent[key] = now
+
+	// Opportunistic cleanup keeps the map bounded during long sessions.
+	if len(r.recent) > 256 {
+		for k, seen := range r.recent {
+			if now.Sub(seen) > 10*time.Minute {
+				delete(r.recent, k)
+			}
+		}
+	}
+	return true
 }
 
 func sanitizeFields(in map[string]any) map[string]any {
