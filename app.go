@@ -943,6 +943,26 @@ type LicensePolicy struct {
 	ServiceURL        string `json:"service_url,omitempty"`
 }
 
+func (a *App) ReportUIError(message string, componentStack string) {
+	message = strings.TrimSpace(message)
+	componentStack = strings.TrimSpace(componentStack)
+	if message == "" {
+		message = "unknown frontend error"
+	}
+	if len(message) > 4000 {
+		message = message[:4000]
+	}
+	if len(componentStack) > 12000 {
+		componentStack = componentStack[:12000]
+	}
+
+	log.Error().
+		Str("surface", "frontend").
+		Str("ui_error", message).
+		Str("component_stack", componentStack).
+		Msg("ClashGO UI crash")
+}
+
 func (a *App) GetLicensePolicy() LicensePolicy {
 	cfg := config.LoadOrDefault("config.json")
 	serviceURL := clashControlServiceURL(cfg)
