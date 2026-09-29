@@ -352,8 +352,8 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
     <div className="space-y-6">
       <AutomationOverview />
 
-      <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-zinc-50/90 dark:bg-zinc-950/90 backdrop-blur-xl">
-        <div className="inline-flex rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-1.5 shadow-sm">
+      <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-zinc-50/90 dark:bg-zinc-950/90 backdrop-blur-xl overflow-x-auto">
+        <div className="flex w-full min-w-max sm:w-auto sm:inline-flex rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-1.5 shadow-sm">
           {([
             ['summary', 'Résumé', 'dashboard'],
             ['history', 'Historique', 'history'],
@@ -364,7 +364,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
               type="button"
               onClick={() => setActivityPage(id)}
               className={
-                'flex items-center gap-2 rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] transition ' +
+                'flex flex-1 sm:flex-none items-center justify-center gap-2 rounded-xl px-3 sm:px-4 py-2.5 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.12em] sm:tracking-[0.16em] transition whitespace-nowrap ' +
                 (activityPage === id
                   ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950'
                   : 'text-zinc-500 hover:text-zinc-950 dark:hover:text-white')
