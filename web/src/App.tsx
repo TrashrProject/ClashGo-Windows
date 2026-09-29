@@ -1748,6 +1748,10 @@ function App() {
         licensePlan={licensePlan}
         licenseExpiresAt={licenseExpiresAt}
         speedProfile={String(stats.member_speed_profile || stats.speed_profile || 'normal')}
+        paused={isPaused}
+        sessionAttacks={Number(stats.session_attacks || 0)}
+        sessionCap={Number(stats.session_attack_cap || 0)}
+        scheduledStopAt={scheduledStopAt}
         startReady={startReady}
         startBlockedReason={startBlockedReason}
       />
