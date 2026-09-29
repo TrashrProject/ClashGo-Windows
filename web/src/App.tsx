@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import Sidebar, { InterfaceLevel } from './components/Sidebar';
+import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import HomeView from './components/HomeView';
 import Analytics from './components/Analytics';
@@ -39,7 +39,7 @@ import {
   SetSimpleMode,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
-import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent, AttackReplayView, SessionReportView } from './types';
+import { InterfaceLevel, TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent, AttackReplayView, SessionReportView } from './types';
 import UpdateBanner from './components/UpdateBanner';
 import './App.css';
 
