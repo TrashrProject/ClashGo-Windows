@@ -59,12 +59,13 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Validate control API and frontend syntax
+      - name: Validate control API and frontend
         shell: bash
         run: |
           node --check cloudflare/worker/src/index.js
           cd web
           npm ci
+          npm run build
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           import path from 'node:path';
@@ -205,9 +206,28 @@ jobs:
         shell: powershell
         run: '"C:\opencv\build\install\x64\mingw\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append'
 
+      - name: Restore cached Wails
+        id: wails-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~\go\bin\wails.exe
+          key: wails-v2.12.0-windows-amd64
+
       - name: Install Wails
+        if: steps.wails-cache.outputs.cache-hit != 'true'
         shell: powershell
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Save Wails cache
+        if: steps.wails-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~\go\bin\wails.exe
+          key: wails-v2.12.0-windows-amd64
+
+      - name: Verify Wails
+        shell: powershell
+        run: wails version
 
       - name: Synchronize runtime assets
         shell: powershell
