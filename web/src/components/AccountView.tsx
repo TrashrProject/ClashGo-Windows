@@ -255,6 +255,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [memberPresets, setMemberPresets] = React.useState<MemberPresetSlot[]>([]);
   const [memberPresetBusy, setMemberPresetBusy] = React.useState<number | null>(null);
   const [memberPresetNames, setMemberPresetNames] = React.useState<Record<number, string>>({});
+  const [memberPresetDeleteConfirm, setMemberPresetDeleteConfirm] = React.useState<number | null>(null);
   const [memberPage, setMemberPage] = React.useState<'account' | 'settings' | 'village'>(initialPage);
 
   React.useEffect(() => {
@@ -452,6 +453,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     try {
       const presets = await DeleteMemberPreset(slot);
       setMemberPresets((presets || []) as MemberPresetSlot[]);
+      setMemberPresetDeleteConfirm(null);
       setMemberMessage(`Profil personnel ${slot} supprimé.`);
     } catch (e) {
       setMemberSaveError(e instanceof Error ? e.message : String(e));
@@ -1147,6 +1149,17 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                         disabled={testSessionActive}
                         className="mt-3 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-black text-zinc-950 dark:text-white outline-none focus:border-zinc-400"
                       />
+                      {preset && (
+                        <div className="mt-3 rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/70 px-3 py-2 text-[10px] font-bold text-zinc-500">
+                          {preset.settings.speed_profile === 'fast'
+                            ? 'Rapide'
+                            : preset.settings.speed_profile === 'cautious'
+                              ? 'Prudente'
+                              : 'Normale'}
+                          {' · '}{preset.settings.max_attacks_per_session} / session
+                          {' · '}{preset.settings.max_attacks_per_hour} / h
+                        </div>
+                      )}
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           type="button"
@@ -1169,10 +1182,21 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                             <button
                               type="button"
                               disabled={memberPresetBusy !== null || memberSaving || testSessionActive}
-                              onClick={() => void deletePersonalPreset(slot)}
-                              className="rounded-lg border border-rose-200 dark:border-rose-900/50 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-rose-500 disabled:opacity-30"
+                              onClick={() => {
+                                if (memberPresetDeleteConfirm === slot) {
+                                  void deletePersonalPreset(slot);
+                                } else {
+                                  setMemberPresetDeleteConfirm(slot);
+                                }
+                              }}
+                              className={
+                                'rounded-lg border px-3 py-2 text-[9px] font-black uppercase tracking-wider disabled:opacity-30 ' +
+                                (memberPresetDeleteConfirm === slot
+                                  ? 'border-rose-500 bg-rose-500 text-white'
+                                  : 'border-rose-200 dark:border-rose-900/50 text-rose-500')
+                              }
                             >
-                              Supprimer
+                              {memberPresetDeleteConfirm === slot ? 'Confirmer' : 'Supprimer'}
                             </button>
                           </>
                         )}
