@@ -441,22 +441,24 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
         const cached = await GetCachedPlayerProfile();
         if (cached) setProfile(cached as PlayerProfile);
 
-        try {
-          const p = await GetPlayerProfile();
-          setProfile(p as PlayerProfile);
+        if (account.service_configured) {
+          try {
+            const p = await GetPlayerProfile();
+            setProfile(p as PlayerProfile);
 
-          // Account sync may auto-switch the farm profile to the player's HDV.
-          // Re-read config once so the visible plan updates immediately.
-          const refreshedCfg = await GetConfig();
-          const refreshedFarm = (refreshedCfg as any)?.attack?.farm;
-          if (refreshedFarm?.enabled && refreshedFarm?.profiles) {
-            setFarmProfile(refreshedFarm.profiles[String(refreshedFarm.town_hall)] || null);
+            // Account sync may auto-switch the farm profile to the player's HDV.
+            // Re-read config once so the visible plan updates immediately.
+            const refreshedCfg = await GetConfig();
+            const refreshedFarm = (refreshedCfg as any)?.attack?.farm;
+            if (refreshedFarm?.enabled && refreshedFarm?.profiles) {
+              setFarmProfile(refreshedFarm.profiles[String(refreshedFarm.town_hall)] || null);
+            }
+          } catch (syncErr) {
+            // The tag is still useful locally even when the optional account
+            // service is offline. Surface a soft warning without treating the
+            // member space as broken.
+            setError(syncErr instanceof Error ? syncErr.message : String(syncErr));
           }
-        } catch (syncErr) {
-          // The tag is still useful locally even when the optional account
-          // service is offline. Surface a soft warning without treating the
-          // member space as broken.
-          setError(syncErr instanceof Error ? syncErr.message : String(syncErr));
         }
       } else {
         setProfile(null);
@@ -526,12 +528,12 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   }, []);
 
   React.useEffect(() => {
-    if (profile || busy || !playerTag) return;
+    if (profile || busy || !playerTag || !serviceConfigured) return;
     const id = window.setInterval(() => {
       void refresh();
     }, 4000);
     return () => window.clearInterval(id);
-  }, [profile, busy, playerTag, refresh]);
+  }, [profile, busy, playerTag, serviceConfigured, refresh]);
 
   const linkClashAccount = async () => {
     if (accountLinkBusy) return;
