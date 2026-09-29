@@ -514,7 +514,10 @@ function App() {
     };
     init();
 
+    const uiVisible = () => typeof document === 'undefined' || document.visibilityState !== 'hidden';
+
     const fetchFastData = async () => {
+      if (!uiVisible()) return;
       try {
         const [s, a] = await Promise.all([
           GetStats(),
@@ -528,6 +531,7 @@ function App() {
     };
 
     const fetchHistory = async () => {
+      if (!uiVisible()) return;
       try {
         const h = await GetAttackHistory();
         setHistory((h ?? []) as unknown as AttackReport[]);
@@ -537,6 +541,8 @@ function App() {
     };
 
     const fetchLogs = async () => {
+      if (!uiVisible()) return;
+      if (tab !== 'settings' && tab !== 'developer') return;
       try {
         const l = await GetLogs();
         setLogs(l ?? []);
@@ -546,6 +552,7 @@ function App() {
     };
 
     const fetchResourceHistory = async () => {
+      if (!uiVisible()) return;
       try {
         const rh = await GetVillageResourceHistory();
         setResourceHistory((rh ?? []) as VillageResourceSnapshot[]);
@@ -555,6 +562,7 @@ function App() {
     };
 
     const fetchReplay = async () => {
+      if (!uiVisible()) return;
       try {
         const latest = await GetLatestAttackReplay();
         setReplay((latest ?? { available: false, complete: false, events: [] }) as unknown as AttackReplayView);
@@ -564,6 +572,7 @@ function App() {
     };
 
     const fetchCurrentArmy = async () => {
+      if (!uiVisible()) return;
       try {
         const army = await GetCurrentArmy();
         setCurrentArmy((army || null) as unknown as CurrentArmyStatus | null);
@@ -573,6 +582,7 @@ function App() {
     };
 
     const fetchSessionReport = async () => {
+      if (!uiVisible()) return;
       try {
         const report = await GetSessionReport();
         const typed = report as unknown as SessionReportView;
@@ -603,6 +613,7 @@ function App() {
     const sessionReportInterval = setInterval(fetchSessionReport, 30000); // cold-start/stop fallback
 
     const fetchDiagnostics = async () => {
+      if (!uiVisible()) return;
       try {
         const d = await GetSystemDiagnostics();
         setSystemDiagnostics(d as SystemDiagnostics);
@@ -612,6 +623,22 @@ function App() {
     };
     fetchDiagnostics();
     const diagnosticsInterval = setInterval(fetchDiagnostics, 5000);
+
+    const handleVisibilityChange = () => {
+      if (!uiVisible()) return;
+      // Resync the member surface immediately after restoring/minimizing the
+      // Wails window instead of waiting for each poll interval independently.
+      void fetchFastData();
+      void fetchHistory();
+      void fetchResourceHistory();
+      void fetchCurrentArmy();
+      void fetchSessionReport();
+      void fetchDiagnostics();
+      if (tab === 'settings' || tab === 'developer') {
+        void fetchLogs();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // The 1 Hz screenshot poll used to live here. It moved into
     // <Feed/>'s own useEffect so it only runs when the Live View tab
@@ -758,6 +785,7 @@ function App() {
       clearInterval(replayInterval);
       clearInterval(sessionReportInterval);
       clearInterval(diagnosticsInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       unsubUpdater();
       unsubLicense();
       unsubBotError();
@@ -899,7 +927,7 @@ function App() {
     } finally {
       setStartupCheckRunning(false);
     }
-  }, []);
+  }, [tab]);
 
   const handleStart = async () => {
     if (startInFlightRef.current || isRunning || isStarting) return;
