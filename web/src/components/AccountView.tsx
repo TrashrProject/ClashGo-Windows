@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ClearAccount, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetPlayerProfile, GetVillageResources } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicenseState, GetPlayerProfile, GetVillageResources } from '../../wailsjs/go/main/App';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
 type CurrentArmyUnit = {
@@ -32,6 +32,16 @@ type FarmProfile = {
   spells: FarmUnit[];
   heroes: string[];
   siege: string;
+};
+
+type LicenseState = {
+  activated: boolean;
+  role: 'member' | 'developer' | 'admin' | '';
+  license_hint?: string;
+  machine_id?: string;
+  last_validated?: string;
+  offline_until?: string;
+  error?: string;
 };
 
 type VillageResources = {
@@ -75,6 +85,59 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState('');
   const [error, setError] = React.useState('');
+  const [licenseState, setLicenseState] = React.useState<LicenseState | null>(null);
+  const [licenseKey, setLicenseKey] = React.useState('');
+  const [licenseBusy, setLicenseBusy] = React.useState(false);
+  const [licenseError, setLicenseError] = React.useState('');
+
+  const refreshLicense = React.useCallback(async () => {
+    try {
+      const state = await GetLicenseState();
+      setLicenseState(state as LicenseState);
+      if (state?.activated && (state.role === 'developer' || state.role === 'admin')) {
+        onInterfaceLevelChange('developer');
+      }
+    } catch {
+      // Licensing UI remains optional while the control service is unavailable.
+    }
+  }, [onInterfaceLevelChange]);
+
+  const activateLicense = async () => {
+    const key = licenseKey.trim();
+    if (!key || licenseBusy) return;
+    setLicenseBusy(true);
+    setLicenseError('');
+    try {
+      const state = await ActivateLicense(key);
+      const typed = state as LicenseState;
+      setLicenseState(typed);
+      setLicenseKey('');
+      if (typed.role === 'developer' || typed.role === 'admin') {
+        onInterfaceLevelChange('developer');
+      } else {
+        onInterfaceLevelChange('simple');
+      }
+    } catch (e) {
+      setLicenseError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLicenseBusy(false);
+    }
+  };
+
+  const deactivateLicense = async () => {
+    if (licenseBusy) return;
+    setLicenseBusy(true);
+    setLicenseError('');
+    try {
+      await DeactivateLicense();
+      await refreshLicense();
+      onInterfaceLevelChange('simple');
+    } catch (e) {
+      setLicenseError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLicenseBusy(false);
+    }
+  };
 
   const refresh = React.useCallback(async () => {
     setBusy(true); setError('');
@@ -110,7 +173,10 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     }
   }, []);
 
-  React.useEffect(() => { void refresh(); }, [refresh, playerTag]);
+  React.useEffect(() => {
+    void refresh();
+    void refreshLicense();
+  }, [refresh, refreshLicense, playerTag]);
 
   // The local/proxied account service may start a few seconds after ClashGO.
   // Retry automatically while no profile is available so users never have to
@@ -171,6 +237,71 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
+      <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-zinc-950 dark:bg-white p-6 md:p-7 text-white dark:text-zinc-950 shadow-premium-lg">
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6">
+          <div className="min-w-0">
+            <div className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-400 dark:text-zinc-500">ClashGO License</div>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <h3 className="text-2xl font-black">
+                {licenseState?.activated ? 'License active' : 'Activate ClashGO'}
+              </h3>
+              {licenseState?.activated && (
+                <span className="px-3 py-1 rounded-full bg-emerald-400/15 text-emerald-400 dark:text-emerald-600 text-[10px] font-black uppercase tracking-widest">
+                  {licenseState.role || 'member'}
+                </span>
+              )}
+            </div>
+            <p className="mt-2 text-sm font-semibold text-zinc-400 dark:text-zinc-600">
+              {licenseState?.activated
+                ? (licenseState.license_hint || 'License') + ' · linked to this machine'
+                : 'Enter the license key supplied by ClashGO. One license can be linked to one machine.'}
+            </p>
+            {licenseState?.offline_until && (
+              <p className="mt-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                Offline access until {new Date(licenseState.offline_until).toLocaleString()}
+              </p>
+            )}
+          </div>
+
+          {licenseState?.activated ? (
+            <button
+              type="button"
+              onClick={() => void deactivateLicense()}
+              disabled={licenseBusy}
+              className="shrink-0 px-5 py-3 rounded-xl border border-white/10 dark:border-zinc-200 text-[10px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600 hover:text-white dark:hover:text-zinc-950 disabled:opacity-40"
+            >
+              Remove local license
+            </button>
+          ) : (
+            <div className="w-full xl:w-auto flex flex-col sm:flex-row gap-2">
+              <input
+                value={licenseKey}
+                onChange={(e) => setLicenseKey(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void activateLicense();
+                }}
+                placeholder="CGO-XXXXXX-XXXXXX-XXXXXX-XXXXXX"
+                autoComplete="off"
+                spellCheck={false}
+                className="w-full sm:w-[330px] h-12 rounded-xl border border-white/10 dark:border-zinc-200 bg-white/5 dark:bg-zinc-100 px-4 font-mono text-xs outline-none focus:ring-2 focus:ring-emerald-500/40"
+              />
+              <button
+                type="button"
+                onClick={() => void activateLicense()}
+                disabled={licenseBusy || !licenseKey.trim()}
+                className="h-12 px-5 rounded-xl bg-white dark:bg-zinc-950 text-zinc-950 dark:text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-30"
+              >
+                {licenseBusy ? 'Checking…' : 'Activate'}
+              </button>
+            </div>
+          )}
+        </div>
+        {(licenseError || licenseState?.error) && (
+          <div className="mt-4 rounded-xl bg-rose-500/10 px-4 py-3 text-xs font-bold text-rose-400 dark:text-rose-600">
+            {licenseError || licenseState?.error}
+          </div>
+        )}
+      </section>
       <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
           <div>
