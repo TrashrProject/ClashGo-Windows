@@ -43,21 +43,21 @@ const formatBytes = (n: number): string => {
 const stateLabel = (state: string): string => {
   switch (state) {
     case 'idle':
-      return 'Up to date';
+      return 'À jour';
     case 'checking':
-      return 'Checking for updates…';
+      return 'Recherche de mises à jour…';
     case 'available':
-      return 'Update available';
+      return 'Mise à jour disponible';
     case 'downloading':
-      return 'Downloading…';
+      return 'Téléchargement…';
     case 'ready':
-      return 'Ready to install';
+      return 'Prête à installer';
     case 'restarting':
-      return 'Restarting…';
+      return 'Redémarrage…';
     case 'error':
-      return 'Update error';
+      return 'Erreur de mise à jour';
     case 'up_to_date':
-      return 'Up to date';
+      return 'À jour';
     default:
       return state;
   }
@@ -149,8 +149,8 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
   // reports one) or the moment a background poll flips `available` to
   // true. We pop at most once per latest version so the 2s status
   // ticker can't re-open a dialog the user already closed. The
-  // deliberate dismissals are "Later" (unmounts the whole banner via
-  // App-level updateDismissed) and "Skip version" (persisted on disk,
+  // deliberate dismissals are "Plus tard" (unmounts the whole banner via
+  // App-level updateDismissed) and "Ignorer cette version" (persisted on disk,
   // which recants availability server-side). Small delay so the first
   // paint settles before the modal slides in.
   const autoPoppedVersion = React.useRef<string | null>(null);
@@ -184,7 +184,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
   const progressPct = Math.round((status.progress || 0) * 100);
   const showSkipped =
     status.skip_version && status.skip_version === status.latest_version;
-  const canOneClick =
+  const canOneClique sur =
     (status.available || status.state === 'ready') && status.state !== 'downloading';
 
   const guardedAction = async (key: string, fn: () => Promise<unknown>) => {
@@ -199,7 +199,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
     }
   };
 
-  const doOneClick = () => guardedAction('oneclick', onUpdateAndRestart);
+  const doOneClique sur = () => guardedAction('oneclick', onUpdateAndRestart);
   const doDownload = () => guardedAction('download', onDownload);
   const doApply = () => guardedAction('apply', onApply);
   const doSkip = async () => {
@@ -232,13 +232,13 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
           {stateIcon(status.state)}
         </span>
         {status.state === 'downloading'
-          ? `Downloading ${progressPct}%`
+          ? `Téléchargement ${progressPct}%`
           : status.available
             ? `Update ${status.latest_version}`
             : status.state === 'ready'
               ? `v${status.latest_version} — Install`
               : status.state === 'error'
-                ? 'Update failed'
+                ? 'Échec de la mise à jour'
                 : stateLabel(status.state)}
         {status.available && (
           <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
@@ -263,15 +263,15 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                 <div className="flex-1 min-w-0">
                   <div className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.35em] mb-1.5 flex items-center gap-2">
                     <span className="material-symbols-outlined text-xs">rocket_launch</span>
-                    ClashGO Update
+                    Mise à jour ClashGO
                   </div>
                   <h2 id="update-banner-title" className="font-headline text-[1.7rem] font-bold tracking-tight text-zinc-950 dark:text-white leading-tight">
                     {status.available
-                      ? `${status.latest_version} is here`
+                      ? `${status.latest_version} est disponible`
                       : stateLabel(status.state)}
                   </h2>
                   <p className="text-[11px] text-zinc-500 dark:text-zinc-500 mt-1.5 font-bold tabular-nums flex items-center gap-2">
-                    <span className="text-zinc-400 dark:text-zinc-600 uppercase tracking-widest text-[10px]">Current</span>
+                    <span className="text-zinc-400 dark:text-zinc-600 uppercase tracking-widest text-[10px]">Actuelle</span>
                     <span className="font-mono">v{appVersion}</span>
                     {status.min_supported && (
                       <>
@@ -290,7 +290,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                     onDismiss();
                   }}
                   className="w-9 h-9 rounded-xl bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center justify-center text-zinc-500 dark:text-zinc-400 transition-colors"
-                  aria-label="Close update dialog"
+                  aria-label="Fermer la mise à jour"
                 >
                   <span className="material-symbols-outlined text-base">close</span>
                 </button>
@@ -314,7 +314,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                 </pre>
               ) : (
                 <div className="text-sm text-zinc-500 dark:text-zinc-400">
-                  No release notes were published for this version.
+                  Aucune note de version n’a été publiée pour cette version.
                 </div>
               )}
 
@@ -324,11 +324,10 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                 </div>
               )}
 
-              {isBotRunning && canOneClick && (
+              {isBotRunning && canOneClique sur && (
                 <div className="mt-4 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] font-bold text-amber-600 dark:text-amber-400 tracking-wide leading-relaxed">
                   <span className="material-symbols-outlined text-xs align-middle mr-1">info</span>
-                  The bot is currently running. Updating will stop the bot
-                  cleanly, drain ADB, and relaunch with the new version.
+                  Le bot est actuellement en cours. La mise à jour l’arrêtera proprement, fermera les opérations ADB puis relancera ClashGO avec la nouvelle version.
                 </div>
               )}
             </div>
@@ -347,11 +346,11 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                   </span>
                   {busy === 'oneclick'
                     ? status.state === 'ready'
-                      ? 'Installing…'
-                      : 'Downloading & installing…'
+                      ? 'Installation…'
+                      : 'Téléchargement & installing…'
                     : status.state === 'ready'
-                      ? 'Install & Restart'
-                      : `Update to v${status.latest_version}`}
+                      ? 'Installer et redémarrer'
+                      : `Mettre à jour vers v${status.latest_version}`}
                 </span>
               </button>
 
@@ -363,7 +362,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                   className="h-10 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 text-zinc-700 dark:text-zinc-300 text-[10px] font-black uppercase tracking-[0.2em] transition-colors flex items-center justify-center gap-1.5"
                 >
                   <span className="material-symbols-outlined text-[14px]">download</span>
-                  {status.state === 'ready' ? 'Re-download' : 'Download only'}
+                  {status.state === 'ready' ? 'Retélécharger' : 'Télécharger seulement'}
                 </button>
                 <button
                   onClick={() => doApply()}
@@ -371,7 +370,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                   className="h-10 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 text-zinc-700 dark:text-zinc-300 text-[10px] font-black uppercase tracking-[0.2em] transition-colors flex items-center justify-center gap-1.5"
                 >
                   <span className="material-symbols-outlined text-[14px]">folder_open</span>
-                  Open in Finder
+                  Ouvrir le fichier
                 </button>
               </div>
 
@@ -389,7 +388,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                   >
                     {busy === 'check' ? 'progress_activity' : 'refresh'}
                   </span>
-                  Re-check
+                  Revérifier
                 </button>
                 <div className="flex items-center gap-3">
                   <button
@@ -397,7 +396,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                     disabled={busy !== null || !status.available}
                     className="text-[10px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.2em] hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors disabled:opacity-30"
                   >
-                    Skip version
+                    Ignorer cette version
                   </button>
                   <span className="text-zinc-200 dark:text-zinc-800">•</span>
                   <button
@@ -407,7 +406,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                     }}
                     className="text-[10px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.2em] hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
                   >
-                    Later
+                    Plus tard
                   </button>
                 </div>
               </div>
@@ -418,7 +417,7 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
                   disabled={busy !== null}
                   className="text-[10px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.2em] hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors mt-1 text-center w-full"
                 >
-                  Resume notifications for v{status.skip_version}
+                  Réactiver les notifications pour v{status.skip_version}
                 </button>
               )}
 
@@ -444,19 +443,19 @@ const UpdateBanner: React.FC<UpdateBannerProps> = ({
 const busyLabel = (b: string): string => {
   switch (b) {
     case 'oneclick':
-      return 'Downloading • verifying • installing…';
+      return 'Téléchargement • verifying • installing…';
     case 'download':
-      return 'Downloading…';
+      return 'Téléchargement…';
     case 'apply':
-      return 'Opening Finder…';
+      return 'Ouverture du fichier…';
     case 'check':
-      return 'Checking release feed…';
+      return 'Vérification des mises à jour…';
     case 'skip':
-      return 'Saving preference…';
+      return 'Enregistrement de la préférence…';
     case 'clear':
-      return 'Clearing preference…';
+      return 'Réactivation des notifications…';
     default:
-      return 'Working…';
+      return 'Traitement…';
   }
 };
 
@@ -492,10 +491,10 @@ const DownloadBody: React.FC<{
       />
     </div>
     <div className="flex items-center justify-between text-[10px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-widest tabular-nums">
-      <span>{progressPct}% downloaded</span>
+      <span>{progressPct}% téléchargé</span>
       <span className="flex items-center gap-1.5">
         <span className="material-symbols-outlined text-[12px]">verified_user</span>
-        SHA256 on completion
+        Vérification SHA256 à la fin
       </span>
     </div>
   </div>
@@ -518,7 +517,7 @@ const ReadyBody: React.FC<{
         verified_user
       </span>
       <span className="text-xs font-bold text-zinc-950 dark:text-white">
-        Verified. Ready to install.
+        Verified. Prête à installer.
       </span>
     </div>
     {status.download_path && (
@@ -527,9 +526,8 @@ const ReadyBody: React.FC<{
       </div>
     )}
     <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
-      Click <strong className="text-zinc-950 dark:text-white">Install &amp; Restart</strong>{' '}
-      to apply now. The helper script will swap the running bundle
-      and relaunch. ClashGO will exit briefly during the swap.
+      Clique sur <strong className="text-zinc-950 dark:text-white">Install &amp; Restart</strong>{' '}
+      pour appliquer la mise à jour maintenant. ClashGO se fermera brièvement puis se relancera automatiquement.
     </p>
   </div>
 );
@@ -542,7 +540,7 @@ const ErrorBody: React.FC<{ status: UpdateStatus; lastError: string | null }> = 
     <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/30">
       <span className="material-symbols-outlined text-rose-500 text-base">error</span>
       <span className="text-xs font-bold text-rose-600 dark:text-rose-400">
-        Update check did not complete.
+        La vérification de mise à jour n’a pas abouti.
       </span>
     </div>
     {status.error && (
@@ -557,7 +555,7 @@ const ErrorBody: React.FC<{ status: UpdateStatus; lastError: string | null }> = 
 );
 
 // RestartSplash is rendered instead of the modal/pill when the user
-// pressed Install & Restart. It covers the screen for the brief
+// pressed Installer et redémarrer. It covers the screen for the brief
 // window between the helper reading -> running and the new bundle
 // appearing in the dock; non-dismissible on purpose.
 const RestartSplash: React.FC<{ status: UpdateStatus }> = ({ status }) => (
@@ -574,16 +572,16 @@ const RestartSplash: React.FC<{ status: UpdateStatus }> = ({ status }) => (
       </div>
       <div className="space-y-2.5">
         <h3 className="font-headline text-2xl font-bold tracking-tight text-white">
-          Restarting ClashGO
+          Redémarrage de ClashGO
         </h3>
         <p className="text-sm text-zinc-400 leading-relaxed">
           Installing{' '}
           <span className="font-mono font-bold text-emerald-400">v{status.latest_version}</span>
-          . The new build will appear in your dock in a moment.
+          . La nouvelle version va se relancer dans quelques instants.
         </p>
       </div>
       <div className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.4em]">
-        don&rsquo;t quit this window
+        ne ferme pas cette fenêtre
       </div>
     </div>
   </div>
