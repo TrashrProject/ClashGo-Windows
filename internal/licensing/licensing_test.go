@@ -337,3 +337,46 @@ func TestSetBaseURLSwitchesNextActivationImmediately(t *testing.T) {
 		t.Fatalf("baseURLSnapshot=%q want %q", got, newServer.URL)
 	}
 }
+
+
+func TestDeactivateLocalRemovesTransactionalArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "license.json")
+	for _, candidate := range []string{path, path + ".bak", path + ".tmp"} {
+		if err := os.WriteFile(candidate, []byte("fixture"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	svc := &Service{
+		path: path,
+		stored: storedLicense{
+			Key:       "CGO-ABCDEF-GHIJKL-MNOPQR-STUVWX",
+			Role:      RoleMember,
+			MachineID: "machine-a",
+		},
+		state: State{Activated: true, Role: RoleMember},
+	}
+
+	if err := svc.DeactivateLocal(); err != nil {
+		t.Fatalf("DeactivateLocal failed: %v", err)
+	}
+	if svc.GetState().Activated {
+		t.Fatal("service remained activated after local deactivation")
+	}
+	if svc.LicenseKey() != "" {
+		t.Fatal("license key remained in memory after local deactivation")
+	}
+	for _, candidate := range []string{path, path + ".bak", path + ".tmp"} {
+		if _, err := os.Stat(candidate); !os.IsNotExist(err) {
+			t.Fatalf("deactivation left transactional artifact %s: %v", candidate, err)
+		}
+	}
+
+	// A fresh service pointed at the same path must not recover any backup.
+	reloaded := &Service{path: path}
+	reloaded.load()
+	if reloaded.GetState().Activated {
+		t.Fatal("deactivated license was recovered on reload")
+	}
+}
