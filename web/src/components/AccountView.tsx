@@ -2,6 +2,7 @@
 import React from 'react';
 import { InterfaceLevel } from '../types';
 import { ActivateLicense, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetVillageResources, RefreshLicense, SaveMemberSettings } from '../../wailsjs/go/main/App';
+import { EventsOn } from '../../wailsjs/runtime';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
 type CurrentArmyUnit = {
@@ -122,6 +123,17 @@ type LicensePolicy = {
   enforced: boolean;
   service_configured: boolean;
   service_url?: string;
+};
+
+const safeLicenseEventsOn = (
+  eventName: string,
+  callback: (payload: LicenseState) => void,
+): (() => void) => {
+  try {
+    return EventsOn(eventName, callback);
+  } catch {
+    return () => {};
+  }
 };
 
 type VillageResources = {
@@ -321,6 +333,19 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     void refreshLicense();
     void refreshMemberSettings();
   }, [refresh, refreshLicense, refreshMemberSettings, playerTag]);
+
+  React.useEffect(() => {
+    const off = safeLicenseEventsOn('license_state', (payload) => {
+      if (!payload || typeof payload !== 'object') return;
+      setLicenseState(payload);
+      if (payload.activated && (payload.role === 'developer' || payload.role === 'admin')) {
+        onInterfaceLevelChange('developer');
+      } else if (payload.activated && interfaceLevel === 'developer') {
+        onInterfaceLevelChange('simple');
+      }
+    });
+    return off;
+  }, [interfaceLevel, onInterfaceLevelChange]);
 
   // The local/proxied account service may start a few seconds after ClashGO.
   // Retry automatically while no profile is available so users never have to
