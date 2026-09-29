@@ -646,6 +646,26 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]any{"incidents": rows})
 	})
 
+	mux.HandleFunc("GET /v1/developer/history", func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
+		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
+		actor, ok := control.authorizeDeveloper(key, machineID)
+		if !ok || actor.Role != "admin" {
+			writeJSON(w, http.StatusForbidden, map[string]string{"message": "admin license required"})
+			return
+		}
+		control.mu.RLock()
+		rows := append([]licenseEvent(nil), control.data.Events...)
+		control.mu.RUnlock()
+		if len(rows) > 500 {
+			rows = rows[len(rows)-500:]
+		}
+		for left, right := 0, len(rows)-1; left < right; left, right = left+1, right-1 {
+			rows[left], rows[right] = rows[right], rows[left]
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"events": rows})
+	})
+
 	mux.HandleFunc("GET /v1/developer/licenses", func(w http.ResponseWriter, r *http.Request) {
 		key := strings.TrimSpace(r.Header.Get("X-ClashGO-License"))
 		machineID := strings.TrimSpace(r.Header.Get("X-ClashGO-Machine"))
@@ -713,18 +733,30 @@ func main() {
 				return
 			}
 			hash := hashLicense(generated)
-			control.data.Licenses[hash] = &licenseRecord{
+			rec := &licenseRecord{
 				ID:              licenseIDFromHash(hash),
 				Hint:            licenseHint(generated),
 				CustomerName:    strings.TrimSpace(in.CustomerName),
 				CustomerContact: strings.TrimSpace(in.CustomerContact),
 				CustomerNotes:   strings.TrimSpace(in.CustomerNotes),
 				Role:            role,
-				Active:       true,
-				CreatedAt:    time.Now().UTC(),
-				Plan:         plan,
-				DurationDays: durationDays,
+				Active:          true,
+				CreatedAt:       time.Now().UTC(),
+				Plan:            plan,
+				DurationDays:    durationDays,
+				PaymentStatus:   "unknown",
 			}
+			control.data.Licenses[hash] = rec
+			control.appendEventLocked(licenseEvent{
+				LicenseID:       rec.ID,
+				LicenseHint:     rec.Hint,
+				CustomerName:    rec.CustomerName,
+				CustomerContact: rec.CustomerContact,
+				EventType:       "created",
+				Plan:            rec.Plan,
+				PaymentStatus:   rec.PaymentStatus,
+				CreatedAt:       rec.CreatedAt,
+			})
 			keys = append(keys, generated)
 		}
 		_ = control.saveLocked()
@@ -856,7 +888,23 @@ func main() {
 		rec.PaymentStatus = validPaymentStatus(in.PaymentStatus)
 		rec.TotalPaidCents += in.AmountCents
 		rec.NextDueAt = rec.ExpiresAt
+		if len(in.Note) > 1000 {
+			in.Note = in.Note[:1000]
+		}
 		expiresAt := rec.ExpiresAt
+		control.appendEventLocked(licenseEvent{
+			LicenseID:       rec.ID,
+			LicenseHint:     rec.Hint,
+			CustomerName:    rec.CustomerName,
+			CustomerContact: rec.CustomerContact,
+			EventType:       "renewal",
+			Plan:            rec.Plan,
+			AmountCents:     in.AmountCents,
+			PaymentStatus:   rec.PaymentStatus,
+			Note:            strings.TrimSpace(in.Note),
+			CreatedAt:       time.Now().UTC(),
+			ExpiresAt:       rec.ExpiresAt,
+		})
 		_ = control.saveLocked()
 		control.mu.Unlock()
 
