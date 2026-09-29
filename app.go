@@ -1776,6 +1776,42 @@ func normalizeControlServiceURL(raw string) (string, error) {
 	return strings.TrimRight(parsed.String(), "/"), nil
 }
 
+func probeControlServiceURL(baseURL string) error {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return fmt.Errorf("control service URL is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/healthz", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "ClashGO/"+version)
+
+	resp, err := (&http.Client{Timeout: 4 * time.Second}).Do(req)
+	if err != nil {
+		return fmt.Errorf("control service unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("control service health check returned %s", resp.Status)
+	}
+
+	var payload struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&payload); err != nil {
+		return fmt.Errorf("invalid control service health response: %w", err)
+	}
+	if !payload.OK {
+		return fmt.Errorf("control service health check failed")
+	}
+	return nil
+}
+
 func (a *App) SetBetaControlServiceURL(raw string) (ControlServiceConfig, error) {
 	if !betaControlOverrideAllowed() {
 		return a.GetControlServiceConfig(), fmt.Errorf("local control-service override is disabled in stable builds")
@@ -1788,6 +1824,9 @@ func (a *App) SetBetaControlServiceURL(raw string) (ControlServiceConfig, error)
 	}
 	normalized, err := normalizeControlServiceURL(raw)
 	if err != nil {
+		return a.GetControlServiceConfig(), err
+	}
+	if err := probeControlServiceURL(normalized); err != nil {
 		return a.GetControlServiceConfig(), err
 	}
 	cfg := config.LoadOrDefault("config.json")
