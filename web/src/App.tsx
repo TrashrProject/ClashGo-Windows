@@ -1472,6 +1472,7 @@ function App() {
               interfaceLevel={interfaceLevel}
               initialPage={accountPage}
               testSessionActive={testSessionActive}
+              automationActive={isRunning || isStarting || testSessionActive}
               onInterfaceLevelChange={handleInterfaceLevelChange}
               onAccountChanged={(tag) => {
                 setPlayerTag(tag);
