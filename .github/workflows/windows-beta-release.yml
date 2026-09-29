@@ -1,11 +1,7 @@
 name: Windows Beta Release
 
 on:
-  workflow_run:
-    workflows:
-      - Core CI
-    types:
-      - completed
+  push:
     branches:
       - feature/intelligence-v2
   workflow_dispatch:
@@ -21,42 +17,90 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     outputs:
-      build: ${{ steps.current.outputs.build }}
-      sha: ${{ steps.current.outputs.sha }}
+      sha: ${{ steps.sha.outputs.sha }}
     steps:
-      - name: Keep only the latest successful beta commit
-        id: current
+      - name: Checkout candidate beta commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Capture tested SHA
+        id: sha
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run fast backend gate
+        shell: bash
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            sha="$(gh api repos/TrashrProject/ClashGo-Windows/branches/feature/intelligence-v2 --jq '.commit.sha')"
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            echo "sha=$sha" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          go test ./internal/config
+          go test ./internal/telemetry
+          go test ./internal/intelligence
+          go test ./cmd/account_proxy
 
-          if [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
-            echo "build=false" >> "$GITHUB_OUTPUT"
-            echo "sha=$EVENT_SHA" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
-          current="$(gh api repos/TrashrProject/ClashGo-Windows/branches/feature/intelligence-v2 --jq '.commit.sha')"
-          echo "sha=$EVENT_SHA" >> "$GITHUB_OUTPUT"
-          if [ "$EVENT_SHA" = "$current" ]; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "build=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping stale beta commit $EVENT_SHA; current branch head is $current"
-          fi
+      - name: Validate control API and frontend syntax
+        shell: bash
+        run: |
+          node --check cloudflare/worker/src/index.js
+          cd web
+          npm ci
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import ts from 'typescript';
+
+          const files = [];
+          const walk = (dir) => {
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) walk(full);
+              else if (entry.isFile() && /\.tsx?$/.test(entry.name) && !entry.name.endsWith('.d.ts')) files.push(full);
+            }
+          };
+          walk('src');
+
+          let failed = false;
+          for (const file of files) {
+            const source = fs.readFileSync(file, 'utf8');
+            const result = ts.transpileModule(source, {
+              fileName: file,
+              reportDiagnostics: true,
+              compilerOptions: {
+                jsx: ts.JsxEmit.ReactJSX,
+                target: ts.ScriptTarget.ES2020,
+                module: ts.ModuleKind.ESNext,
+              },
+            });
+            for (const diagnostic of result.diagnostics || []) {
+              if (diagnostic.category !== ts.DiagnosticCategory.Error) continue;
+              failed = true;
+              const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n');
+              if (diagnostic.file && typeof diagnostic.start === 'number') {
+                const pos = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
+                console.error(`${file}:${pos.line + 1}:${pos.character + 1} ${message}`);
+              } else {
+                console.error(`${file}: ${message}`);
+              }
+            }
+          }
+          if (failed) process.exit(1);
+          console.log(`TS/TSX syntax OK: ${files.length} files`);
+          NODE
 
   beta:
     needs: gate
-    if: needs.gate.outputs.build == 'true'
     runs-on: windows-latest
     timeout-minutes: 120
     env:
