@@ -150,6 +150,31 @@ const friendlyLicenseError = (value?: string): string => {
   return raw || 'Impossible de vérifier la licence pour le moment.';
 };
 
+const friendlyControlServiceError = (value: unknown): string => {
+  const raw = value instanceof Error ? value.message : String(value || '');
+  const text = raw.toLowerCase();
+  if (text.includes('unreachable') || text.includes('connection refused') || text.includes('no such host')) {
+    return 'Serveur introuvable. Vérifie que le serveur local est lancé puis réessaie.';
+  }
+  if (text.includes('health check returned')) {
+    return 'Le serveur répond, mais son service ClashGO n’est pas prêt.';
+  }
+  if (text.includes('health response') || text.includes('health check failed')) {
+    return 'Le serveur ne répond pas comme un serveur de licences ClashGO valide.';
+  }
+  if (text.includes('must use https')) {
+    return 'Une adresse distante doit utiliser HTTPS. HTTP est autorisé uniquement en local.';
+  }
+  if (text.includes('invalid control service url') || text.includes('control service url is required')) {
+    return 'Adresse du serveur invalide.';
+  }
+  if (text.includes('stop clashgo')) {
+    return 'Arrête le bot avant de changer le serveur de licences.';
+  }
+  return raw || 'Impossible de connecter le serveur de licences.';
+};
+
+
 const applySpeedPreset = (settings: MemberSettings, profile: MemberSettings['speed_profile']): MemberSettings => {
   switch (profile) {
     case 'cautious':
@@ -361,7 +386,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       await refreshLicense();
       onReadinessChanged?.();
     } catch (e) {
-      setControlURLMessage(e instanceof Error ? e.message : String(e));
+      setControlURLMessage(friendlyControlServiceError(e));
     } finally {
       setControlURLBusy(false);
     }
@@ -916,7 +941,14 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="min-w-0">
               <div className="text-[9px] font-black uppercase tracking-[0.2em] text-sky-500">Mode test bêta</div>
-              <h3 className="mt-1 text-lg font-black text-zinc-950 dark:text-white">Connecter le serveur de licences local</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="mt-1 text-lg font-black text-zinc-950 dark:text-white">Connecter le serveur de licences local</h3>
+                {controlService?.configured && (
+                  <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-[8px] font-black uppercase tracking-widest text-emerald-600">
+                    Serveur connecté
+                  </span>
+                )}
+              </div>
               <p className="mt-1 text-xs font-semibold text-zinc-500">
                 Pour tester les licences sans serveur public, lance START-CLASHGO-LICENSE-TEST.cmd puis garde l’adresse locale ci-dessous.
               </p>
