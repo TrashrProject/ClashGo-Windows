@@ -232,6 +232,51 @@ function App() {
   const [lootExitPercent, setLootExitPercent] = useState(100);
   const [simpleMode, setSimpleMode] = useState(true);
 
+  const syncMemberScopedView = useCallback(async (activated: boolean) => {
+    if (!activated) {
+      setPlayerTag('');
+      setHistory([]);
+      setResourceHistory([]);
+      setActivity([]);
+      setReplay({ available: false, complete: false, events: [] });
+      setSessionReport(null);
+      return;
+    }
+
+    const [accountResult, statsResult, historyResult, resourceResult, activityResult, replayResult, reportResult] = await Promise.allSettled([
+      GetAccountConfig(),
+      GetStats(),
+      GetAttackHistory(),
+      GetVillageResourceHistory(),
+      GetActivity(),
+      GetLatestAttackReplay(),
+      GetSessionReport(),
+    ]);
+
+    if (accountResult.status === 'fulfilled') {
+      setPlayerTag(accountResult.value?.player_tag || '');
+    }
+    if (statsResult.status === 'fulfilled') {
+      setStats(statsResult.value);
+    }
+    if (historyResult.status === 'fulfilled') {
+      setHistory(historyResult.value ?? []);
+    }
+    if (resourceResult.status === 'fulfilled') {
+      setResourceHistory((resourceResult.value ?? []) as VillageResourceSnapshot[]);
+    }
+    if (activityResult.status === 'fulfilled') {
+      setActivity((activityResult.value ?? []) as unknown as ActivityEvent[]);
+    }
+    if (replayResult.status === 'fulfilled') {
+      setReplay((replayResult.value ?? { available: false, complete: false, events: [] }) as unknown as AttackReplayView);
+    }
+    if (reportResult.status === 'fulfilled') {
+      const report = reportResult.value as unknown as SessionReportView;
+      setSessionReport(report && (report.attacks || 0) > 0 ? report : null);
+    }
+  }, []);
+
   const handleLicenseReady = useCallback((state: { activated: boolean; role?: string; member_name?: string; plan?: string }, policy: { enforced: boolean }) => {
     const role = state?.role === 'admin'
       ? 'admin'
@@ -261,10 +306,12 @@ function App() {
       setTab((current) => current === 'developer' ? 'dashboard' : current);
     }
 
+    void syncMemberScopedView(Boolean(state?.activated));
+
     if (!policy.enforced || state?.activated) {
       setLicenseAccessReady(true);
     }
-  }, []);
+  }, [syncMemberScopedView]);
 
   const handleInterfaceLevelChange = useCallback((level: InterfaceLevel) => {
     setInterfaceLevel(level);
@@ -483,6 +530,7 @@ function App() {
       setLicenseRole(role);
       setLicenseMemberName(payload?.member_name || '');
       setLicensePlan(payload?.plan || '');
+      void syncMemberScopedView(Boolean(payload?.activated));
 
       if (role === 'developer' || role === 'admin') {
         setInterfaceLevel('developer');
@@ -560,7 +608,7 @@ function App() {
       unsubAttackHistory();
       unsubStatsUpdated();
     };
-  }, []);
+  }, [syncMemberScopedView]);
 
   useEffect(() => {
     if (darkMode) {
