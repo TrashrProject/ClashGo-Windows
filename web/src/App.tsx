@@ -603,7 +603,7 @@ function App() {
       const path = await handleExportDiagnostics();
       setBotDiagnosticPath(path);
     } catch {
-      setBotDiagnosticPath('Diagnostic export failed — check the system console.');
+      setBotDiagnosticPath('Échec de l’export du diagnostic — consulte la console système.');
     }
   };
 
@@ -682,12 +682,12 @@ function App() {
           : 'disconnected';
   const adbStateLabel =
     adbState === 'connected'
-      ? 'Connected'
+      ? 'Connecté'
       : adbState === 'degraded'
-        ? 'Degraded'
+        ? 'Dégradé'
         : adbState === 'disconnected'
-          ? 'Disconnected'
-          : 'Awaiting';
+          ? 'Déconnecté'
+          : 'En attente';
 
   const tabTitle: Record<TabType, string> = {
     dashboard: 'Accueil',
@@ -762,7 +762,7 @@ function App() {
                   <span className={`w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-300 dark:bg-zinc-800'}`}></span>
                   <span className="w-1.5 h-1.5 bg-zinc-300 dark:bg-zinc-800 rounded-full"></span>
                 </div>
-                <h2 className="text-[11px] text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.4em] font-black">ClashGO System</h2>
+                <h2 className="text-[11px] text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.4em] font-black">ClashGO</h2>
               </div>
               <h1 className="font-headline text-5xl font-bold tracking-tight text-zinc-950 dark:text-white">{tabTitle[tab]}</h1>
             </div>
@@ -818,20 +818,20 @@ function App() {
                     onClick={() => setTab('settings')}
                     className="rounded-xl border border-zinc-300/70 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
                   >
-                    Windows readiness
+                    État Windows
                   </button>
                   <button
                     type="button"
                     onClick={() => void handleBotDiagnosticExport()}
                     className="rounded-xl bg-rose-600 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition hover:bg-rose-500"
                   >
-                    Export diagnostics
+                    Exporter le diagnostic
                   </button>
                   <button
                     type="button"
                     onClick={() => { setBotError(''); setBotDiagnosticPath(''); }}
                     className="rounded-xl px-3 py-2 text-zinc-500 transition hover:bg-rose-500/10 hover:text-rose-600 dark:text-zinc-400"
-                    aria-label="Dismiss startup error"
+                    aria-label="Fermer l’erreur de démarrage"
                   >
                     <span className="material-symbols-outlined text-lg">close</span>
                   </button>
