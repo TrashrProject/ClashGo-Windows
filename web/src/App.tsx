@@ -57,6 +57,8 @@ import {
   GetScheduledSessionStop,
   CancelScheduledSessionStop,
   ScheduleSessionStop,
+  ClearSessionLootGoal,
+  SetSessionLootGoal,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
 import { InterfaceLevel, TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent, AttackReplayView, SessionReportView, BotStats, AttackReport } from './types';
@@ -276,6 +278,12 @@ function App() {
   const [gracefulStopPending, setGracefulStopPending] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [scheduledStopAt, setScheduledStopAt] = useState('');
+  const [sessionLootGoal, setSessionLootGoal] = useState<{ gold: number; elixir: number; dark_elixir: number; active: boolean }>({
+    gold: 0,
+    elixir: 0,
+    dark_elixir: 0,
+    active: false,
+  });
   const [history, setHistory] = useState<AttackReport[]>([]);
   const [resourceHistory, setResourceHistory] = useState<VillageResourceSnapshot[]>([]);
   const [currentArmy, setCurrentArmy] = useState<CurrentArmyStatus | null>(null);
@@ -875,6 +883,7 @@ function App() {
       refreshBootReport();
     });
     const unsubBotStopped = safeEventsOn("bot_stopped", (payload: unknown) => {
+      setSessionLootGoal({ gold: 0, elixir: 0, dark_elixir: 0, active: false });
       setScheduledStopAt('');
       setIsPaused(false);
       setGracefulStopPending(false);
@@ -964,6 +973,24 @@ function App() {
       setScheduledStopAt('');
     });
 
+    const unsubLootGoal = safeEventsOn("session_loot_goal", (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      const goal = payload as { gold?: number; elixir?: number; dark_elixir?: number; active?: boolean };
+      setSessionLootGoal({
+        gold: Number(goal.gold || 0),
+        elixir: Number(goal.elixir || 0),
+        dark_elixir: Number(goal.dark_elixir || 0),
+        active: Boolean(goal.active),
+      });
+    });
+
+    const unsubLootGoalReached = safeEventsOn("session_loot_goal_reached", (payload: unknown) => {
+      setSessionLootGoal({ gold: 0, elixir: 0, dark_elixir: 0, active: false });
+      const message = normalizeBotErrorMessage(payload, 'Objectif de butin atteint · arrêt propre de la session.');
+      setMemberNotice(message);
+      window.setTimeout(() => setMemberNotice(''), 7000);
+    });
+
     return () => {
       clearInterval(fastInterval);
       clearInterval(logInterval);
@@ -991,6 +1018,8 @@ function App() {
       unsubScheduledStop();
       unsubScheduledStopCancelled();
       unsubScheduledStopTriggered();
+      unsubLootGoal();
+      unsubLootGoalReached();
     };
   }, [syncMemberScopedView]);
 
@@ -1123,6 +1152,35 @@ function App() {
       setStartupCheckRunning(false);
     }
   }, []);
+
+  const handleSetLootGoal = async (gold: number, elixir: number, dark: number) => {
+    if (!isRunning) return;
+    try {
+      const goal = await SetSessionLootGoal(gold, elixir, dark);
+      const typed = goal as unknown as { gold?: number; elixir?: number; dark_elixir?: number; active?: boolean };
+      setSessionLootGoal({
+        gold: Number(typed.gold || 0),
+        elixir: Number(typed.elixir || 0),
+        dark_elixir: Number(typed.dark_elixir || 0),
+        active: Boolean(typed.active),
+      });
+      setMemberNotice('Objectif de butin activé.');
+      window.setTimeout(() => setMemberNotice(''), 3500);
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const handleClearLootGoal = async () => {
+    try {
+      await ClearSessionLootGoal();
+      setSessionLootGoal({ gold: 0, elixir: 0, dark_elixir: 0, active: false });
+      setMemberNotice('Objectif de butin désactivé.');
+      window.setTimeout(() => setMemberNotice(''), 3000);
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
 
   const handleScheduleStop = async (minutes: 30 | 60 | 120) => {
     if (!isRunning) return;
@@ -1868,6 +1926,9 @@ function App() {
               onScheduleStop={(minutes) => void handleScheduleStop(minutes)}
               onCancelScheduledStop={() => void handleCancelScheduledStop()}
               scheduledStopAt={scheduledStopAt}
+              sessionLootGoal={sessionLootGoal}
+              onSetLootGoal={(gold, elixir, dark) => void handleSetLootGoal(gold, elixir, dark)}
+              onClearLootGoal={() => void handleClearLootGoal()}
               onStartTestSession={handleStartTestSession}
               onStartQuickTestSession={handleStartQuickTestSession}
               onStop={handleStop}
