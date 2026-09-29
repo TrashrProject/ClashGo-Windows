@@ -97,6 +97,7 @@ const DeveloperView: React.FC = () => {
   const [copied, setCopied] = React.useState(false);
   const [search, setSearch] = React.useState('');
   const [licenseFilter, setLicenseFilter] = React.useState<'all' | 'active' | 'revoked'>('all');
+  const [renewPlans, setRenewPlans] = React.useState<Record<string, 'free_2d' | 'week_1' | 'month_1' | 'lifetime'>>({});
 
   const isAdmin = role === 'admin';
 
@@ -172,13 +173,14 @@ const DeveloperView: React.FC = () => {
   const renewLicense = async (item: LicenseRow) => {
     const id = String(item.id || '');
     if (!id) return;
-    const plan = (item.plan === 'free_2d' || item.plan === 'week_1' || item.plan === 'month_1' || item.plan === 'lifetime')
+    const currentPlan = (item.plan === 'free_2d' || item.plan === 'week_1' || item.plan === 'month_1' || item.plan === 'lifetime')
       ? item.plan
       : 'month_1';
+    const plan = renewPlans[id] || currentPlan;
     await runLicenseAction(
       id,
       () => AdminRenewLicense(id, plan),
-      'Licence renouvelée · même clé conservée.'
+      'Licence renouvelée en ' + planLabel(plan) + ' · même clé conservée.'
     );
   };
 
@@ -518,16 +520,30 @@ const DeveloperView: React.FC = () => {
                       <option value="admin">Admin</option>
                     </select>
 
-                    {item.plan !== 'lifetime' && (
-                      <button
-                        type="button"
-                        disabled={actionID === item.id}
-                        onClick={() => void renewLicense(item)}
-                        className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-40"
-                      >
-                        Renouveler
-                      </button>
-                    )}
+                    <select
+                      value={renewPlans[String(item.id)] || ((item.plan === 'free_2d' || item.plan === 'week_1' || item.plan === 'month_1' || item.plan === 'lifetime') ? item.plan : 'month_1')}
+                      disabled={actionID === item.id}
+                      onChange={(e) => setRenewPlans((current) => ({
+                        ...current,
+                        [String(item.id)]: e.target.value as 'free_2d' | 'week_1' | 'month_1' | 'lifetime',
+                      }))}
+                      className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-2 text-[9px] font-black uppercase tracking-wider outline-none disabled:opacity-40"
+                      title="Formule appliquée au prochain renouvellement"
+                    >
+                      <option value="free_2d">+2 jours</option>
+                      <option value="week_1">+1 semaine</option>
+                      <option value="month_1">+1 mois</option>
+                      <option value="lifetime">À vie</option>
+                    </select>
+
+                    <button
+                      type="button"
+                      disabled={actionID === item.id}
+                      onClick={() => void renewLicense(item)}
+                      className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-40"
+                    >
+                      Renouveler
+                    </button>
 
                     <button
                       type="button"
