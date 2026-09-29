@@ -639,7 +639,8 @@ func main() {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "invalid incident"})
 			return
 		}
-		if rec.MachineID != "" && in.MachineID != "" && rec.MachineID != in.MachineID {
+		in.MachineID = strings.TrimSpace(in.MachineID)
+		if rec.MachineID == "" || in.MachineID == "" || rec.MachineID != in.MachineID {
 			writeJSON(w, http.StatusConflict, map[string]string{"message": "machine mismatch"})
 			return
 		}
