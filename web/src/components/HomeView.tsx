@@ -42,6 +42,15 @@ interface HomeViewProps {
     recovery_used?: string[];
     attempts?: number;
   } | null;
+  currentArmy: {
+    timestamp?: string;
+    ready: boolean;
+    uncertain: boolean;
+    warnings?: string[];
+    units?: Array<{ name: string; category: string; count: number; confidence: number; slot_x: number }>;
+    target_town_hall?: number;
+    target_label?: string;
+  } | null;
 }
 
 const licenseRemainingLabel = (expiresAt?: string): { label: string; urgent: boolean } => {
@@ -233,7 +242,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     onStart, onStartTestSession, onStartQuickTestSession, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
     licenseReady, licenseRequired, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
-    memberName, licensePlan, licenseExpiresAt, latestBootReport,
+    memberName, licensePlan, licenseExpiresAt, latestBootReport, currentArmy,
   } = props;
 
   const lastAttack = history && history.length > 0 ? history[0] : undefined;
@@ -252,6 +261,40 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
     if (raw === 'balanced' || raw === 'normal') return 'Normale';
     return 'Normale';
   }, [stats.member_speed_profile, stats.speed_profile]);
+
+  const armyStatus = React.useMemo(() => {
+    if (!currentArmy) {
+      return { label: 'En attente', tone: 'neutral' as const, detail: 'Aucune lecture récente' };
+    }
+    const ts = currentArmy.timestamp ? new Date(currentArmy.timestamp).getTime() : NaN;
+    const ageMinutes = Number.isFinite(ts)
+      ? Math.max(0, Math.round((Date.now() - ts) / 60_000))
+      : null;
+
+    if (ageMinutes == null || ageMinutes > 10) {
+      return {
+        label: 'À contrôler',
+        tone: 'neutral' as const,
+        detail: ageMinutes == null ? 'Date de lecture inconnue' : 'Dernière lecture il y a ' + ageMinutes + ' min',
+      };
+    }
+    if (currentArmy.uncertain) {
+      return { label: 'Incertaine', tone: 'amber' as const, detail: 'Lecture à confirmer' };
+    }
+    if (!currentArmy.ready) {
+      return {
+        label: 'Non conforme',
+        tone: 'rose' as const,
+        detail: currentArmy.warnings?.[0] || 'Composition différente du plan',
+      };
+    }
+    return {
+      label: 'Prête',
+      tone: 'emerald' as const,
+      detail: currentArmy.target_label ||
+        (currentArmy.target_town_hall ? 'Profil HDV ' + currentArmy.target_town_hall : 'Composition validée'),
+    };
+  }, [currentArmy]);
 
   const sessionCap = Math.max(0, Number(stats.session_attack_cap || 0));
   const sessionAttacks = Math.max(0, Number(stats.session_attacks || 0));
@@ -467,6 +510,23 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
               }>
                 Santé · {Math.max(0, Math.min(100, stats.health_score ?? 100))}/100
               </span>
+              <button
+                type="button"
+                onClick={onOpenVillage}
+                title={armyStatus.detail}
+                className={
+                  'rounded-full border px-3 py-1.5 text-[9px] font-black uppercase tracking-widest transition ' +
+                  (armyStatus.tone === 'emerald'
+                    ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-400 dark:text-emerald-600'
+                    : armyStatus.tone === 'amber'
+                      ? 'border-amber-400/20 bg-amber-400/10 text-amber-400 dark:text-amber-600'
+                      : armyStatus.tone === 'rose'
+                        ? 'border-rose-400/20 bg-rose-400/10 text-rose-400 dark:text-rose-600'
+                        : 'border-white/10 dark:border-zinc-200 bg-white/5 dark:bg-zinc-100 text-zinc-300 dark:text-zinc-600')
+                }
+              >
+                Armée · {armyStatus.label}
+              </button>
             </div>
           </div>
           <button
