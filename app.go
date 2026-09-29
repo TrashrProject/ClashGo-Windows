@@ -1839,6 +1839,9 @@ type AdminLicenseRequest struct {
 	CustomerName    string `json:"customer_name,omitempty"`
 	CustomerContact string `json:"customer_contact,omitempty"`
 	CustomerNotes   string `json:"customer_notes,omitempty"`
+	AmountCents     int    `json:"amount_cents,omitempty"`
+	PaymentStatus   string `json:"payment_status,omitempty"`
+	PaymentNote     string `json:"note,omitempty"`
 }
 
 type AdminLicenseResult struct {
@@ -1870,6 +1873,16 @@ func (a *App) CreateAdminLicense(input AdminLicenseRequest) (AdminLicenseResult,
 		plan = "month_1"
 	}
 
+	if input.AmountCents < 0 {
+		input.AmountCents = 0
+	}
+	paymentStatus := strings.ToLower(strings.TrimSpace(input.PaymentStatus))
+	switch paymentStatus {
+	case "paid", "pending", "offered", "free":
+	default:
+		paymentStatus = "unknown"
+	}
+
 	payload, err := json.Marshal(map[string]any{
 		"role":             role,
 		"plan":             plan,
@@ -1877,6 +1890,9 @@ func (a *App) CreateAdminLicense(input AdminLicenseRequest) (AdminLicenseResult,
 		"customer_name":    strings.TrimSpace(input.CustomerName),
 		"customer_contact": strings.TrimSpace(input.CustomerContact),
 		"customer_notes":   strings.TrimSpace(input.CustomerNotes),
+		"amount_cents":     input.AmountCents,
+		"payment_status":   paymentStatus,
+		"note":             strings.TrimSpace(input.PaymentNote),
 	})
 	if err != nil {
 		return AdminLicenseResult{}, err
