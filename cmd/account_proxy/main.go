@@ -922,7 +922,9 @@ func main() {
 		if in.AmountCents < 0 {
 			in.AmountCents = 0
 		}
-		rec.PaymentStatus = validPaymentStatus(in.PaymentStatus)
+		if strings.TrimSpace(in.PaymentStatus) != "" {
+			rec.PaymentStatus = validPaymentStatus(in.PaymentStatus)
+		}
 		rec.TotalPaidCents += in.AmountCents
 		rec.NextDueAt = rec.ExpiresAt
 		if len(in.Note) > 1000 {
