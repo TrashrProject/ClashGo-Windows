@@ -57,3 +57,22 @@ func TestCloudflareDeveloperAdminContractMatchesDesktop(t *testing.T) {
 		t.Fatal("desktop admin/developer calls no longer send machine-bound license authentication")
 	}
 }
+
+
+func TestCloudflareProtectsActiveAdminFromSelfLockout(t *testing.T) {
+	data, err := os.ReadFile("cloudflare/worker/src/index.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(data)
+	required := []string{
+		"cannot remove admin role from the active admin license",
+		"cannot revoke the active admin license",
+		"cannot reset the active admin license machine",
+	}
+	for _, message := range required {
+		if !strings.Contains(src, message) {
+			t.Errorf("missing active-admin self-lockout protection: %q", message)
+		}
+	}
+}
