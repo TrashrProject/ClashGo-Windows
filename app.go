@@ -1,6 +1,6 @@
 package main
 
-// Build marker: beta pipeline validation after Windows runtime fixes.
+// Build marker: beta pipeline validation after matchmaking/BlueStacks stability fixes.
 import (
 	"bytes"
 	"context"
