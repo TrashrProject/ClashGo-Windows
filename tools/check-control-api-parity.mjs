@@ -60,5 +60,22 @@ for (const field of antiSharingFields) {
   }
 }
 
+const adminAuditEvents = [
+  'machine_reset',
+  'revoked',
+  'reactivated',
+  'role_changed',
+  'customer_updated',
+];
+
+for (const eventType of adminAuditEvents) {
+  for (const [name, source] of Object.entries(sources)) {
+    if (!source.includes(eventType)) {
+      console.error(`Missing admin audit event in ${name}: ${eventType}`);
+      failed = true;
+    }
+  }
+}
+
 if (failed) process.exit(1);
-console.log(`Control API parity OK: ${requiredRoutes.length} shared routes, ${protections.length} safety guards and ${antiSharingFields.length} anti-sharing fields.`);
+console.log(`Control API parity OK: ${requiredRoutes.length} shared routes, ${protections.length} safety guards, ${antiSharingFields.length} anti-sharing fields and ${adminAuditEvents.length} admin audit events.`);
