@@ -1,5 +1,6 @@
 package main
 
+// Build marker: beta pipeline validation after contract/test alignment.
 import (
 	"bytes"
 	"context"
