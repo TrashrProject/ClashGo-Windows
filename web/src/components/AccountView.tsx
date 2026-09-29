@@ -247,6 +247,7 @@ interface AccountViewProps {
   onInterfaceLevelChange: (level: InterfaceLevel) => void;
   onAccountChanged: (tag: string) => void;
   onReadinessChanged?: () => void;
+  onPageChange?: (page: 'account' | 'settings' | 'village') => void;
 }
 
 const AccountView: React.FC<AccountViewProps> = React.memo(({
@@ -258,6 +259,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   onInterfaceLevelChange,
   onAccountChanged,
   onReadinessChanged,
+  onPageChange,
 }) => {
   const [profile, setProfile] = React.useState<PlayerProfile | null>(null);
   const [resources, setResources] = React.useState<VillageResources | null>(null);
@@ -744,7 +746,10 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
             <button
               key={id}
               type="button"
-              onClick={() => setMemberPage(id)}
+              onClick={() => {
+                setMemberPage(id);
+                onPageChange?.(id);
+              }}
               className={
                 'flex flex-1 sm:flex-none items-center justify-center gap-2 rounded-xl px-3 sm:px-4 py-2.5 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.12em] sm:tracking-[0.16em] transition whitespace-nowrap ' +
                 (memberPage === id
