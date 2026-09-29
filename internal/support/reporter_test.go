@@ -113,3 +113,88 @@ func TestTrimQueueDropsStaleAndCapsSize(t *testing.T) {
 		t.Fatalf("trimQueue did not preserve newest tail, last=%q", got[len(got)-1].Message)
 	}
 }
+
+
+func TestReporterQueueRewriteKeepsMultipleIncidents(t *testing.T) {
+	dir := t.TempDir()
+	r := &Reporter{
+		appVersion: "test",
+		queuePath:  filepath.Join(dir, "queue.jsonl"),
+		recent:     make(map[string]time.Time),
+	}
+
+	for _, msg := range []string{"one", "two", "three"} {
+		line := []byte(`{"level":"error","message":"` + msg + `","surface":"backend"}`)
+		if _, err := r.Write(line); err != nil {
+			t.Fatalf("Write(%s) failed: %v", msg, err)
+		}
+	}
+
+	items := r.readQueueLocked()
+	if len(items) != 3 {
+		t.Fatalf("expected 3 incidents after queue rewrites, got %d", len(items))
+	}
+	for i, want := range []string{"one", "two", "three"} {
+		if items[i].Message != want {
+			t.Fatalf("item %d message = %q, want %q", i, items[i].Message, want)
+		}
+	}
+}
+
+func TestTrimQueueCapsAndDropsOldIncidents(t *testing.T) {
+	now := time.Now().UTC()
+	items := make([]incident, 0, maxQueuedIncidents+3)
+	items = append(items, incident{
+		At:      now.Add(-maxIncidentAge-time.Hour).Format(time.RFC3339Nano),
+		Message: "too old",
+	})
+	for i := 0; i < maxQueuedIncidents+2; i++ {
+		items = append(items, incident{
+			At:      now.Add(time.Duration(i) * time.Second).Format(time.RFC3339Nano),
+			Message: "keep",
+		})
+	}
+
+	got := trimQueue(items, now)
+	if len(got) != maxQueuedIncidents {
+		t.Fatalf("expected queue cap %d, got %d", maxQueuedIncidents, len(got))
+	}
+	if got[0].Message == "too old" {
+		t.Fatal("expired incident survived trim")
+	}
+}
+
+func TestReporterTruncatesOversizedMessageAndField(t *testing.T) {
+	dir := t.TempDir()
+	r := &Reporter{
+		appVersion: "test",
+		queuePath:  filepath.Join(dir, "queue.jsonl"),
+		recent:     make(map[string]time.Time),
+	}
+	longMessage := strings.Repeat("m", maxIncidentMessageBytes+500)
+	longField := strings.Repeat("x", maxIncidentFieldBytes+500)
+	line, err := json.Marshal(map[string]any{
+		"level":   "error",
+		"message": longMessage,
+		"surface": "frontend",
+		"detail":  longField,
+	})
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	if _, err := r.Write(line); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	items := r.readQueueLocked()
+	if len(items) != 1 {
+		t.Fatalf("expected one incident, got %d", len(items))
+	}
+	if len(items[0].Message) > maxIncidentMessageBytes+3 {
+		t.Fatalf("message was not truncated: %d bytes", len(items[0].Message))
+	}
+	detail, _ := items[0].Fields["detail"].(string)
+	if len(detail) > maxIncidentFieldBytes+3 {
+		t.Fatalf("field was not truncated: %d bytes", len(detail))
+	}
+}
