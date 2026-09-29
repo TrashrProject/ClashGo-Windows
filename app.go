@@ -34,7 +34,7 @@ func gracefulStopReached(history []bot.AttackReport, sequenceStartUnix int64) bo
 		return false
 	}
 	latest := history[0]
-	if latest.ReturnHomeDurationMS <= 0 || !latest.ReturnHomeSuccess {
+	if latest.ReturnHomeDurationMS <= 0 {
 		return false
 	}
 	reportAt, err := time.Parse(time.RFC3339, latest.Timestamp)
@@ -1326,8 +1326,12 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 
 			if shouldStopGracefully {
 				if a.ctx != nil {
+					message := "Attaque terminée · retour au village confirmé · arrêt de ClashGO."
+					if len(history) > 0 && !history[0].ReturnHomeSuccess {
+						message = "Attaque terminée · retour au village non confirmé · arrêt de sécurité de ClashGO."
+					}
 					runtime.EventsEmit(a.ctx, "graceful_stop_completed", map[string]any{
-						"message": "Attaque terminée · retour au village confirmé · arrêt de ClashGO.",
+						"message": message,
 					})
 				}
 				go a.StopBot()
