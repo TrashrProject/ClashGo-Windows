@@ -63,8 +63,19 @@ const SettingsView: React.FC<SettingsViewProps> = React.memo(({
   const [latestTrace, setLatestTrace] = React.useState('');
   const [traceBusy, setTraceBusy] = React.useState(false);
   const [bootReport, setBootReport] = React.useState<BootReportView | null>(null);
-  const [settingsPage, setSettingsPage] = React.useState<'general' | 'windows' | 'diagnostic'>('general');
+  const [settingsPage, setSettingsPage] = React.useState<'general' | 'windows' | 'diagnostic'>(() => {
+    try {
+      const saved = localStorage.getItem('clashgo_settings_page');
+      return saved === 'windows' || saved === 'diagnostic' ? saved : 'general';
+    } catch {
+      return 'general';
+    }
+  });
   const resetTimerRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    try { localStorage.setItem('clashgo_settings_page', settingsPage); } catch {}
+  }, [settingsPage]);
 
   React.useEffect(() => () => {
     if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current);
