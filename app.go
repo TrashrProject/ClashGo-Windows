@@ -273,25 +273,40 @@ func (a *App) archiveMemberRuntimeState(clearShared bool) error {
 	return nil
 }
 
-func (a *App) restoreMemberRuntimeState(adoptLegacy bool) error {
+func (a *App) restoreMemberRuntimeState(adoptShared bool) error {
 	dir := a.memberRuntimeStateDir()
 	if dir == "" {
 		return nil
 	}
 	marker := filepath.Join(dir, ".initialized")
-	if _, err := os.Stat(marker); os.IsNotExist(err) {
-		if adoptLegacy {
-			// Upgrade migration: the locally active license owns the existing
-			// pre-profile runtime data. Snapshot it without clearing the shared
-			// files so the current UI keeps working during startup.
+
+	if adoptShared {
+		// A persisted local activation means the shared runtime files belong to
+		// this same member from the previous process. If any are present, they
+		// are newer than (or equal to) the archived snapshot and therefore are
+		// authoritative. Refresh the member archive without clearing them.
+		hasShared := false
+		for _, rel := range memberRuntimeStateFiles {
+			if _, err := os.Stat(paths.ResolveConfig(rel)); err == nil {
+				hasShared = true
+				break
+			}
+		}
+		if hasShared {
 			return a.archiveMemberRuntimeState(false)
 		}
-		// Brand-new member profile: never inherit another user's shared state.
-		for _, rel := range memberRuntimeStateFiles {
-			_ = os.Remove(paths.ResolveConfig(rel))
-		}
+	}
+
+	if _, err := os.Stat(marker); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
+		}
+		// A newly activated license must start clean. A startup migration with
+		// no shared data also starts clean and simply initializes its namespace.
+		if !adoptShared {
+			for _, rel := range memberRuntimeStateFiles {
+				_ = os.Remove(paths.ResolveConfig(rel))
+			}
 		}
 		return os.WriteFile(marker, []byte("1"), 0o600)
 	}
@@ -407,11 +422,15 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 	a.mu.Unlock()
 
-	// Persist final stats. saveStats writes through the process-global async
-	// writer, then close that writer only on real application shutdown. Normal
-	// Bot Stop/Start cycles intentionally keep it alive so later sessions do
-	// not fall back to synchronous disk I/O.
+	// Persist final stats. saveStats is a synchronous barrier through the
+	// process-global writer, so attack-history writes queued before it are on
+	// disk before we refresh the member snapshot.
 	a.saveStats()
+	if a.license != nil && a.license.GetState().Activated {
+		if err := a.archiveMemberRuntimeState(false); err != nil {
+			log.Warn().Err(err).Msg("failed to persist member runtime state on shutdown")
+		}
+	}
 	bot.CloseAsyncWriter()
 }
 
