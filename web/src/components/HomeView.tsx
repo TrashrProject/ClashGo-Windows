@@ -12,6 +12,7 @@ interface HomeViewProps {
   onStop: () => void;
   onOpenAutomation: () => void;
   onOpenAccount: () => void;
+  onOpenSettings: () => void;
   licenseReady: boolean;
   accountLinked: boolean;
   windowsReady: boolean | null;
@@ -85,7 +86,7 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, running, starting,
-    onStart, onStop, onOpenAutomation, onOpenAccount,
+    onStart, onStop, onOpenAutomation, onOpenAccount, onOpenSettings,
     licenseReady, accountLinked, windowsReady,
   } = props;
 
@@ -181,6 +182,61 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           </div>
         ))}
       </section>
+
+      {!running && (
+        <section className="rounded-[1.75rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-premium dark:shadow-none">
+          {!licenseReady ? (
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">Étape suivante</div>
+                <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">Activer ta licence ClashGO</div>
+                <div className="mt-1 text-xs font-semibold text-zinc-500">L’activation ouvre ton espace membre et lie la licence à ce PC.</div>
+              </div>
+              <button type="button" onClick={onOpenAccount} className="rounded-xl bg-zinc-950 dark:bg-white px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950">
+                Ouvrir Mon ClashGO
+              </button>
+            </div>
+          ) : !accountLinked ? (
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">Étape suivante</div>
+                <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">Lier ton compte Clash</div>
+                <div className="mt-1 text-xs font-semibold text-zinc-500">Ton tag joueur permet à ClashGO de choisir automatiquement le bon profil HDV.</div>
+              </div>
+              <button type="button" onClick={onOpenAccount} className="rounded-xl bg-zinc-950 dark:bg-white px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950">
+                Lier mon compte
+              </button>
+            </div>
+          ) : windowsReady === false ? (
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500">Étape suivante</div>
+                <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">Vérifier BlueStacks</div>
+                <div className="mt-1 text-xs font-semibold text-zinc-500">ClashGO a détecté un élément Windows ou ADB à vérifier avant le lancement.</div>
+              </div>
+              <button type="button" onClick={onOpenSettings} className="rounded-xl bg-zinc-950 dark:bg-white px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950">
+                Voir le diagnostic
+              </button>
+            </div>
+          ) : windowsReady === true ? (
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-500">Tout est prêt</div>
+                <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">ClashGO peut démarrer</div>
+                <div className="mt-1 text-xs font-semibold text-zinc-500">Licence, compte Clash et environnement Windows sont prêts.</div>
+              </div>
+              <button type="button" onClick={onStart} className="rounded-xl bg-emerald-500 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-white">
+                Démarrer maintenant
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 text-sm font-semibold text-zinc-500">
+              <span className="material-symbols-outlined animate-spin text-base">progress_activity</span>
+              Vérification de BlueStacks et ADB…
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="grid grid-cols-2 xl:grid-cols-4 gap-4">
         {[
