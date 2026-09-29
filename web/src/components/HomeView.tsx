@@ -703,12 +703,23 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
               <div className="mt-1 text-xs font-semibold text-zinc-500">
                 {sessionReport.recommendations?.[0] || 'Rapport sauvegardé automatiquement par ClashGO.'}
               </div>
+              <div className="mt-3 flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-wider text-zinc-400">
+                <span>{sessionReport.anomalies || 0} anomalie{sessionReport.anomalies === 1 ? '' : 's'}</span>
+                <span>·</span>
+                <span>
+                  {sessionReport.recovery_attempts > 0
+                    ? Math.round(sessionReport.recovery_success_rate || 0) + ' % récupérations réussies'
+                    : 'Aucune récupération nécessaire'}
+                </span>
+                <span>·</span>
+                <span>{Math.round(sessionReport.zero_touch_rate || 0)} % zéro-touch</span>
+              </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:min-w-[560px]">
               {[
-                ['Or / h', formatLoot(Math.round(sessionReport.gold_per_hour || 0))],
-                ['Élixir / h', formatLoot(Math.round(sessionReport.elixir_per_hour || 0))],
-                ['Étoiles moy.', (sessionReport.average_stars || 0).toFixed(1)],
+                ['Attaques', String(sessionReport.attacks || 0)],
+                ['Déploiements', Math.round(sessionReport.full_deploy_rate || 0) + ' %'],
+                ['Retour village', Math.round(sessionReport.return_home_rate || 0) + ' %'],
                 ['Santé', Math.max(0, Math.min(100, sessionReport.health_score || 0)) + '/100'],
               ].map(([label, value]) => (
                 <div key={String(label)} className="rounded-2xl border border-emerald-100/80 dark:border-emerald-900/30 bg-white/80 dark:bg-zinc-900/70 px-3 py-3">
