@@ -49,7 +49,7 @@ const sideLabel = (value?: string): string => {
     south: 'bas',
     east: 'droite',
     west: 'gauche',
-    unknown: 'inconnu',
+    inconnu: 'inconnu',
     auto: 'auto',
   };
   return labels[raw] || (raw ? raw : 'auto');
@@ -231,7 +231,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         const rawRegressions = ev.fields?.regressions;
         let regressionDetail = '';
         if (Array.isArray(rawRegressions) && rawRegressions.length > 0) {
-          const first = rawRegressions[0] as { metric?: unknown; delta_pct?: unknown };
+          const first = rawRegressions[0] as { metric?: inconnu; delta_pct?: inconnu };
           const metric = typeof first.metric === 'string' ? first.metric.split('_').join(' ') : 'metric';
           const delta = typeof first.delta_pct === 'number' && Number.isFinite(first.delta_pct)
             ? ` · +${first.delta_pct.toFixed(0)}%`
@@ -719,7 +719,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
             <div className="flex items-center gap-2">
               {([
                 ['all', 'Tout'],
-                ['complete', 'Full deploy'],
+                ['complete', 'Déploiement complet'],
                 ['partial', 'Partiel'],
               ] as const).map(([id, label]) => (
                 <button
@@ -761,7 +761,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                       score {latestAttack.target_score || 0}/100 · {latestAttack.runtime_mode || 'Inconnu'}
                     </span>
                     <span className="px-2 py-1 rounded-lg bg-white/10 text-zinc-300 text-[9px] font-black uppercase tracking-wider">
-                      {latestAttack.destruction_pct || 0}% · {(latestAttack.battle_end_reason || 'unknown').split('_').join(' ')}
+                      {latestAttack.destruction_pct || 0}% · {(latestAttack.battle_end_reason || 'inconnu').split('_').join(' ')}
                     </span>
                     <span className="px-2 py-1 rounded-lg bg-white/10 text-zinc-300 text-[9px] font-black uppercase tracking-wider">
                       {latestAttack.full_routine_duration_ms > 0 ? `${(latestAttack.full_routine_duration_ms / 1000).toFixed(0)}s cycle réel` : `${(latestAttack.cycle_duration_ms / 1000).toFixed(0)} s cycle`}
@@ -791,7 +791,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                             ? 'bg-amber-500/15 text-amber-300'
                             : 'bg-white/10 text-zinc-300'
                       }`}>
-                        result {latestAttack.result_confidence || 'unknown'} · ★ {(latestAttack.stars_source || 'unknown').split('_').join(' ')} · loot {(latestAttack.loot_source || 'unknown').split('_').join(' ')}
+                        result {latestAttack.result_confidence || 'inconnu'} · ★ {(latestAttack.stars_source || 'inconnu').split('_').join(' ')} · loot {(latestAttack.loot_source || 'inconnu').split('_').join(' ')}
                       </span>
                     )}
                   </div>
@@ -915,7 +915,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                           </div>
                           {(rep.loot_source || rep.result_confidence) && (
                             <div className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider mt-1">
-                              {(rep.loot_source || 'unknown').split('_').join(' ')} · {rep.result_confidence || 'unknown'} confiance
+                              {(rep.loot_source || 'inconnu').split('_').join(' ')} · {rep.result_confidence || 'inconnu'} confiance
                             </div>
                           )}
                         </td>
@@ -945,7 +945,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                             {rep.search_skips || 0} ignorés · {((rep.full_routine_duration_ms || rep.cycle_duration_ms || 0) / 1000).toFixed(0)}s cycle réel
                           </div>
                           <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mt-1">
-                            {rep.destruction_pct || 0}% · {(rep.battle_end_reason || 'unknown').split('_').join(' ')}
+                            {rep.destruction_pct || 0}% · {(rep.battle_end_reason || 'inconnu').split('_').join(' ')}
                           </div>
                         </td>
 
@@ -1035,7 +1035,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                   ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/20'
                   : 'bg-zinc-100 dark:bg-zinc-900/50 text-zinc-500 border-zinc-200 dark:border-zinc-800/50 hover:text-zinc-700 dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800'
               }`}
-              title={terminalAutoScroll ? 'Auto-scroll enabled (click to disable)' : 'Auto-scroll disabled (click to enable)'}
+              title={terminalAutoScroll ? 'Défilement auto activé (cliquer pour désactiver)' : 'Défilement auto désactivé (cliquer pour activer)'}
             >
               <span className="material-symbols-outlined text-sm">
                 {terminalAutoScroll ? 'keyboard_arrow_down' : 'keyboard_arrow_up'}
@@ -1045,7 +1045,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
             <button
               onClick={() => void copyText(exportText)}
               className="h-9 px-5 rounded-xl bg-zinc-100 dark:bg-zinc-900/50 text-[10px] font-black text-zinc-500 hover:text-zinc-700 dark:hover:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all uppercase tracking-[0.2em] border border-zinc-200 dark:border-zinc-800/50 active:scale-95"
-              title="Copy the full console to the clipboard (ANSI-free)"
+              title="Copier toute la console dans le presse-papiers (sans ANSI)"
             >
               Export Logs
             </button>
