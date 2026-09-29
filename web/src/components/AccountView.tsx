@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetVillageResources, SaveMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetVillageResources, RefreshLicense, SaveMemberSettings } from '../../wailsjs/go/main/App';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
 type CurrentArmyUnit = {
@@ -161,6 +161,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [licenseKey, setLicenseKey] = React.useState('');
   const [licenseBusy, setLicenseBusy] = React.useState(false);
   const [licenseError, setLicenseError] = React.useState('');
+  const [licenseRefreshing, setLicenseRefreshing] = React.useState(false);
   const [memberSettings, setMemberSettings] = React.useState<MemberSettings | null>(null);
   const [memberSaving, setMemberSaving] = React.useState(false);
   const [memberMessage, setMemberMessage] = React.useState('');
@@ -227,6 +228,26 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       setLicenseError(e instanceof Error ? e.message : String(e));
     } finally {
       setLicenseBusy(false);
+    }
+  };
+
+  const refreshLicenseNow = async () => {
+    if (licenseRefreshing) return;
+    setLicenseRefreshing(true);
+    setLicenseError('');
+    try {
+      const state = await RefreshLicense();
+      const typed = state as LicenseState;
+      setLicenseState(typed);
+      if (typed.activated && (typed.role === 'developer' || typed.role === 'admin')) {
+        onInterfaceLevelChange('developer');
+      } else if (typed.activated && interfaceLevel === 'developer') {
+        onInterfaceLevelChange('simple');
+      }
+    } catch (e) {
+      setLicenseError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLicenseRefreshing(false);
     }
   };
 
@@ -453,12 +474,22 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
           </div>
 
           {licenseState?.activated ? (
-            <div className="shrink-0">
+            <div className="shrink-0 flex flex-col items-end gap-2">
+              {!confirmDeactivate && (
+                <button
+                  type="button"
+                  onClick={() => void refreshLicenseNow()}
+                  disabled={licenseBusy || licenseRefreshing}
+                  className="px-5 py-3 rounded-xl bg-white dark:bg-zinc-950 text-zinc-950 dark:text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
+                >
+                  {licenseRefreshing ? 'Actualisation…' : 'Actualiser la licence'}
+                </button>
+              )}
               {!confirmDeactivate ? (
                 <button
                   type="button"
                   onClick={() => setConfirmDeactivate(true)}
-                  disabled={licenseBusy}
+                  disabled={licenseBusy || licenseRefreshing}
                   className="px-5 py-3 rounded-xl border border-white/10 dark:border-zinc-200 text-[10px] font-black uppercase tracking-widest text-zinc-300 dark:text-zinc-600 hover:text-white dark:hover:text-zinc-950 disabled:opacity-40"
                 >
                   Désactiver sur ce PC
