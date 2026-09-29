@@ -25,6 +25,7 @@ import {
   GetConfig,
   GetStrategies,
   GetSystemDiagnostics,
+  GetStartupReadiness,
   ExportDiagnostics,
   SetBlueStacksInstance,
   GetUpdateStatus,
@@ -219,6 +220,11 @@ function App() {
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [botError, setBotError] = useState('');
   const [botDiagnosticPath, setBotDiagnosticPath] = useState('');
+  const [startupCheck, setStartupCheck] = useState<{
+    ready: boolean;
+    checks: Array<{ id: string; label: string; ok: boolean; message: string }>;
+  } | null>(null);
+  const [startupCheckRunning, setStartupCheckRunning] = useState(false);
 
   // Config states
   const [goldThreshold, setGoldThreshold] = useState(400000);
@@ -667,6 +673,31 @@ function App() {
     );
   };
 
+  const handleStartupCheck = useCallback(async () => {
+    if (startupCheckRunning) return;
+    setStartupCheckRunning(true);
+    try {
+      const result = await GetStartupReadiness();
+      setStartupCheck(result as unknown as {
+        ready: boolean;
+        checks: Array<{ id: string; label: string; ok: boolean; message: string }>;
+      });
+    } catch (err) {
+      console.warn('Startup readiness check failed:', err);
+      setStartupCheck({
+        ready: false,
+        checks: [{
+          id: 'internal',
+          label: 'Diagnostic',
+          ok: false,
+          message: 'Le pré-contrôle n’a pas pu être exécuté.',
+        }],
+      });
+    } finally {
+      setStartupCheckRunning(false);
+    }
+  }, [startupCheckRunning]);
+
   const handleStart = async () => {
     setBotError('');
     setBotDiagnosticPath('');
@@ -1079,6 +1110,9 @@ function App() {
               accountLinked={Boolean(playerTag)}
               windowsReady={systemDiagnostics ? windowsPreflightReady : null}
               readinessIssues={readinessIssues}
+              startupCheck={startupCheck}
+              startupCheckRunning={startupCheckRunning}
+              onRunStartupCheck={() => void handleStartupCheck()}
             />
           )}
           {tab === 'activity' && <Dashboard {...dashboardProps} />}
