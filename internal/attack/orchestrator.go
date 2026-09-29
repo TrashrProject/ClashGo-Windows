@@ -485,7 +485,33 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			deploySide = "right"
 		}
 
-		if side, rp1, rp2, freeSpace, ok := windowsDeployCorridor(redZone, w, h, uiCutoff); ok {
+		// A real user pin is an explicit calibration made against this player's
+		// current BlueStacks layout. Honor it before the coarse red-zone BBox.
+		// The BBox can legitimately span almost the whole frame when disconnected
+		// red/orange UI contours are merged, which previously discarded a valid
+		// user line and aborted the attack with "no safe Windows deploy corridor".
+		if userPinnedForTarget && len(deployLine.Points) >= 2 {
+			p1 = sanitizeWindowsDeployPoint(deployLine.Points[0], w, h)
+			p2 = sanitizeWindowsDeployPoint(deployLine.Points[len(deployLine.Points)-1], w, h)
+			if p1.Y >= uiCutoff || p2.Y >= uiCutoff {
+				return len(slotMgr.GetAllSlots()), fmt.Errorf("user-pinned Windows deploy line intersects lower battle HUD")
+			}
+			deploySide = targetEdge
+			e.lastDeploySide = deploySide
+			e.lastRedZoneBBox = redZone.BBox
+			e.lastDeployP1 = p1
+			e.lastDeployP2 = p2
+			e.lastDeployFreeSpace = 0
+			e.lastSafetyMode = "user_pinned"
+			e.lastRedZoneValid = redZone.Valid
+			e.lastCorridorVerified = true
+			e.lastHUDSafe = true
+			e.logger.Info().
+				Str("target", targetEdge).
+				Interface("p1", p1).
+				Interface("p2", p2).
+				Msg("Windows user-pinned deploy line locked")
+		} else if side, rp1, rp2, freeSpace, ok := windowsDeployCorridor(redZone, w, h, uiCutoff); ok {
 			deploySide, p1, p2 = side, rp1, rp2
 			e.lastDeploySide = deploySide
 			e.lastRedZoneBBox = redZone.BBox
