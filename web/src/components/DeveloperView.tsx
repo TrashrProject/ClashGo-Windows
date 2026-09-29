@@ -1068,9 +1068,89 @@ const DeveloperView: React.FC = () => {
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Installations ClashGO</div>
             <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Licences & machines</h3>
           </div>
-          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          <div className="p-4 space-y-3">
             {filteredLicenses.map((item, index) => (
-              <div key={(item.id || item.hint || 'license') + index} className="p-5 flex flex-col lg:flex-row lg:items-center gap-4">
+              <div
+                key={(item.id || item.hint || 'license') + index}
+                className="rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/45 p-4 shadow-sm"
+              >
+                <div className="grid grid-cols-1 xl:grid-cols-[minmax(300px,1fr)_170px_minmax(430px,auto)] gap-5 xl:items-center">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-base font-black text-zinc-950 dark:text-white">
+                        {item.customer_name || item.hint || 'Licence'}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-zinc-200/70 dark:bg-zinc-800 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-zinc-600 dark:text-zinc-300">
+                        {item.role || 'member'}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-zinc-200/70 dark:bg-zinc-800 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-zinc-600 dark:text-zinc-300">
+                        {planLabel(item.plan)}
+                      </span>
+                      {(() => {
+                        const presence = presenceState(item.last_seen_at);
+                        return (
+                          <span className={'shrink-0 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] ' + presence.tone}>
+                            {presence.label}
+                          </span>
+                        );
+                      })()}
+                      {isCurrentAdminLicense(item) && (
+                        <span className="shrink-0 rounded-full bg-sky-500/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-sky-500">
+                          Cette licence
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/70 px-3 py-2.5 min-w-0">
+                        <div className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-400">Machine</div>
+                        <div className="mt-1 truncate text-xs font-bold text-zinc-700 dark:text-zinc-200">
+                          {item.machine_name || 'PC non nommé'}
+                        </div>
+                        <div className="mt-1 truncate font-mono text-[10px] text-zinc-400" title={item.machine_id || ''}>
+                          {shortMachine(item.machine_id)}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/70 px-3 py-2.5 min-w-0">
+                        <div className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-400">Licence</div>
+                        <div className="mt-1 font-mono text-xs font-black text-zinc-700 dark:text-zinc-200">
+                          {item.hint || '••••'}
+                        </div>
+                        <div className="mt-1 truncate text-[10px] font-semibold text-zinc-400">
+                          {item.customer_contact || 'Aucun contact'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {item.customer_notes && (
+                      <div className="mt-2 text-[10px] font-semibold text-zinc-500 line-clamp-2" title={item.customer_notes}>
+                        Note · {item.customer_notes}
+                      </div>
+                    )}
+                    {Number(item.denied_activations || 0) > 0 && (
+                      <div className="mt-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[10px] font-bold text-amber-600 dark:text-amber-300">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="material-symbols-outlined text-sm">warning</span>
+                          <span>{Number(item.denied_activations || 0)} tentative(s) bloquée(s) depuis un autre PC</span>
+                          {item.last_denied_at && <span>· {dateLabel(item.last_denied_at)}</span>}
+                        </div>
+                        {item.last_denied_machine && (
+                          <div className="mt-1 font-mono text-[9px] opacity-70">
+                            Machine refusée · {shortMachine(item.last_denied_machine)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {isAdmin && (item.payment_status || Number(item.total_paid_cents || 0) > 0) && (
+                      <div className="mt-2 flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-wider">
+                        <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-600 dark:text-emerald-400">
+                          Total {euroLabel(item.total_paid_cents)}
+                        </span>
+                        <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-zinc-500">
+                          {paymentLabel(item.payment_status)}
+                        </span>
+                      </div>
+                    )}
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-black text-zinc-900 dark:text-white">
@@ -1182,9 +1262,10 @@ const DeveloperView: React.FC = () => {
                       </div>
                     </div>
                   )}
-                </div>
-                <div className="lg:text-right">
-                  <div className={
+                  </div>
+
+                  <div className="xl:text-left">
+                    <div className={
                     'text-[10px] font-black uppercase tracking-widest ' +
                     (item.active === false || isLicenseExpired(item, now)
                       ? 'text-rose-500'
@@ -1200,8 +1281,8 @@ const DeveloperView: React.FC = () => {
                   <div className="mt-1 text-[10px] text-zinc-400">{item.app_version || 'Jamais connectée'}</div>
                 </div>
 
-                {isAdmin && item.id && (
-                  <div className="lg:w-full xl:w-auto xl:min-w-[390px] flex flex-wrap items-center gap-2 lg:justify-end">
+                  {isAdmin && item.id && (
+                  <div className="flex flex-wrap items-center gap-2 xl:justify-end">
                     <button
                       type="button"
                       disabled={actionID === item.id || editingCustomerID === String(item.id)}
@@ -1362,6 +1443,7 @@ const DeveloperView: React.FC = () => {
                     </button>
                   </div>
                 )}
+                </div>
               </div>
             ))}
             {!busy && filteredLicenses.length === 0 && (
