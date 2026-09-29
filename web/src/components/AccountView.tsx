@@ -359,13 +359,13 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                         : 'À vie'}
                 </span>
                 {licenseState.expires_at && (
-                  <span>· Expire le {new Date(licenseState.expires_at).toLocaleString()}</span>
+                  <span>· Expire le {new Date(licenseState.expires_at).toLocaleString('fr-FR')}</span>
                 )}
               </div>
             )}
             {licenseState?.offline_until && (
               <p className="mt-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                Accès hors ligne jusqu’au {new Date(licenseState.offline_until).toLocaleString()}
+                Accès hors ligne jusqu’au {new Date(licenseState.offline_until).toLocaleString('fr-FR')}
               </p>
             )}
 
@@ -396,7 +396,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                 <div className="rounded-xl border border-white/10 dark:border-zinc-200/70 bg-white/5 dark:bg-zinc-100 px-3 py-2.5">
                   <div className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-500">Expiration</div>
                   <div className="mt-1 text-xs font-black">
-                    {licenseState.expires_at ? new Date(licenseState.expires_at).toLocaleDateString() : 'Jamais'}
+                    {licenseState.expires_at ? new Date(licenseState.expires_at).toLocaleDateString('fr-FR') : 'Jamais'}
                   </div>
                 </div>
               </div>
@@ -458,6 +458,20 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               <p className="mt-2 text-sm font-semibold text-zinc-500 max-w-2xl">
                 Ces réglages agissent réellement sur le bot et sont appliqués sans redémarrage. Les contrôles de sécurité restent actifs, même en mode Rapide.
               </p>
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                disabled={memberSaving}
+                onClick={() => {
+                  const next = applySpeedPreset(memberSettings, 'normal');
+                  setMemberSettings(next);
+                  void saveMemberSettings(next);
+                }}
+                className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-950 dark:hover:text-white disabled:opacity-40"
+              >
+                Restaurer les réglages recommandés
+              </button>
             </div>
 
             <div>
@@ -637,7 +651,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white')
                 }
               >
-                {level}
+                {level === 'simple' ? 'Simple' : 'Avancé'}
               </button>
             ))}
           </div>
