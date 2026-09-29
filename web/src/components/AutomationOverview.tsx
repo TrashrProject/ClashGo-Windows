@@ -153,12 +153,12 @@ const AutomationOverview: React.FC = React.memo(() => {
         )}
         {state.recoveryPauseThreshold > 0 && (
           <div className="px-3 py-2 rounded-xl border border-sky-500/20 bg-sky-500/10 text-sky-300 text-[10px] font-black uppercase tracking-wider">
-            Protection récupération ×{state.recoveryPauseThreshold}
+            Protection anti-boucle active
           </div>
         )}
         {state.resourceTime && (
           <div className="ml-auto text-[10px] font-bold text-zinc-600">
-            Dernier scan du village {new Date(state.resourceTime).toLocaleTimeString()}
+            Dernier scan du village {new Date(state.resourceTime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
           </div>
         )}
       </div>
