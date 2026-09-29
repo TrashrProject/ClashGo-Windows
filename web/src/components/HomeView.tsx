@@ -16,6 +16,8 @@ interface HomeViewProps {
   onStartTestSession: () => void;
   onStartQuickTestSession: () => void;
   onStop: () => void;
+  onStopAfterAttack: () => void;
+  gracefulStopPending: boolean;
   onOpenAutomation: () => void;
   onOpenAccount: () => void;
   onOpenMemberSettings: () => void;
@@ -241,7 +243,7 @@ const activityLabel = (event: ActivityEvent): { title: string; detail: string; i
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, sessionReport, testSessionActive, running, starting,
-    onStart, onStartWithPreset, onSpeedChange, onStartTestSession, onStartQuickTestSession, onStop, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
+    onStart, onStartWithPreset, onSpeedChange, onStartTestSession, onStartQuickTestSession, onStop, onStopAfterAttack, gracefulStopPending, onOpenAutomation, onOpenAccount, onOpenMemberSettings, onOpenVillage, onOpenSettings,
     licenseReady, licenseRequired, accountLinked, windowsReady, readinessIssues,
     startupCheck, startupCheckRunning, onRunStartupCheck,
     memberName, licensePlan, licenseExpiresAt, latestBootReport, currentArmy,
@@ -664,6 +666,46 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                   </button>
                 );
               })}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {running && !testSessionActive && (
+        <section className="rounded-[1.5rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-premium dark:shadow-none">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+              <div className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">Arrêt de session</div>
+              <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white">
+                {gracefulStopPending ? 'Arrêt propre programmé' : 'Choisis comment arrêter ClashGO'}
+              </div>
+              <div className="mt-1 text-[11px] font-semibold text-zinc-500">
+                {gracefulStopPending
+                  ? 'ClashGO termine l’attaque en cours, confirme le retour au village puis s’arrête.'
+                  : 'L’arrêt propre évite de couper un déploiement ou l’écran de résultats.'}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onStopAfterAttack}
+                disabled={gracefulStopPending}
+                className={
+                  'rounded-xl px-4 py-2.5 text-[9px] font-black uppercase tracking-widest transition ' +
+                  (gracefulStopPending
+                    ? 'bg-amber-500/10 text-amber-500 cursor-wait'
+                    : 'bg-zinc-950 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200')
+                }
+              >
+                {gracefulStopPending ? 'ARRÊT PROGRAMMÉ…' : 'ARRÊTER APRÈS L’ATTAQUE'}
+              </button>
+              <button
+                type="button"
+                onClick={onStop}
+                className="rounded-xl border border-rose-200 dark:border-rose-900/50 px-4 py-2.5 text-[9px] font-black uppercase tracking-widest text-rose-600 dark:text-rose-400 hover:bg-rose-500/10"
+              >
+                ARRÊT IMMÉDIAT
+              </button>
             </div>
           </div>
         </section>
