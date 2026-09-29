@@ -557,12 +557,15 @@ async function dashboardSummary(env) {
   };
 }
 
-async function resetMachine(request, env) {
+async function resetMachine(request, env, protectedLicenseId = "") {
   let body;
   try { body = await readJSON(request, 65536); }
   catch { return json({ message: "invalid request" }, 400); }
   const id = clean(body.license_id);
   if (!id) return json({ message: "license_id is required" }, 400);
+  if (protectedLicenseId && id === protectedLicenseId) {
+    return json({ message: "cannot reset the active admin license machine" }, 409);
+  }
   const result = await env.DB.prepare(
     "UPDATE licenses SET machine_id = NULL, last_seen_at = NULL, app_version = NULL WHERE id = ?1"
   ).bind(id).run();
@@ -584,13 +587,16 @@ async function revokeLicense(request, env) {
 }
 
 
-async function setLicenseRole(request, env) {
+async function setLicenseRole(request, env, protectedLicenseId = "") {
   let body;
   try { body = await readJSON(request, 65536); }
   catch { return json({ message: "invalid request" }, 400); }
   const id = clean(body.license_id);
   const role = normalizeRole(body.role);
   if (!id) return json({ message: "license_id is required" }, 400);
+  if (protectedLicenseId && id === protectedLicenseId && role !== "admin") {
+    return json({ message: "cannot remove admin role from the active admin license" }, 409);
+  }
   const result = await env.DB.prepare(
     "UPDATE licenses SET role = ?1 WHERE id = ?2"
   ).bind(role, id).run();
@@ -598,13 +604,16 @@ async function setLicenseRole(request, env) {
   return json({ ok: true, role });
 }
 
-async function setLicenseActive(request, env) {
+async function setLicenseActive(request, env, protectedLicenseId = "") {
   let body;
   try { body = await readJSON(request, 65536); }
   catch { return json({ message: "invalid request" }, 400); }
   const id = clean(body.license_id);
   const active = body.active === true ? 1 : 0;
   if (!id) return json({ message: "license_id is required" }, 400);
+  if (protectedLicenseId && id === protectedLicenseId && active === 0) {
+    return json({ message: "cannot revoke the active admin license" }, 409);
+  }
   const result = await env.DB.prepare(
     "UPDATE licenses SET active = ?1 WHERE id = ?2"
   ).bind(active, id).run();
@@ -814,51 +823,35 @@ async function router(request, env) {
     if (request.method === "GET" && path === "/v1/developer/incidents") {
       return json({ incidents: await listIncidents(env, 500) });
     }
+
+    const adminOnly = () => {
+      if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
+      return null;
+    };
+
     if (request.method === "POST" && path === "/v1/developer/licenses") {
-      if (dev.role !== "admin") {
-        return json({ message: "admin license required" }, 403);
-      }
+      const denied = adminOnly();
+      if (denied) return denied;
       return createLicenses(request, env);
     }
-    if (dev.role === "admin" && request.method === "POST" && path === "/v1/developer/licenses/reset-machine") {
-      return resetMachine(request, env);
-    }
-    if (dev.role === "admin" && request.method === "POST" && path === "/v1/developer/licenses/set-active") {
-      return setLicenseActive(request, env);
-    }
-    if (dev.role === "admin" && request.method === "POST" && path === "/v1/developer/licenses/renew") {
-      return renewLicense(request, env);
-    }
     if (request.method === "POST" && path === "/v1/developer/licenses/reset-machine") {
-      if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
-      return resetMachine(request, env);
+      const denied = adminOnly();
+      if (denied) return denied;
+      return resetMachine(request, env, dev.id);
     }
     if (request.method === "POST" && path === "/v1/developer/licenses/set-role") {
-      if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
-      return setLicenseRole(request, env);
+      const denied = adminOnly();
+      if (denied) return denied;
+      return setLicenseRole(request, env, dev.id);
     }
     if (request.method === "POST" && path === "/v1/developer/licenses/set-active") {
-      if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
-      return setLicenseActive(request, env);
+      const denied = adminOnly();
+      if (denied) return denied;
+      return setLicenseActive(request, env, dev.id);
     }
     if (request.method === "POST" && path === "/v1/developer/licenses/renew") {
-      if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
-      return renewLicense(request, env);
-    }
-    if (request.method === "POST" && path === "/v1/developer/licenses/reset-machine") {
-      if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
-      return resetMachine(request, env);
-    }
-    if (request.method === "POST" && path === "/v1/developer/licenses/set-active") {
-      if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
-      return setLicenseActive(request, env);
-    }
-    if (request.method === "POST" && path === "/v1/developer/licenses/set-role") {
-      if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
-      return setLicenseRole(request, env);
-    }
-    if (request.method === "POST" && path === "/v1/developer/licenses/renew") {
-      if (dev.role !== "admin") return json({ message: "admin license required" }, 403);
+      const denied = adminOnly();
+      if (denied) return denied;
       return renewLicense(request, env);
     }
   }
