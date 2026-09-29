@@ -289,6 +289,7 @@ function App() {
   const startupCheckAutoRan = useRef(false);
   const startInFlightRef = useRef(false);
   const testSessionInFlightRef = useRef(false);
+  const lastLicenseFocusRefreshRef = useRef(0);
   // Prevent a slow previous-license restore from overwriting the UI after a
   // fast deactivate/reactivate or member switch.
   const memberSyncGenerationRef = useRef(0);
@@ -674,11 +675,15 @@ function App() {
       void fetchCurrentArmy();
       void fetchSessionReport();
       void fetchDiagnostics();
-      void GetLicenseState()
-        .then((state) => {
-          if (state?.activated) void RefreshLicense();
-        })
-        .catch(() => {});
+      const now = Date.now();
+      if (now - lastLicenseFocusRefreshRef.current >= 30_000) {
+        lastLicenseFocusRefreshRef.current = now;
+        void GetLicenseState()
+          .then((state) => {
+            if (state?.activated) void RefreshLicense();
+          })
+          .catch(() => {});
+      }
       if (tabRef.current === 'settings' || tabRef.current === 'developer') {
         void fetchLogs();
       }
