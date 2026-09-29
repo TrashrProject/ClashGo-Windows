@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActiverLicense, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetVillageResources, SaveMemberSettings } from '../../wailsjs/go/main/App';
+import { ActiverLicense, ClearAccount, DeactivateLicense, GetAccountConfig, GetCachedPlayerProfile, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberSettings, GetPlayerProfile, GetVillageResources, SaveMemberSettings } from '../../wailsjs/go/main/App';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
 type CurrentArmyUnit = {
@@ -69,6 +69,12 @@ const applySpeedPreset = (settings: MemberSettings, profile: MemberSettings['spe
   }
 };
 
+type LicensePolicy = {
+  enforced: boolean;
+  service_configured: boolean;
+  service_url?: string;
+};
+
 type VillageResources = {
   timestamp: string;
   gold: number;
@@ -111,6 +117,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [message, setMessage] = React.useState('');
   const [error, setError] = React.useState('');
   const [licenseState, setLicenseState] = React.useState<LicenseState | null>(null);
+  const [licensePolicy, setLicensePolicy] = React.useState<LicensePolicy | null>(null);
   const [licenseKey, setLicenseKey] = React.useState('');
   const [licenseBusy, setLicenseBusy] = React.useState(false);
   const [licenseError, setLicenseError] = React.useState('');
@@ -121,13 +128,15 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
 
   const refreshLicense = React.useCallback(async () => {
     try {
-      const state = await GetLicenseState();
+      const [state, policy] = await Promise.all([GetLicenseState(), GetLicensePolicy()]);
       setLicenseState(state as LicenseState);
+      setLicensePolicy(policy as LicensePolicy);
       if (state?.activated && (state.role === 'developer' || state.role === 'admin')) {
         onInterfaceLevelChange('developer');
       }
     } catch {
-      // Licensing UI remains optional while the control service is unavailable.
+      // Licensing UI remains usable in local beta mode while the control
+      // service is not configured.
     }
   }, [onInterfaceLevelChange]);
 
@@ -408,11 +417,18 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
           </div>
         )}
       </section>
-      {licenseState?.activated && memberSettings && (
+      {(licenseState?.activated || licensePolicy?.enforced === false) && memberSettings && (
         <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
           <div className="flex flex-col gap-6">
             <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Mon ClashGO</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Mon ClashGO</div>
+                {!licenseState?.activated && licensePolicy?.enforced === false && (
+                  <span className="rounded-full bg-amber-500/10 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-amber-500">
+                    Mode bêta local
+                  </span>
+                )}
+              </div>
               <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Réglages membre</h3>
               <p className="mt-2 text-sm font-semibold text-zinc-500 max-w-2xl">
                 Ces réglages agissent réellement sur le bot et sont appliqués sans redémarrage. Les contrôles de sécurité restent actifs, même en mode Rapide.
