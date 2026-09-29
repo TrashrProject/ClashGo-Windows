@@ -814,6 +814,12 @@ async function router(request, env) {
     if (request.method === "GET" && path === "/v1/developer/incidents") {
       return json({ incidents: await listIncidents(env, 500) });
     }
+    if (request.method === "POST" && path === "/v1/developer/licenses") {
+      if (dev.role !== "admin") {
+        return json({ message: "admin license required" }, 403);
+      }
+      return createLicenses(request, env);
+    }
   }
 
   return json({ message: "not found" }, 404);
