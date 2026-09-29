@@ -55,6 +55,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
   const [copiedIdx, setCopiedIdx] = React.useState<number | null>(null);
   const [historyFilter, setHistoryFilter] = React.useState<'all' | 'complete' | 'partial'>('all');
   const [historyLimit, setHistoryLimit] = React.useState(10);
+  const [activityPage, setActivityPage] = React.useState<'summary' | 'history' | 'console'>('summary');
   const copiedTimerRef = React.useRef<number | null>(null);
   const uptimeHours = stats.uptime / (1e9 * 3600);
 
@@ -68,7 +69,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       return typeof raw === 'string' ? raw : '';
     };
     const rows: Array<{ at: string; icon: string; title: string; detail: string }> = [];
-    for (const ev of activity ?? []) {
+    for (const ev sur activity ?? []) {
       if (rows.length >= 7) break;
       if (ev.type === 'target_found' && ev.fields?.accept !== true) continue;
       if (ev.type === 'target_skipped' || ev.type === 'state_changed') continue;
@@ -161,7 +162,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
     const events = (replay?.events ?? []).filter((ev) => ev.kind === 'deploy');
     let maxX = 860;
     let maxY = 732;
-    for (const ev of events) {
+    for (const ev sur events) {
       maxX = Math.max(maxX, ev.p1?.x || 0, ev.p2?.x || 0, ev.slot_x || 0);
       maxY = Math.max(maxY, ev.p1?.y || 0, ev.p2?.y || 0, ev.slot_y || 0);
     }
@@ -196,7 +197,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
 
   const severityCounts = React.useMemo(() => {
     const counts: Record<LogSeverity, number> = { debug: 0, info: 0, success: 0, warn: 0, error: 0 };
-    for (const l of parsedLogs) counts[l.level]++;
+    for (const l sur parsedLogs) counts[l.level]++;
     return counts;
   }, [parsedLogs]);
 
@@ -225,7 +226,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
     copiedTimerRef.current = window.setTimeout(() => setCopiedIdx(null), 1200);
   };
 
-  // Wrap every (case-insensitive) occurrence of the filter text in
+  // Wrap every (case-insensitive) occurrence sur the filter text in
   // <mark> so matches pop out while the message keeps its color.
   const highlightMatch = (message: string): React.ReactNode => {
     const needle = logFilter.trim().toLowerCase();
@@ -301,7 +302,32 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
     <div className="space-y-6">
       <AutomationOverview />
 
-      {sessionReport && sessionReport.attacks > 0 && (
+      <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-zinc-50/90 dark:bg-zinc-950/90 backdrop-blur-xl">
+        <div className="inline-flex rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-1.5 shadow-sm">
+          {([
+            ['summary', 'Résumé', 'dashboard'],
+            ['history', 'Historique', 'history'],
+            ['console', 'Console', 'terminal'],
+          ] as const).map(([id, label, icon]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setActivityPage(id)}
+              className={
+                'flex items-center gap-2 rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] transition ' +
+                (activityPage === id
+                  ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950'
+                  : 'text-zinc-500 hover:text-zinc-950 dark:hover:text-white')
+              }
+            >
+              <span className="material-symbols-outlined text-base">{icon}</span>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {activityPage === 'summary' && sessionReport && sessionReport.attacks > 0 && (
         <section className="bg-zinc-950 dark:bg-white rounded-[2.5rem] shadow-premium-lg overflow-hidden">
           <div className="px-6 py-5 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-5">
             <div className="min-w-0">
@@ -361,7 +387,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       )}
 
       {/* Compact activity feed: high-level actions only, not raw diagnostics. */}
-      <section className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none overflow-hidden">
+      <section className={(activityPage === 'summary' ? '' : 'hidden ') + "bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none overflow-hidden"}>
         <div className="px-6 py-5 flex items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-800/70">
           <div>
             <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Activité en direct</div>
@@ -396,7 +422,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         )}
       </section>
 
-      {replay?.available && (
+      {activityPage === 'summary' && replay?.available && (
         <section className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none overflow-hidden">
           <div className="px-6 py-5 flex flex-wrap items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-800/70">
             <div>
@@ -413,13 +439,13 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
           </div>
 
           {(replay.events ?? []).length === 0 ? (
-            <div className="px-6 py-8 text-sm font-medium text-zinc-400">No deployment actions recorded in the latest trace.</div>
+            <div className="px-6 py-8 text-sm font-medium text-zinc-400">Aucune action de déploiement enregistrée dans la dernière trace.</div>
           ) : (
             <>
               <div className="px-6 pt-5">
                 <div className="grid grid-cols-1 xl:grid-cols-[1.5fr_auto] gap-4 items-start">
                   <div className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-zinc-950 overflow-hidden relative">
-                    <div className="absolute top-4 left-4 z-10">
+                    <div className="absolute top-4 restant(s)-4 z-10">
                       <div className="text-[9px] font-black uppercase tracking-[0.22em] text-zinc-500">Carte de déploiement</div>
                       <div className="mt-1 text-xs font-bold text-zinc-300">{replayMap.events.length} recorded deploy actions</div>
                     </div>
@@ -427,7 +453,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                       viewBox={`0 0 ${replayMap.width} ${replayMap.height}`}
                       className="w-full aspect-[860/732] min-h-[280px]"
                       role="img"
-                      aria-label="Latest deployment map"
+                      aria-label="Carte du dernier déploiement"
                     >
                       <defs>
                         <pattern id="deploy-grid" width="60" height="60" patternUnits="userSpaceOnUse">
@@ -500,12 +526,12 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                   </div>
                   <div className="grid grid-cols-2 xl:grid-cols-1 gap-2 min-w-[160px]">
                     {[
-                      ['Troop', 'bg-sky-500'],
-                      ['Hero', 'bg-amber-500'],
-                      ['Siege / CC', 'bg-rose-500'],
-                      ['Spell', 'bg-violet-500'],
-                      ['Safe line', 'bg-emerald-400'],
-                      ['Red zone', 'bg-rose-400'],
+                      ['Troupe', 'bg-sky-500'],
+                      ['Héros', 'bg-amber-500'],
+                      ['Siège / CDC', 'bg-rose-500'],
+                      ['Sort', 'bg-violet-500'],
+                      ['Ligne sûre', 'bg-emerald-400'],
+                      ['Zone rouge', 'bg-rose-400'],
                     ].map(([label, cls]) => (
                       <div key={label} className="rounded-xl border border-zinc-100 dark:border-zinc-800 px-3 py-2 flex items-center gap-2">
                         <span className={`size-2.5 rounded-full ${cls}`} />
@@ -551,11 +577,11 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       )}
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div className={(activityPage === 'summary' ? '' : 'hidden ') + "grid grid-cols-1 md:grid-cols-3 gap-8"}>
         {[
-          { label: 'Gold Looted', value: stats.total_gold, color: 'text-amber-500', bg: 'bg-amber-500/10', icon: 'monetization_on', rate: getRate(stats.total_gold) },
-          { label: 'Elixir Looted', value: stats.total_elixir, color: 'text-fuchsia-500', bg: 'bg-fuchsia-500/10', icon: 'water_drop', rate: getRate(stats.total_elixir) },
-          { label: 'Dark Elixir', value: stats.total_de, color: 'text-zinc-950 dark:text-zinc-100', bg: 'bg-zinc-100 dark:bg-zinc-800', icon: 'water_drop', rate: getRate(stats.total_de) }
+          { label: 'Or récupéré', value: stats.total_gold, color: 'text-amber-500', bg: 'bg-amber-500/10', icon: 'monetization_on', rate: getRate(stats.total_gold) },
+          { label: 'Élixir récupéré', value: stats.total_elixir, color: 'text-fuchsia-500', bg: 'bg-fuchsia-500/10', icon: 'water_drop', rate: getRate(stats.total_elixir) },
+          { label: 'Élixir noir', value: stats.total_de, color: 'text-zinc-950 dark:text-zinc-100', bg: 'bg-zinc-100 dark:bg-zinc-800', icon: 'water_drop', rate: getRate(stats.total_de) }
         ].map((item, idx) => (
           <div key={idx} className="bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none hover:shadow-premium-hover dark:hover:bg-zinc-800/50 transition-all duration-300 group">
             <div className="flex items-center justify-between mb-5">
@@ -575,7 +601,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       </div>
 
       {/* Persistent Attack History */}
-      <section className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none overflow-hidden">
+      <section className={(activityPage === 'history' ? '' : 'hidden ') + "bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none overflow-hidden"}>
         <div className="px-6 py-5 border-b border-zinc-100 dark:border-zinc-800/70 bg-gradient-to-r from-zinc-50/80 to-white dark:from-zinc-900 dark:to-zinc-900">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-4">
@@ -624,26 +650,26 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                   <div className="flex items-center gap-3 flex-wrap">
                     <span className="text-lg font-bold">{latestAttack.strategy || 'Unknown strategy'}</span>
                     <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                      {latestAttack.target_edge || 'Auto edge'}{latestAttack.deploy_side && latestAttack.deploy_side !== 'Unknown' ? ` → ${latestAttack.deploy_side}` : ''}
+                      {latestAttack.target_edge || 'Auto edge'}{latestAttack.deploy_side && latestAttack.deploy_side !== 'Inconnu' ? ` → ${latestAttack.deploy_side}` : ''}
                     </span>
                     <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider ${
                       latestAttack.deploy_success
                         ? 'bg-emerald-500/15 text-emerald-400'
                         : 'bg-amber-500/15 text-amber-300'
                     }`}>
-                      {latestAttack.deploy_success ? 'Deploy complete' : `${latestAttack.undeployed_slots} slot(s) left`}
+                      {latestAttack.deploy_success ? 'Deploy complete' : `${latestAttack.undeployed_slots} slot(s) restant(s)`}
                     </span>
                     <span className="px-2 py-1 rounded-lg bg-white/10 text-zinc-300 text-[9px] font-black uppercase tracking-wider">
                       {(latestAttack.search_duration_ms / 1000 || 0).toFixed(1)} s recherche · {latestAttack.search_skips || 0} ignorés
                     </span>
                     <span className="px-2 py-1 rounded-lg bg-white/10 text-zinc-300 text-[9px] font-black uppercase tracking-wider">
-                      score {latestAttack.target_score || 0}/100 · {latestAttack.runtime_mode || 'Unknown'}
+                      score {latestAttack.target_score || 0}/100 · {latestAttack.runtime_mode || 'Inconnu'}
                     </span>
                     <span className="px-2 py-1 rounded-lg bg-white/10 text-zinc-300 text-[9px] font-black uppercase tracking-wider">
                       {latestAttack.destruction_pct || 0}% · {(latestAttack.battle_end_reason || 'unknown').split('_').join(' ')}
                     </span>
                     <span className="px-2 py-1 rounded-lg bg-white/10 text-zinc-300 text-[9px] font-black uppercase tracking-wider">
-                      {latestAttack.full_routine_duration_ms > 0 ? `${(latestAttack.full_routine_duration_ms / 1000).toFixed(0)}s true loop` : `${(latestAttack.cycle_duration_ms / 1000).toFixed(0)} s cycle`}
+                      {latestAttack.full_routine_duration_ms > 0 ? `${(latestAttack.full_routine_duration_ms / 1000).toFixed(0)}s cycle réel` : `${(latestAttack.cycle_duration_ms / 1000).toFixed(0)} s cycle`}
                       {latestAttack.return_home_duration_ms > 0 ? ` · ${(latestAttack.return_home_duration_ms / 1000).toFixed(1)}s home` : ''}
                     </span>
                     {latestAttack.red_zone_valid && (
@@ -713,7 +739,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
             <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
               <span className="material-symbols-outlined text-zinc-400 text-2xl">history</span>
             </div>
-            <div className="text-sm font-bold text-zinc-600 dark:text-zinc-300">No saved attacks for this filter</div>
+            <div className="text-sm font-bold text-zinc-600 dark:text-zinc-300">No attaques sauvegardées for this filter</div>
             <div className="text-xs text-zinc-400 mt-1">Completed battles will appear here automatically and survive restarts.</div>
           </div>
         ) : (
@@ -774,12 +800,12 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                         </td>
 
                         <td className="px-4 py-4">
-                          <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{rep.strategy || 'Unknown'}</div>
+                          <div className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{rep.strategy || 'Inconnu'}</div>
                           <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mt-1">
-                            {rep.target_edge || 'Auto'}{rep.deploy_side && rep.deploy_side !== 'Unknown' ? ` → ${rep.deploy_side}` : ''}
+                            {rep.target_edge || 'Auto'}{rep.deploy_side && rep.deploy_side !== 'Inconnu' ? ` → ${rep.deploy_side}` : ''}
                           </div>
                           <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mt-1">
-                            score {rep.target_score || 0}/100 · {rep.runtime_mode || 'Unknown'}
+                            score {rep.target_score || 0}/100 · {rep.runtime_mode || 'Inconnu'}
                           </div>
                         </td>
 
@@ -790,11 +816,11 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                             <span className="text-zinc-600 dark:text-zinc-300">{(rep.dark_elixir_stolen + rep.bonus_de).toLocaleString()} DE</span>
                           </div>
                           <div className="text-[9px] text-zinc-400 font-black uppercase tracking-wider mt-1">
-                            {(totalLoot / 1e6).toFixed(2)}M combined
+                            {(totalLoot / 1e6).toFixed(2)}M combiné
                           </div>
                           {(rep.loot_source || rep.result_confidence) && (
                             <div className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider mt-1">
-                              {(rep.loot_source || 'unknown').split('_').join(' ')} · {rep.result_confidence || 'unknown'} confidence
+                              {(rep.loot_source || 'unknown').split('_').join(' ')} · {rep.result_confidence || 'unknown'} confiance
                             </div>
                           )}
                         </td>
@@ -806,10 +832,10 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                               : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
                           }`}>
                             <span className="material-symbols-outlined text-sm">{rep.deploy_success ? 'check_circle' : 'warning'}</span>
-                            {rep.deploy_success ? 'Complet' : `${rep.undeployed_slots} left`}
+                            {rep.deploy_success ? 'Complet' : `${rep.undeployed_slots} restant(s)`}
                           </div>
                           <div className="text-[9px] text-zinc-400 font-black uppercase tracking-wider mt-1.5 tabular-nums">
-                            {((rep.deploy_duration_ms || 0) / 1000).toFixed(1)}s deploy
+                            {((rep.deploy_duration_ms || 0) / 1000).toFixed(1)}s déploiement
                           </div>
                           {!rep.parsed_results && (
                             <div className="text-[9px] text-rose-500 font-black uppercase tracking-wider mt-1.5">Lecture OCR du résultat incomplète</div>
@@ -821,7 +847,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                             {((rep.search_duration_ms || 0) / 1000).toFixed(1)}s
                           </div>
                           <div className="text-[9px] font-black text-zinc-400 uppercase tracking-wider mt-1">
-                            {rep.search_skips || 0} ignorés · {((rep.full_routine_duration_ms || rep.cycle_duration_ms || 0) / 1000).toFixed(0)}s true loop
+                            {rep.search_skips || 0} ignorés · {((rep.full_routine_duration_ms || rep.cycle_duration_ms || 0) / 1000).toFixed(0)}s cycle réel
                           </div>
                           <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mt-1">
                             {rep.destruction_pct || 0}% · {(rep.battle_end_reason || 'unknown').split('_').join(' ')}
@@ -845,7 +871,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
 
             <div className="px-6 py-4 border-t border-zinc-100 dark:border-zinc-800/70 flex items-center justify-between gap-4 bg-zinc-50/40 dark:bg-zinc-800/10">
               <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                Showing {Math.min(historyLimit, filteredHistory.length)} of {filteredHistory.length} saved attacks
+                Affichage {Math.min(historyLimit, filteredHistory.length)} sur {filteredHistory.length} attaques sauvegardées
               </div>
               <div className="flex items-center gap-2">
                 {historyLimit > 10 && (
@@ -871,12 +897,12 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       </section>
 
       {/* Summary Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
+      <div className={(activityPage === 'summary' ? '' : 'hidden ') + "grid grid-cols-2 lg:grid-cols-4 gap-8"}>
         {[
-          { label: 'Bases Searched', value: stats.search_skips + stats.attacks_completed, icon: 'search', detail: `${stats.search_skips} ignorés` },
-          { label: 'Attacks', value: stats.attacks_completed, icon: 'bolt' },
-          { label: 'Total Revenue', value: `${((stats.total_gold + stats.total_elixir) / 1e6).toFixed(1)}M`, icon: 'trending_up' },
-          { label: 'System Uptime', value: formatUptime(stats.uptime), icon: 'timer' }
+          { label: 'Villages analysés', value: stats.search_skips + stats.attacks_completed, icon: 'search', detail: `${stats.search_skips} ignorés` },
+          { label: 'Attaques', value: stats.attacks_completed, icon: 'bolt' },
+          { label: 'Butin total', value: `${((stats.total_gold + stats.total_elixir) / 1e6).toFixed(1)}M`, icon: 'trending_up' },
+          { label: 'Temps actif', value: formatUptime(stats.uptime), icon: 'timer' }
         ].map((item, idx) => (
           <div key={idx} className="group bg-white dark:bg-zinc-900 p-5 rounded-[2rem] border border-zinc-100/50 dark:border-zinc-800/50 flex items-center gap-6 shadow-premium dark:shadow-none transition-all duration-500 hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
              <div className="w-14 h-14 rounded-2xl bg-zinc-50 dark:bg-zinc-800 flex items-center justify-center border border-zinc-100 dark:border-zinc-700 shadow-sm transition-transform group-hover:scale-110">
@@ -896,7 +922,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
       </div>
 
       {/* Logs Terminal */}
-      <section className="bg-white dark:bg-black rounded-[3rem] p-3 shadow-premium-lg border border-zinc-200/60 dark:border-zinc-900/80 transition-all duration-500">
+      <section className={(activityPage === 'console' ? '' : 'hidden ') + "bg-white dark:bg-black rounded-[3rem] p-3 shadow-premium-lg border border-zinc-200/60 dark:border-zinc-900/80 transition-all duration-500"}>
         <div className="px-8 py-3 flex flex-wrap items-center gap-4 justify-between border-b border-zinc-100 dark:border-zinc-900/50">
           <div className="flex items-center gap-4">
             <div className="flex gap-2">
@@ -934,19 +960,19 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         {/* Filter bar: text search + severity chips. */}
         <div className="px-8 py-3 flex flex-wrap items-center gap-3 border-b border-zinc-100 dark:border-zinc-900/50">
           <div className="relative flex-1 min-w-[180px] max-w-sm">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-sm text-zinc-600">search</span>
+            <span className="absolute restant(s)-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-sm text-zinc-600">search</span>
             <input
               value={logFilter}
               onChange={(e) => setLogFilter(e.target.value)}
-              placeholder="Filter logs…"
-              aria-label="Filter logs by text"
+              placeholder="Filtrer les logs…"
+              aria-label="Filtrer les logs par texte"
               className="w-full h-9 pl-9 pr-8 rounded-xl bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800/60 text-xs font-bold text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/40 focus:ring-2 focus:ring-emerald-500/10 transition-all"
             />
             {logFilter && (
               <button
                 onClick={() => setLogFilter('')}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-600 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
-                aria-label="Clear log filter"
+                aria-label="Effacer le filtre"
               >
                 <span className="material-symbols-outlined text-sm">close</span>
               </button>
@@ -982,7 +1008,7 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         <div
           ref={containerRef}
           role="log"
-          aria-label="System console — live bot output"
+          aria-label="Console système — sortie du bot en direct"
           onMouseEnter={() => setTerminalHovered(true)}
           onMouseLeave={() => setTerminalHovered(false)}
           className="p-5 h-80 terminal-scroll overflow-y-auto font-mono text-[13px] leading-relaxed text-zinc-600 dark:text-zinc-400 selection:bg-emerald-500/20"
@@ -1026,8 +1052,8 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
                         ? 'text-emerald-500 opacity-100'
                         : 'text-zinc-400 dark:text-zinc-600 hover:text-zinc-700 dark:hover:text-white'
                     }`}
-                    title="Copy line"
-                    aria-label="Copy log line"
+                    title="Copier la ligne"
+                    aria-label="Copier la ligne de log"
                   >
                     <span className="material-symbols-outlined text-sm">
                       {copiedIdx === i ? 'check' : 'content_copy'}
