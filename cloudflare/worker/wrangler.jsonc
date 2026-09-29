@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "clashgo-control-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "CLASHGO_WEB_ORIGIN": "https://trashrproject.github.io"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "clashgo-control",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+    }
+  ]
+}
