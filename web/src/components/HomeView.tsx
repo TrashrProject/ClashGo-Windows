@@ -1,6 +1,6 @@
 import React from 'react';
 import { ActivityEvent, AttackReport, BotStats } from '../types';
-import { formatTemps actif } from '../utils';
+import { formatUptime } from '../utils';
 
 interface HomeViewProps {
   stats: BotStats;
@@ -10,8 +10,8 @@ interface HomeViewProps {
   starting: boolean;
   onStart: () => void;
   onStop: () => void;
-  onOpenAutomatisation: () => void;
-  onOpenMon ClashGO: () => void;
+  onOpenAutomation: () => void;
+  onOpenAccount: () => void;
   licenseReady: boolean;
   accountLinked: boolean;
   windowsReady: boolean | null;
@@ -27,7 +27,7 @@ const formatLoot = (value: number): string => {
 const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   const {
     stats, history, activity, running, starting,
-    onStart, onStop, onOpenAutomatisation, onOpenMon ClashGO,
+    onStart, onStop, onOpenAutomation, onOpenAccount,
     licenseReady, accountLinked, windowsReady,
   } = props;
 
@@ -129,7 +129,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           { label: 'Attaques', value: String(stats.attacks_completed || 0), icon: 'swords' },
           { label: 'Or', value: formatLoot(stats.total_gold || 0), icon: 'paid' },
           { label: 'Elixir', value: formatLoot(stats.total_elixir || 0), icon: 'water_drop' },
-          { label: 'Temps actif', value: formatTemps actif(stats.uptime || 0), icon: 'schedule' },
+          { label: 'Temps actif', value: formatUptime(stats.uptime || 0), icon: 'schedule' },
         ].map((item) => (
           <div key={item.label} className="rounded-[1.75rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-premium dark:shadow-none">
             <span className="material-symbols-outlined text-lg text-zinc-400">{item.icon}</span>
@@ -177,14 +177,14 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Accès rapides</div>
           <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">L’essentiel en deux clics</h3>
           <div className="mt-5 grid gap-3">
-            <button type="button" onClick={onOpenAutomatisation} className="w-full flex items-center justify-between rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 px-4 py-4 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
+            <button type="button" onClick={onOpenAutomation} className="w-full flex items-center justify-between rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 px-4 py-4 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
               <span>
                 <span className="block text-sm font-black text-zinc-950 dark:text-white">Automatisation</span>
                 <span className="block mt-0.5 text-xs font-semibold text-zinc-500">Butin ciblé, armée et comportement d’attaque</span>
               </span>
               <span className="material-symbols-outlined text-zinc-400">chevron_right</span>
             </button>
-            <button type="button" onClick={onOpenMon ClashGO} className="w-full flex items-center justify-between rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 px-4 py-4 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
+            <button type="button" onClick={onOpenAccount} className="w-full flex items-center justify-between rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 px-4 py-4 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
               <span>
                 <span className="block text-sm font-black text-zinc-950 dark:text-white">Mon ClashGO</span>
                 <span className="block mt-0.5 text-xs font-semibold text-zinc-500">Licence, réglages membre et profil du village</span>
