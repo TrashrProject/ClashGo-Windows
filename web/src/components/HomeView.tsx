@@ -236,6 +236,7 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
   } = props;
 
   const lastAttack = history && history.length > 0 ? history[0] : undefined;
+  const [sessionCopyState, setSessionCopyState] = React.useState<'idle' | 'copied' | 'error'>('idle');
   const recentActivity = React.useMemo(
     () => (activity || [])
       .filter((event) => event.type !== 'state_changed' && event.type !== 'target_skipped')
@@ -284,6 +285,33 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
           ].filter(Boolean).join(' · '),
     };
   }, [sessionReport]);
+
+  const copySessionSummary = React.useCallback(async () => {
+    if (!sessionReport) return;
+    const lines = [
+      'ClashGO · Dernière session',
+      'Attaques: ' + (sessionReport.attacks || 0),
+      'Déploiements complets: ' + Math.round(sessionReport.full_deploy_rate || 0) + ' %',
+      'Retour village: ' + Math.round(sessionReport.return_home_rate || 0) + ' %',
+      'Zéro-touch: ' + Math.round(sessionReport.zero_touch_rate || 0) + ' %',
+      'Santé runtime: ' + Math.max(0, Math.min(100, sessionReport.health_score || 0)) + '/100',
+      'Anomalies: ' + (sessionReport.anomalies || 0),
+      'Récupérations: ' + (sessionReport.recovery_attempts || 0) +
+        ((sessionReport.recovery_attempts || 0) > 0
+          ? ' · ' + Math.round(sessionReport.recovery_success_rate || 0) + ' % réussies'
+          : ''),
+      'Validation: ' + (lastSessionValidation?.label || 'Non disponible'),
+      sessionReport.recommendations?.[0] ? 'Note: ' + sessionReport.recommendations[0] : '',
+    ].filter(Boolean).join('\n');
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      setSessionCopyState('copied');
+    } catch {
+      setSessionCopyState('error');
+    }
+    window.setTimeout(() => setSessionCopyState('idle'), 2500);
+  }, [sessionReport, lastSessionValidation]);
 
   const runCheckAction = React.useCallback((action?: string) => {
     switch (action) {
@@ -769,18 +797,30 @@ const HomeView: React.FC<HomeViewProps> = React.memo((props) => {
                 <span>{Math.round(sessionReport.zero_touch_rate || 0)} % zéro-touch</span>
               </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:min-w-[560px]">
-              {[
-                ['Attaques', String(sessionReport.attacks || 0)],
-                ['Déploiements', Math.round(sessionReport.full_deploy_rate || 0) + ' %'],
-                ['Retour village', Math.round(sessionReport.return_home_rate || 0) + ' %'],
-                ['Santé', Math.max(0, Math.min(100, sessionReport.health_score || 0)) + '/100'],
-              ].map(([label, value]) => (
-                <div key={String(label)} className="rounded-2xl border border-emerald-100/80 dark:border-emerald-900/30 bg-white/80 dark:bg-zinc-900/70 px-3 py-3">
-                  <div className="text-sm font-black text-zinc-950 dark:text-white tabular-nums">{value}</div>
-                  <div className="mt-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">{label}</div>
-                </div>
-              ))}
+            <div className="lg:min-w-[560px]">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {[
+                  ['Attaques', String(sessionReport.attacks || 0)],
+                  ['Déploiements', Math.round(sessionReport.full_deploy_rate || 0) + ' %'],
+                  ['Retour village', Math.round(sessionReport.return_home_rate || 0) + ' %'],
+                  ['Santé', Math.max(0, Math.min(100, sessionReport.health_score || 0)) + '/100'],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-2xl border border-emerald-100/80 dark:border-emerald-900/30 bg-white/80 dark:bg-zinc-900/70 px-3 py-3">
+                    <div className="text-sm font-black text-zinc-950 dark:text-white tabular-nums">{value}</div>
+                    <div className="mt-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">{label}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => void copySessionSummary()}
+                  className="rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-white/80 dark:bg-zinc-900 px-4 py-2 text-[9px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-300 transition hover:border-emerald-400"
+                >
+                  <span className="material-symbols-outlined mr-2 align-middle text-sm">content_copy</span>
+                  {sessionCopyState === 'copied' ? 'Copié' : sessionCopyState === 'error' ? 'Copie impossible' : 'Copier le résumé'}
+                </button>
+              </div>
             </div>
           </div>
         </section>
