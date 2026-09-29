@@ -429,7 +429,10 @@ func (c *Classifier) buildRules() {
 			Priority: 99,
 			Weight:   99,
 			Desc:     "quit confirm dialog (Cancel / Okay)",
-			MinPass:  2,
+			// Require the complete dialog signature. Two loose color anchors can
+			// occur on a bright village/event frame and caused repeated false
+			// "quit-confirm" detections even after tapping Cancel.
+			MinPass:  3,
 			Checks: []PixelCheck{
 				// Green Okay button
 				{497, 431, 0xD6, 0xF4, 0x76, 45},
