@@ -883,6 +883,34 @@ func (a *App) IsRunning() bool {
 	return a.bot != nil
 }
 
+type LicensePolicy struct {
+	Enforced          bool   `json:"enforced"`
+	ServiceConfigured bool   `json:"service_configured"`
+	ServiceURL        string `json:"service_url,omitempty"`
+}
+
+func (a *App) GetLicensePolicy() LicensePolicy {
+	cfg := config.LoadOrDefault("config.json")
+	serviceURL := clashControlServiceURL(cfg)
+
+	// Licensing becomes mandatory only when a real control endpoint has been
+	// explicitly configured for the build/runtime. The localhost fallback is
+	// intentionally development-only and must never lock beta testers out.
+	explicit := strings.TrimSpace(os.Getenv("CLASHGO_CONTROL_API_URL")) != "" ||
+		strings.TrimSpace(controlServiceURL) != ""
+
+	return LicensePolicy{
+		Enforced:          explicit,
+		ServiceConfigured: explicit && strings.TrimSpace(serviceURL) != "",
+		ServiceURL:        func() string {
+			if explicit {
+				return serviceURL
+			}
+			return ""
+		}(),
+	}
+}
+
 // GetLicenseState exposes safe activation metadata to the UI. The full
 // license key is intentionally never returned through Wails.
 func (a *App) GetLicenseState() licensing.State {
