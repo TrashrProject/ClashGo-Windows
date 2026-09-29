@@ -24,6 +24,9 @@ type Incident = {
   customer_name?: string;
   customer_contact?: string;
   customer_notes?: string;
+  payment_status?: string;
+  total_paid_cents?: number;
+  next_due_at?: string;
 };
 
 type LicenseRow = {
@@ -70,6 +73,19 @@ const planLabel = (value?: string): string => {
   if (value === 'week_1') return '1 semaine';
   if (value === 'month_1') return '1 mois';
   return 'À vie';
+};
+
+const paymentLabel = (value?: string): string => {
+  if (value === 'paid') return 'Payé';
+  if (value === 'pending') return 'En attente';
+  if (value === 'offered') return 'Offert';
+  if (value === 'free') return 'Free';
+  return 'Non renseigné';
+};
+
+const euroLabel = (cents?: number): string => {
+  const value = Number(cents || 0) / 100;
+  return value.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
 };
 
 const dateLabel = (value?: string): string => {
@@ -140,6 +156,10 @@ const DeveloperView: React.FC = () => {
   const [search, setSearch] = React.useState('');
   const [licenseFilter, setLicenseFilter] = React.useState<'all' | 'active' | 'revoked' | 'expired' | 'expiring' | 'unactivated'>('all');
   const [renewPlans, setRenewPlans] = React.useState<Record<string, 'free_2d' | 'week_1' | 'month_1' | 'lifetime'>>({});
+  const [renewingID, setRenewingID] = React.useState('');
+  const [renewAmount, setRenewAmount] = React.useState('');
+  const [renewPaymentStatus, setRenewPaymentStatus] = React.useState<'paid' | 'pending' | 'offered' | 'free'>('paid');
+  const [renewNote, setRenewNote] = React.useState('');
   const [editingCustomerID, setEditingCustomerID] = React.useState('');
   const [editCustomerName, setEditCustomerName] = React.useState('');
   const [editCustomerContact, setEditCustomerContact] = React.useState('');
@@ -220,8 +240,8 @@ const DeveloperView: React.FC = () => {
     }
   };
 
-  const runLicenseAction = async (id: string, action: () => Promise<unknown>, success: string) => {
-    if (!isAdmin || !id || actionID) return;
+  const runLicenseAction = async (id: string, action: () => Promise<unknown>, success: string): Promise<boolean> => {
+    if (!isAdmin || !id || actionID) return false;
     setActionID(id);
     setError('');
     setNotice('');
@@ -229,8 +249,10 @@ const DeveloperView: React.FC = () => {
       await action();
       setNotice(success);
       await refresh();
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return false;
     } finally {
       setActionID('');
     }
@@ -243,11 +265,42 @@ const DeveloperView: React.FC = () => {
       ? item.plan
       : 'month_1';
     const plan = renewPlans[id] || currentPlan;
-    await runLicenseAction(
+    const normalizedAmount = renewAmount.trim().replace(',', '.');
+    const parsedAmount = normalizedAmount === '' ? 0 : Number(normalizedAmount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+      setError('Montant invalide.');
+      return;
+    }
+    const amountCents = Math.round(parsedAmount * 100);
+    const ok = await runLicenseAction(
       id,
-      () => AdminRenewLicense(id, plan),
+      () => AdminRenewLicense(id, plan, amountCents, renewPaymentStatus, renewNote.trim()),
       'Licence renouvelée en ' + planLabel(plan) + ' · même clé conservée.'
     );
+    if (ok) {
+      setRenewingID('');
+      setRenewAmount('');
+      setRenewPaymentStatus('paid');
+      setRenewNote('');
+    }
+  };
+
+  const openRenewal = (item: LicenseRow) => {
+    const id = String(item.id || '');
+    if (!id) return;
+    setRenewingID(id);
+    setRenewAmount('');
+    setRenewPaymentStatus('paid');
+    setRenewNote('');
+    setError('');
+    setNotice('');
+  };
+
+  const cancelRenewal = () => {
+    setRenewingID('');
+    setRenewAmount('');
+    setRenewPaymentStatus('paid');
+    setRenewNote('');
   };
 
   const resetMachine = async (item: LicenseRow) => {
@@ -359,6 +412,8 @@ const DeveloperView: React.FC = () => {
       item.customer_name,
       item.customer_contact,
       item.customer_notes,
+      item.payment_status,
+      item.total_paid_cents,
       item.hint,
       item.id,
       item.machine_id,
@@ -758,6 +813,16 @@ const DeveloperView: React.FC = () => {
                       Note · {item.customer_notes}
                     </div>
                   )}
+                  {isAdmin && (item.payment_status || Number(item.total_paid_cents || 0) > 0) && (
+                    <div className="mt-2 flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-wider">
+                      <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-600 dark:text-emerald-400">
+                        Total {euroLabel(item.total_paid_cents)}
+                      </span>
+                      <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-zinc-500">
+                        {paymentLabel(item.payment_status)}
+                      </span>
+                    </div>
+                  )}
 
                   {isAdmin && item.id && editingCustomerID === String(item.id) && (
                     <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 max-w-2xl">
@@ -865,7 +930,7 @@ const DeveloperView: React.FC = () => {
                         <button
                           type="button"
                           disabled={actionID === item.id}
-                          onClick={() => void renewLicense(item)}
+                          onClick={() => openRenewal(item)}
                           className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-40"
                         >
                           Renouveler
@@ -875,6 +940,64 @@ const DeveloperView: React.FC = () => {
                       <span className="h-9 inline-flex items-center rounded-lg bg-emerald-500/10 px-3 text-[9px] font-black uppercase tracking-wider text-emerald-500">
                         À vie
                       </span>
+                    )}
+
+                    {renewingID === String(item.id) && item.plan !== 'lifetime' && (
+                      <div className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/70 p-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+                          <label>
+                            <div className="mb-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">Montant encaissé (€)</div>
+                            <input
+                              value={renewAmount}
+                              onChange={(e) => setRenewAmount(e.target.value)}
+                              inputMode="decimal"
+                              placeholder="Ex. 9,99"
+                              className="h-9 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 text-xs font-bold outline-none"
+                            />
+                          </label>
+                          <label>
+                            <div className="mb-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">Statut</div>
+                            <select
+                              value={renewPaymentStatus}
+                              onChange={(e) => setRenewPaymentStatus(e.target.value as typeof renewPaymentStatus)}
+                              className="h-9 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-[9px] font-black uppercase outline-none"
+                            >
+                              <option value="paid">Payé</option>
+                              <option value="pending">En attente</option>
+                              <option value="offered">Offert</option>
+                              <option value="free">Free</option>
+                            </select>
+                          </label>
+                          <label className="sm:col-span-2">
+                            <div className="mb-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">Note renouvellement</div>
+                            <input
+                              value={renewNote}
+                              onChange={(e) => setRenewNote(e.target.value)}
+                              maxLength={1000}
+                              placeholder="Optionnel"
+                              className="h-9 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 text-xs font-semibold outline-none"
+                            />
+                          </label>
+                        </div>
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            type="button"
+                            disabled={actionID === item.id}
+                            onClick={() => void renewLicense(item)}
+                            className="h-9 rounded-lg bg-zinc-950 dark:bg-white px-4 text-[9px] font-black uppercase tracking-wider text-white dark:text-zinc-950 disabled:opacity-40"
+                          >
+                            Confirmer le renouvellement
+                          </button>
+                          <button
+                            type="button"
+                            disabled={actionID === item.id}
+                            onClick={cancelRenewal}
+                            className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-500 disabled:opacity-40"
+                          >
+                            Annuler
+                          </button>
+                        </div>
+                      </div>
                     )}
 
                     <button
