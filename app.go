@@ -1743,6 +1743,24 @@ func (a *App) AdminSetLicenseRole(licenseID, role string) error {
 	return err
 }
 
+func (a *App) AdminUpdateLicenseCustomer(licenseID, customerName, customerContact string) error {
+	licenseID = strings.TrimSpace(licenseID)
+	customerName = strings.TrimSpace(customerName)
+	customerContact = strings.TrimSpace(customerContact)
+	if licenseID == "" {
+		return fmt.Errorf("license id is required")
+	}
+	if customerName == "" {
+		return fmt.Errorf("customer name is required")
+	}
+	_, err := a.adminControlPOST("/v1/developer/licenses/update-customer", map[string]any{
+		"license_id":       licenseID,
+		"customer_name":    customerName,
+		"customer_contact": customerContact,
+	})
+	return err
+}
+
 func (a *App) AdminRenewLicense(licenseID, plan string) (map[string]any, error) {
 	licenseID = strings.TrimSpace(licenseID)
 	if licenseID == "" {
