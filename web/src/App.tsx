@@ -575,7 +575,24 @@ function App() {
       setLicenseRole(role);
       setLicenseMemberName(payload?.member_name || '');
       setLicensePlan(payload?.plan || '');
+      setLicenseExpiresAt(payload?.expires_at || '');
+      setLicenseAccessReady(Boolean(payload?.activated));
+      startupCheckAutoRan.current = false;
+      setStartupCheck(null);
       void syncMemberScopedView(Boolean(payload?.activated));
+      if (payload?.activated) {
+        void GetStartupReadiness()
+          .then((result) => {
+            setStartupCheck(result as unknown as {
+              ready: boolean;
+              checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
+            });
+            startupCheckAutoRan.current = true;
+          })
+          .catch(() => {
+            startupCheckAutoRan.current = false;
+          });
+      }
 
       if (role === 'developer' || role === 'admin') {
         setInterfaceLevel('developer');
@@ -589,9 +606,6 @@ function App() {
         setTab((current) => current === 'developer' ? 'dashboard' : current);
       }
 
-      if (payload?.activated === false) {
-        setLicenseAccessReady(false);
-      }
     });
 
     // StartBot returns running=true immediately while the boot runs in
