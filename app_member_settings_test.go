@@ -342,3 +342,63 @@ func TestClearCachedPlayerProfileIfDifferentKeepsMatchingMember(t *testing.T) {
 		t.Fatalf("expected matching cached profile to remain, err=%v", err)
 	}
 }
+
+
+func TestMemberAccountFileRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "members", "profile.account.json")
+	want := "#ABC123XYZ"
+
+	if err := saveMemberAccountFile(path, want); err != nil {
+		t.Fatalf("saveMemberAccountFile: %v", err)
+	}
+	got, ok := loadMemberAccountFile(path)
+	if !ok {
+		t.Fatal("expected saved member account to load")
+	}
+	if got != want {
+		t.Fatalf("loaded tag=%q want=%q", got, want)
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("temporary member account survived successful save: %v", err)
+	}
+	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+		t.Fatalf("backup member account survived successful save: %v", err)
+	}
+}
+
+func TestMemberAccountFileRecoversBackup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "members", "profile.account.json")
+	want := "#RECOVER9"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := json.Marshal(memberAccountProfile{PlayerTag: want})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".bak", backup, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := loadMemberAccountFile(path)
+	if !ok {
+		t.Fatal("expected backup member account to recover")
+	}
+	if got != want {
+		t.Fatalf("recovered tag=%q want=%q", got, want)
+	}
+	primary, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("recovered primary missing: %v", err)
+	}
+	var restored memberAccountProfile
+	if err := json.Unmarshal(primary, &restored); err != nil {
+		t.Fatalf("recovered primary invalid json: %v", err)
+	}
+	if restored.PlayerTag != want {
+		t.Fatalf("recovered primary tag=%q want=%q", restored.PlayerTag, want)
+	}
+}
