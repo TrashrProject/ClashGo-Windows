@@ -250,7 +250,8 @@ function App() {
       return;
     }
 
-    const [accountResult, statsResult, historyResult, resourceResult, activityResult, replayResult, reportResult] = await Promise.allSettled([
+    const [configResult, accountResult, statsResult, historyResult, resourceResult, activityResult, replayResult, reportResult] = await Promise.allSettled([
+      GetConfig(),
       GetAccountConfig(),
       GetStats(),
       GetAttackHistory(),
@@ -260,6 +261,19 @@ function App() {
       GetSessionReport(),
     ]);
 
+    if (configResult.status === 'fulfilled') {
+      const conf = configResult.value;
+      setGoldThreshold(conf.search.min_loot_gold);
+      setElixirThreshold(conf.search.min_loot_elixir);
+      setDeThreshold(conf.search.min_loot_de);
+      setSearchEnabled(conf.search.enabled);
+      setUpgradeWalls(conf.upgrade.upgrade_walls);
+      setSelectedStrategy(conf.attack.strategy_file);
+      setStallTimer(conf.attack.stall_timer_seconds);
+      setLootExitEnabled(conf.attack.loot_exit_enabled ?? false);
+      setLootExitPercent(conf.attack.loot_exit_percent ?? 100);
+      setSimpleMode(conf.automation?.simple_mode ?? true);
+    }
     if (accountResult.status === 'fulfilled') {
       setPlayerTag(accountResult.value?.player_tag || '');
     }
