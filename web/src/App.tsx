@@ -210,6 +210,7 @@ function App() {
   const [licenseRole, setLicenseRole] = useState<'member' | 'developer' | 'admin' | ''>('');
   const [licenseMemberName, setLicenseMemberName] = useState('');
   const [licensePlan, setLicensePlan] = useState('');
+  const [licenseExpiresAt, setLicenseExpiresAt] = useState('');
 
   // Updater state — pushed via `updater_status` event from Go.
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(DEFAULT_UPDATE_STATUS);
@@ -277,7 +278,7 @@ function App() {
     }
   }, []);
 
-  const handleLicenseReady = useCallback((state: { activated: boolean; role?: string; member_name?: string; plan?: string }, policy: { enforced: boolean }) => {
+  const handleLicenseReady = useCallback((state: { activated: boolean; role?: string; member_name?: string; plan?: string; expires_at?: string }, policy: { enforced: boolean }) => {
     const role = state?.role === 'admin'
       ? 'admin'
       : state?.role === 'developer'
@@ -288,6 +289,7 @@ function App() {
     setLicenseRole(role);
     setLicenseMemberName(state?.member_name || '');
     setLicensePlan(state?.plan || '');
+    setLicenseExpiresAt(state?.expires_at || '');
 
     if (role === 'developer' || role === 'admin') {
       setInterfaceLevel('developer');
@@ -389,11 +391,13 @@ function App() {
           setLicenseRole(license.role);
           setLicenseMemberName(license.member_name || '');
           setLicensePlan(license.plan || '');
+          setLicenseExpiresAt(license.expires_at || '');
           setInterfaceLevel('developer');
         } else if (license?.activated) {
           setLicenseRole('member');
           setLicenseMemberName(license.member_name || '');
           setLicensePlan(license.plan || '');
+          setLicenseExpiresAt(license.expires_at || '');
           try {
             const savedLevel = await GetMemberInterfaceLevel();
             setInterfaceLevel(savedLevel === 'advanced' ? 'advanced' : 'simple');
@@ -404,6 +408,7 @@ function App() {
           setLicenseRole('');
           setLicenseMemberName('');
           setLicensePlan('');
+          setLicenseExpiresAt('');
           setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
         }
       } catch (err) {
@@ -519,7 +524,7 @@ function App() {
       }
     });
 
-    const unsubLicense = safeEventsOn("license_state", (payload: { activated?: boolean; role?: string; member_name?: string; plan?: string; error?: string }) => {
+    const unsubLicense = safeEventsOn("license_state", (payload: { activated?: boolean; role?: string; member_name?: string; plan?: string; expires_at?: string; error?: string }) => {
       const role = payload?.role === 'admin'
         ? 'admin'
         : payload?.role === 'developer'
@@ -805,6 +810,24 @@ function App() {
           ? 'Déconnecté'
           : 'En attente';
 
+  const licenseExpiryNotice = useMemo(() => {
+    if (!licenseAccessReady || !licenseExpiresAt) return null;
+    const expiry = Date.parse(licenseExpiresAt);
+    if (!Number.isFinite(expiry)) return null;
+    const remainingMs = expiry - Date.now();
+    if (remainingMs <= 0) {
+      return { urgent: true, text: 'Ta licence ClashGO est expirée.' };
+    }
+    const remainingHours = Math.ceil(remainingMs / (60 * 60 * 1000));
+    if (remainingHours <= 72) {
+      const text = remainingHours <= 24
+        ? 'Ta licence ClashGO expire aujourd’hui.'
+        : `Ta licence ClashGO expire dans ${Math.ceil(remainingHours / 24)} jours.`;
+      return { urgent: remainingHours <= 24, text };
+    }
+    return null;
+  }, [licenseAccessReady, licenseExpiresAt]);
+
   const readinessIssues = useMemo(() => {
     if (!systemDiagnostics) return [] as string[];
     const issues: string[] = [];
@@ -946,6 +969,32 @@ function App() {
               </div>
             </div>
           </header>
+
+          {licenseExpiryNotice && (
+            <section className={
+              'mb-4 rounded-2xl border px-4 py-3 ' +
+              (licenseExpiryNotice.urgent
+                ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300'
+                : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300')
+            }>
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <span className="material-symbols-outlined text-lg">{licenseExpiryNotice.urgent ? 'error' : 'schedule'}</span>
+                  <div>
+                    <div className="text-xs font-black uppercase tracking-wider">Licence</div>
+                    <div className="mt-0.5 text-sm font-semibold">{licenseExpiryNotice.text}</div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTab('account')}
+                  className="shrink-0 rounded-xl border border-current/20 px-4 py-2 text-[10px] font-black uppercase tracking-widest"
+                >
+                  Mon ClashGO
+                </button>
+              </div>
+            </section>
+          )}
 
           {botError && (
             <section className="mb-6 no-drag rounded-2xl border border-rose-500/30 bg-rose-500/10 px-5 py-4 shadow-sm" role="alert">
