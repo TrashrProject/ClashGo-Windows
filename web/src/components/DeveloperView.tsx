@@ -1074,7 +1074,7 @@ const DeveloperView: React.FC = () => {
                 key={(item.id || item.hint || 'license') + index}
                 className="rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/45 p-4 shadow-sm"
               >
-                <div className="grid grid-cols-1 xl:grid-cols-[minmax(300px,1fr)_170px_minmax(430px,auto)] gap-5 xl:items-center">
+                <div className="grid grid-cols-1 xl:grid-cols-[minmax(320px,1fr)_170px_minmax(430px,auto)] gap-5 xl:items-center">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate text-base font-black text-zinc-950 dark:text-white">
@@ -1102,7 +1102,7 @@ const DeveloperView: React.FC = () => {
                     </div>
 
                     <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <div className="rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/70 px-3 py-2.5 min-w-0">
+                      <div className="min-w-0 rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/70 px-3 py-2.5">
                         <div className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-400">Machine</div>
                         <div className="mt-1 truncate text-xs font-bold text-zinc-700 dark:text-zinc-200">
                           {item.machine_name || 'PC non nommé'}
@@ -1111,7 +1111,7 @@ const DeveloperView: React.FC = () => {
                           {shortMachine(item.machine_id)}
                         </div>
                       </div>
-                      <div className="rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/70 px-3 py-2.5 min-w-0">
+                      <div className="min-w-0 rounded-xl border border-zinc-200/70 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/70 px-3 py-2.5">
                         <div className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-400">Licence</div>
                         <div className="mt-1 font-mono text-xs font-black text-zinc-700 dark:text-zinc-200">
                           {item.hint || '••••'}
@@ -1123,10 +1123,11 @@ const DeveloperView: React.FC = () => {
                     </div>
 
                     {item.customer_notes && (
-                      <div className="mt-2 text-[10px] font-semibold text-zinc-500 line-clamp-2" title={item.customer_notes}>
+                      <div className="mt-2 line-clamp-2 text-[10px] font-semibold text-zinc-500" title={item.customer_notes}>
                         Note · {item.customer_notes}
                       </div>
                     )}
+
                     {Number(item.denied_activations || 0) > 0 && (
                       <div className="mt-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[10px] font-bold text-amber-600 dark:text-amber-300">
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -1141,6 +1142,7 @@ const DeveloperView: React.FC = () => {
                         )}
                       </div>
                     )}
+
                     {isAdmin && (item.payment_status || Number(item.total_paid_cents || 0) > 0) && (
                       <div className="mt-2 flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-wider">
                         <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-600 dark:text-emerald-400">
@@ -1151,74 +1153,110 @@ const DeveloperView: React.FC = () => {
                         </span>
                       </div>
                     )}
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-black text-zinc-900 dark:text-white">
-                      {item.customer_name || item.hint || 'Licence'}
-                    </span>
-                    <span className="px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-[9px] font-black uppercase tracking-widest text-zinc-500">
-                      {item.role || 'member'}
-                    </span>
-                    <span className="px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-[9px] font-black uppercase tracking-widest text-zinc-500">
-                      {planLabel(item.plan)}
-                    </span>
-                    {(() => {
-                      const presence = presenceState(item.last_seen_at);
-                      return (
-                        <span className={'px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ' + presence.tone}>
-                          {presence.label}
-                        </span>
-                      );
-                    })()}
-                    {isCurrentAdminLicense(item) && (
-                      <span className="px-2 py-1 rounded-lg bg-sky-500/10 text-[9px] font-black uppercase tracking-widest text-sky-500">
-                        Cette licence
-                      </span>
-                    )}
                   </div>
-                  <div className="mt-1 text-[10px] font-semibold text-zinc-500">
-                    {item.machine_name ? 'PC · ' + item.machine_name : 'PC non nommé'}
-                  </div>
-                  <div className="mt-1 text-[10px] font-mono text-zinc-400">
-                    {item.hint || '••••'} · {shortMachine(item.machine_id)}
-                  </div>
-                  {item.customer_contact && (
-                    <div className="mt-1 text-[10px] font-semibold text-zinc-400">{item.customer_contact}</div>
-                  )}
-                  {item.customer_notes && (
-                    <div className="mt-2 max-w-2xl text-[10px] font-semibold text-zinc-500 line-clamp-2" title={item.customer_notes}>
-                      Note · {item.customer_notes}
-                    </div>
-                  )}
-                  {Number(item.denied_activations || 0) > 0 && (
-                    <div className="mt-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[10px] font-bold text-amber-600 dark:text-amber-300">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <span className="material-symbols-outlined text-sm">warning</span>
-                        <span>
-                          {Number(item.denied_activations || 0)} tentative(s) bloquée(s) depuis un autre PC
-                        </span>
-                        {item.last_denied_at && <span>· {dateLabel(item.last_denied_at)}</span>}
-                      </div>
-                      {item.last_denied_machine && (
-                        <div className="mt-1 font-mono text-[9px] opacity-70">
-                          Machine refusée · {shortMachine(item.last_denied_machine)}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {isAdmin && (item.payment_status || Number(item.total_paid_cents || 0) > 0) && (
-                    <div className="mt-2 flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-wider">
-                      <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-600 dark:text-emerald-400">
-                        Total {euroLabel(item.total_paid_cents)}
-                      </span>
-                      <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-zinc-500">
-                        {paymentLabel(item.payment_status)}
-                      </span>
-                    </div>
-                  )}
 
-                  {isAdmin && item.id && editingCustomerID === String(item.id) && (
-                    <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 max-w-2xl">
+                  <div className="xl:border-l xl:border-zinc-200/80 xl:dark:border-zinc-800 xl:pl-5">
+                    <div className={
+                      'text-[10px] font-black uppercase tracking-[0.16em] ' +
+                      (item.active === false || isLicenseExpired(item, now)
+                        ? 'text-rose-500'
+                        : (!item.machine_id && !item.activated_at)
+                          ? 'text-amber-500'
+                          : 'text-emerald-500')
+                    }>
+                      {licenseStatusLabel(item, now)}
+                    </div>
+                    <div className="mt-2 text-xs font-bold text-zinc-700 dark:text-zinc-200">
+                      {expiryLabel(item.expires_at, now)}
+                    </div>
+                    <div className="mt-1 text-[10px] font-semibold text-zinc-400">
+                      {item.app_version || 'Jamais connectée'}
+                    </div>
+                  </div>
+
+                  {isAdmin && item.id && (
+                    <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                      <button
+                        type="button"
+                        disabled={actionID === item.id || editingCustomerID === String(item.id)}
+                        onClick={() => startCustomerEdit(item)}
+                        className="h-9 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white/70 dark:bg-zinc-900 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-40"
+                      >
+                        Client
+                      </button>
+
+                      <select
+                        value={(item.role === 'developer' || item.role === 'admin') ? item.role : 'member'}
+                        disabled={actionID === item.id || isCurrentAdminLicense(item)}
+                        onChange={(e) => void setLicenseRole(item, e.target.value as 'member' | 'developer' | 'admin')}
+                        className="h-9 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white/70 dark:bg-zinc-900 px-3 text-[9px] font-black uppercase tracking-wider outline-none disabled:opacity-40"
+                      >
+                        <option value="member">Membre</option>
+                        <option value="developer">Développeur</option>
+                        <option value="admin">Admin</option>
+                      </select>
+
+                      {item.plan !== 'lifetime' ? (
+                        <>
+                          <select
+                            value={renewPlans[String(item.id)] || ((item.plan === 'free_2d' || item.plan === 'week_1' || item.plan === 'month_1') ? item.plan : 'month_1')}
+                            disabled={actionID === item.id}
+                            onChange={(e) => setRenewPlans((current) => ({
+                              ...current,
+                              [String(item.id)]: e.target.value as 'free_2d' | 'week_1' | 'month_1' | 'lifetime',
+                            }))}
+                            className="h-9 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white/70 dark:bg-zinc-900 px-3 text-[9px] font-black uppercase tracking-wider outline-none disabled:opacity-40"
+                            title="Formule appliquée au prochain renouvellement"
+                          >
+                            <option value="free_2d">+2 jours</option>
+                            <option value="week_1">+1 semaine</option>
+                            <option value="month_1">+1 mois</option>
+                            <option value="lifetime">Passer à vie</option>
+                          </select>
+                          <button
+                            type="button"
+                            disabled={actionID === item.id}
+                            onClick={() => openRenewal(item)}
+                            className="h-9 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white/70 dark:bg-zinc-900 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-40"
+                          >
+                            Renouveler
+                          </button>
+                        </>
+                      ) : (
+                        <span className="inline-flex h-9 items-center rounded-xl bg-emerald-500/10 px-3 text-[9px] font-black uppercase tracking-wider text-emerald-500">
+                          À vie
+                        </span>
+                      )}
+
+                      <button
+                        type="button"
+                        disabled={actionID === item.id || !item.machine_id || isCurrentAdminLicense(item)}
+                        onClick={() => void resetMachine(item)}
+                        className="h-9 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white/70 dark:bg-zinc-900 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-30"
+                      >
+                        Reset PC
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={actionID === item.id || isCurrentAdminLicense(item)}
+                        onClick={() => void setActive(item, item.active === false)}
+                        className={
+                          'h-9 rounded-xl border px-3 text-[9px] font-black uppercase tracking-wider disabled:opacity-40 ' +
+                          (item.active === false
+                            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500'
+                            : 'border-rose-500/30 bg-rose-500/10 text-rose-500')
+                        }
+                      >
+                        {actionID === item.id ? '…' : item.active === false ? 'Réactiver' : 'Révoquer'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {isAdmin && item.id && editingCustomerID === String(item.id) && (
+                  <div className="mt-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/70 p-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                       <input
                         value={editCustomerName}
                         onChange={(e) => setEditCustomerName(e.target.value)}
@@ -1242,208 +1280,110 @@ const DeveloperView: React.FC = () => {
                         rows={2}
                         className="md:col-span-2 resize-none rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-semibold outline-none focus:border-zinc-400"
                       />
-                      <div className="md:col-span-2 flex gap-2">
-                        <button
-                          type="button"
-                          disabled={actionID === item.id || !editCustomerName.trim()}
-                          onClick={() => void saveCustomerEdit(item)}
-                          className="h-9 rounded-lg bg-zinc-950 dark:bg-white px-3 text-[9px] font-black uppercase tracking-wider text-white dark:text-zinc-950 disabled:opacity-40"
-                        >
-                          Enregistrer
-                        </button>
-                        <button
-                          type="button"
-                          disabled={actionID === item.id}
-                          onClick={cancelCustomerEdit}
-                          className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-500 disabled:opacity-40"
-                        >
-                          Annuler
-                        </button>
-                      </div>
                     </div>
-                  )}
-                  </div>
-
-                  <div className="xl:text-left">
-                    <div className={
-                    'text-[10px] font-black uppercase tracking-widest ' +
-                    (item.active === false || isLicenseExpired(item, now)
-                      ? 'text-rose-500'
-                      : (!item.machine_id && !item.activated_at)
-                        ? 'text-amber-500'
-                        : 'text-emerald-500')
-                  }>
-                    {licenseStatusLabel(item, now)}
-                  </div>
-                  <div className="mt-1 text-[10px] text-zinc-400">
-                    {expiryLabel(item.expires_at, now)}
-                  </div>
-                  <div className="mt-1 text-[10px] text-zinc-400">{item.app_version || 'Jamais connectée'}</div>
-                </div>
-
-                  {isAdmin && item.id && (
-                  <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-                    <button
-                      type="button"
-                      disabled={actionID === item.id || editingCustomerID === String(item.id)}
-                      onClick={() => startCustomerEdit(item)}
-                      className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-40"
-                    >
-                      Client
-                    </button>
-
-                    <select
-                      value={(item.role === 'developer' || item.role === 'admin') ? item.role : 'member'}
-                      disabled={actionID === item.id || isCurrentAdminLicense(item)}
-                      onChange={(e) => void setLicenseRole(item, e.target.value as 'member' | 'developer' | 'admin')}
-                      className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-2 text-[9px] font-black uppercase tracking-wider outline-none disabled:opacity-40"
-                    >
-                      <option value="member">Membre</option>
-                      <option value="developer">Développeur</option>
-                      <option value="admin">Admin</option>
-                    </select>
-
-                    {item.plan !== 'lifetime' ? (
-                      <>
-                        <select
-                          value={renewPlans[String(item.id)] || ((item.plan === 'free_2d' || item.plan === 'week_1' || item.plan === 'month_1') ? item.plan : 'month_1')}
-                          disabled={actionID === item.id}
-                          onChange={(e) => setRenewPlans((current) => ({
-                            ...current,
-                            [String(item.id)]: e.target.value as 'free_2d' | 'week_1' | 'month_1' | 'lifetime',
-                          }))}
-                          className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-2 text-[9px] font-black uppercase tracking-wider outline-none disabled:opacity-40"
-                          title="Formule appliquée au prochain renouvellement"
-                        >
-                          <option value="free_2d">+2 jours</option>
-                          <option value="week_1">+1 semaine</option>
-                          <option value="month_1">+1 mois</option>
-                          <option value="lifetime">Passer à vie</option>
-                        </select>
-
-                        <button
-                          type="button"
-                          disabled={actionID === item.id}
-                          onClick={() => openRenewal(item)}
-                          className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-40"
-                        >
-                          Renouveler
-                        </button>
-                      </>
-                    ) : (
-                      <span className="h-9 inline-flex items-center rounded-lg bg-emerald-500/10 px-3 text-[9px] font-black uppercase tracking-wider text-emerald-500">
-                        À vie
-                      </span>
-                    )}
-
-                    {renewingID === String(item.id) && item.plan !== 'lifetime' && (
-                      <div className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/70 p-3">
-                        <div className="mb-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
-                          {([
-                            ['free_2d', '+2 jours'],
-                            ['week_1', '+1 semaine'],
-                            ['month_1', '+1 mois'],
-                            ['lifetime', 'À vie'],
-                          ] as const).map(([plan, label]) => {
-                            const selected = (renewPlans[String(item.id)] || item.plan) === plan;
-                            return (
-                              <button
-                                key={plan}
-                                type="button"
-                                onClick={() => setRenewPlans((current) => ({ ...current, [String(item.id)]: plan }))}
-                                className={
-                                  'h-9 rounded-lg border px-3 text-[9px] font-black uppercase tracking-wider transition ' +
-                                  (selected
-                                    ? 'border-zinc-950 bg-zinc-950 text-white dark:border-white dark:bg-white dark:text-zinc-950'
-                                    : 'border-zinc-200 bg-white text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400')
-                                }
-                              >
-                                {label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
-                          <label>
-                            <div className="mb-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">Montant encaissé (€)</div>
-                            <input
-                              value={renewAmount}
-                              onChange={(e) => setRenewAmount(e.target.value)}
-                              inputMode="decimal"
-                              placeholder="Ex. 9,99"
-                              className="h-9 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 text-xs font-bold outline-none"
-                            />
-                          </label>
-                          <label>
-                            <div className="mb-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">Statut</div>
-                            <select
-                              value={renewPaymentStatus}
-                              onChange={(e) => setRenewPaymentStatus(e.target.value as typeof renewPaymentStatus)}
-                              className="h-9 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-[9px] font-black uppercase outline-none"
-                            >
-                              <option value="paid">Payé</option>
-                              <option value="pending">En attente</option>
-                              <option value="offered">Offert</option>
-                              <option value="free">Free</option>
-                            </select>
-                          </label>
-                          <label className="sm:col-span-2">
-                            <div className="mb-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">Note renouvellement</div>
-                            <input
-                              value={renewNote}
-                              onChange={(e) => setRenewNote(e.target.value)}
-                              maxLength={1000}
-                              placeholder="Optionnel"
-                              className="h-9 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 text-xs font-semibold outline-none"
-                            />
-                          </label>
-                        </div>
-                        <div className="mt-3 flex gap-2">
-                          <button
-                            type="button"
-                            disabled={actionID === item.id}
-                            onClick={() => void renewLicense(item)}
-                            className="h-9 rounded-lg bg-zinc-950 dark:bg-white px-4 text-[9px] font-black uppercase tracking-wider text-white dark:text-zinc-950 disabled:opacity-40"
-                          >
-                            Confirmer le renouvellement
-                          </button>
-                          <button
-                            type="button"
-                            disabled={actionID === item.id}
-                            onClick={cancelRenewal}
-                            className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-500 disabled:opacity-40"
-                          >
-                            Annuler
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    <button
-                      type="button"
-                      disabled={actionID === item.id || !item.machine_id || isCurrentAdminLicense(item)}
-                      onClick={() => void resetMachine(item)}
-                      className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 disabled:opacity-30"
-                    >
-                      Reset PC
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={actionID === item.id || isCurrentAdminLicense(item)}
-                      onClick={() => void setActive(item, item.active === false)}
-                      className={
-                        'h-9 rounded-lg border px-3 text-[9px] font-black uppercase tracking-wider disabled:opacity-40 ' +
-                        (item.active === false
-                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500'
-                          : 'border-rose-500/30 bg-rose-500/10 text-rose-500')
-                      }
-                    >
-                      {actionID === item.id ? '…' : item.active === false ? 'Réactiver' : 'Révoquer'}
-                    </button>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        disabled={actionID === item.id || !editCustomerName.trim()}
+                        onClick={() => void saveCustomerEdit(item)}
+                        className="h-9 rounded-lg bg-zinc-950 dark:bg-white px-3 text-[9px] font-black uppercase tracking-wider text-white dark:text-zinc-950 disabled:opacity-40"
+                      >
+                        Enregistrer
+                      </button>
+                      <button
+                        type="button"
+                        disabled={actionID === item.id}
+                        onClick={cancelCustomerEdit}
+                        className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-500 disabled:opacity-40"
+                      >
+                        Annuler
+                      </button>
+                    </div>
                   </div>
                 )}
-                </div>
+
+                {renewingID === String(item.id) && item.plan !== 'lifetime' && (
+                  <div className="mt-4 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white/70 dark:bg-zinc-900/70 p-3">
+                    <div className="mb-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {([
+                        ['free_2d', '+2 jours'],
+                        ['week_1', '+1 semaine'],
+                        ['month_1', '+1 mois'],
+                        ['lifetime', 'À vie'],
+                      ] as const).map(([plan, label]) => {
+                        const selected = (renewPlans[String(item.id)] || item.plan) === plan;
+                        return (
+                          <button
+                            key={plan}
+                            type="button"
+                            onClick={() => setRenewPlans((current) => ({ ...current, [String(item.id)]: plan }))}
+                            className={
+                              'h-9 rounded-lg border px-3 text-[9px] font-black uppercase tracking-wider transition ' +
+                              (selected
+                                ? 'border-zinc-950 bg-zinc-950 text-white dark:border-white dark:bg-white dark:text-zinc-950'
+                                : 'border-zinc-200 bg-white text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400')
+                            }
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+                      <label>
+                        <div className="mb-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">Montant encaissé (€)</div>
+                        <input
+                          value={renewAmount}
+                          onChange={(e) => setRenewAmount(e.target.value)}
+                          inputMode="decimal"
+                          placeholder="Ex. 9,99"
+                          className="h-9 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 text-xs font-bold outline-none"
+                        />
+                      </label>
+                      <label>
+                        <div className="mb-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">Statut</div>
+                        <select
+                          value={renewPaymentStatus}
+                          onChange={(e) => setRenewPaymentStatus(e.target.value as typeof renewPaymentStatus)}
+                          className="h-9 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-[9px] font-black uppercase outline-none"
+                        >
+                          <option value="paid">Payé</option>
+                          <option value="pending">En attente</option>
+                          <option value="offered">Offert</option>
+                          <option value="free">Free</option>
+                        </select>
+                      </label>
+                      <label className="sm:col-span-2">
+                        <div className="mb-1 text-[8px] font-black uppercase tracking-wider text-zinc-400">Note renouvellement</div>
+                        <input
+                          value={renewNote}
+                          onChange={(e) => setRenewNote(e.target.value)}
+                          maxLength={1000}
+                          placeholder="Optionnel"
+                          className="h-9 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 text-xs font-semibold outline-none"
+                        />
+                      </label>
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        type="button"
+                        disabled={actionID === item.id}
+                        onClick={() => void renewLicense(item)}
+                        className="h-9 rounded-lg bg-zinc-950 dark:bg-white px-4 text-[9px] font-black uppercase tracking-wider text-white dark:text-zinc-950 disabled:opacity-40"
+                      >
+                        Confirmer le renouvellement
+                      </button>
+                      <button
+                        type="button"
+                        disabled={actionID === item.id}
+                        onClick={cancelRenewal}
+                        className="h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 text-[9px] font-black uppercase tracking-wider text-zinc-500 disabled:opacity-40"
+                      >
+                        Annuler
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
             {!busy && filteredLicenses.length === 0 && (
