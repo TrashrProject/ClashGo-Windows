@@ -290,7 +290,7 @@ export interface BotConfig {
   };
 }
 
-export type TabType = 'dashboard' | 'activity' | 'account' | 'analytics' | 'config' | 'settings';
+export type TabType = 'dashboard' | 'activity' | 'account' | 'analytics' | 'config' | 'settings' | 'developer';
 export type InterfaceLevel = 'simple' | 'advanced' | 'developer';
 
 // UpdateStatus mirrors internal/updater.Status (Go side).
