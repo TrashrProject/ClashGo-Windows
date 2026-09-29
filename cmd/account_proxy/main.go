@@ -75,6 +75,33 @@ type supportIncident struct {
 	Fields     map[string]any `json:"fields,omitempty"`
 }
 
+const (
+	maxStoredSupportIncidents   = 5000
+	maxStoredSupportIncidentAge = 30 * 24 * time.Hour
+)
+
+func trimStoredSupportIncidents(items []supportIncident, now time.Time) []supportIncident {
+	if len(items) == 0 {
+		return nil
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	cutoff := now.Add(-maxStoredSupportIncidentAge)
+	kept := make([]supportIncident, 0, len(items))
+	for _, item := range items {
+		if !item.ReceivedAt.IsZero() && item.ReceivedAt.Before(cutoff) {
+			continue
+		}
+		kept = append(kept, item)
+	}
+	if len(kept) > maxStoredSupportIncidents {
+		kept = append([]supportIncident(nil), kept[len(kept)-maxStoredSupportIncidents:]...)
+	}
+	return kept
+}
+
+
 type licenseEvent struct {
 	ID              string    `json:"id"`
 	LicenseID       string    `json:"license_id"`
@@ -662,9 +689,7 @@ func main() {
 
 		control.mu.Lock()
 		control.data.Incidents = append(control.data.Incidents, in)
-		if len(control.data.Incidents) > 5000 {
-			control.data.Incidents = append([]supportIncident(nil), control.data.Incidents[len(control.data.Incidents)-5000:]...)
-		}
+		control.data.Incidents = trimStoredSupportIncidents(control.data.Incidents, in.ReceivedAt)
 		_ = control.saveLocked()
 		control.mu.Unlock()
 		writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "id": in.ID})
