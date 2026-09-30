@@ -800,7 +800,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 					})
 					continue
 				}
-								time.Sleep(750 * time.Millisecond)
+				time.Sleep(750 * time.Millisecond)
 
 				// Blind-confirm tap. No template matching, no
 				// cost-color check. The post-tap capture below
@@ -815,7 +815,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 					})
 					continue
 				}
-								time.Sleep(650 * time.Millisecond)
+				time.Sleep(650 * time.Millisecond)
 
 				modalScreen, modalErr := h.Client.CaptureToMat()
 				if modalErr != nil {
