@@ -218,6 +218,10 @@ var memberRuntimeStateFiles = []string{
 	filepath.Join("output", "session_reports", "latest.json"),
 }
 
+var memberRuntimeStateDirs = []string{
+	"learning",
+}
+
 func (a *App) memberRuntimeStateDir() string {
 	if a == nil || a.license == nil {
 		return ""
@@ -268,6 +272,45 @@ func copyRuntimeStateFile(src, dst string) error {
 	return nil
 }
 
+func copyRuntimeStateDir(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("runtime state path is not a directory: %s", src)
+	}
+	if err := os.RemoveAll(dst); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	return filepath.Walk(src, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return nil
+		}
+		return copyRuntimeStateFile(path, target)
+	})
+}
+
 func (a *App) archiveMemberRuntimeState(clearShared bool) error {
 	dir := a.memberRuntimeStateDir()
 	if dir == "" {
@@ -296,6 +339,20 @@ func (a *App) archiveMemberRuntimeState(clearShared bool) error {
 			_ = os.Remove(src)
 		}
 	}
+	for _, rel := range memberRuntimeStateDirs {
+		src := paths.ResolveConfig(rel)
+		dst := filepath.Join(dir, rel)
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			_ = os.RemoveAll(dst)
+			continue
+		}
+		if err := copyRuntimeStateDir(src, dst); err != nil {
+			return fmt.Errorf("archive member state dir %s: %w", rel, err)
+		}
+		if clearShared {
+			_ = os.RemoveAll(src)
+		}
+	}
 	marker := filepath.Join(dir, ".initialized")
 	if err := os.WriteFile(marker, []byte("1"), 0o600); err != nil {
 		return err
@@ -322,6 +379,14 @@ func (a *App) restoreMemberRuntimeState(adoptShared bool) error {
 				break
 			}
 		}
+		if !hasShared {
+			for _, rel := range memberRuntimeStateDirs {
+				if _, err := os.Stat(paths.ResolveConfig(rel)); err == nil {
+					hasShared = true
+					break
+				}
+			}
+		}
 		if hasShared {
 			return a.archiveMemberRuntimeState(false)
 		}
@@ -337,6 +402,9 @@ func (a *App) restoreMemberRuntimeState(adoptShared bool) error {
 			for _, rel := range memberRuntimeStateFiles {
 				_ = os.Remove(paths.ResolveConfig(rel))
 			}
+			for _, rel := range memberRuntimeStateDirs {
+				_ = os.RemoveAll(paths.ResolveConfig(rel))
+			}
 		}
 		return os.WriteFile(marker, []byte("1"), 0o600)
 	}
@@ -350,6 +418,17 @@ func (a *App) restoreMemberRuntimeState(adoptShared bool) error {
 		}
 		if err := copyRuntimeStateFile(src, dst); err != nil {
 			return fmt.Errorf("restore member state %s: %w", rel, err)
+		}
+	}
+	for _, rel := range memberRuntimeStateDirs {
+		src := filepath.Join(dir, rel)
+		dst := paths.ResolveConfig(rel)
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			_ = os.RemoveAll(dst)
+			continue
+		}
+		if err := copyRuntimeStateDir(src, dst); err != nil {
+			return fmt.Errorf("restore member state dir %s: %w", rel, err)
 		}
 	}
 	return nil
@@ -376,6 +455,9 @@ func (a *App) clearInMemoryMemberRuntimeState() {
 func clearSharedMemberRuntimeStateFiles() {
 	for _, rel := range memberRuntimeStateFiles {
 		_ = os.Remove(paths.ResolveConfig(rel))
+	}
+	for _, rel := range memberRuntimeStateDirs {
+		_ = os.RemoveAll(paths.ResolveConfig(rel))
 	}
 }
 
