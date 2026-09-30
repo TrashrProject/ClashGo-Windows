@@ -435,11 +435,13 @@ func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates 
 		}
 		sm.templatesTried++
 		var matches []vision.Match
-		if specialsOnly {
+		if specialsOnly || runtime.GOOS == "windows" {
+			// On Windows, reuse the scale learned by previous attacks. The
+			// preferred matcher automatically falls back to the exact 20-scale
+			// scan whenever the one-scale result is missing or doubtful, so this
+			// keeps first-run correctness while making repeated attacks much faster.
 			matches, _ = vision.MatchMultiScaleROICachedPreferred(screen, tpl, tplName, 0.2, 1.2, 20, 0.55, barROI)
 		} else {
-			// First/full classification remains exact and seeds the scale hint
-			// used only by later high-confidence live rescans.
 			matches, _ = vision.MatchMultiScaleROICached(screen, tpl, tplName, 0.2, 1.2, 20, 0.55, barROI)
 			if len(matches) > 0 {
 				vision.RememberPreferredTemplateScale(tplName, 0.2, 1.2, 20, matches[0].Scale)
