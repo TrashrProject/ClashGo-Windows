@@ -109,6 +109,13 @@ type Executor struct {
 	// is only allowed after deployment has been verified complete.
 	earlyExitAllowed bool
 
+	// Intelligence V3 farm exit is a per-attack runtime policy. It reuses the
+	// passive live-loot samples already collected by the battle wait and never
+	// increases ADB screenshot cadence.
+	adaptiveFarmExitEnabled bool
+	adaptiveFarmExitPercent int
+	adaptiveFarmExitStall   time.Duration
+
 	OnPlanReady  func(duration time.Duration, edge string)
 	OnPhaseStart func(phase string, edge string)
 	OnUnitDeploy func(unit string, slotX int, slotY int)
@@ -208,6 +215,56 @@ func (e *Executor) BattleLootOCRMetrics() (samples int, avgMS float64) {
 
 func (e *Executor) SetEarlyExitAllowed(allowed bool) {
 	e.earlyExitAllowed = allowed
+}
+
+func (e *Executor) SetAdaptiveFarmExit(enabled bool, minLootPercent int, stall time.Duration) {
+	if minLootPercent < 0 {
+		minLootPercent = 0
+	}
+	if minLootPercent > 100 {
+		minLootPercent = 100
+	}
+	if stall < 5*time.Second {
+		stall = 5 * time.Second
+	}
+	if stall > 30*time.Second {
+		stall = 30 * time.Second
+	}
+	e.adaptiveFarmExitEnabled = enabled
+	e.adaptiveFarmExitPercent = minLootPercent
+	e.adaptiveFarmExitStall = stall
+}
+
+func weightedFarmLootUnits(gold, elixir, dark int) int64 {
+	clamp := func(v int) int64 {
+		if v < 0 {
+			return 0
+		}
+		return int64(v)
+	}
+	return clamp(gold) + clamp(elixir) + clamp(dark)*100
+}
+
+func adaptiveFarmLootPercent(initialGold, initialElixir, initialDE, remainingGold, remainingElixir, remainingDE int) int {
+	initial := weightedFarmLootUnits(initialGold, initialElixir, initialDE)
+	if initial <= 0 {
+		return 0
+	}
+	remaining := weightedFarmLootUnits(remainingGold, remainingElixir, remainingDE)
+	if remaining < 0 {
+		remaining = 0
+	}
+	if remaining > initial {
+		remaining = initial
+	}
+	pct := int(math.Round((1 - float64(remaining)/float64(initial)) * 100))
+	if pct < 0 {
+		return 0
+	}
+	if pct > 100 {
+		return 100
+	}
+	return pct
 }
 
 // SetInitialLoot stores the pre-attack Available Loot snapshot used by the
@@ -2043,6 +2100,8 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 	lastPctTime := time.Now()
 	stallLimit := time.Duration(e.cfg.StallTimerSeconds) * time.Second
 	lootExitConfirmations := 0
+	farmBestLootUnits := int64(0)
+	farmLootProgressAt := time.Now()
 
 	// Live-loot OCR stabilizer used both for the optional loot-exit rule and
 	// for accurate dashboard/history totals.
@@ -2177,6 +2236,15 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 							e.lastRemainingDE = liveLootTick.DarkElixir
 						}
 						e.remainingLootValid = true
+						stolenUnits := weightedFarmLootUnits(
+							e.initialLootGold-e.lastRemainingGold,
+							e.initialLootElixir-e.lastRemainingElixir,
+							e.initialLootDE-e.lastRemainingDE,
+						)
+						if stolenUnits > farmBestLootUnits {
+							farmBestLootUnits = stolenUnits
+							farmLootProgressAt = time.Now()
+						}
 						e.logger.Debug().
 							Int("remaining_gold", e.lastRemainingGold).
 							Int("remaining_elixir", e.lastRemainingElixir).
@@ -2259,6 +2327,60 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 					} else {
 						lootExitConfirmations = 0
 						e.logger.Debug().Err(lootErr).Msg("loot-exit OCR unavailable this tick")
+					}
+				}
+			}
+
+			// Intelligence V3 farm-throughput exit. This path intentionally uses
+			// only the stable loot snapshots collected above; it does not request a
+			// second OCR pass or a faster screenshot cadence. Explicit UI loot-exit
+			// and strategy end_at_percent settings remain authoritative.
+			strategyEndAtPct := 0
+			if e.activeStrategy != nil {
+				strategyEndAtPct = e.activeStrategy.EndAtPercent
+			}
+			if e.earlyExitAllowed &&
+				e.adaptiveFarmExitEnabled &&
+				!e.cfg.LootExitEnabled &&
+				strategyEndAtPct == 0 &&
+				e.remainingLootValid {
+				lootedPct := adaptiveFarmLootPercent(
+					e.initialLootGold, e.initialLootElixir, e.initialLootDE,
+					e.lastRemainingGold, e.lastRemainingElixir, e.lastRemainingDE,
+				)
+				threshold := e.adaptiveFarmExitPercent
+				if threshold < 0 {
+					threshold = 0
+				}
+				if threshold > 100 {
+					threshold = 100
+				}
+				stall := e.adaptiveFarmExitStall
+				if stall <= 0 {
+					stall = 12 * time.Second
+				}
+				stalledFor := time.Since(farmLootProgressAt)
+				if lootedPct >= threshold && stalledFor >= stall {
+					if !e.endButtonVisible(screen, sCfg) {
+						e.logger.Debug().
+							Int("loot_percent", lootedPct).
+							Dur("loot_stall", stalledFor).
+							Msg("V3 farm-exit ready but End Battle button is not visible")
+					} else {
+						e.logger.Info().
+							Int("loot_percent", lootedPct).
+							Int("threshold", threshold).
+							Dur("loot_stall", stalledFor).
+							Msg("Intelligence V3 ending stalled battle to maximize farm throughput")
+						screen.Close()
+						if err := e.EndBattle(); err != nil {
+							e.lastBattleEndReason = "adaptive_farm_exit_failed"
+							e.logger.Warn().Err(err).Msg("V3 farm-exit EndBattle tap failed")
+							return false
+						}
+						e.lastBattleEndReason = "adaptive_farm_exit"
+						e.lastLootExitPercent = lootedPct
+						return true
 					}
 				}
 			}
