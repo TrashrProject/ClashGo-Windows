@@ -29,7 +29,7 @@ func (b *Bot) sleepResponsive(d time.Duration) bool {
 // Keeping this out of the happy path avoids extra ADB captures during normal
 // operation while preserving useful evidence when recovery is needed.
 func (b *Bot) captureFailureDiagnostic(name string, extra map[string]interface{}) {
-	screen, err := b.client.CaptureToMat()
+	screen, err := b.runtimeFrameFresh(2 * time.Second)
 	if err != nil || screen.Empty() {
 		if !screen.Empty() {
 			screen.Close()
@@ -91,7 +91,7 @@ func (b *Bot) waitAndClickButton(templateName, stepName string, timeout time.Dur
 			return false
 		}
 
-		screen, err := b.client.CaptureToMat()
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil {
 			if !b.sleepResponsive(120 * time.Millisecond) {
 				return false
@@ -202,7 +202,7 @@ func (b *Bot) waitForUIEvidence(templateName string, expected game.GameState, ti
 		if b.ctx.Err() != nil {
 			return false
 		}
-		screen, err := b.client.CaptureToMat()
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil {
 			if !b.sleepResponsive(120 * time.Millisecond) {
 				return false
