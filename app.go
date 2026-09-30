@@ -4450,6 +4450,25 @@ func (a *App) SaveAccountConfig(playerTag string) error {
 
 	cfg := config.LoadOrDefault("config.json")
 	cfg.Account.PlayerTag = tag
+	// A manually changed linked tag is only allowed to keep multi-account
+	// rotation enabled when that tag maps to one of its enabled profiles.
+	// Otherwise fail safe by disabling rotation rather than letting metadata
+	// claim a different active account than Clash of Clans actually has loaded.
+	if cfg.Account.MultiAccount.Enabled {
+		matched := ""
+		for _, account := range cfg.Account.MultiAccount.Accounts {
+			if account.Enabled && strings.EqualFold(strings.TrimSpace(account.PlayerTag), tag) {
+				matched = account.ID
+				break
+			}
+		}
+		if matched == "" {
+			cfg.Account.MultiAccount.Enabled = false
+			cfg.Account.MultiAccount.ActiveAccountID = ""
+		} else {
+			cfg.Account.MultiAccount.ActiveAccountID = matched
+		}
+	}
 	// Purge legacy desktop keys during the first save after upgrading.
 	cfg.Account.LegacyAPIKey = ""
 
@@ -4486,6 +4505,10 @@ func (a *App) ClearAccount() error {
 	cfg := config.LoadOrDefault("config.json")
 	cfg.Account.PlayerTag = ""
 	cfg.Account.LegacyAPIKey = ""
+	// Keep the user's profile list for convenience, but disable rotation until
+	// a real current Clash account is linked again.
+	cfg.Account.MultiAccount.Enabled = false
+	cfg.Account.MultiAccount.ActiveAccountID = ""
 
 	oldTag, hadOldTag := a.loadMemberAccountTag()
 	accountPath := a.memberAccountPath()
