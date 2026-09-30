@@ -949,7 +949,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				// genuinely draining multi-charge cards, never the spent-
 				// card loop (live: 1-charge rage re-fired for the old 2-
 				// round budget while OCR read "1" every time).
-				if extra, confirmed := spellDeployer.VerifyAndReconcile(up.Unit, up.Slot, targetEdge, plan.Phase.Pattern, 4); extra > 0 {
+				if extra, confirmed := spellDeployer.VerifyAndReconcile(up.Unit, up.Slot, targetEdge, plan.Phase.Pattern, 1); extra > 0 {
 					e.logger.Debug().
 						Str("unit", up.Unit.Name).
 						Int("extra_fired", extra).
@@ -1083,18 +1083,28 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		}
 	}
 
-	// 10. Sweep remaining. Pass formulaPtr so the sweep path honors
-	// user-pinned _event_troop / _event_spell coords the same way
-	// DeployHeroes / DeployTroops already do. Without this the bot
-	// silently dropped event troops on the dynamically-detected
-	// red-zone line, ignoring the user's pin entirely.
-	sweeper := NewSweeper(tapExec, slotMgr, pCfg, deployLine, w, h, formulaPtr, troopCounter, s.EventTroopsAutoDeployEnabled(), e.logger)
-	sweeper.Sweep(strategyNames, countMap)
+	// 10. Recovery-only sweep. On the normal path every planned card has
+	// already been marked deployed, so skip the expensive fresh-frame sweep.
+	remainingBeforeSweep := len(slotMgr.GetUndeployedSlots())
+	if remainingBeforeSweep > 0 {
+		e.logger.Debug().Int("remaining", remainingBeforeSweep).Msg("running recovery sweep for unresolved cards")
+		sweeper := NewSweeper(tapExec, slotMgr, pCfg, deployLine, w, h, formulaPtr, troopCounter, s.EventTroopsAutoDeployEnabled(), e.logger)
+		sweeper.Sweep(strategyNames, countMap)
+	}
 
-	// 11. Verify
-	verifier := NewVerifier(tapExec, slotMgr, pCfg, targetEdge, w, h, DefaultVerifyConfig(), troopCounter, e.logger)
+	// 11. One checkpoint only when something still appears unresolved.
+	remainingAfterSweep := len(slotMgr.GetUndeployedSlots())
+	if remainingAfterSweep == 0 {
+		e.logger.Info().Dur("deploy_total", time.Since(analysisStarted)).Msg("deployment complete without recovery scan")
+		return 0, nil
+	}
+
+	verifier := NewVerifier(tapExec, slotMgr, pCfg, targetEdge, w, h, FastVerifyConfig(), troopCounter, e.logger)
 	remainingCount := verifier.VerifyAll()
-
+	e.logger.Info().
+		Int("remaining", remainingCount).
+		Dur("deploy_total", time.Since(analysisStarted)).
+		Msg("deployment recovery checkpoint complete")
 	return remainingCount, nil
 }
 
