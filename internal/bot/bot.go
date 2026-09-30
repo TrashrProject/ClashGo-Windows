@@ -2275,6 +2275,18 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			}
 		}
 
+		if decision.Accept && b.cfg.Attack.DryRun {
+			strategyName := filepath.Base(b.cfg.Attack.StrategyFile)
+			targetEdge := "TopLeft"
+			if strat, stratErr := strategy.ParseYAML(b.cfg.Attack.StrategyFile); stratErr == nil {
+				strategyName = strat.Name
+				targetEdge = strat.TargetEdge
+			}
+			b.saveDryRunPreview(screen, strategyName, targetEdge)
+			decision.Accept = false
+			decision.Reason = "dry_run_preview"
+		}
+
 		if b.telemetry != nil {
 			if decision.Accept {
 				b.telemetry.Emit(telemetry.EventTargetFound, map[string]any{
