@@ -464,7 +464,7 @@ func (hm *HeroManager) DeployTroops(
 	}
 	defer post.Close()
 
-	if hm.slotManager.RefreshAfterSlotConsumed(post, slot) {
+	if hm.slotManager.RefreshPositionsAfterDeployment(post, slot) {
 		hm.slotManager.MarkSlotDeployed(slot)
 		hm.logger.Info().
 			Str("unit", unit.Name).
@@ -480,7 +480,7 @@ func (hm *HeroManager) DeployTroops(
 	visualEmpty := isSlotEmptyStatic(post, slot.X, slot.Y, hm.w, hm.h)
 	if live <= 0 && visualEmpty {
 		hm.slotManager.MarkSlotDeployed(slot)
-		_ = hm.slotManager.RefreshActivePositions(post)
+		_ = hm.slotManager.RefreshPositions(post)
 		hm.logger.Info().
 			Str("unit", unit.Name).
 			Int("fired_total", tapCount).
