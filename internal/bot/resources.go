@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Ducky705/ClashGO/internal/game"
+	"github.com/Ducky705/ClashGO/internal/intelligence"
 	"github.com/Ducky705/ClashGO/internal/paths"
 	"gocv.io/x/gocv"
 )
@@ -27,6 +28,20 @@ func (b *Bot) maybeScanVillageResources(screen gocv.Mat) {
 	snap := b.resourceReader.Read(screen)
 	if !snap.Valid {
 		return
+	}
+
+	if b.villageMemory != nil {
+		if err := b.villageMemory.UpdateResources(intelligence.VillageResources{
+			Gold: snap.Gold,
+			Elixir: snap.Elixir,
+			DarkElixir: snap.DarkElixir,
+			GoldValid: snap.GoldValid,
+			ElixirValid: snap.ElixirValid,
+			DarkValid: snap.DarkValid,
+			UpdatedAt: snap.Timestamp,
+		}); err != nil {
+			b.logger.Debug().Err(err).Msg("could not update persistent village resource memory")
+		}
 	}
 
 	path := paths.ResolveConfig("village_resources.json")
