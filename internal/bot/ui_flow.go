@@ -2,6 +2,7 @@ package bot
 
 import (
 	"image"
+	"math"
 	"time"
 
 	"github.com/Ducky705/ClashGO/internal/game"
@@ -40,6 +41,72 @@ func (b *Bot) captureFailureDiagnostic(name string, extra map[string]interface{}
 	b.DumpDiagnostics(name, screen, extra)
 }
 
+func (b *Bot) findLocalizedFindMatchButton(screen gocv.Mat, roi image.Rectangle) (int, int, bool) {
+	if screen.Empty() || roi.Dx() < 10 || roi.Dy() < 10 {
+		return 0, 0, false
+	}
+	bounds := image.Rect(0, 0, screen.Cols(), screen.Rows())
+	roi = roi.Intersect(bounds)
+	if roi.Dx() < 10 || roi.Dy() < 10 {
+		return 0, 0, false
+	}
+
+	sub := screen.Region(roi)
+	defer sub.Close()
+	hsv := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC3)
+	defer vision.PutMat(hsv)
+	mask := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+	gocv.CvtColor(sub, &hsv, gocv.ColorBGRToHSV)
+
+	// CoC's Find Match action is a large saturated yellow/orange button.
+	// Detecting the button body instead of its text keeps this path language
+	// independent (French/English/etc.).
+	gocv.InRangeWithScalar(
+		hsv,
+		gocv.NewScalar(7, 105, 120, 0),
+		gocv.NewScalar(48, 255, 255, 0),
+		&mask,
+	)
+
+	contours := gocv.FindContours(mask, gocv.RetrievalExternal, gocv.ChainApproxSimple)
+	defer contours.Close()
+
+	bestArea := 0.0
+	best := image.Rectangle{}
+	scaleArea := math.Max(0.1, b.cal.ScaleX*b.cal.ScaleY)
+	for i := 0; i < contours.Size(); i++ {
+		c := contours.At(i)
+		area := gocv.ContourArea(c)
+		refArea := area / scaleArea
+		if refArea < 900 || refArea > 45000 {
+			continue
+		}
+		r := gocv.BoundingRect(c)
+		if r.Dx() < 20 || r.Dy() < 16 {
+			continue
+		}
+		aspect := float64(r.Dx()) / float64(r.Dy())
+		if aspect < 1.35 || aspect > 7.5 {
+			continue
+		}
+		fill := area / float64(r.Dx()*r.Dy())
+		if fill < 0.32 {
+			continue
+		}
+		if area > bestArea {
+			bestArea = area
+			best = r
+		}
+	}
+	if bestArea <= 0 {
+		return 0, 0, false
+	}
+	return roi.Min.X + best.Min.X + best.Dx()/2,
+		roi.Min.Y + best.Min.Y + best.Dy()/2,
+		true
+}
+
 // waitAndClickButton waits for visual evidence of a button and clicks it as
 // soon as it is visible. It replaces fixed post-click sleeps in the hot
 // village -> attack -> army -> battle path.
@@ -69,7 +136,10 @@ func (b *Bot) waitAndClickButton(templateName, stepName string, timeout time.Dur
 	// If there is no template, do not blindly tap an assumed coordinate.
 	// A missing asset is a configuration/runtime-integrity problem; failing
 	// closed is safer than turning a fast path into a random UI action.
-	if !hasTemplate {
+	if !hasTemplate &&
+		templateName != "btn_attack" &&
+		templateName != "btn_battle" &&
+		templateName != "btn_find_match" {
 		b.logger.Error().
 			Str("step", stepName).
 			Str("template", templateName).
@@ -138,7 +208,15 @@ func (b *Bot) waitAndClickButton(templateName, stepName string, timeout time.Dur
 			}
 		}
 
-		if !matched {
+		if !matched && templateName == "btn_find_match" {
+			if x, y, ok := b.findLocalizedFindMatchButton(screen, physROI); ok {
+				clickX, clickY = x, y
+				confidence = 0.93
+				matched = true
+			}
+		}
+
+		if !matched && hasTemplate {
 			matches, matchErr := vision.MatchMultiScaleROICached(
 				screen, tpl, templateName, 0.2, 2.0, 5, 0.45, physROI,
 			)
