@@ -144,7 +144,7 @@ type WallUpgradeHooks struct {
 // wrapper that delegates to runWallUpgradeLoop with the production
 // Bot's dependencies. The diagnostic tool at cmd/test_wall_upgrade
 // calls runWallUpgradeLoop directly with a hand-built hooks struct.
-func (b *Bot) UpgradeWalls(gc *game.GameContext) {
+func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 	const wallMemoryID = "builder_menu_wall_entry"
 	var (
 		lastSearchAttempt float64
@@ -211,6 +211,9 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) {
 		case "all_unaffordable":
 			terminalReason = step
 			retryableFailure = false
+		case "stopped":
+			terminalReason = step
+			retryableFailure = true
 
 		case "wall_text_not_found", "tap_builder_failed", "not_in_main_village",
 			"aborted_capture_defensive", "scroll_failed", "scroll_up_failed",
@@ -352,14 +355,17 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) {
 		}
 	}
 
+	completed := b.ctx.Err() == nil && !retryableFailure && terminalReason == "all_unaffordable"
 	b.logger.Info().
 		Int("learned_wall_upgrades", upgradesLearned).
 		Int("wall_stage_attempts", attempts).
 		Dur("wall_stage_duration", time.Since(stageStarted)).
 		Bool("resource_spend_verified", resourceVerified).
+		Bool("completed", completed).
 		Float64("last_wall_confidence", lastWallConf).
 		Str("terminal_reason", terminalReason).
 		Msg("wall-upgrade cycle complete")
+	return completed
 }
 
 // RunWallUpgradeLoop drives the wall-upgrade sequence with explicit deps
