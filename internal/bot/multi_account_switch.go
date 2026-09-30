@@ -297,9 +297,14 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) error {
 			// At this point the physical Supercell switch is already proven by a
 			// loading transition + MainVillage return. The scheduler MUST advance
 			// even if a later disk persistence step is degraded, otherwise the next
-			// cycle would believe the previous account is still active.
+			// cycle could attempt to switch the same account a second time.
 			if err := b.multiAccount.MarkSwitched(next.ID); err != nil {
-				return fmt.Errorf("physical switch succeeded but scheduler state failed: %w", err)
+				// MarkSwitched mutates the in-memory scheduler before persistence.
+				// Never reinterpret this as a physical switch failure.
+				b.logger.Error().Err(err).
+					Str("account_id", next.ID).
+					Msg("account switched physically; scheduler persistence degraded")
+				_ = b.multiAccount.MarkSwitchWarning(fmt.Errorf("scheduler persistence degraded after verified switch: %w", err))
 			}
 			b.wallUpgradePending.Store(b.cfg.Upgrade.UpgradeWalls)
 			b.logger.Info().
@@ -308,8 +313,14 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) error {
 				Str("player_tag", next.PlayerTag).
 				Msg("multi-account switch verified and activated")
 			if activationErr != nil {
-				return activationErr
+				b.logger.Error().Err(activationErr).
+					Str("account_id", next.ID).
+					Msg("account switch succeeded; local profile persistence degraded")
+				_ = b.multiAccount.MarkSwitchWarning(activationErr)
 			}
+			// Physical switch success is final. Persistence warnings must never
+			// bubble up to the caller as switch failures, otherwise the outer
+			// backoff path could schedule duplicate Supercell-ID navigation.
 			return nil
 		}
 		switch state {
