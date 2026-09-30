@@ -90,6 +90,7 @@ type Bot struct {
 	returnHomeMicros    atomic.Int64
 	lastReturnHomeUS    atomic.Int64
 	safePacingUntilUS   atomic.Int64
+	wallUpgradePending  atomic.Bool
 
 	// Xingchen-style runtime supervision: independent heartbeat, phase/state
 	// tracking, and single-flight recovery/restart guards.
@@ -1935,6 +1936,26 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	var cooldownDurationMS int64
 	var preparationDurationMS int64
 
+	// A failed post-battle wall pass is never forgotten. Retry it once the bot
+	// is safely back on the Main Village, before spending time on another
+	// matchmaking cycle. Failure here does not deadlock farming: the pending
+	// bit remains set and the next home cycle gets another chance.
+	if b.cfg.Upgrade.UpgradeWalls && b.wallUpgradePending.Load() {
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
+		if err == nil && !screen.Empty() {
+			state, _ := b.classify(screen)
+			screen.Close()
+			if state == game.StateMainVillage {
+				b.logger.Info().Msg("pending wall-upgrade stage detected; retrying before next attack")
+				if b.UpgradeWalls(gc) {
+					b.wallUpgradePending.Store(false)
+				}
+			}
+		} else if err == nil {
+			screen.Close()
+		}
+	}
+
 	// Inter-attack cooldown. Armies need real time to retrain; without a
 	// gate the bot re-attacked ~8s after every Return Home with whatever
 	// the camps held (observed live: three near-identical defeats in <4
@@ -2789,6 +2810,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 
 	if !returnedHome {
+		if b.cfg.Upgrade.UpgradeWalls {
+			b.wallUpgradePending.Store(true)
+		}
 		b.logger.Error().Msg("failed to return home after battle, restarting game...")
 		b.restartGame()
 		return
@@ -2803,11 +2827,15 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	b.logger.Debug().Msg("dismissing potential post-attack popup")
 	_ = b.client.Tap(sideX, sideY)
 	if b.cfg.Upgrade.UpgradeWalls {
-		// Wall automation needs the home HUD fully settled before it starts
-		// scanning/selecting walls. Preserve the conservative settle here.
-		time.Sleep(900 * time.Millisecond)
-		b.UpgradeWalls(gc)
+		b.wallUpgradePending.Store(true)
+		// ReturnHome already verified the village; a short settle is sufficient
+		// before the evidence-driven wall stage starts.
+		time.Sleep(450 * time.Millisecond)
+		if b.UpgradeWalls(gc) {
+			b.wallUpgradePending.Store(false)
+		}
 	} else {
+		b.wallUpgradePending.Store(false)
 		// ReturnHome already verified MainVillage. For pure farming, only a
 		// short acknowledgement window is needed for the side tap itself.
 		time.Sleep(300 * time.Millisecond)
