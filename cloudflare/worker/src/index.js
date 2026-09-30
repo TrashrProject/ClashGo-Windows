@@ -67,21 +67,70 @@ function newLicenseKey() {
   return `CGO-${raw.slice(0,6)}-${raw.slice(6,12)}-${raw.slice(12,18)}-${raw.slice(18,24)}`;
 }
 
-function safeFields(input) {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+const sensitiveFieldFragments = [
+  "token", "password", "secret", "license", "authorization", "cookie", "api_key", "apikey"
+];
+
+function safeValue(value, depth = 0) {
+  if (depth > 5) return "[max-depth]";
+  if (value == null || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") return value.slice(0, 4000);
+  if (Array.isArray(value)) return value.slice(0, 50).map((item) => safeValue(item, depth + 1));
+  if (typeof value !== "object") return String(value).slice(0, 4000);
+
   const out = {};
-  for (const [key, value] of Object.entries(input)) {
+  for (const [key, child] of Object.entries(value)) {
     const lower = key.toLowerCase();
-    if (
-      lower.includes("token") ||
-      lower.includes("password") ||
-      lower.includes("secret") ||
-      lower.includes("license") ||
-      lower.includes("authorization")
-    ) continue;
-    out[key] = value;
+    if (sensitiveFieldFragments.some((fragment) => lower.includes(fragment))) {
+      out[key] = "[redacted]";
+      continue;
+    }
+    out[key] = safeValue(child, depth + 1);
   }
   return out;
+}
+
+function safeFields(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  return safeValue(input, 0);
+}
+
+function requestIP(request) {
+  return clean(request.headers.get("CF-Connecting-IP")) ||
+    clean(request.headers.get("X-Forwarded-For")).split(",")[0] ||
+    "unknown";
+}
+
+async function allowRate(env, scope, limit, windowSeconds) {
+  const now = Math.floor(Date.now() / 1000);
+  const bucket = Math.floor(now / windowSeconds);
+  const expiresAt = now + windowSeconds * 2;
+  const key = clean(scope).slice(0, 180);
+  if (!key) return false;
+
+  try {
+    await env.DB.prepare(`
+      INSERT INTO rate_limits (scope, bucket, count, expires_at)
+      VALUES (?1, ?2, 1, ?3)
+      ON CONFLICT(scope, bucket)
+      DO UPDATE SET count = count + 1, expires_at = excluded.expires_at
+    `).bind(key, bucket, expiresAt).run();
+
+    const row = await env.DB.prepare(
+      "SELECT count FROM rate_limits WHERE scope = ?1 AND bucket = ?2"
+    ).bind(key, bucket).first();
+
+    // Opportunistic bounded cleanup; no correctness depends on this delete.
+    if ((bucket & 31) === 0) {
+      await env.DB.prepare("DELETE FROM rate_limits WHERE expires_at < ?1").bind(now).run();
+    }
+    return Number(row?.count || 0) <= limit;
+  } catch (error) {
+    // Fail closed for privileged or abuse-prone endpoints if the limiter is
+    // unavailable; a control-plane outage must not silently remove protection.
+    console.error("rate limiter failure", error);
+    return false;
+  }
 }
 
 function corsHeaders(request, env) {
@@ -923,14 +972,22 @@ async function router(request, env) {
   }
 
   if (request.method === "POST" && path === "/v1/license/activate") {
+    const allowed = await allowRate(env, "activate:" + requestIP(request), 10, 600);
+    if (!allowed) return json({ message: "too many activation attempts" }, 429);
     return activateLicense(request, env);
   }
 
   if (request.method === "POST" && path === "/v1/support/incidents") {
+    const rawLicense = clean(request.headers.get("X-ClashGO-License"));
+    const incidentScope = rawLicense ? await sha256(rawLicense) : requestIP(request);
+    const allowed = await allowRate(env, "incident:" + incidentScope, 60, 3600);
+    if (!allowed) return json({ message: "incident rate limit exceeded" }, 429);
     return ingestIncident(request, env);
   }
 
   if (path.startsWith("/v1/admin/")) {
+    const allowed = await allowRate(env, "admin:" + requestIP(request), 120, 60);
+    if (!allowed) return json({ message: "admin rate limit exceeded" }, 429);
     if (!(await adminOK(request, env))) return unauthorizedAdmin();
 
     if (request.method === "GET" && path === "/v1/admin/licenses") {
@@ -983,6 +1040,8 @@ async function router(request, env) {
   if (path.startsWith("/v1/developer/")) {
     const dev = await requireDeveloper(request, env);
     if (!dev) return json({ message: "developer license required" }, 403);
+    const allowed = await allowRate(env, "developer:" + dev.id, 180, 60);
+    if (!allowed) return json({ message: "developer rate limit exceeded" }, 429);
 
     if (request.method === "GET" && path === "/v1/developer/licenses") {
       const rows = await listLicenses(env);
