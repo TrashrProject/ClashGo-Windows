@@ -45,3 +45,18 @@ func TestApplyDetectedPositionsRejectsAmbiguousCount(t *testing.T) {
 		t.Fatalf("positions changed on ambiguous refresh: %d %d", a.X, b.X)
 	}
 }
+
+
+func TestApplyDetectedPositionsAfterDeploymentExcludesJustVanishedCard(t *testing.T) {
+	first := &TrackedSlot{TroopSlot: TroopSlot{X: 100, Y: 680, Category: "Troop"}, UnitName: "dragon", State: SlotIdentified}
+	second := &TrackedSlot{TroopSlot: TroopSlot{X: 180, Y: 680, Category: "Troop"}, UnitName: "balloon", State: SlotIdentified}
+	hero := &TrackedSlot{TroopSlot: TroopSlot{X: 260, Y: 680, Category: "Hero"}, UnitName: "archer queen", State: SlotIdentified}
+	sm := &SlotManager{slots: []*TrackedSlot{first, second, hero}}
+
+	if !sm.applyDetectedPositionsAfter([]int{120, 200}, first) {
+		t.Fatal("expected refresh while just-deployed card is already visually gone")
+	}
+	if second.X != 120 || hero.X != 200 {
+		t.Fatalf("remaining positions=%d,%d want 120,200", second.X, hero.X)
+	}
+}
