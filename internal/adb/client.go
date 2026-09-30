@@ -343,15 +343,38 @@ func (c *Client) CaptureScreen() ([]byte, error) {
 	return c.captureScreenRaw()
 }
 
+func captureGapForFailures(base time.Duration, consecutiveFails int) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	if consecutiveFails < 0 {
+		consecutiveFails = 0
+	}
+
+	// BlueStacks is most fragile when a failing capture loop immediately
+	// retries heavy screencap work. Back off exponentially after consecutive
+	// failures, but keep the normal healthy cadence unchanged.
+	shift := consecutiveFails
+	if shift > 3 {
+		shift = 3
+	}
+	gap := base * time.Duration(1<<shift)
+	if gap > 6*time.Second {
+		gap = 6 * time.Second
+	}
+	return gap
+}
+
 func (c *Client) waitForCaptureBudget() {
 	c.captureGateMu.Lock()
 	defer c.captureGateMu.Unlock()
 
-	if c.minCaptureGap <= 0 {
+	gap := captureGapForFailures(c.minCaptureGap, c.Health().ConsecutiveFails)
+	if gap <= 0 {
 		c.lastCaptureStart = time.Now()
 		return
 	}
-	if wait := c.minCaptureGap - time.Since(c.lastCaptureStart); wait > 0 {
+	if wait := gap - time.Since(c.lastCaptureStart); wait > 0 {
 		time.Sleep(wait)
 	}
 	c.lastCaptureStart = time.Now()
@@ -384,6 +407,13 @@ func (c *Client) captureBlueStacksPNGToMat() (gocv.Mat, error) {
 	if _, err := transport.Exec("shell:screencap -p " + remote); err != nil {
 		return emptyMat(), fmt.Errorf("png screencap: %w", err)
 	}
+
+	// Let BlueStacks finish flushing the PNG before starting the readback.
+	// Without this tiny quiet period the capture and cat services can overlap
+	// inside adbd under load, which is exactly when HD-Player instability has
+	// been observed on Windows.
+	time.Sleep(35 * time.Millisecond)
+
 	raw, err := transport.Exec("exec:cat " + remote)
 	if err != nil {
 		return emptyMat(), fmt.Errorf("png readback: %w", err)
