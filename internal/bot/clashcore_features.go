@@ -1,14 +1,18 @@
 package bot
 
 import (
+	"encoding/json"
 	"fmt"
 	"image"
+	"image/color"
 	"math"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/Ducky705/ClashGO/internal/attack"
 	"github.com/Ducky705/ClashGO/internal/game"
 	"github.com/Ducky705/ClashGO/internal/paths"
 	"github.com/Ducky705/ClashGO/internal/vision"
@@ -220,6 +224,96 @@ func (b *Bot) maybeSaveNearMissBaseScreenshot(screen gocv.Mat, gold, elixir, dar
 		Int("de", darkElixir).
 		Int("score", score).
 		Msg("saved sampled near-miss target")
+}
+
+type dryRunPreview struct {
+	Timestamp    time.Time       `json:"timestamp"`
+	Strategy     string          `json:"strategy"`
+	TargetEdge   string          `json:"target_edge"`
+	PhysicalSide string          `json:"physical_side"`
+	RedZoneValid bool            `json:"red_zone_valid"`
+	RedZone      image.Rectangle `json:"red_zone"`
+	DeployPoints []image.Point   `json:"deploy_points"`
+	Outside      bool            `json:"outside_red_zone"`
+	HUDSafe      bool            `json:"hud_safe"`
+}
+
+func previewSide(edge string) string {
+	s := strings.ToLower(strings.TrimSpace(edge))
+	switch {
+	case strings.Contains(s, "top"):
+		return "top"
+	case strings.Contains(s, "right"):
+		return "right"
+	case strings.Contains(s, "bottom"):
+		return "bottom"
+	case strings.Contains(s, "left"):
+		return "left"
+	default:
+		return ""
+	}
+}
+
+func (b *Bot) saveDryRunPreview(screen gocv.Mat, strategyName, targetEdge string) {
+	if b == nil || screen.Empty() {
+		return
+	}
+	w, h := screen.Cols(), screen.Rows()
+	uiCutoff := int(float64(h) * 0.85)
+	zone := attack.NewRedLineDetector(b.logger).Detect(screen, uiCutoff)
+	line := attack.NewDeployLineCalculator(b.logger).Calculate(
+		zone, w, h, uiCutoff, previewSide(targetEdge), 15,
+	)
+
+	hudSafe := true
+	for _, p := range line.Points {
+		if p.Y >= uiCutoff {
+			hudSafe = false
+			break
+		}
+	}
+	preview := dryRunPreview{
+		Timestamp: time.Now(), Strategy: strategyName, TargetEdge: targetEdge,
+		PhysicalSide: line.Side, RedZoneValid: zone.Valid, RedZone: zone.BBox,
+		DeployPoints: append([]image.Point(nil), line.Points...),
+		Outside: line.Outside, HUDSafe: hudSafe,
+	}
+
+	dir := paths.ResolveConfig("output/dry_run_previews")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	stamp := time.Now().Format("20060102_150405.000")
+	data, err := json.MarshalIndent(preview, "", "  ")
+	if err == nil {
+		_ = os.WriteFile(filepath.Join(dir, "dry_run_"+stamp+".json"), data, 0o600)
+	}
+
+	overlay := b.screenshotForPersistence(screen)
+	if overlay.Empty() {
+		overlay.Close()
+		return
+	}
+	defer overlay.Close()
+	if zone.Valid {
+		gocv.Rectangle(&overlay, zone.BBox, color.RGBA{R: 255, G: 80, B: 80, A: 255}, 2)
+	}
+	if len(line.Points) >= 2 {
+		gocv.Line(&overlay, line.Points[0], line.Points[len(line.Points)-1], color.RGBA{R: 80, G: 255, B: 120, A: 255}, 2)
+	}
+	for _, p := range line.Points {
+		gocv.Circle(&overlay, p, 5, color.RGBA{R: 80, G: 220, B: 255, A: 255}, -1)
+	}
+	_ = gocv.IMWrite(filepath.Join(dir, "dry_run_"+stamp+".png"), overlay)
+	prunePNGDir(dir, 50)
+	b.logger.Info().
+		Str("strategy", strategyName).
+		Str("target_edge", targetEdge).
+		Str("side", line.Side).
+		Bool("red_zone_valid", zone.Valid).
+		Bool("hud_safe", hudSafe).
+		Int("points", len(line.Points)).
+		Msg("dry-run deployment preview saved; no troops deployed")
 }
 
 type collectorTarget struct {
