@@ -486,3 +486,25 @@ func TestNormalizeCOCAPIKeyRejectsPlaceholder(t *testing.T) {
 		}
 	}
 }
+
+
+func TestLimiterSweepsExpiredEntries(t *testing.T) {
+	l := &limiterState{entries: map[string]*clientWindow{
+		"stale": {start: time.Now().Add(-10 * time.Minute), count: 30},
+	}}
+	l.lastSweep = time.Now().Add(-10 * time.Minute)
+	if !l.allow("fresh") {
+		t.Fatal("fresh client should be allowed")
+	}
+	if _, ok := l.entries["stale"]; ok {
+		t.Fatal("stale limiter entry should be swept")
+	}
+	for i := 1; i < 30; i++ {
+		if !l.allow("fresh") {
+			t.Fatalf("request %d should still be allowed", i+1)
+		}
+	}
+	if l.allow("fresh") {
+		t.Fatal("31st request in the same minute should be rate limited")
+	}
+}
