@@ -3,7 +3,9 @@ package bot
 import (
 	"encoding/json"
 	"fmt"
+	"image"
 	"math"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,6 +18,7 @@ import (
 	"github.com/Ducky705/ClashGO/internal/intelligence"
 	"github.com/Ducky705/ClashGO/internal/paths"
 	"github.com/Ducky705/ClashGO/pkg/strategy"
+	"gocv.io/x/gocv"
 )
 
 type multiAccountRect struct {
@@ -144,6 +147,85 @@ func (b *Bot) tapAccountRect(c multiAccountSwitchCalibration, r multiAccountRect
 	return nil
 }
 
+func accountVisualHash(frame gocv.Mat) (uint64, error) {
+	if frame.Empty() {
+		return 0, fmt.Errorf("empty frame")
+	}
+	gray := gocv.NewMat()
+	defer gray.Close()
+	if frame.Channels() == 1 {
+		frame.CopyTo(&gray)
+	} else {
+		gocv.CvtColor(frame, &gray, gocv.ColorBGRToGray)
+	}
+	small := gocv.NewMat()
+	defer small.Close()
+	gocv.Resize(gray, &small, image.Pt(9, 8), 0, 0, gocv.InterpolationArea)
+	if small.Empty() || small.Rows() != 8 || small.Cols() != 9 {
+		return 0, fmt.Errorf("could not build visual hash")
+	}
+	var hash uint64
+	var bit uint
+	for y := 0; y < 8; y++ {
+		for x := 0; x < 8; x++ {
+			if small.GetUCharAt(y, x) > small.GetUCharAt(y, x+1) {
+				hash |= uint64(1) << bit
+			}
+			bit++
+		}
+	}
+	return hash, nil
+}
+
+func (b *Bot) accountSceneFingerprint(timeout time.Duration) (uint64, uint64, error) {
+	if b == nil {
+		return 0, 0, fmt.Errorf("bot unavailable")
+	}
+	frame, err := b.runtimeFrameFresh(timeout)
+	if err != nil {
+		return 0, 0, err
+	}
+	if frame.Empty() {
+		frame.Close()
+		return 0, 0, fmt.Errorf("empty runtime frame")
+	}
+	hash, err := accountVisualHash(frame)
+	frame.Close()
+	return hash, b.frameSeq.Load(), err
+}
+
+func (b *Bot) waitForAccountVisualChange(startSeq, beforeHash uint64, timeout time.Duration) (int, bool) {
+	deadline := time.Now().Add(timeout)
+	bestDistance := 0
+	for time.Now().Before(deadline) {
+		if b.ctx.Err() != nil {
+			return bestDistance, false
+		}
+		if b.frameSeq.Load() <= startSeq {
+			if !b.sleepResponsive(120 * time.Millisecond) {
+				return bestDistance, false
+			}
+			continue
+		}
+		afterHash, seq, err := b.accountSceneFingerprint(1200 * time.Millisecond)
+		if err == nil && seq > startSeq {
+			distance := bits.OnesCount64(beforeHash ^ afterHash)
+			if distance > bestDistance {
+				bestDistance = distance
+			}
+			// Eight changed dHash bits is intentionally conservative enough to
+			// reject a stale frame while still tolerating small animations.
+			if distance >= 8 {
+				return distance, true
+			}
+		}
+		if !b.sleepResponsive(150 * time.Millisecond) {
+			return bestDistance, false
+		}
+	}
+	return bestDistance, false
+}
+
 func (b *Bot) accountState(timeout time.Duration) (game.GameState, error) {
 	screen, err := b.runtimeFrameFresh(timeout)
 	if err != nil {
@@ -246,24 +328,36 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) error {
 		return fmt.Errorf("Settings screen was not confirmed")
 	}
 
+	settingsHash, settingsSeq, err := b.accountSceneFingerprint(2 * time.Second)
+	if err != nil {
+		_ = b.client.Back()
+		return fmt.Errorf("fingerprint Settings screen: %w", err)
+	}
 	if err := b.tapAccountRect(c, c.SupercellIDButton, "supercell_id"); err != nil {
 		_ = b.client.Back()
 		return err
 	}
-	if !b.sleepResponsive(700 * time.Millisecond) {
-		return fmt.Errorf("switch cancelled")
+	if distance, ok := b.waitForAccountVisualChange(settingsSeq, settingsHash, 5*time.Second); !ok {
+		_ = b.client.Back()
+		return fmt.Errorf("Supercell ID panel visual transition was not confirmed (distance=%d)", distance)
 	}
 	if state, err := b.accountState(2 * time.Second); err != nil || state == game.StateMainVillage {
 		_ = b.client.Back()
 		return fmt.Errorf("Supercell ID panel was not confirmed")
 	}
 
+	supercellHash, supercellSeq, err := b.accountSceneFingerprint(2 * time.Second)
+	if err != nil {
+		_ = b.client.Back()
+		return fmt.Errorf("fingerprint Supercell ID panel: %w", err)
+	}
 	if err := b.tapAccountRect(c, c.SwitchAccountButton, "switch_account"); err != nil {
 		_ = b.client.Back()
 		return err
 	}
-	if !b.sleepResponsive(650 * time.Millisecond) {
-		return fmt.Errorf("switch cancelled")
+	if distance, ok := b.waitForAccountVisualChange(supercellSeq, supercellHash, 5*time.Second); !ok {
+		_ = b.client.Back()
+		return fmt.Errorf("account selector visual transition was not confirmed (distance=%d)", distance)
 	}
 	if state, err := b.accountState(2 * time.Second); err != nil || state == game.StateMainVillage {
 		_ = b.client.Back()
