@@ -472,6 +472,28 @@ func (m *Manager) MarkSwitchFailed(err error) error {
 	return m.saveLocked()
 }
 
+func (m *Manager) MarkSwitchAmbiguous(accountID string, cause error) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	accountID = strings.TrimSpace(accountID)
+	target := m.accountByIDLocked(accountID)
+	if target == nil || !target.Enabled {
+		return fmt.Errorf("unknown or disabled multi-account profile %q", accountID)
+	}
+	m.state.RecoveryRequired = true
+	m.state.RecoveryTargetAccountID = accountID
+	if cause != nil {
+		m.state.LastError = "account switch identity uncertain: " + cause.Error()
+	} else {
+		m.state.LastError = "account switch identity uncertain"
+	}
+	m.state.UpdatedAt = time.Now()
+	return m.saveLocked()
+}
+
 func (m *Manager) MarkSwitchWarning(err error) error {
 	if m == nil {
 		return nil
