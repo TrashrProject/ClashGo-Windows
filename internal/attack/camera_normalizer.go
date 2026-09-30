@@ -11,6 +11,9 @@ import (
 const (
 	cameraNormalizeMaxZooms = 3
 	cameraNormalizeMaxPans  = 2
+	// Hard SLA for camera preparation. The whole accept->plan path should stay
+	// in the "few seconds" range even on a base that needs multiple adjustments.
+	cameraNormalizeBudget   = 3 * time.Second
 )
 
 // deploymentMargins describes the legal screen space outside the detected
@@ -122,6 +125,8 @@ func (e *Executor) normalizeBattlefieldCamera(
 	owned := false
 	zone = detector.Detect(current, uiCutoff)
 	required := cameraSafeMargin(w)
+	started := time.Now()
+	budgetExpired := func() bool { return time.Since(started) >= cameraNormalizeBudget }
 
 	logState := func(stage string, attempt int) {
 		margins := marginsForRedZone(zone, w, uiCutoff)
@@ -164,6 +169,10 @@ func (e *Executor) normalizeBattlefieldCamera(
 
 	if runtime.GOOS == "windows" {
 		for attempt := 1; attempt <= cameraNormalizeMaxZooms; attempt++ {
+			if budgetExpired() {
+				e.logger.Warn().Dur("elapsed", time.Since(started)).Msg("camera normalization budget reached during zoom stage")
+				break
+			}
 			margins := marginsForRedZone(zone, w, uiCutoff)
 			if zone.Valid && marginForSide(margins, preferredSide) >= required {
 				break
@@ -179,7 +188,7 @@ func (e *Executor) normalizeBattlefieldCamera(
 			}
 			// One calm render window: do not poll/capture through the zoom
 			// animation, which previously created extra BlueStacks pressure.
-			time.Sleep(650 * time.Millisecond)
+			time.Sleep(350 * time.Millisecond)
 			if !replaceWithFresh("zoom_out", attempt) {
 				break
 			}
@@ -189,6 +198,10 @@ func (e *Executor) normalizeBattlefieldCamera(
 		// the intended side cramped. Each pan is followed by exactly one fresh
 		// capture and one red-zone pass.
 		for attempt := 1; attempt <= cameraNormalizeMaxPans; attempt++ {
+			if budgetExpired() {
+				e.logger.Warn().Dur("elapsed", time.Since(started)).Msg("camera normalization budget reached during pan stage")
+				break
+			}
 			margins := marginsForRedZone(zone, w, uiCutoff)
 			if zone.Valid && marginForSide(margins, preferredSide) >= required {
 				break
@@ -207,7 +220,7 @@ func (e *Executor) normalizeBattlefieldCamera(
 				e.logger.Warn().Err(err).Msg("camera normalization: pan failed")
 				break
 			}
-			time.Sleep(600 * time.Millisecond)
+			time.Sleep(325 * time.Millisecond)
 			if !replaceWithFresh("pan", attempt) {
 				break
 			}
@@ -224,6 +237,7 @@ func (e *Executor) normalizeBattlefieldCamera(
 		Int("required_free_space", required).
 		Int("screen_w", w).
 		Int("screen_h", h).
+		Dur("camera_ms", time.Since(started)).
 		Msg("battlefield camera normalized; handing frame to deploy planner")
 
 	return current, owned, zone
