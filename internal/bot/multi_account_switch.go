@@ -609,6 +609,13 @@ func (b *Bot) applyPreparedManagedAccount(prepared *preparedManagedAccount, next
 	b.contextual = prepared.contextual
 	b.villageMemory = prepared.villageMemory
 	b.armySlot = prepared.armySlot
+	if b.attackExec != nil {
+		if b.cfg.Account.MultiAccount.Enabled {
+			b.attackExec.SetArmyInspectionPath(AccountArmySnapshotPath(b.cfg))
+		} else {
+			b.attackExec.SetArmyInspectionPath("")
+		}
+	}
 
 	b.logger.Info().
 		Str("account_scope", learningScopeKey(b.cfg)).
