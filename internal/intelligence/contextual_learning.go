@@ -52,23 +52,73 @@ func (c AttackContext) FamilyKey() string {
 }
 
 type ContextualOutcome struct {
-	Context            AttackContext `json:"context"`
-	Edge               string        `json:"edge"`
-	Stars              int           `json:"stars"`
-	DestructionPct     int           `json:"destruction_pct"`
-	GoldStolen         int           `json:"gold_stolen"`
-	ElixirStolen       int           `json:"elixir_stolen"`
-	DarkElixirStolen   int           `json:"dark_elixir_stolen"`
-	DeploySuccess      bool          `json:"deploy_success"`
-	ReturnHomeSuccess  bool          `json:"return_home_success"`
-	SafeDeployment     bool          `json:"safe_deployment"`
-	ParsedResults      bool          `json:"parsed_results"`
-	RecoveryCount      int           `json:"recovery_count"`
-	BlueStacksRestart  int           `json:"bluestacks_restart"`
-	At                 time.Time     `json:"at"`
+	Context              AttackContext `json:"context"`
+	Edge                 string        `json:"edge"`
+	Stars                int           `json:"stars"`
+	DestructionPct       int           `json:"destruction_pct"`
+	GoldStolen           int           `json:"gold_stolen"`
+	ElixirStolen         int           `json:"elixir_stolen"`
+	DarkElixirStolen     int           `json:"dark_elixir_stolen"`
+	CycleDurationMS      int64         `json:"cycle_duration_ms"`
+	FullRoutineDurationMS int64        `json:"full_routine_duration_ms"`
+	DeploySuccess        bool          `json:"deploy_success"`
+	ReturnHomeSuccess    bool          `json:"return_home_success"`
+	SafeDeployment       bool          `json:"safe_deployment"`
+	ParsedResults        bool          `json:"parsed_results"`
+	RecoveryCount        int           `json:"recovery_count"`
+	BlueStacksRestart    int           `json:"bluestacks_restart"`
+	At                   time.Time     `json:"at"`
+}
+
+func weightedFarmResources(gold, elixir, dark int) float64 {
+	// Dark elixir is two orders of magnitude scarcer than gold/elixir. Giving
+	// it a 100x conversion lets the learner compare mixed-loot attacks without
+	// allowing a tiny raw DE number to disappear next to million-scale G/E.
+	return float64(maxIntLearning(gold, 0)+maxIntLearning(elixir, 0)) +
+		float64(maxIntLearning(dark, 0))*100
+}
+
+func FarmResourcesPerHour(o ContextualOutcome) float64 {
+	elapsedMS := o.FullRoutineDurationMS
+	if elapsedMS <= 0 {
+		elapsedMS = o.CycleDurationMS
+	}
+	if elapsedMS <= 0 {
+		return 0
+	}
+	return weightedFarmResources(o.GoldStolen, o.ElixirStolen, o.DarkElixirStolen) *
+		3600000 / float64(elapsedMS)
 }
 
 func RewardForContextualOutcome(o ContextualOutcome) float64 {
+	// Intelligence V3 is a FARM optimizer. The primary objective is how much
+	// loot is extracted and how quickly the full attack cycle finishes.
+	// Stars/destruction are intentionally only tiny secondary signals.
+	stolen := weightedFarmResources(o.GoldStolen, o.ElixirStolen, o.DarkElixirStolen)
+	available := weightedFarmResources(o.Context.TargetGold, o.Context.TargetElixir, o.Context.TargetDE)
+
+	captureRatio := 0.0
+	if available > 0 {
+		captureRatio = clamp(stolen/available, 0, 1.25)
+	}
+
+	// 50 points: proportion of available loot actually collected.
+	score := captureRatio * 50
+
+	// 35 points: absolute farm throughput. The reference rate is deliberately
+	// not a hard requirement; values above it continue receiving some credit,
+	// capped so stability can never be traded away for reckless speed.
+	if rate := FarmResourcesPerHour(o); rate > 0 {
+		const referenceWeightedPerHour = 30_000_000.0
+		score += clamp(rate/referenceWeightedPerHour, 0, 1.35) * 35
+	} else if stolen > 0 {
+		// Old history rows may predate full-cycle timing. They still contribute
+		// through loot capture, but cannot falsely appear faster than live data.
+		score += math.Min(10, stolen/250000)
+	}
+
+	// Stars/destruction are not the farming target. They only break close ties
+	// when two attacks yield similar loot/time.
 	stars := o.Stars
 	if stars < 0 {
 		stars = 0
@@ -76,6 +126,7 @@ func RewardForContextualOutcome(o ContextualOutcome) float64 {
 	if stars > 3 {
 		stars = 3
 	}
+	score += float64(stars) * 0.75
 	pct := o.DestructionPct
 	if pct < 0 {
 		pct = 0
@@ -83,51 +134,39 @@ func RewardForContextualOutcome(o ContextualOutcome) float64 {
 	if pct > 100 {
 		pct = 100
 	}
-
-	// Battle quality dominates the score. Stability/safety can only reduce
-	// a seemingly good attack, never be traded away for a few extra stars.
-	score := float64(stars)*15 + float64(pct)*0.30
-
-	lootRatios := make([]float64, 0, 3)
-	if o.Context.TargetGold > 0 {
-		lootRatios = append(lootRatios, clamp(float64(o.GoldStolen)/float64(o.Context.TargetGold), 0, 1))
-	}
-	if o.Context.TargetElixir > 0 {
-		lootRatios = append(lootRatios, clamp(float64(o.ElixirStolen)/float64(o.Context.TargetElixir), 0, 1))
-	}
-	if o.Context.TargetDE > 0 {
-		lootRatios = append(lootRatios, clamp(float64(o.DarkElixirStolen)/float64(o.Context.TargetDE), 0, 1))
-	}
-	if len(lootRatios) > 0 {
-		var sum float64
-		for _, ratio := range lootRatios {
-			sum += ratio
-		}
-		score += (sum / float64(len(lootRatios))) * 15
-	}
+	score += float64(pct) * 0.015
 
 	if o.DeploySuccess {
-		score += 6
+		score += 3
 	} else {
 		score -= 30
 	}
 	if o.ReturnHomeSuccess {
-		score += 4
+		score += 3
 	} else {
 		score -= 25
 	}
 	if o.SafeDeployment {
-		score += 5
+		score += 4
 	} else {
 		score -= 15
 	}
 	if o.ParsedResults {
-		score += 2
+		score += 1
 	}
 
+	// Emulator stability stays a hard constraint. A strategy that earns a lot
+	// but destabilizes BlueStacks must never become champion.
 	score -= float64(o.RecoveryCount) * 25
 	score -= float64(o.BlueStacksRestart) * 100
 	return clamp(score, -100, 100)
+}
+
+func maxIntLearning(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 type EdgeLearningStat struct {
