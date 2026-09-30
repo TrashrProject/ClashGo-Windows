@@ -2,6 +2,7 @@ package multiaccount
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -313,5 +314,67 @@ func TestResolveRecoveryClearsJournalAndRestoresRotation(t *testing.T) {
 	required, target = again.RecoveryStatus()
 	if required || target != "" {
 		t.Fatalf("recovery journal survived explicit resolution: required=%v target=%q", required, target)
+	}
+}
+
+
+func TestManagerManualRecoveryResolutionClearsInterruptedJournal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multi.json")
+	cfg := testConfig()
+
+	m, err := NewManager(path, cfg, "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.BeginSwitch("b"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the process stopping after switch navigation began but before
+	// MainVillage was verified.
+	reloaded, err := NewManager(path, cfg, "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	required, target := reloaded.RecoveryStatus()
+	if !required || target != "b" {
+		t.Fatalf("recovery required=%v target=%q want true/b", required, target)
+	}
+
+	// The human sees that account B is actually loaded and confirms it.
+	if err := reloaded.ResolveRecovery("b"); err != nil {
+		t.Fatal(err)
+	}
+	required, target = reloaded.RecoveryStatus()
+	if required || target != "" {
+		t.Fatalf("recovery still active: required=%v target=%q", required, target)
+	}
+	active, ok := reloaded.Active()
+	if !ok || active.ID != "b" {
+		t.Fatalf("active=%+v ok=%v want b/true", active, ok)
+	}
+	if _, err := os.Stat(path + ".switch.json"); !os.IsNotExist(err) {
+		t.Fatalf("switch journal should be removed after manual recovery, err=%v", err)
+	}
+}
+
+func TestManagerRecoveryResolutionRejectsDisabledAccount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multi.json")
+	cfg := testConfig()
+	m, err := NewManager(path, cfg, "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.BeginSwitch("b"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg.Accounts[1].Enabled = false
+	reloaded, err := NewManager(path, cfg, "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reloaded.ResolveRecovery("b"); err == nil {
+		t.Fatal("expected disabled account recovery confirmation to fail")
 	}
 }
