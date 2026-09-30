@@ -54,6 +54,7 @@ type Bot struct {
 
 	attackExec *attack.Executor
 	governor   *autopolicy.Governor
+	adaptive   *intelligence.AdaptiveEngine
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -131,6 +132,7 @@ type Bot struct {
 	historyCache []AttackReport
 	telemetry    *telemetry.Bus
 	lastPrepTimings PreparationTimings
+	lastPlanningUS  atomic.Int64
 
 	uiAnchorMu        sync.RWMutex
 	uiAnchors         map[string]image.Point
@@ -333,6 +335,32 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		uiAnchors:          make(map[string]image.Point),
 	}
 
+	emulatorKind := "adb"
+	if cfg.Device.BlueStacksInstance != "" || strings.Contains(strings.ToLower(cfg.Device.DeviceID), "localhost") {
+		emulatorKind = "bluestacks"
+	}
+	adaptive, adaptiveErr := intelligence.NewAdaptiveEngine(
+		paths.ResolveConfig("adaptive_learning.json"),
+		intelligence.EnvironmentFingerprint{
+			OS: runtime.GOOS,
+			Emulator: emulatorKind,
+			DeviceID: cfg.Device.DeviceID,
+			Width: cfg.Device.Width,
+			Height: cfg.Device.Height,
+			DPI: cfg.Device.DPI,
+			Strategy: filepath.Base(cfg.Attack.StrategyFile),
+			TownHall: cfg.Attack.Farm.TownHall,
+		},
+	)
+	if adaptiveErr != nil {
+		b.logger.Warn().Err(adaptiveErr).Msg("adaptive intelligence unavailable; continuing without learning")
+	} else {
+		b.adaptive = adaptive
+		b.logger.Info().
+			Str("mode", string(adaptive.Mode())).
+			Msg("adaptive intelligence active")
+	}
+
 	// Resolve the strategy's declared army slot once at boot so the
 	// pre-battle click sequence can arm the right saved recipe. The
 	// strategy is parsed again later for the deploy phases; this early
@@ -394,6 +422,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 	b.attackExec.SetClassifier(b.classify)
 	b.attackExec.SetFrameProvider(b.runtimeFrameFresh)
 	b.attackExec.OnPlanReady = func(duration time.Duration, edge string) {
+		b.lastPlanningUS.Store(duration.Microseconds())
 		b.logger.Info().Dur("planning", duration).Str("edge", edge).Msg("attack plan committed; starting deployment")
 		b.setRuntimePhase(PhaseDeploying)
 	}
@@ -1796,6 +1825,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	defer b.setRuntimePhase(PhaseIdle)
 	sequenceRecoveryStart := b.recoveryAttempts.Load()
 	sequenceBlueStacksRestartStart := b.blueStacksRestarts.Load()
+	b.lastPlanningUS.Store(0)
 	b.seqStartedAtUnix.Store(time.Now().Unix())
 	defer b.seqStartedAtUnix.Store(0)
 	defer b.seqRunning.Store(false)
@@ -2489,11 +2519,44 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	rep.ReturnHomeDurationMS = returnHomeDur.Milliseconds()
 	rep.ReturnHomeSuccess = returnedHome
 	rep.FullRoutineDurationMS = time.Since(sequenceStartedAt).Milliseconds()
-	b.recordAttackSoak(
-		rep,
-		b.recoveryAttempts.Load()-sequenceRecoveryStart,
-		b.blueStacksRestarts.Load()-sequenceBlueStacksRestartStart,
-	)
+	recoveryDelta := b.recoveryAttempts.Load() - sequenceRecoveryStart
+	blueStacksRestartDelta := b.blueStacksRestarts.Load() - sequenceBlueStacksRestartStart
+	b.recordAttackSoak(rep, recoveryDelta, blueStacksRestartDelta)
+
+	if b.adaptive != nil {
+		clean := rep.DeploySuccess && rep.ReturnHomeSuccess && rep.ParsedResults &&
+			recoveryDelta == 0 && blueStacksRestartDelta == 0
+		reward, learnErr := b.adaptive.Observe(intelligence.LearningOutcome{
+			Domain: "attack",
+			Parameters: map[string]float64{
+				"search_capture_ms":   700,
+				"planning_capture_ms": 250,
+				"deploy_capture_ms":   350,
+				"card_settle_ms":      150,
+				"camera_zoom_steps":   3,
+				"camera_pan_steps":    2,
+			},
+			Clean:             clean,
+			DeploySuccess:     rep.DeploySuccess,
+			ReturnHomeSuccess: rep.ReturnHomeSuccess,
+			SafeDeployment:    rep.RedZoneValid,
+			ParsedResults:     rep.ParsedResults,
+			RecoveryCount:     int(recoveryDelta),
+			BlueStacksRestart: int(blueStacksRestartDelta),
+			PlanningMS:        b.lastPlanningUS.Load() / 1000,
+			DeployMS:          rep.DeployDurationMS,
+			CaptureMS:         rep.CaptureMS,
+		})
+		if learnErr != nil {
+			b.logger.Warn().Err(learnErr).Msg("adaptive intelligence observation could not be saved")
+		} else {
+			b.logger.Info().
+				Float64("reward", reward).
+				Str("mode", string(b.adaptive.Mode())).
+				Bool("clean", clean).
+				Msg("adaptive intelligence learned from attack")
+		}
+	}
 
 	b.historyMu.Lock()
 	if len(b.historyCache) > 0 && b.historyCache[0].Timestamp == rep.Timestamp {
