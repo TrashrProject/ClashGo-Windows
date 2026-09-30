@@ -2449,39 +2449,6 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 					}
 				}
 
-				// Optional star-target exit. Star count is derived from the same
-				// validated destruction/TH evidence used by result accounting, so this
-				// adds no OCR or screenshot work. As with every early-exit path, the
-				// red End Battle button must be visible before we tap anything.
-				starTarget := e.cfg.EndAtStars
-				if starTarget < 0 { starTarget = 0 }
-				if starTarget > 3 { starTarget = 3 }
-				if e.earlyExitAllowed && starTarget > 0 {
-					currentStars := game.StarsFromOutcome(currentPct, e.thDestroyed)
-					if currentStars >= starTarget {
-						if !e.endButtonVisible(screen, sCfg) {
-							e.logger.Debug().
-								Int("stars", currentStars).
-								Int("target", starTarget).
-								Msg("star target reached but End Battle button not visible; keeping battle alive")
-						} else {
-							e.logger.Info().
-								Int("stars", currentStars).
-								Int("target", starTarget).
-								Int("destruction", currentPct).
-								Msg("star target reached; ending battle")
-							screen.Close()
-							if err := e.EndBattle(); err != nil {
-								e.lastBattleEndReason = "star_target_end_failed"
-								e.logger.Warn().Err(err).Msg("star-target EndBattle tap failed")
-								return false
-							}
-							e.lastBattleEndReason = "star_target"
-							return true
-						}
-					}
-				}
-
 				// Optional star target. Stars are derived from the same live,
 				// validated destruction + TH evidence already used by result
 				// accounting, so this adds no screenshots or parallel OCR stream.
