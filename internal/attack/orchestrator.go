@@ -962,7 +962,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			tapExec.HumanSleep(150, 30)
 
 			detectedCount := GetCountForSlot(troopCounts, up.Slot.X)
-			heroMgr.DeployTroops(up.Unit, up.Slot, plan.Phase.Pattern, plan.Phase.Offset, plan.Phase.Pattern, screen, detectedCount)
+			heroMgr.DeployTroops(up.Unit, up.Slot, plan.Phase.Pattern, plan.Phase.Offset, plan.Phase.Pattern, deployScreen, detectedCount)
 		}
 
 		// Deploy siege
@@ -1002,7 +1002,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				heroUnits = append(heroUnits, up.Unit)
 			}
 			if len(heroUnits) > 0 {
-				heroMgr.DeployHeroes(heroUnits, screen)
+				heroMgr.DeployHeroes(heroUnits, deployScreen)
 			}
 		}
 
