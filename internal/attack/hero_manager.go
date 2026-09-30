@@ -450,7 +450,7 @@ func (hm *HeroManager) DeployTroops(
 	}
 	deployed(tapCount, hm.lineJitter(hasFormula))
 
-	const reconcileRounds = 3
+	const reconcileRounds = 1
 	const reconcileSettleMs = 150
 	for round := 0; round < reconcileRounds; round++ {
 		// Battle-timer guard: the reconcile top-ups exist to catch genuine
