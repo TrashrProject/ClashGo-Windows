@@ -97,6 +97,19 @@ func accountAttackHistoryPath(cfg *config.BotConfig) string {
 }
 
 
+func AccountVillageResourcesPath(cfg *config.BotConfig) string {
+	return learningAccountStatePath(cfg, "village_resources.json")
+}
+
+func AccountVillageResourceHistoryPath(cfg *config.BotConfig) string {
+	return learningAccountStatePath(cfg, "village_resource_history.json")
+}
+
+func AccountArmySnapshotPath(cfg *config.BotConfig) string {
+	return learningAccountStatePath(cfg, "current_army.json")
+}
+
+
 // ResolveMultiAccountActivePlayerTag returns the PlayerTag associated with the
 // scheduler's last durably verified active account. The scheduler state is
 // written only after a physical Supercell-ID switch has completed its loading
