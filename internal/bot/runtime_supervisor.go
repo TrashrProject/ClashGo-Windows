@@ -72,6 +72,7 @@ func (b *Bot) runtimeSupervisorLoop() {
 			return
 		case <-ticker.C:
 			now := time.Now()
+			b.applyRuntimeHealthPolicy(now)
 
 			if last := b.captureHeartbeat.Load(); last > 0 {
 				staleFor := now.Sub(time.Unix(0, last))
