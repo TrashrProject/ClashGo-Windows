@@ -45,6 +45,10 @@ type AutomationConfig struct {
 	// AutoProfileSync keeps account data fresh without manual Sync clicks.
 	AutoProfileSync bool `json:"auto_profile_sync"`
 
+	// MaxRunMinutes stops an unattended session cleanly after the requested
+	// amount of wall-clock time. 0 keeps the historical unlimited behavior.
+	MaxRunMinutes int `json:"max_run_minutes"`
+
 	// AutoCollectors periodically taps verified resource bubbles while the bot
 	// is idle on the main village. It never runs during search/deploy/battle.
 	AutoCollectors bool `json:"auto_collectors"`
@@ -303,12 +307,16 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 }
 
 func (d *Duration) UnmarshalJSON(b []byte) error {
-	s := string(b)
-	s = s[1 : len(s)-1]
-
-	dur, err := time.ParseDuration(s)
+	if d == nil {
+		return fmt.Errorf("parse duration: nil destination")
+	}
+	var raw string
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return fmt.Errorf("parse duration: expected JSON string: %w", err)
+	}
+	dur, err := time.ParseDuration(raw)
 	if err != nil {
-		return fmt.Errorf("parse duration %q: %w", s, err)
+		return fmt.Errorf("parse duration %q: %w", raw, err)
 	}
 	d.Duration = dur
 	return nil
@@ -401,6 +409,7 @@ func DefaultConfig() *BotConfig {
 			AutoArmyGuard:          true,
 			AutoResourceTracking:   true,
 			AutoProfileSync:        true,
+			MaxRunMinutes:          0,
 			AutoCollectors:         false,
 			CollectorInterval:      Duration{10 * time.Minute},
 			PrivacyMaskUsername:    true,
@@ -457,14 +466,33 @@ func decodeConfig(data []byte) (*BotConfig, error) {
 	return &cfg, nil
 }
 
+func archiveCorruptConfig(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	ext := filepath.Ext(path)
+	base := strings.TrimSuffix(path, ext)
+	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
+	target := fmt.Sprintf("%s.corrupt.%s%s", base, stamp, ext)
+	if err := os.Rename(path, target); err != nil {
+		return ""
+	}
+	return target
+}
+
 func Load(path string) (*BotConfig, error) {
 	path = resolveConfigPath(path)
 
 	data, err := os.ReadFile(path)
+	primaryInvalid := false
 	if err == nil {
 		if cfg, parseErr := decodeConfig(data); parseErr == nil {
 			return cfg, nil
 		}
+		primaryInvalid = true
 	}
 
 	// A transactional save keeps the previous valid file as .bak until the
@@ -473,12 +501,22 @@ func Load(path string) (*BotConfig, error) {
 	backupPath := path + ".bak"
 	if backup, backupErr := os.ReadFile(backupPath); backupErr == nil {
 		if cfg, parseErr := decodeConfig(backup); parseErr == nil {
+			if primaryInvalid {
+				_ = archiveCorruptConfig(path)
+			}
 			return cfg, nil
 		}
 	}
 
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
+	}
+	archived := ""
+	if primaryInvalid {
+		archived = archiveCorruptConfig(path)
+	}
+	if archived != "" {
+		return nil, fmt.Errorf("parse config: invalid JSON and no valid backup; corrupt file preserved at %s", archived)
 	}
 	return nil, fmt.Errorf("parse config: invalid JSON and no valid backup")
 }
