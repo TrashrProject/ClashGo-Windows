@@ -9,8 +9,22 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$wailsConfigPath = Join-Path $repoRoot "wails.json"
+$wailsConfigOriginal = $null
 Push-Location $repoRoot
 try {
+    # Keep the executable's Windows metadata on the exact same version as the
+    # Go ldflags, VERSION.txt, installer and update manifest. The checked-in
+    # wails.json stays stable; this edit exists only for the duration of build.
+    if (Test-Path $wailsConfigPath) {
+        $wailsConfigOriginal = [System.IO.File]::ReadAllText($wailsConfigPath)
+        $wailsConfig = $wailsConfigOriginal | ConvertFrom-Json
+        if (-not $wailsConfig.info) { throw "wails.json is missing info metadata" }
+        $wailsConfig.info.productVersion = $Version
+        $json = $wailsConfig | ConvertTo-Json -Depth 20
+        [System.IO.File]::WriteAllText($wailsConfigPath, $json, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "Wails productVersion synchronized to $Version"
+    }
     if (-not $SkipSync -and -not (Test-Path ".\assets\templates\btn_attack.png")) { & ".\tools\sync-upstream-runtime.ps1" }
     if (-not (Test-Path ".\assets\templates\btn_attack.png")) { throw "Runtime templates are missing. Run tools\sync-upstream-runtime.ps1 first." }
 
@@ -75,7 +89,12 @@ $env:CGO_LDFLAGS = "-LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -l
     try {
         npm ci
         if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
-    } finally { Pop-Location }
+    } finally {
+    if ($null -ne $wailsConfigOriginal) {
+        [System.IO.File]::WriteAllText($wailsConfigPath, $wailsConfigOriginal, (New-Object System.Text.UTF8Encoding($false)))
+    }
+    Pop-Location
+}
 
     if (-not $SkipTests) {
         Write-Host "Running focused tests..."
