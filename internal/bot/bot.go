@@ -2290,6 +2290,12 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			}
 		}
 
+		if !decision.Accept {
+			b.maybeSaveNearMissBaseScreenshot(
+				screen, loot.Gold, loot.Elixir, loot.DarkElixir, decision.Score, sequenceSkips+1,
+			)
+		}
+
 		if decision.Accept {
 			attackStartedAt = time.Now()
 			acceptedTargetGold = loot.Gold
