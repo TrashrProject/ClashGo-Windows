@@ -264,6 +264,12 @@ type SearchConfig struct {
 	MinLootDarkElixir    int  `json:"min_loot_de"`
 	SaveAcceptedBaseScreenshots bool `json:"save_accepted_base_screenshots"`
 
+	// Near-miss sampling keeps a small forensic set of rejected villages that
+	// were close to configured loot thresholds, without writing every skip.
+	SaveNearMissBaseScreenshots bool `json:"save_near_miss_base_screenshots"`
+	NearMissSampleEvery        int  `json:"near_miss_sample_every"`
+	NearMissWithinPercent      int  `json:"near_miss_within_percent"`
+
 	// AdaptiveSearch progressively relaxes loot thresholds after a long skip
 	// streak, but never below AdaptiveFloorPercent of the configured values.
 	AdaptiveSearch          bool `json:"adaptive_search"`
@@ -379,6 +385,9 @@ func DefaultConfig() *BotConfig {
 			MinLootElixir:        750000,
 			MinLootDarkElixir:    2000,
 			SaveAcceptedBaseScreenshots: true,
+			SaveNearMissBaseScreenshots: true,
+			NearMissSampleEvery:          20,
+			NearMissWithinPercent:        10,
 			AdaptiveSearch:          true,
 			AdaptiveStartAfterSkips: 8,
 			AdaptiveStepEverySkips:  4,
