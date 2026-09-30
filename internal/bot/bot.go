@@ -3830,6 +3830,9 @@ func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 		// while applying member pacing changes live.
 		b.governor.UpdateConfig(cfg.Automation)
 	}
+	if !cfg.Upgrade.UpgradeWalls {
+		b.wallUpgradePending.Store(false)
+	}
 
 	if b.navigator != nil {
 		b.navigator.SetDisableChestDismissal(cfg.Device.DisableChestDismissal)
