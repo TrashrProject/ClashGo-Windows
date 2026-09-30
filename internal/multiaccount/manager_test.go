@@ -172,3 +172,50 @@ func TestManagerFailedSwitchUsesBackoff(t *testing.T) {
 		t.Fatalf("expected first backoff to expire, allowed=%v remaining=%s", allowed, remaining)
 	}
 }
+
+
+func TestSwitchWarningDoesNotCreateBackoff(t *testing.T) {
+	m, err := NewManager("", testConfig(), "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.MarkSwitched("b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.MarkSwitchWarning(fmt.Errorf("config persistence degraded")); err != nil {
+		t.Fatal(err)
+	}
+
+	st := m.State()
+	if st.ActiveAccountID != "b" {
+		t.Fatalf("active account=%q want b", st.ActiveAccountID)
+	}
+	if st.ConsecutiveSwitchFailures != 0 {
+		t.Fatalf("warning incremented switch failures: %+v", st)
+	}
+	if st.LastError == "" {
+		t.Fatal("warning should remain visible in runtime status")
+	}
+	allowed, remaining := m.SwitchAttemptAllowed(time.Now().Add(time.Second))
+	if !allowed || remaining != 0 {
+		t.Fatalf("warning must not create switch backoff: allowed=%v remaining=%s", allowed, remaining)
+	}
+}
+
+func TestPhysicalFailureStillCreatesBackoff(t *testing.T) {
+	m, err := NewManager("", testConfig(), "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.MarkSwitchFailed(fmt.Errorf("selector not confirmed")); err != nil {
+		t.Fatal(err)
+	}
+	st := m.State()
+	if st.ConsecutiveSwitchFailures != 1 {
+		t.Fatalf("physical failure count=%d want 1", st.ConsecutiveSwitchFailures)
+	}
+	allowed, remaining := m.SwitchAttemptAllowed(time.Now())
+	if allowed || remaining <= 0 {
+		t.Fatalf("physical failure must create backoff: allowed=%v remaining=%s", allowed, remaining)
+	}
+}
