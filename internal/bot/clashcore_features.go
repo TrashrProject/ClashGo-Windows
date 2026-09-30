@@ -6,7 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"strings"
+	"sort"
 	"time"
 
 	"github.com/Ducky705/ClashGO/internal/paths"
@@ -71,16 +71,10 @@ func (b *Bot) saveAcceptedBaseScreenshot(screen gocv.Mat, gold, elixir, darkElix
 		return
 	}
 
-	account := strings.TrimSpace(b.cfg.Account.PlayerTag)
-	account = strings.TrimPrefix(account, "#")
-	account = strings.NewReplacer("/", "_", "\\", "_", ":", "_", " ", "_").Replace(account)
-	if account == "" {
-		account = "account"
-	}
-
+	// Never put the player tag in the filename: privacy mode must protect both
+	// pixels and filesystem metadata.
 	name := fmt.Sprintf(
-		"accepted_%s_%s_G%d_E%d_DE%d_S%d.png",
-		account,
+		"accepted_%s_G%d_E%d_DE%d_S%d.png",
 		time.Now().Format("20060102_150405.000"),
 		gold,
 		elixir,
@@ -107,6 +101,30 @@ func (b *Bot) saveAcceptedBaseScreenshot(screen gocv.Mat, gold, elixir, darkElix
 		Int("de", darkElixir).
 		Int("score", score).
 		Msg("accepted-base screenshot saved")
+
+	// Unattended sessions must not grow the output directory without bound.
+	// Keep the newest 200 accepted targets; failures to prune are non-fatal.
+	if entries, err := os.ReadDir(dir); err == nil {
+		type agedFile struct {
+			path string
+			when time.Time
+		}
+		files := make([]agedFile, 0, len(entries))
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".png" {
+				continue
+			}
+			if info, statErr := entry.Info(); statErr == nil {
+				files = append(files, agedFile{path: filepath.Join(dir, entry.Name()), when: info.ModTime()})
+			}
+		}
+		if len(files) > 200 {
+			sort.Slice(files, func(i, j int) bool { return files[i].when.Before(files[j].when) })
+			for _, old := range files[:len(files)-200] {
+				_ = os.Remove(old.path)
+			}
+		}
+	}
 }
 
 type collectorTarget struct {
