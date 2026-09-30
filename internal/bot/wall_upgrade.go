@@ -800,7 +800,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 					})
 					continue
 				}
-				time.Sleep(1200 * time.Millisecond)
+								time.Sleep(750 * time.Millisecond)
 
 				// Blind-confirm tap. No template matching, no
 				// cost-color check. The post-tap capture below
@@ -815,7 +815,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 					})
 					continue
 				}
-				time.Sleep(1200 * time.Millisecond)
+								time.Sleep(650 * time.Millisecond)
 
 				modalScreen, modalErr := h.Client.CaptureToMat()
 				if modalErr != nil {
@@ -865,9 +865,9 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 					// The two X's are dismissed in sequence (primary
 					// always first because the gem-buy modal reveals the
 					// confirm/secondary menu; then alt if configured).
-					// Each tap is followed by a 1s settle so CoC's modal
-					// close-fade has time to complete on slow BlueStacks
-					// 5.21 macOS frames. After both taps we re-capture
+					// Each tap gets a short settle; the following ADB capture already
+					// contributes its own paced wait, so a full extra second here was
+					// redundant. After both taps we re-capture
 					// once and verify both rects are down; if either is
 					// still up the iteration exits with explicit
 					// primary_still_up / alt_still_up flags so the user
@@ -879,7 +879,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 						if err := h.Client.Tap(xcx, xcy); err != nil {
 							h.Logger.Error().Err(err).Msg("primary X tap failed")
 						}
-						time.Sleep(1000 * time.Millisecond)
+						time.Sleep(450 * time.Millisecond)
 					}
 					if xPopupAlt != nil {
 						acx, acy := xPopupAlt.Center()
@@ -889,7 +889,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 						if err := h.Client.Tap(acx, acy); err != nil {
 							h.Logger.Error().Err(err).Msg("alt X tap failed")
 						}
-						time.Sleep(1000 * time.Millisecond)
+						time.Sleep(450 * time.Millisecond)
 					}
 
 					// Final verify: did both popups dismiss?
@@ -1680,7 +1680,7 @@ func defensiveDualTapAndLogClose(h *WallUpgradeHooks, xcx, xcy int, xPopupAlt *R
 		acx, acy := xPopupAlt.Center()
 		_ = h.Client.Tap(acx, acy)
 	}
-	time.Sleep(1000 * time.Millisecond)
+	time.Sleep(600 * time.Millisecond)
 	h.step("asset_driven_modal_close_failed", map[string]any{
 		"name":             btnName,
 		"reason":           reason,
