@@ -4021,57 +4021,11 @@ type MultiAccountRuntimeStatus struct {
 	SwitchInFlight     bool      `json:"switch_in_flight"`
 }
 
-func multiAccountRuntimeStatusFromManager(mgr *multiaccount.Manager, switchInFlight bool) MultiAccountRuntimeStatus {
-	if mgr == nil {
-		return MultiAccountRuntimeStatus{}
-	}
-	st := mgr.State()
-	recoveryRequired, recoveryTarget := mgr.RecoveryStatus()
-	out := MultiAccountRuntimeStatus{
-		Enabled:          mgr.Enabled(),
-		ActiveAccountID:  st.ActiveAccountID,
-		AttacksThisTurn:  st.AttacksThisTurn,
-		TotalSwitches:    st.TotalSwitches,
-		LastSwitchAt:     st.LastSwitchAt,
-		LastError:        st.LastError,
-		RecoveryRequired: recoveryRequired,
-		RecoveryTargetID: recoveryTarget,
-		SwitchInFlight:   switchInFlight,
-	}
-	if active, ok := mgr.Active(); ok {
-		out.ActiveAccountLabel = active.Label
-	}
-	if next, due := mgr.NextDue(); due {
-		out.RotationDue = true
-		out.NextAccountID = next.ID
-		out.NextAccountLabel = next.Label
-	}
-	return out
-}
-
-func LoadMultiAccountRuntimeStatus(cfg *config.BotConfig) MultiAccountRuntimeStatus {
-	if cfg == nil {
-		return MultiAccountRuntimeStatus{}
-	}
-	mgr, err := multiaccount.NewManager(
-		multiAccountStatePath(cfg),
-		cfg.Account.MultiAccount,
-		cfg.Account.PlayerTag,
-	)
-	if err != nil {
-		return MultiAccountRuntimeStatus{
-			Enabled:   false,
-			LastError: err.Error(),
-		}
-	}
-	return multiAccountRuntimeStatusFromManager(mgr, false)
-}
-
 func (b *Bot) MultiAccountStatus() MultiAccountRuntimeStatus {
 	if b == nil || b.multiAccount == nil {
 		return MultiAccountRuntimeStatus{}
 	}
-	return multiAccountRuntimeStatusFromManager(b.multiAccount, b.multiAccountSwitchInFlight.Load())
+	return multiAccountRuntimeStatus(b.multiAccount, b.multiAccountSwitchInFlight.Load())
 }
 
 func (b *Bot) Health() game.SystemHealth {
