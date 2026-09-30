@@ -294,6 +294,13 @@ jobs:
         shell: powershell
         run: .\tools\build-installer.ps1 -Version "$env:BETA_VERSION"
 
+      - name: Authenticode sign beta artifacts when certificate is configured
+        shell: powershell
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: .\tools\sign-windows-artifacts.ps1 -Version "$env:BETA_VERSION"
+
       - name: Generate beta manifest and checksums
         id: manifest
         shell: powershell
