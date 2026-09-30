@@ -384,6 +384,12 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 		h.Logger.Info().Msg("Template-matching fallback: no rect assets loaded — using btn_upgrade_wall template + cost-color")
 	}
 
+	// Once a wall row has been found, remember how many upward menu swipes
+	// were required from the deterministic bottom position. Subsequent wall
+	// upgrades can jump straight back near that row and validate it with one
+	// capture instead of repeating the full search.
+	preferredWallAttempt := -1
+
 	for upgradeCount := 1; ; upgradeCount++ {
 		// Stop check: the loop is otherwise unbounded (it only exits
 		// when no affordable wall remains). Breaking at the iteration
@@ -421,7 +427,11 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 			break
 		}
 		h.step("builder_tapped", map[string]any{"x": bx, "y": by})
-		time.Sleep(1500 * time.Millisecond) // Wait for menu to appear
+		builderSettle := 850 * time.Millisecond
+		if h.DeepSearch {
+			builderSettle = 1100 * time.Millisecond
+		}
+		time.Sleep(builderSettle)
 
 		// ROI for the upgrades menu (default right side of the screen)
 		menuROI := image.Rect(
@@ -517,18 +527,32 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 		sy1 := menuROI.Max.Y - bottomMargin
 		sy2 := menuROI.Min.Y + topMargin
 
-		// 3. Scroll robustly to the dead bottom of the menu
-		h.Logger.Debug().Int("scrollX", scrollX).Int("sy1", sy1).Int("sy2", sy2).Msg("Scrolling upgrades menu to the bottom")
-		for i := 0; i < 6; i++ {
-			if err := h.Client.Swipe(scrollX, sy1, scrollX, sy2, 300); err != nil {
+		// 3. Reset to a deterministic menu bottom. Four full-height swipes are
+		// enough on the normal path; the bounded recovery pass keeps the older
+		// six-swipe depth for unusual/long menus. Shorter settles remove several
+		// seconds of dead time per wall without adding captures.
+		bottomSwipes := 4
+		if h.DeepSearch {
+			bottomSwipes = 6
+		}
+		h.Logger.Debug().
+			Int("scrollX", scrollX).
+			Int("swipes", bottomSwipes).
+			Msg("Resetting upgrades menu to bottom")
+		for i := 0; i < bottomSwipes; i++ {
+			if err := h.Client.Swipe(scrollX, sy1, scrollX, sy2, 260); err != nil {
 				h.Logger.Error().Err(err).Msg("Failed to swipe menu down")
 				h.step("scroll_failed", map[string]any{"err": err.Error(), "iter": i})
 				return
 			}
-			time.Sleep(450 * time.Millisecond)
+			time.Sleep(220 * time.Millisecond)
 		}
-		time.Sleep(1200 * time.Millisecond) // momentum settle
-		h.step("menu_scrolled_to_bottom", nil)
+		bottomSettle := 500 * time.Millisecond
+		if h.DeepSearch {
+			bottomSettle = 750 * time.Millisecond
+		}
+		time.Sleep(bottomSettle)
+		h.step("menu_scrolled_to_bottom", map[string]any{"swipes": bottomSwipes})
 
 		// 4. Slowly scroll back up and search for "Wall" text
 		wallTpl, ok := h.Templates.Get("text_wall")
@@ -540,7 +564,31 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 		}
 
 		wallClicked := false
-		for attempt := 0; attempt < 12; attempt++ {
+		searchAttemptOffset := 0
+		if preferredWallAttempt > 0 && !h.DeepSearch {
+			// Replay the known scroll distance without doing capture/match work at
+			// every intermediate position. The first capture below validates that
+			// the row is still where the previous successful iteration found it.
+			startY := menuROI.Min.Y + menuROI.Dx()/2
+			endY := startY + int(140*h.Cal.ScaleY)
+			for i := 0; i < preferredWallAttempt; i++ {
+				if err := h.Client.Swipe(scrollX, startY, scrollX, endY, 260); err != nil {
+					break
+				}
+				time.Sleep(180 * time.Millisecond)
+			}
+			searchAttemptOffset = preferredWallAttempt
+			h.step("wall_search_fast_forward", map[string]any{"attempt": preferredWallAttempt})
+			time.Sleep(250 * time.Millisecond)
+		}
+
+		maxSearchAttempts := 8
+		if h.DeepSearch {
+			maxSearchAttempts = 12
+			searchAttemptOffset = 0
+		}
+		for localAttempt := 0; localAttempt < maxSearchAttempts; localAttempt++ {
+			attempt := searchAttemptOffset + localAttempt
 			screen, err := h.Client.CaptureToMat()
 			if err != nil {
 				time.Sleep(500 * time.Millisecond)
@@ -608,6 +656,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 				}
 				if err := h.Client.Tap(best.Point.X, best.Point.Y); err == nil {
 					wallClicked = true
+					preferredWallAttempt = attempt
 				}
 			}
 			screen.Close()
@@ -616,28 +665,19 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 				break
 			}
 
-			// Aggressive multiple-traverse swipe up (100px × 12 attempts =
-			// 1200px ≈ 3.5x traverses of the 339px menu). Per the user's
-			// empirical observation, over-scrolling is harmless (CoC's
-			// menu momentum-curve absorbs it) while under-scrolling has
-			// repeatedly hidden the wall row inside the matcher's blind
-			// spot between animation settle windows. The 12 attempts give
-			// the matcher ~36s of wall time to find any row in the scroll
-			// envelope; the loop's wallClicked early-break short-circuits
-			// on the first hit so a well-populated menu costs no extra
-			// time over the prior 6×90 = 540px / 7×90 = 630px runs.
 			h.Logger.Debug().Int("scrollX", scrollX).Msg("Wall text not visible, scrolling up...")
 			startY := menuROI.Min.Y + menuROI.Dx()/2
-			endY := startY + int(100*h.Cal.ScaleY)
-			if err := h.Client.Swipe(scrollX, startY, scrollX, endY, 400); err != nil {
+			endY := startY + int(140*h.Cal.ScaleY)
+			if err := h.Client.Swipe(scrollX, startY, scrollX, endY, 280); err != nil {
 				h.Logger.Error().Err(err).Msg("Failed to swipe up")
 				h.step("scroll_up_failed", map[string]any{"err": err.Error()})
 				break
 			}
-			time.Sleep(1000 * time.Millisecond)
+			time.Sleep(350 * time.Millisecond)
 		}
 
 		if !wallClicked {
+			preferredWallAttempt = -1
 			h.Logger.Warn().Msg("Failed to locate Wall text in builder menu, ending sequence")
 			h.step("wall_text_not_found", nil)
 			// Do NOT call Client.Back() here. The outer loop's runDismiss
