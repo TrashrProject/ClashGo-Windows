@@ -443,25 +443,50 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 	if histData, err := os.ReadFile(paths.ResolveConfig("attack_history.json")); err == nil {
 		var seeded []AttackReport
 		if jsonErr := json.Unmarshal(histData, &seeded); jsonErr == nil {
+			// Global history remains the dashboard view across all accounts.
 			b.historyCache = seeded
-			// Bootstrap V3 from the history ClashGO already collected. Only do
-			// this for an empty V3 state so restarting the app never double-counts
-			// the same historical attacks.
-			if b.contextual != nil && b.contextual.TotalSamples() == 0 && len(seeded) > 0 {
-				limit := len(seeded)
+
+			// Intelligence bootstrap must never mix accounts. In multi-account
+			// mode prefer the account-scoped history; if it does not exist yet,
+			// only accept explicitly tagged rows from the global history. Legacy
+			// untagged rows are intentionally ignored because ownership cannot be
+			// proven safely.
+			bootstrap := seeded
+			if cfg.Account.MultiAccount.Enabled && strings.TrimSpace(cfg.Account.PlayerTag) != "" {
+				bootstrap = nil
+				if accountData, accountErr := os.ReadFile(accountAttackHistoryPath(cfg)); accountErr == nil {
+					var accountSeeded []AttackReport
+					if json.Unmarshal(accountData, &accountSeeded) == nil {
+						bootstrap = accountSeeded
+					}
+				}
+				if len(bootstrap) == 0 {
+					for _, rep := range seeded {
+						if rep.PlayerTag != "" && strings.EqualFold(strings.TrimSpace(rep.PlayerTag), strings.TrimSpace(cfg.Account.PlayerTag)) {
+							bootstrap = append(bootstrap, rep)
+						}
+					}
+				}
+			}
+
+			// Bootstrap only an empty account-specific V3 state so restarts never
+			// double-count historical attacks.
+			if b.contextual != nil && b.contextual.TotalSamples() == 0 && len(bootstrap) > 0 {
+				limit := len(bootstrap)
 				if limit > 200 {
 					limit = 200
 				}
 				outcomes := make([]intelligence.ContextualOutcome, 0, limit)
-				// History is newest-first. Feed oldest-first so EWMA ends weighted
-				// toward the most recent real attacks.
 				for i := limit - 1; i >= 0; i-- {
-					outcomes = append(outcomes, contextualOutcomeFromReport(seeded[i], cfg.Attack.Farm.TownHall, 0, 0))
+					outcomes = append(outcomes, contextualOutcomeFromReport(bootstrap[i], cfg.Attack.Farm.TownHall, 0, 0))
 				}
 				if err := b.contextual.ObserveMany(outcomes); err != nil {
-					b.logger.Warn().Err(err).Msg("Intelligence V3 history bootstrap failed")
+					b.logger.Warn().Err(err).Msg("Intelligence V3 account history bootstrap failed")
 				} else {
-					b.logger.Info().Int("replayed_attacks", len(outcomes)).Msg("Intelligence V3 learned from existing attack history")
+					b.logger.Info().
+						Int("replayed_attacks", len(outcomes)).
+						Str("account_scope", learningScopeKey(cfg)).
+						Msg("Intelligence V3 learned from account-specific attack history")
 				}
 			}
 		} else {
