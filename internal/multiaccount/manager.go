@@ -374,6 +374,44 @@ func (m *Manager) RecoveryStatus() (bool, string) {
 	return m.state.RecoveryRequired, m.state.RecoveryTargetAccountID
 }
 
+func (m *Manager) RequireRecovery(accountID string, err error) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.RecoveryRequired = true
+	m.state.RecoveryTargetAccountID = accountID
+	if err != nil {
+		m.state.LastError = err.Error()
+	}
+	m.state.UpdatedAt = time.Now()
+	return m.saveLocked()
+}
+
+func (m *Manager) ResolveRecovery(accountID string) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	target := m.accountByIDLocked(accountID)
+	if target == nil || !target.Enabled {
+		return fmt.Errorf("unknown or disabled multi-account profile %q", accountID)
+	}
+	m.state.ActiveAccountID = target.ID
+	m.state.AttacksThisTurn = 0
+	m.state.RecoveryRequired = false
+	m.state.RecoveryTargetAccountID = ""
+	m.state.ConsecutiveSwitchFailures = 0
+	m.state.LastError = ""
+	m.state.UpdatedAt = time.Now()
+	if err := m.removeSwitchJournalLocked(); err != nil {
+		return err
+	}
+	return m.saveLocked()
+}
+
 func (m *Manager) ResolveRecovery(accountID string) error {
 	if m == nil {
 		return fmt.Errorf("multi-account manager unavailable")
