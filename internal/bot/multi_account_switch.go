@@ -272,7 +272,15 @@ func accountLoadingState(s game.GameState) bool {
 	}
 }
 
-func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) error {
+func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) (retErr error) {
+	journalPrepared := false
+	switchMayHaveOccurred := false
+	journalPhysical := false
+	defer func() {
+		if journalPrepared && !switchMayHaveOccurred && b != nil && b.multiAccount != nil {
+			_ = b.multiAccount.AbortPreparedSwitch(next.ID)
+		}
+	}()
 	if b == nil || b.multiAccount == nil {
 		return fmt.Errorf("multi-account scheduler unavailable")
 	}
@@ -317,6 +325,10 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) error {
 	if state != game.StateMainVillage {
 		return fmt.Errorf("account switch requires MainVillage, got %s", state.String())
 	}
+	if err := b.multiAccount.BeginSwitch(next.ID); err != nil {
+		return fmt.Errorf("persist switch journal: %w", err)
+	}
+	journalPrepared = true
 
 	if err := b.tapAccountRect(c, c.SettingsButton, "settings"); err != nil {
 		return err
@@ -368,6 +380,10 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) error {
 		_ = b.client.Back()
 		return err
 	}
+	// From this point on the physical account may already be changing. If the
+	// process stops before MainVillage confirmation, keep the prepared journal
+	// so startup enters recovery-required mode instead of guessing.
+	switchMayHaveOccurred = true
 
 	// Never mark a switch from a tap alone. Require a genuine game loading
 	// state before accepting the target slot, otherwise a stale/moved selector
@@ -387,34 +403,56 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) error {
 			continue
 		}
 		if state == game.StateMainVillage {
-			activationErr := b.applyPreparedManagedAccount(prepared, next)
-			// At this point the physical Supercell switch is already proven by a
-			// loading transition + MainVillage return. The scheduler MUST advance
-			// even if a later disk persistence step is degraded, otherwise the next
-			// cycle could attempt to switch the same account a second time.
-			if err := b.multiAccount.MarkSwitched(next.ID); err != nil {
-				// MarkSwitched mutates the in-memory scheduler before persistence.
-				// Never reinterpret this as a physical switch failure.
+			if err := b.multiAccount.MarkPhysicalSwitch(next.ID); err != nil {
 				b.logger.Error().Err(err).
 					Str("account_id", next.ID).
-					Msg("account switched physically; scheduler persistence degraded")
-				_ = b.multiAccount.MarkSwitchWarning(fmt.Errorf("scheduler persistence degraded after verified switch: %w", err))
+					Msg("physical switch verified but journal phase could not be persisted")
+			} else {
+				journalPhysical = true
 			}
+
+			// Persist scheduler state before config. Both are redundant records of
+			// the same verified physical switch; if either write degrades, the
+			// physical journal remains so the next boot can recover the target.
+			schedulerErr := b.multiAccount.MarkSwitched(next.ID)
+			activationErr := b.applyPreparedManagedAccount(prepared, next)
+
 			b.wallUpgradePending.Store(b.cfg.Upgrade.UpgradeWalls)
 			b.logger.Info().
 				Str("account_id", next.ID).
 				Str("account_label", next.Label).
 				Str("player_tag", next.PlayerTag).
 				Msg("multi-account switch verified and activated")
+
+			if schedulerErr != nil {
+				b.logger.Error().Err(schedulerErr).
+					Str("account_id", next.ID).
+					Msg("account switched physically; scheduler persistence degraded")
+				_ = b.multiAccount.MarkSwitchWarning(fmt.Errorf("scheduler persistence degraded after verified switch: %w", schedulerErr))
+			}
 			if activationErr != nil {
 				b.logger.Error().Err(activationErr).
 					Str("account_id", next.ID).
 					Msg("account switch succeeded; local profile persistence degraded")
 				_ = b.multiAccount.MarkSwitchWarning(activationErr)
 			}
-			// Physical switch success is final. Persistence warnings must never
-			// bubble up to the caller as switch failures, otherwise the outer
-			// backoff path could schedule duplicate Supercell-ID navigation.
+
+			if schedulerErr == nil && activationErr == nil {
+				if !journalPhysical {
+					// One retry after both durable records succeeded. If this still
+					// fails, leaving the prepared journal is safer than deleting it.
+					if err := b.multiAccount.MarkPhysicalSwitch(next.ID); err == nil {
+						journalPhysical = true
+					}
+				}
+				if journalPhysical {
+					if err := b.multiAccount.CompleteSwitch(next.ID); err != nil {
+						b.logger.Warn().Err(err).Msg("could not clear completed account switch journal")
+					}
+				}
+			}
+			// A verified physical switch is final. Persistence degradation is a
+			// warning, not a reason to navigate Supercell ID again.
 			return nil
 		}
 		switch state {
