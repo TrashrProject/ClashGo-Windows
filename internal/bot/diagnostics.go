@@ -29,13 +29,18 @@ func (b *Bot) DumpDiagnostics(reason string, screen gocv.Mat, context map[string
 	timestamp := time.Now().Format("20060102_150405")
 	baseName := fmt.Sprintf("diag_%s", timestamp)
 
-	// Save screenshot
+	// Save screenshot from a detached privacy-safe clone. Vision keeps using the
+	// original frame and is therefore never affected by the username mask.
 	imgName := paths.ResolveConfig(baseName + ".png")
+	var persisted gocv.Mat
 	if !screen.Empty() {
-		if ok := gocv.IMWrite(imgName, screen); !ok {
-			b.logger.Error().Str("file", imgName).Msg("failed to save diagnostic screenshot")
-		} else {
-			b.logger.Info().Str("file", imgName).Msg("saved diagnostic screenshot")
+		persisted = b.screenshotForPersistence(screen)
+		if !persisted.Empty() {
+			if ok := gocv.IMWrite(imgName, persisted); !ok {
+				b.logger.Error().Str("file", imgName).Msg("failed to save diagnostic screenshot")
+			} else {
+				b.logger.Info().Str("file", imgName).Msg("saved diagnostic screenshot")
+			}
 		}
 	}
 
@@ -70,8 +75,9 @@ func (b *Bot) DumpDiagnostics(reason string, screen gocv.Mat, context map[string
 	_ = os.Remove(paths.ResolveConfig("last_failure.json"))
 
 	// Copy files to last_failure (safer than symlinks on some systems/setups)
-	if !screen.Empty() {
-		_ = gocv.IMWrite(paths.ResolveConfig("last_failure.png"), screen)
+	if !persisted.Empty() {
+		_ = gocv.IMWrite(paths.ResolveConfig("last_failure.png"), persisted)
+		persisted.Close()
 	}
 	_ = os.WriteFile(paths.ResolveConfig("last_failure.json"), jsonData, 0644)
 
