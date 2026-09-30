@@ -84,181 +84,22 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	e.lastSelectedCardOCRCount = 0
 	e.lastSelectedCardOCRMicros = 0
 
-	// 1. Detect red zone (deployment boundary)
-	redDetector := NewRedLineDetector(e.logger)
+	// 1. Normalize the battlefield camera BEFORE red-zone geometry, slot
+	// detection or troop planning. This is a bounded Xingchen-style stage:
+	// establish scale, re-capture, re-detect the live red boundary, expose the
+	// intended attack side if needed, then freeze that fresh frame for the
+	// generic deployment planner.
 	uiCutoff := int(float64(h) * 0.85) // above troop bar
-	redZone := redDetector.Detect(screen, uiCutoff)
-	e.lastRedZoneValid = redZone.Valid
-	if redZone.Valid {
-		e.lastRedZoneBBox = redZone.BBox
-	}
-
-	// Windows adaptive camera search.
-	//
-	// A static screenshot is not enough when the village is zoomed-in or
-	// shifted against an edge: there may literally be no safe strip behind
-	// the red deployment boundary. Before choosing any troop-drop line, let
-	// the bot manipulate the map like a player would: zoom OUT, re-detect,
-	// then pan the map to expose more legal terrain. Every gesture is followed
-	// by a fresh capture + fresh red-line detection. We never deploy from stale
-	// pre-gesture coordinates.
-	deployScreen := screen
-	var cameraFrame gocv.Mat
-	cameraFrameOwned := false
+	deployScreen, cameraFrameOwned, redZone := e.normalizeBattlefieldCamera(screen, targetEdge, uiCutoff)
 	defer func() {
-		if cameraFrameOwned && !cameraFrame.Empty() {
-			cameraFrame.Close()
+		if cameraFrameOwned && !deployScreen.Empty() {
+			deployScreen.Close()
 		}
 	}()
 
-	if runtime.GOOS == "windows" && !xingchenCompatibleAttackFlow {
-		freeSpace := func(z RedZone) (string, int) {
-			side, _, _, free, ok := windowsDeployCorridor(z, w, h, uiCutoff)
-			if !ok {
-				return "", 0
-			}
-			return side, free
-		}
-
-		refreshCamera := func(reason string) bool {
-			fresh, err := e.client.CaptureToMat()
-			if err != nil || fresh.Empty() {
-				if !fresh.Empty() {
-					fresh.Close()
-				}
-				e.logger.Warn().Err(err).Str("reason", reason).Msg("adaptive camera capture failed")
-				return false
-			}
-			if cameraFrameOwned && !cameraFrame.Empty() {
-				cameraFrame.Close()
-			}
-			cameraFrame = fresh
-			cameraFrameOwned = true
-			deployScreen = cameraFrame
-			redZone = redDetector.Detect(deployScreen, uiCutoff)
-			e.lastRedZoneValid = redZone.Valid
-			if redZone.Valid {
-				e.lastRedZoneBBox = redZone.BBox
-			}
-			side, free := freeSpace(redZone)
-			e.logger.Debug().
-				Str("reason", reason).
-				Bool("red_zone_valid", redZone.Valid).
-				Str("best_side", side).
-				Int("free_space", free).
-				Msg("adaptive camera re-evaluated deployment space")
-			return true
-		}
-
-		// Aim for a meaningful strip outside the red line, not merely a few
-		// pixels. ~90px on the 860-wide reference frame leaves enough room for
-		// the line itself, contour error and multiple troop taps.
-		minSafeFree := int(90.0 * float64(w) / 860.0)
-		if minSafeFree < 64 {
-			minSafeFree = 64
-		}
-
-		side, free := freeSpace(redZone)
-		e.logger.Debug().
-			Bool("red_zone_valid", redZone.Valid).
-			Str("best_side", side).
-			Int("free_space", free).
-			Int("required_free_space", minSafeFree).
-			Msg("adaptive camera evaluating battlefield")
-
-		// Windows-safe zoom recovery. Native ADB multi-touch pinch is disabled
-		// because it can terminate BlueStacks Pie64. Instead, drive the
-		// BlueStacks host zoom-out key (configured by zoom_out_key, default i),
-		// then re-capture and re-measure the red boundary. Stop as soon as the
-		// deployment corridor is sufficiently exposed.
-		if !redZone.Valid || free < minSafeFree {
-			for zoomTry := 1; zoomTry <= 3; zoomTry++ {
-				e.logger.Info().
-					Int("attempt", zoomTry).
-					Bool("red_zone_valid", redZone.Valid).
-					Int("free_space", free).
-					Int("required_free_space", minSafeFree).
-					Msg("adaptive camera: battlefield too zoomed; requesting safe BlueStacks zoom out")
-
-				if err := e.client.ZoomOutSafe(); err != nil {
-					e.logger.Warn().Err(err).Msg("adaptive camera: safe BlueStacks zoom out failed")
-					break
-				}
-				time.Sleep(450 * time.Millisecond)
-				if !refreshCamera("safe_zoom_out") {
-					break
-				}
-				side, free = freeSpace(redZone)
-				if redZone.Valid && free >= minSafeFree {
-					e.logger.Info().
-						Int("attempts", zoomTry).
-						Str("safe_side", side).
-						Int("free_space", free).
-						Msg("adaptive camera: zoom level now suitable for deployment")
-					break
-				}
-			}
-		}
-
-		// Drag the MAP toward the opposite
-		// direction so the already-best legal side gains even more empty land.
-		// Gestures stay in the playfield, well above the troop bar.
-		for panTry := 1; panTry <= 2 && redZone.Valid && free < minSafeFree; panTry++ {
-			cx := w / 2
-			cy := int(float64(uiCutoff) * 0.52)
-			dx := int(float64(w) * 0.20)
-			dy := int(float64(uiCutoff) * 0.18)
-			x2, y2 := cx, cy
-
-			switch side {
-			case "left":
-				// Move village right -> expose more legal space on left.
-				x2 = cx + dx
-			case "right":
-				x2 = cx - dx
-			case "top":
-				y2 = cy + dy
-			case "bottom":
-				y2 = cy - dy
-			}
-
-			e.logger.Info().
-				Int("attempt", panTry).
-				Str("target_safe_side", side).
-				Int("from_x", cx).Int("from_y", cy).
-				Int("to_x", x2).Int("to_y", y2).
-				Msg("adaptive camera: panning map to expose legal deployment area")
-
-			if err := e.client.Swipe(cx, cy, x2, y2, 260); err != nil {
-				e.logger.Warn().Err(err).Msg("adaptive camera map pan failed")
-				break
-			}
-			time.Sleep(360 * time.Millisecond)
-			if !refreshCamera("map_pan") {
-				break
-			}
-			side, free = freeSpace(redZone)
-		}
-
-		// If a pan loses the red boundary, make one final host-key zoom-out
-		// attempt. This remains safe because it never injects Android
-		// multi-touch; failure is left visible rather than guessed through.
-		if !redZone.Valid && cameraFrameOwned {
-			e.logger.Warn().Msg("adaptive camera lost red boundary after pan; retrying one safe BlueStacks zoom out")
-			if err := e.client.ZoomOutSafe(); err == nil {
-				time.Sleep(450 * time.Millisecond)
-				_ = refreshCamera("post_pan_safe_zoom_out")
-			} else {
-				e.logger.Warn().Err(err).Msg("adaptive camera post-pan safe zoom out failed")
-			}
-		}
-
-		side, free = freeSpace(redZone)
-		e.logger.Debug().
-			Bool("red_zone_valid", redZone.Valid).
-			Str("selected_side", side).
-			Int("free_space", free).
-			Msg("adaptive camera search complete")
+	e.lastRedZoneValid = redZone.Valid
+	if redZone.Valid {
+		e.lastRedZoneBBox = redZone.BBox
 	}
 
 	// 2. Load precision config FIRST so we can detect user-pinned coords
