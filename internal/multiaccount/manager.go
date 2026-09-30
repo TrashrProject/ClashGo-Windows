@@ -99,30 +99,43 @@ func normalizeTag(tag string) string {
 
 func (m *Manager) reconcileActiveLocked(currentTag string) {
 	currentTag = normalizeTag(currentTag)
-	if active := m.accountByIDLocked(m.state.ActiveAccountID); active != nil && active.Enabled {
-		return
-	}
-	if configured := m.accountByIDLocked(m.cfg.ActiveAccountID); m.cfg.ActiveAccountID != "" && configured != nil && configured.Enabled {
-		m.state.ActiveAccountID = m.cfg.ActiveAccountID
-		m.state.AttacksThisTurn = 0
-		return
-	}
+
+	// The PlayerTag is persisted only after ClashGO has observed a verified
+	// account load. Prefer it over scheduler state so a process stop/crash
+	// between config.Save and MarkSwitched self-heals on the next boot.
 	for i := range m.cfg.Accounts {
 		a := &m.cfg.Accounts[i]
 		if a.Enabled && currentTag != "" && normalizeTag(a.PlayerTag) == currentTag {
+			if m.state.ActiveAccountID != a.ID {
+				m.state.AttacksThisTurn = 0
+			}
 			m.state.ActiveAccountID = a.ID
 			return
 		}
 	}
+
+	if configured := m.accountByIDLocked(m.cfg.ActiveAccountID); m.cfg.ActiveAccountID != "" && configured != nil && configured.Enabled {
+		if m.state.ActiveAccountID != m.cfg.ActiveAccountID {
+			m.state.AttacksThisTurn = 0
+		}
+		m.state.ActiveAccountID = m.cfg.ActiveAccountID
+		return
+	}
+
+	if active := m.accountByIDLocked(m.state.ActiveAccountID); active != nil && active.Enabled {
+		return
+	}
+
 	for i := range m.cfg.Accounts {
 		if m.cfg.Accounts[i].Enabled {
 			m.state.ActiveAccountID = m.cfg.Accounts[i].ID
+			m.state.AttacksThisTurn = 0
 			return
 		}
 	}
 	m.state.ActiveAccountID = ""
+	m.state.AttacksThisTurn = 0
 }
-
 func (m *Manager) Enabled() bool {
 	if m == nil {
 		return false
