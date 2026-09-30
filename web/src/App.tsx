@@ -17,6 +17,7 @@ import {
   GetActivity,
   GetLogs,
   SaveConfig,
+  SaveClashCoreFeatures,
   StartBot,
   StopBot,
   StopAfterCurrentAttack,
@@ -400,6 +401,11 @@ function App() {
   const [stallTimer, setStallTimer] = useState(30);
   const [lootExitEnabled, setLootExitEnabled] = useState(false);
   const [lootExitPercent, setLootExitPercent] = useState(100);
+  const [endAtStars, setEndAtStars] = useState(0);
+  const [autoCollectors, setAutoCollectors] = useState(false);
+  const [collectorMinutes, setCollectorMinutes] = useState(10);
+  const [privacyMaskUsername, setPrivacyMaskUsername] = useState(true);
+  const [saveAcceptedBases, setSaveAcceptedBases] = useState(true);
   const [simpleMode, setSimpleMode] = useState(true);
 
   const syncMemberScopedView = useCallback(async (activated: boolean) => {
@@ -456,6 +462,12 @@ function App() {
       setStallTimer(conf.attack.stall_timer_seconds);
       setLootExitEnabled(conf.attack.loot_exit_enabled ?? false);
       setLootExitPercent(conf.attack.loot_exit_percent ?? 100);
+      setEndAtStars(conf.attack.end_at_stars ?? 0);
+      setAutoCollectors(conf.automation?.auto_collectors ?? false);
+      const intervalNs = Number(conf.automation?.collector_interval ?? 0);
+      setCollectorMinutes(intervalNs > 0 ? Math.max(1, Math.round(intervalNs / 60_000_000_000)) : 10);
+      setPrivacyMaskUsername(conf.automation?.privacy_mask_username ?? true);
+      setSaveAcceptedBases(conf.search.save_accepted_base_screenshots ?? true);
       setSimpleMode(conf.automation?.simple_mode ?? true);
     }
     if (accountResult.status === 'fulfilled') {
@@ -1072,6 +1084,13 @@ function App() {
       stallTimer,
       lootExitEnabled,
       lootExitPercent,
+    );
+    await SaveClashCoreFeatures(
+      autoCollectors,
+      collectorMinutes,
+      privacyMaskUsername,
+      saveAcceptedBases,
+      endAtStars,
     );
   };
 
@@ -1690,6 +1709,11 @@ function App() {
     stallTimer, setStallTimer,
     lootExitEnabled, setLootExitEnabled,
     lootExitPercent, setLootExitPercent,
+    endAtStars, setEndAtStars,
+    autoCollectors, setAutoCollectors,
+    collectorMinutes, setCollectorMinutes,
+    privacyMaskUsername, setPrivacyMaskUsername,
+    saveAcceptedBases, setSaveAcceptedBases,
     simpleMode,
     testSessionActive,
     automationActive: isRunning || isStarting,
@@ -1723,7 +1747,8 @@ function App() {
   }), [
     goldThreshold, elixirThreshold, deThreshold,
     selectedStrategy, strategies, searchEnabled, upgradeWalls, stallTimer,
-    lootExitEnabled, lootExitPercent, simpleMode, testSessionActive, isRunning, isStarting, refreshStartupReadiness
+    lootExitEnabled, lootExitPercent, endAtStars, autoCollectors, collectorMinutes,
+    privacyMaskUsername, saveAcceptedBases, simpleMode, testSessionActive, isRunning, isStarting, refreshStartupReadiness
   ]);
 
   if (!licenseAccessReady) {
