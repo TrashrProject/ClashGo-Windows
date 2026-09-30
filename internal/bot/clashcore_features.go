@@ -342,6 +342,9 @@ func (b *Bot) maybeCollectVillageResources(screen gocv.Mat) {
 	if b.seqRunning.Load() || b.paused.Load() || b.ctx.Err() != nil {
 		return
 	}
+	if b.collectorCircuitOpen() {
+		return
+	}
 
 	interval := b.cfg.Automation.CollectorInterval.Duration
 	if interval <= 0 {
@@ -381,6 +384,7 @@ func (b *Bot) maybeCollectVillageResources(screen gocv.Mat) {
 			b.recordActivity()
 
 			verifiedGain := false
+			comparable := false
 			select {
 			case <-b.ctx.Done():
 				return
@@ -388,16 +392,18 @@ func (b *Bot) maybeCollectVillageResources(screen gocv.Mat) {
 			}
 			if fresh, err := b.runtimeFrameFresh(1500 * time.Millisecond); err == nil && !fresh.Empty() {
 				after := b.readCollectorResourceSnapshot(fresh)
-				verifiedGain = collectorResourceIncreased(target.kind, before, after)
+				verifiedGain, comparable = collectorResourceVerification(target.kind, before, after)
 				fresh.Close()
 			}
+			b.recordCollectorVerification(verifiedGain, comparable)
 
 			logEvent := b.logger.Info().
 				Str("collector", target.kind).
 				Int("x", target.point.X).
 				Int("y", target.point.Y).
 				Float64("confidence_score", target.score).
-				Bool("resource_gain_verified", verifiedGain)
+				Bool("resource_gain_verified", verifiedGain).
+				Bool("resource_comparable", comparable)
 			logEvent.Msg("collector resource bubble tapped")
 		}
 	}(targets)
@@ -445,16 +451,19 @@ func (b *Bot) readCollectorResourceSnapshot(screen gocv.Mat) game.VillageResourc
 	return reader.Read(screen)
 }
 
-func collectorResourceIncreased(kind string, before, after game.VillageResourceSnapshot) bool {
+func collectorResourceVerification(kind string, before, after game.VillageResourceSnapshot) (increased, comparable bool) {
 	switch kind {
 	case "gold":
-		return before.GoldValid && after.GoldValid && after.Gold > before.Gold
+		if !before.GoldValid || !after.GoldValid { return false, false }
+		return after.Gold > before.Gold, true
 	case "elixir":
-		return before.ElixirValid && after.ElixirValid && after.Elixir > before.Elixir
+		if !before.ElixirValid || !after.ElixirValid { return false, false }
+		return after.Elixir > before.Elixir, true
 	case "dark_elixir":
-		return before.DarkValid && after.DarkValid && after.DarkElixir > before.DarkElixir
+		if !before.DarkValid || !after.DarkValid { return false, false }
+		return after.DarkElixir > before.DarkElixir, true
 	default:
-		return false
+		return false, false
 	}
 }
 
