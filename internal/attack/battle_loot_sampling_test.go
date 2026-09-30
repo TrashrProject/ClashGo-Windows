@@ -19,3 +19,23 @@ func TestBattleLootSampleDueThrottlesStatsOnlySampling(t *testing.T) {
 		}
 	}
 }
+
+
+func TestAdaptiveFarmLootPercentWeightsDarkElixir(t *testing.T) {
+	pct := adaptiveFarmLootPercent(
+		1000000, 1000000, 10000,
+		500000, 500000, 5000,
+	)
+	if pct != 50 {
+		t.Fatalf("weighted farm loot percent=%d want 50", pct)
+	}
+}
+
+func TestAdaptiveFarmLootPercentClampsInvalidRemaining(t *testing.T) {
+	if got := adaptiveFarmLootPercent(100, 100, 1, 200, 200, 2); got != 0 {
+		t.Fatalf("remaining above initial must clamp to 0%% progress, got %d", got)
+	}
+	if got := adaptiveFarmLootPercent(100, 100, 1, 0, 0, 0); got != 100 {
+		t.Fatalf("fully collected loot must report 100%%, got %d", got)
+	}
+}
