@@ -63,6 +63,7 @@ type ContextualOutcome struct {
 	FullRoutineDurationMS int64        `json:"full_routine_duration_ms"`
 	SearchDurationMS      int64        `json:"search_duration_ms"`
 	SearchSkips           int          `json:"search_skips"`
+	BattleDurationMS      int64        `json:"battle_duration_ms"`
 	DeploySuccess        bool          `json:"deploy_success"`
 	ReturnHomeSuccess    bool          `json:"return_home_success"`
 	SafeDeployment       bool          `json:"safe_deployment"`
@@ -221,6 +222,14 @@ type FarmTargetRecommendation struct {
 	Reason            string  `json:"reason"`
 }
 
+type FarmExitRecommendation struct {
+	Enabled        bool   `json:"enabled"`
+	MinLootPercent int    `json:"min_loot_percent"`
+	StallSeconds   int    `json:"stall_seconds"`
+	Samples        int    `json:"samples"`
+	Reason         string `json:"reason"`
+}
+
 func NewContextualEngine(path string) (*ContextualEngine, error) {
 	e := &ContextualEngine{
 		path: path,
@@ -331,6 +340,79 @@ func (e *ContextualEngine) updateProfileLocked(key, edge string, reward float64,
 		stat.CleanStreak++
 	}
 	stat.LastSeen = o.At
+}
+
+func (e *ContextualEngine) RecommendFarmExit(strategy string, townHall int) FarmExitRecommendation {
+	rec := FarmExitRecommendation{Reason: "insufficient farm history"}
+	if e == nil {
+		return rec
+	}
+	strategy = strings.ToLower(strings.TrimSpace(strategy))
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	var efficiencySum float64
+	var efficiencyN int
+	var battleSum int64
+	var battleN int
+	for i := len(e.state.Experiences) - 1; i >= 0 && efficiencyN < 60; i-- {
+		o := e.state.Experiences[i]
+		if strategy != "" && strings.ToLower(strings.TrimSpace(o.Context.Strategy)) != strategy {
+			continue
+		}
+		if townHall > 0 && o.Context.TownHall > 0 && o.Context.TownHall != townHall {
+			continue
+		}
+		if !o.DeploySuccess || !o.ReturnHomeSuccess || o.RecoveryCount > 0 || o.BlueStacksRestart > 0 {
+			continue
+		}
+		available := weightedFarmResources(o.Context.TargetGold, o.Context.TargetElixir, o.Context.TargetDE)
+		stolen := weightedFarmResources(o.GoldStolen, o.ElixirStolen, o.DarkElixirStolen)
+		if available <= 0 {
+			continue
+		}
+		efficiencySum += clamp(stolen/available, 0, 1)
+		efficiencyN++
+		if o.BattleDurationMS > 0 {
+			battleSum += o.BattleDurationMS
+			battleN++
+		}
+	}
+	rec.Samples = efficiencyN
+	if efficiencyN < 6 {
+		return rec
+	}
+
+	avgEfficiency := efficiencySum / float64(efficiencyN)
+	// End only after the run has already collected most of what this strategy
+	// normally manages to collect. Keeping an 8-point margin lets the bot stop
+	// once the remaining loot has become unproductive without cutting the main
+	// farming wave short.
+	minPct := int(math.Round(avgEfficiency*100)) - 8
+	if minPct < 55 {
+		minPct = 55
+	}
+	if minPct > 90 {
+		minPct = 90
+	}
+
+	stallSeconds := 12
+	if battleN > 0 {
+		avgBattleMS := battleSum / int64(battleN)
+		switch {
+		case avgBattleMS >= 120000:
+			stallSeconds = 10
+		case avgBattleMS <= 70000:
+			stallSeconds = 15
+		}
+	}
+
+	rec.Enabled = true
+	rec.MinLootPercent = minPct
+	rec.StallSeconds = stallSeconds
+	rec.Reason = "learned farm exit from historical loot efficiency"
+	return rec
 }
 
 func (e *ContextualEngine) RecommendTarget(
