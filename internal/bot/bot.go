@@ -341,7 +341,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		emulatorKind = "bluestacks"
 	}
 	adaptive, adaptiveErr := intelligence.NewAdaptiveEngine(
-		learningStatePath(cfg, "adaptive_learning.json"),
+		learningAccountStatePath(cfg, "adaptive_learning.json"),
 		intelligence.EnvironmentFingerprint{
 			OS: runtime.GOOS,
 			Emulator: emulatorKind,
@@ -363,7 +363,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 			Msg("adaptive intelligence active")
 	}
 
-	villageMemory, villageErr := intelligence.NewVillageMemory(learningStatePath(cfg, "village_model.json"))
+	villageMemory, villageErr := intelligence.NewVillageMemory(learningEnvironmentStatePath(cfg, "village_model.json"))
 	if villageErr != nil {
 		b.logger.Warn().Err(villageErr).Msg("village memory unavailable; continuing without persistent village model")
 	} else {
