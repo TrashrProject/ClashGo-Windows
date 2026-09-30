@@ -281,9 +281,17 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		deployLine = pinnedLine
 	}
 
-	// 4. Initialize SlotManager — exactly once on the normalized frame.
+	// 4. Initialize SlotManager exactly once on the normalized frame. When
+	// every strategy unit has a template, limit the expensive portrait matcher
+	// to that small subset instead of scanning the entire attack template set.
 	slotStarted := time.Now()
-	slotMgr := NewSlotManager(deployScreen, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+	slotTemplates := e.templates
+	templateFastPath := false
+	if selected, ok := strategyTemplateSubset(e.templates, s); ok {
+		slotTemplates = selected
+		templateFastPath = true
+	}
+	slotMgr := NewSlotManager(deployScreen, pCfg, w, h, mBarY, slotTemplates, e.classify, e.logger)
 	slotMS := time.Since(slotStarted).Milliseconds()
 	if len(slotMgr.GetAllSlots()) == 0 {
 		return 0, fmt.Errorf("no active slots detected")
@@ -874,6 +882,8 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		Int64("camera_ms", cameraMS).
 		Int64("slot_ms", slotMS).
 		Int64("count_ms", countMS).
+		Bool("template_fast_path", templateFastPath).
+		Int("templates_considered", len(slotTemplates)).
 		Int64("planner_ms", prepared.BuiltIn.Milliseconds()).
 		Int("slots", len(slotMgr.GetAllSlots())).
 		Int("resolved_units", prepared.ResolvedUnits).
