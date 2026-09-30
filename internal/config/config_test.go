@@ -177,3 +177,75 @@ func TestLoadRejectsCorruptPrimaryAndBackup(t *testing.T) {
 		t.Fatal("expected Load to reject corrupt primary and backup")
 	}
 }
+
+
+func TestDurationRejectsNonStringJSONWithoutPanic(t *testing.T) {
+	var d Duration
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Duration.UnmarshalJSON panicked on malformed input: %v", r)
+		}
+	}()
+	if err := json.Unmarshal([]byte(`123`), &d); err == nil {
+		t.Fatal("expected numeric duration JSON to be rejected")
+	}
+	if err := json.Unmarshal([]byte(`"10m"`), &d); err != nil {
+		t.Fatalf("valid duration string rejected: %v", err)
+	}
+	if d.Duration != 10*time.Minute {
+		t.Fatalf("duration=%v want 10m", d.Duration)
+	}
+}
+
+func TestLoadArchivesCorruptPrimaryWhenBackupRecovers(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "config.json")
+	cfg := DefaultConfig()
+	cfg.Automation.MaxRunMinutes = 90
+
+	backup, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"automation":{"collector_interval":123}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".bak", backup, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load should recover backup: %v", err)
+	}
+	if got.Automation.MaxRunMinutes != 90 {
+		t.Fatalf("MaxRunMinutes=%d want 90", got.Automation.MaxRunMinutes)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("corrupt primary should have been moved aside, stat err=%v", err)
+	}
+	matches, err := filepath.Glob(filepath.Join(root, "config.corrupt.*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected one preserved corrupt config, got %v", matches)
+	}
+}
+
+func TestMaxRunMinutesRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "config.json")
+	cfg := DefaultConfig()
+	cfg.Automation.MaxRunMinutes = 135
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Automation.MaxRunMinutes != 135 {
+		t.Fatalf("MaxRunMinutes=%d want 135", got.Automation.MaxRunMinutes)
+	}
+}
