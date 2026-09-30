@@ -59,6 +59,8 @@ type Bot struct {
 	cancel      context.CancelFunc
 	done        chan struct{}
 	captureDone chan struct{}
+	frameBroker *FrameBroker
+	brokerActive atomic.Bool
 	logger      zerolog.Logger
 
 	attackCount atomic.Int32
@@ -314,6 +316,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		cancel:            cancel,
 		done:              make(chan struct{}),
 		captureDone:       make(chan struct{}),
+		frameBroker:       NewFrameBroker(),
 		logger:            log.With().Str("bot", "orchestrator").Logger(),
 		startedAt:         startedWall,
 		lastAction:        time.Now(),
@@ -419,8 +422,10 @@ func (b *Bot) Start() error {
 	b.runtimePhase.Store(int32(PhaseIdle))
 	b.runtimePhaseSince.Store(now.UnixNano())
 
+	b.brokerActive.Store(true)
 	go func() {
 		defer close(b.captureDone)
+		defer b.brokerActive.Store(false)
 		b.captureLoop()
 	}()
 	go b.runtimeSupervisorLoop()
@@ -454,6 +459,9 @@ func (b *Bot) Stop() {
 	case <-b.captureDone:
 		captureStopped = true
 	default:
+	}
+	if captureStopped && b.frameBroker != nil {
+		b.frameBroker.Close()
 	}
 
 	// Persist a compact human-readable session summary only after the active
@@ -534,25 +542,28 @@ func (b *Bot) captureLoop() {
 	frames := make(chan frame, 1)
 
 	getCaptureInterval := func() time.Duration {
-		// While an attack/search sequence is running, that goroutine already
-		// performs its own fresh screenshots for state, loot and deployment.
-		// Keeping the background capture loop at 150ms at the same time meant
-		// BlueStacks was being hammered by two independent screencap streams.
-		// On the user's Pie64 instance this can terminate/restart the emulator
-		// with no Go error at all. Keep one low-rate observer alive for popup /
-		// health handling, but remove the duplicate high-frequency pressure.
+		// captureLoop is the ONLY runtime screenshot owner. Attack/search code
+		// consumes broker frames, so cadence can be tuned per phase without
+		// ever creating a second ADB screencap stream.
 		if b.seqRunning.Load() {
-			// The active attack/search goroutine owns screencaps while a
-			// sequence is running. Keep only a very low-rate observer so
-			// BlueStacks is never hit by two concurrent screencap streams.
-			return 2500 * time.Millisecond
+			switch RuntimePhase(b.runtimePhase.Load()) {
+			case PhaseAttackNavigation:
+				return 220 * time.Millisecond
+			case PhaseSearching:
+				return 700 * time.Millisecond
+			case PhaseDeploying:
+				return 280 * time.Millisecond
+			case PhaseBattle, PhaseParsingResult, PhaseReturningHome:
+				return 650 * time.Millisecond
+			default:
+				return 500 * time.Millisecond
+			}
 		}
-
 		switch gc.State {
-		case game.StateBattle, game.StateSearchMap, game.StateLoading:
-			return 300 * time.Millisecond
 		case game.StateMainVillage, game.StateArmySelection, game.StateArmyCamp:
 			return 250 * time.Millisecond
+		case game.StateBattle, game.StateSearchMap, game.StateLoading:
+			return 500 * time.Millisecond
 		default:
 			return 500 * time.Millisecond
 		}
@@ -578,17 +589,6 @@ func (b *Bot) captureLoop() {
 			default:
 			}
 
-			// During an active attack/search sequence, that goroutine is the
-			// exclusive screencap owner. Even a low-rate background observer
-			// adds unnecessary ADB framebuffer pressure on BlueStacks Pie64
-			// during matchmaking/clouds, where repeated screencaps have been
-			// observed to terminate the emulator. Keep the observer asleep
-			// until the sequence releases ownership.
-			if b.seqRunning.Load() {
-				lastCapture = time.Now()
-				continue
-			}
-
 			start := time.Now()
 			screen, err := b.client.CaptureToMat()
 			dur := time.Since(start)
@@ -599,6 +599,9 @@ func (b *Bot) captureLoop() {
 			b.lastCapture = lastCapture
 			if err == nil && !screen.Empty() && screen.Cols() >= 2 && screen.Rows() >= 2 {
 				b.captureHeartbeat.Store(lastCapture.UnixNano())
+				if b.frameBroker != nil {
+					b.frameBroker.Publish(screen, lastCapture)
+				}
 			}
 
 			if err != nil || screen.Empty() || screen.Cols() < 2 || screen.Rows() < 2 {
@@ -627,6 +630,15 @@ func (b *Bot) captureLoop() {
 			}
 			return
 		case f := <-frames:
+			// During an active attack, the state machine owns UI decisions. The
+			// capture loop still feeds FrameBroker, but it must not dismiss/tap
+			// anything in parallel.
+			if b.seqRunning.Load() {
+				if !f.mat.Empty() {
+					f.mat.Close()
+				}
+				continue
+			}
 			// Panic guard: one bad frame (degenerate mat, classifier
 			// edge case, cgo hiccup) must never kill the whole bot
 			// process — an unattended farm would stay dead until a
