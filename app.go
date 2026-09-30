@@ -1,6 +1,6 @@
 package main
 
-// Build marker: beta pipeline validation after Xingchen-style camera normalization.
+// Build marker: final beta validation for single-broker fast attack pipeline.
 import (
 	"bytes"
 	"context"
