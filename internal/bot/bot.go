@@ -393,6 +393,10 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 
 	b.attackExec.SetClassifier(b.classify)
 	b.attackExec.SetFrameProvider(b.runtimeFrameFresh)
+	b.attackExec.OnPlanReady = func(duration time.Duration, edge string) {
+		b.logger.Info().Dur("planning", duration).Str("edge", edge).Msg("attack plan committed; starting deployment")
+		b.setRuntimePhase(PhaseDeploying)
+	}
 
 	return b, nil
 }
@@ -555,6 +559,8 @@ func (b *Bot) captureLoop() {
 				return 220 * time.Millisecond
 			case PhaseSearching:
 				return 700 * time.Millisecond
+			case PhasePlanning:
+				return 280 * time.Millisecond
 			case PhaseDeploying:
 				return 280 * time.Millisecond
 			case PhaseBattle, PhaseParsingResult, PhaseReturningHome:
@@ -2014,7 +2020,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			}
 
 			b.attackExec.SetInitialLoot(loot.Gold, loot.Elixir, loot.DarkElixir)
-			b.setRuntimePhase(PhaseDeploying)
+			b.setRuntimePhase(PhasePlanning)
 			deployStarted := time.Now()
 
 			if strat, stratErr := strategy.ParseYAML(b.cfg.Attack.StrategyFile); stratErr == nil {
