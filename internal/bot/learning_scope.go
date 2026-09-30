@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Ducky705/ClashGO/internal/config"
+	"github.com/Ducky705/ClashGO/internal/multiaccount"
 	"github.com/Ducky705/ClashGO/internal/paths"
 )
 
@@ -129,4 +130,16 @@ func ResolveMultiAccountActivePlayerTag(cfg *config.BotConfig) (string, bool) {
 		return tag, true
 	}
 	return "", false
+}
+
+
+func OpenMultiAccountManager(cfg *config.BotConfig) (*multiaccount.Manager, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("bot configuration unavailable")
+	}
+	return multiaccount.NewManager(
+		multiAccountStatePath(cfg),
+		cfg.Account.MultiAccount,
+		cfg.Account.PlayerTag,
+	)
 }
