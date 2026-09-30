@@ -93,6 +93,7 @@ type Bot struct {
 	lastReturnHomeUS    atomic.Int64
 	safePacingUntilUS   atomic.Int64
 	wallUpgradePending  atomic.Bool
+	navigationFailureStreak atomic.Int32
 
 	// Feature-specific safety circuits. Optional village features fail open
 	// toward farming: repeated uncertainty disables only that feature.
@@ -2151,10 +2152,19 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	preparationStarted := time.Now()
 	b.lastPrepTimings = PreparationTimings{}
 	if !b.clickSequence() {
-		b.logger.Warn().Msg("attack click sequence failed, restarting game to recover...")
-		b.restartGame()
+		streak := b.navigationFailureStreak.Add(1)
+		b.logger.Warn().
+			Int32("navigation_failure_streak", streak).
+			Msg("attack navigation failed; attempting local UI recovery before any game restart")
+		b.recoverAttackNavigationLocally()
+		if streak >= 3 {
+			b.navigationFailureStreak.Store(0)
+			b.logger.Warn().Msg("attack navigation failed three consecutive times; restarting game as last resort")
+			b.restartGame()
+		}
 		return
 	}
+	b.navigationFailureStreak.Store(0)
 	preparationDurationMS = time.Since(preparationStarted).Milliseconds()
 
 	b.setRuntimePhase(PhaseSearching)
@@ -3449,6 +3459,44 @@ func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int
 	return 0, 0, false
 }
 
+func (b *Bot) recoverAttackNavigationLocally() {
+	if b == nil || b.ctx.Err() != nil {
+		return
+	}
+
+	screen, err := b.runtimeFrameFresh(2 * time.Second)
+	if err != nil || screen.Empty() {
+		if err == nil {
+			screen.Close()
+		}
+		b.recordActivity()
+		return
+	}
+
+	state, _ := b.classify(screen)
+	attackVisible := b.findAttackButton(screen, 0.30)
+	screen.Close()
+
+	if state == game.StateMainVillage && attackVisible {
+		b.logger.Info().Msg("local navigation recovery: already back at village; no restart required")
+		b.recordActivity()
+		return
+	}
+
+	switch state {
+	case game.StateFindMatch, game.StateArmySelection, game.StateArmyCamp, game.StateSettings, game.StateUnknown:
+		b.logger.Info().Str("state", state.String()).Msg("local navigation recovery: backing out one UI level")
+		_ = b.client.Back()
+		_ = b.sleepResponsive(700 * time.Millisecond)
+	default:
+		// For loading/search/battle states, never inject Back; those transitions
+		// can still settle naturally and the runtime supervisor owns recovery.
+		b.logger.Info().Str("state", state.String()).Msg("local navigation recovery: leaving transient state to supervisor")
+	}
+
+	b.recordActivity()
+}
+
 func (b *Bot) clickSequence() bool {
 	// Xingchen-style navigation: every action requires fresh visual evidence.
 	// No blind coordinate progression, no stacked retry loops, no duplicate
@@ -3456,16 +3504,52 @@ func (b *Bot) clickSequence() bool {
 	b.lastPrepTimings = PreparationTimings{}
 
 	stepStarted := time.Now()
-	if !b.waitAndClickButton("btn_attack", "Attack", 2500*time.Millisecond) {
-		b.captureFailureDiagnostic("click_attack_failed", nil)
-		return false
+	if !b.focusedButtonClick("Attack", b.locateAttackButtonColor, 3) {
+		// Template fallback remains available for unusual themes where the
+		// orange-region detector is inconclusive.
+		if !b.waitAndClickButton("btn_attack", "Attack", 3000*time.Millisecond) {
+			b.captureFailureDiagnostic("click_attack_failed", nil)
+			return false
+		}
 	}
 	b.lastPrepTimings.AttackButtonMS = time.Since(stepStarted).Milliseconds()
 
+	// Do not immediately assume the attack menu opened. On BlueStacks the ADB
+	// tap can return before the animation is painted, and an occasional tap is
+	// ignored altogether. Require a stable Find Match target; if the village
+	// Attack button is still visible, retry Attack once instead of restarting CoC.
 	stepStarted = time.Now()
-	if !b.waitAndClickButton("btn_find_match", "Find Match", 4500*time.Millisecond) {
-		b.captureFailureDiagnostic("click_find_match_failed", nil)
-		return false
+	if _, _, ok := b.waitForStableLocator("Find Match", b.locateFindMatchButtonColor, 8*time.Second); !ok {
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
+		stillVillage := false
+		if err == nil && !screen.Empty() {
+			state, _ := b.classify(screen)
+			stillVillage = state == game.StateMainVillage && b.findAttackButton(screen, 0.30)
+			screen.Close()
+		} else if err == nil {
+			screen.Close()
+		}
+		if stillVillage {
+			b.logger.Warn().Msg("Attack tap did not open attack menu; retrying Attack once")
+			if !b.focusedButtonClick("Attack", b.locateAttackButtonColor, 2) {
+				b.captureFailureDiagnostic("click_attack_retry_failed", nil)
+				return false
+			}
+			if _, _, ok = b.waitForStableLocator("Find Match", b.locateFindMatchButtonColor, 8*time.Second); !ok {
+				b.captureFailureDiagnostic("find_match_not_visible_after_attack_retry", nil)
+				return false
+			}
+		} else {
+			b.captureFailureDiagnostic("find_match_not_visible_after_attack", nil)
+			return false
+		}
+	}
+	if !b.focusedButtonClick("Find Match", b.locateFindMatchButtonColor, 3) {
+		// Keep the template path as a secondary, evidence-gated fallback.
+		if !b.waitAndClickButton("btn_find_match", "Find Match", 5000*time.Millisecond) {
+			b.captureFailureDiagnostic("click_find_match_failed", nil)
+			return false
+		}
 	}
 	b.lastPrepTimings.FindMatchMS = time.Since(stepStarted).Milliseconds()
 
@@ -3528,9 +3612,11 @@ func (b *Bot) clickSequence() bool {
 	b.lastPrepTimings.ArmySlotMS = time.Since(stepStarted).Milliseconds()
 
 	stepStarted = time.Now()
-	if !b.waitAndClickButton("btn_battle", "Battle", 5000*time.Millisecond) {
-		b.captureFailureDiagnostic("click_battle_failed", nil)
-		return false
+	if !b.focusedButtonClick("Battle Attack", b.locateBattleButtonColor, 3) {
+		if !b.waitAndClickButton("btn_battle", "Battle", 5000*time.Millisecond) {
+			b.captureFailureDiagnostic("click_battle_failed", nil)
+			return false
+		}
 	}
 	b.lastPrepTimings.BattleButtonMS = time.Since(stepStarted).Milliseconds()
 
