@@ -150,7 +150,8 @@ type Bot struct {
 	diagMu          sync.Mutex
 	lastDiagnostics map[string]time.Time
 
-	OnStatsUpdate func()
+	OnStatsUpdate     func()
+	OnAccountChanged func(playerTag, accountID, label string)
 }
 
 // NewBot builds a fully-booted Bot using a background context (no
