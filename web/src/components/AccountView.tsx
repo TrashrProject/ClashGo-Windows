@@ -1070,7 +1070,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   };
 
   const confirmMultiAccountRecovery = async (account: ManagedAccount) => {
-    if (multiAccountRecoveryBusy || !automationActive || !multiAccountStatus?.recovery_required) return;
+    if (multiAccountRecoveryBusy || !multiAccountStatus?.recovery_required) return;
     setMultiAccountRecoveryBusy(true);
     setMultiAccountError('');
     setMultiAccountMessage('');
@@ -1079,7 +1079,11 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       setMultiAccountStatus(status as MultiAccountRuntimeStatusView);
       setMultiAccount(current => ({ ...current, active_account_id: account.id }));
       onAccountChanged(account.player_tag);
-      setMultiAccountMessage(`Compte confirmé : ${account.label || account.player_tag}. L’IA de ce compte a été rechargée et l’automatisation peut reprendre.`);
+      setMultiAccountMessage(
+        automationActive
+          ? `Compte confirmé : ${account.label || account.player_tag}. L’IA de ce compte est rechargée. Le bot reste en pause jusqu’à ta reprise volontaire.`
+          : `Compte confirmé : ${account.label || account.player_tag}. L’état multi-compte est réparé pour le prochain démarrage.`
+      );
     } catch (e) {
       setMultiAccountError(friendlyAccountActionError(e));
     } finally {
@@ -1568,7 +1572,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                       <button
                         key={account.id}
                         type="button"
-                        disabled={multiAccountRecoveryBusy || !automationActive}
+                        disabled={multiAccountRecoveryBusy}
                         onClick={() => void confirmMultiAccountRecovery(account)}
                         className="rounded-xl border border-rose-500/20 bg-white/70 dark:bg-zinc-950/50 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-rose-600 dark:text-rose-400 disabled:opacity-40"
                       >
