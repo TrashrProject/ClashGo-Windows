@@ -390,6 +390,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 	b.navigator.SetDisableChestDismissal(b.cfg.Device.DisableChestDismissal)
 
 	b.attackExec.SetClassifier(b.classify)
+	b.attackExec.SetFrameProvider(b.runtimeFrameFresh)
 
 	return b, nil
 }
