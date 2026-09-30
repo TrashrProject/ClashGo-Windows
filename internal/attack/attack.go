@@ -88,6 +88,11 @@ type Executor struct {
 	lastBattleEndReason string
 	lastBattleWaitMS int64
 	lastLootExitPercent int
+	lastStarExitTarget int
+	lastStarExitSeen int
+	lastStarExitConfirmations int
+	lastStarExitTriggered bool
+	lastStarExitElapsedMS int64
 	lastBattleLootOCRSamples int
 	lastBattleLootOCRMicros int64
 
@@ -204,6 +209,24 @@ func (e *Executor) LastBattleEndReason() string {
 
 func (e *Executor) BattleExitMetrics() (waitMS int64, lootExitPercent int) {
 	return e.lastBattleWaitMS, e.lastLootExitPercent
+}
+
+type StarExitMetrics struct {
+	Target        int   `json:"target"`
+	Seen          int   `json:"seen"`
+	Confirmations int   `json:"confirmations"`
+	Triggered     bool  `json:"triggered"`
+	ElapsedMS     int64 `json:"elapsed_ms"`
+}
+
+func (e *Executor) StarExitMetrics() StarExitMetrics {
+	return StarExitMetrics{
+		Target: e.lastStarExitTarget,
+		Seen: e.lastStarExitSeen,
+		Confirmations: e.lastStarExitConfirmations,
+		Triggered: e.lastStarExitTriggered,
+		ElapsedMS: e.lastStarExitElapsedMS,
+	}
 }
 
 func (e *Executor) BattleLootOCRMetrics() (samples int, avgMS float64) {
@@ -2012,6 +2035,11 @@ func (e *Executor) ResetBattleOutcome() {
 	e.lastBattleEndReason = ""
 	e.lastBattleWaitMS = 0
 	e.lastLootExitPercent = 0
+	e.lastStarExitTarget = 0
+	e.lastStarExitSeen = 0
+	e.lastStarExitConfirmations = 0
+	e.lastStarExitTriggered = false
+	e.lastStarExitElapsedMS = 0
 	e.lastBattleLootOCRSamples = 0
 	e.lastBattleLootOCRMicros = 0
 }
@@ -2103,6 +2131,9 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 	// executor-scoped and would otherwise carry a previous battle's reads
 	// into this one's star computation (see ResetBattleOutcome).
 	e.ResetBattleOutcome()
+	e.lastStarExitTarget = e.cfg.EndAtStars
+	if e.lastStarExitTarget < 0 { e.lastStarExitTarget = 0 }
+	if e.lastStarExitTarget > 3 { e.lastStarExitTarget = 3 }
 
 	lastPct := 0
 	lastPctTime := time.Now()
@@ -2462,11 +2493,13 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 				}
 				if e.earlyExitAllowed && starTarget > 0 {
 					currentStars := game.StarsFromOutcome(currentPct, e.thDestroyed)
+					e.lastStarExitSeen = currentStars
 					if currentStars >= starTarget {
 						starExitConfirmations++
 					} else {
 						starExitConfirmations = 0
 					}
+					e.lastStarExitConfirmations = starExitConfirmations
 
 					if starExitConfirmations >= 2 {
 						if !e.endButtonVisible(screen, sCfg) {
@@ -2488,6 +2521,8 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 								return false
 							}
 							e.lastBattleEndReason = "star_threshold"
+							e.lastStarExitTriggered = true
+							e.lastStarExitElapsedMS = time.Since(waitStarted).Milliseconds()
 							return true
 						}
 					}
