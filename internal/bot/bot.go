@@ -560,7 +560,10 @@ func (b *Bot) captureLoop() {
 			case PhaseSearching:
 				return 700 * time.Millisecond
 			case PhasePlanning:
-				return 650 * time.Millisecond
+				// Planning is intentionally fast: one broker stream at ~4 FPS is
+				// enough for zoom/red-zone/bar analysis without recreating the old
+				// concurrent screencap pressure.
+				return 250 * time.Millisecond
 			case PhaseDeploying:
 				return 350 * time.Millisecond
 			case PhaseBattle, PhaseParsingResult, PhaseReturningHome:
