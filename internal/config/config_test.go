@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoadRebasesRelativeStrategyIntoAssets(t *testing.T) {
@@ -87,6 +88,26 @@ func TestDefaultAutomationIsSimpleAndAutomatic(t *testing.T) {
 	}
 }
 
+
+func TestDefaultClashCoreInspiredFeaturesAreSafe(t *testing.T) {
+	cfg := DefaultConfig()
+
+	if cfg.Automation.AutoCollectors {
+		t.Fatal("collector tapping must stay opt-in until live calibration is confirmed")
+	}
+	if cfg.Automation.CollectorInterval.Duration != 10*time.Minute {
+		t.Fatalf("collector interval=%v want 10m", cfg.Automation.CollectorInterval.Duration)
+	}
+	if !cfg.Automation.PrivacyMaskUsername {
+		t.Fatal("persisted screenshots should mask the player identity by default")
+	}
+	if !cfg.Search.SaveAcceptedBaseScreenshots {
+		t.Fatal("accepted target screenshots should be enabled by default")
+	}
+	if cfg.Attack.EndAtStars != 0 {
+		t.Fatalf("star exit must remain opt-in, got %d", cfg.Attack.EndAtStars)
+	}
+}
 
 func TestSaveAndLoadRoundTrip(t *testing.T) {
 	root := t.TempDir()
