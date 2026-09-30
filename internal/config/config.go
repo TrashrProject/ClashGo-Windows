@@ -59,8 +59,28 @@ type AutomationConfig struct {
 	RecoveryPause Duration `json:"recovery_pause"`
 }
 
+type ManagedAccount struct {
+	ID                string `json:"id"`
+	Label             string `json:"label,omitempty"`
+	PlayerTag         string `json:"player_tag"`
+	Enabled           bool   `json:"enabled"`
+	SwitchSlot        int    `json:"switch_slot,omitempty"`
+	MaxAttacksPerTurn int    `json:"max_attacks_per_turn,omitempty"`
+}
+
+type MultiAccountConfig struct {
+	Enabled            bool             `json:"enabled"`
+	ActiveAccountID    string           `json:"active_account_id,omitempty"`
+	DefaultAttacksTurn int              `json:"default_attacks_per_turn,omitempty"`
+	Accounts           []ManagedAccount `json:"accounts,omitempty"`
+}
+
 type AccountConfig struct {
 	PlayerTag string `json:"player_tag"`
+	// MultiAccount keeps the active account compatible with the legacy
+	// PlayerTag while allowing ClashGO to rotate across several profiles.
+	// No Supercell credentials are stored: switching is UI-only.
+	MultiAccount MultiAccountConfig `json:"multi_account"`
 	// ProxyURL points to the ClashGO account service. End users never need
 	// a Clash developer key; the server owns that credential.
 	ProxyURL string `json:"proxy_url,omitempty"`
@@ -350,7 +370,12 @@ func DefaultConfig() *BotConfig {
 			MaxJitterPixels:    2.0,
 			JitterFraction:     0.15,
 		},
-		Account: AccountConfig{},
+		Account: AccountConfig{
+			MultiAccount: MultiAccountConfig{
+				Enabled: false,
+				DefaultAttacksTurn: 10,
+			},
+		},
 		Automation: AutomationConfig{
 			SpeedProfile:           "normal",
 			SimpleMode:             true,
