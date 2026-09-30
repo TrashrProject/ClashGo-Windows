@@ -237,5 +237,8 @@ func (b *Bot) ResolveMultiAccountRecovery(accountID string) (config.ManagedAccou
 		Str("account_label", account.Label).
 		Str("player_tag", account.PlayerTag).
 		Msg("multi-account recovery resolved; account intelligence rebound; automation remains paused")
+	if b.OnAccountChanged != nil {
+		b.OnAccountChanged(b.cfg.Account.PlayerTag, account.ID, account.Label)
+	}
 	return account, nil
 }
