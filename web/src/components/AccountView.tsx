@@ -59,6 +59,13 @@ type MultiAccountRuntimeStatusView = {
 };
 
 
+type MultiAccountSwitchedEvent = {
+  player_tag?: string;
+  account_id?: string;
+  label?: string;
+};
+
+
 const calibrationCoversAccounts = (raw: unknown, accounts: ManagedAccount[]): boolean => {
   const text = String(raw || '').trim();
   if (!text) return false;
@@ -473,6 +480,31 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       window.clearInterval(interval);
     };
   }, [memberPage, automationActive]);
+
+  React.useEffect(() => safeEventsOn<MultiAccountSwitchedEvent>('multi_account_switched', (payload) => {
+    const tag = String(payload?.player_tag || '').trim().toUpperCase();
+    const accountID = String(payload?.account_id || '').trim();
+    if (!tag || !accountID) return;
+
+    // The new account's public profile/cache must never display data from the
+    // previous village while the optional account service refreshes.
+    setProfile(null);
+    setResources(null);
+    setCurrentArmy(null);
+    setFarmProfile(null);
+    setMultiAccount(current => ({ ...current, active_account_id: accountID }));
+    setMultiAccountStatus(current => current ? {
+      ...current,
+      active_account_id: accountID,
+      active_account_label: payload?.label || accountID,
+      attacks_this_turn: 0,
+      rotation_due: false,
+      switch_in_flight: false,
+      last_error: '',
+    } : current);
+    setMultiAccountMessage(`Compte chargé : ${payload?.label || tag}. Le profil et l’IA ont été isolés pour ce village.`);
+    onAccountChanged(tag);
+  }), [onAccountChanged]);
 
   const refreshLicense = React.useCallback(async () => {
     try {
