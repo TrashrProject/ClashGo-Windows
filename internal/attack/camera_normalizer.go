@@ -138,7 +138,7 @@ func (e *Executor) normalizeBattlefieldCamera(
 	}
 
 	replaceWithFresh := func(stage string, attempt int) bool {
-		fresh, err := e.client.CaptureToMat()
+		fresh, err := e.captureFrame(2 * time.Second)
 		if err != nil || fresh.Empty() {
 			if !fresh.Empty() {
 				fresh.Close()
