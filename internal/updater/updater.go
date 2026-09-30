@@ -891,7 +891,7 @@ func (s *Service) ApplyAuto() (bool, error) {
 			}
 		}
 		if helper == "" {
-			return false, errors.New("Windows update helper is missing from the installation")
+			return false, errors.New("windows update helper is missing from the installation")
 		}
 		tempHelperPath, err := prepareWindowsUpdateHelper(helper)
 		if err != nil {
