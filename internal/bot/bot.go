@@ -1922,7 +1922,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			return
 		}
 
-		screen, err := b.client.CaptureToMat()
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil {
 			b.logger.Warn().Err(err).Msg("search capture failed")
 			if !b.sleepResponsive(1200 * time.Millisecond) {
@@ -2142,7 +2142,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		parsedOK := false
 		prevHash := uint64(0)
 		for attempt := 0; attempt < 3 && !parsedOK; attempt++ {
-			resultScreen, err := b.client.CaptureToMat()
+			resultScreen, err := b.runtimeFrameFresh(2 * time.Second)
 			if err != nil {
 				b.logger.Warn().Err(err).Msg("battle result capture failed; retrying")
 				time.Sleep(500 * time.Millisecond)
@@ -2758,7 +2758,7 @@ func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, 
 	}
 
 	for attempt := 1; attempt <= attempts; attempt++ {
-		first, err := b.client.CaptureToMat()
+		first, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil || first.Empty() {
 			if !first.Empty() { first.Close() }
 			time.Sleep(70 * time.Millisecond)
@@ -2776,7 +2776,7 @@ func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, 
 
 		// Let the button finish a few animation frames, then confirm its center.
 		time.Sleep(85 * time.Millisecond)
-		second, err := b.client.CaptureToMat()
+		second, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil || second.Empty() {
 			if !second.Empty() { second.Close() }
 			continue
@@ -2848,7 +2848,7 @@ func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int
 	stable := 0
 
 	for time.Now().Before(deadline) {
-		screen, err := b.client.CaptureToMat()
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil || screen.Empty() {
 			if !screen.Empty() { screen.Close() }
 			time.Sleep(pollPause)
@@ -2910,7 +2910,7 @@ func (b *Bot) clickSequence() bool {
 	// Arrow when the game has already progressed into clouds/base search.
 	probeDeadline := time.Now().Add(3500 * time.Millisecond)
 	for time.Now().Before(probeDeadline) {
-		screen, err := b.client.CaptureToMat()
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil {
 			if !b.sleepResponsive(250 * time.Millisecond) {
 				return false
@@ -3056,7 +3056,7 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 	)
 
 	for retry := 0; retry < maxRetries; retry++ {
-		screen, err := b.client.CaptureToMat()
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil {
 			b.logger.Warn().Err(err).Str("step", stepName).Msg("capture failed")
 			time.Sleep(500 * time.Millisecond)
@@ -3078,7 +3078,7 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 					b.recordActivity()
 					return true
 				}
-				screen, _ = b.client.CaptureToMat()
+				screen, _ = b.runtimeFrameFresh(2 * time.Second)
 			}
 		}
 
@@ -3241,7 +3241,7 @@ func (b *Bot) waitForStableResultPanel(maxWait time.Duration) (time.Duration, bo
 
 	var previous uint64
 	for time.Since(started) < maxWait {
-		screen, err := b.client.CaptureToMat()
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
 		if err == nil && !screen.Empty() {
 			hash := resultPanelHash(screen, b.cal)
 			screen.Close()
@@ -3314,7 +3314,7 @@ func (b *Bot) colorCheck(screen gocv.Mat, x, y int, lower, upper gocv.Scalar, mi
 // by the captureLoop's next frame) will reset lastAction via recordActivity()
 // on its own.
 func (b *Bot) dismissInterruptions() {
-	screen, err := b.client.CaptureToMat()
+	screen, err := b.runtimeFrameFresh(2 * time.Second)
 	if err != nil {
 		return
 	}
@@ -3370,7 +3370,7 @@ func (b *Bot) dismissSelection() {
 func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		screen, err := b.client.CaptureToMat()
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil {
 			b.logger.Debug().Err(err).Msg("battle-state capture unavailable")
 			if !b.sleepResponsive(350 * time.Millisecond) {
@@ -3476,7 +3476,7 @@ func (b *Bot) deployParsedStrategy(screen gocv.Mat, strat *strategy.DynamicStrat
 func (b *Bot) QuickDeploy() error {
 	b.logger.Info().Msg("deploy-only mode: capturing current screen once")
 
-	screen, err := b.client.CaptureToMat()
+	screen, err := b.runtimeFrameFresh(2 * time.Second)
 	if err != nil {
 		return fmt.Errorf("capture: %w", err)
 	}
