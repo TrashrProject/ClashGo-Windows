@@ -20,15 +20,27 @@ func (sm *SlotManager) RefreshPositions(screen gocv.Mat) bool {
 	if sm == nil || screen.Empty() {
 		return false
 	}
+	return sm.applyDetectedPositions(sm.detectActiveSlots(screen))
+}
 
-	activeXs := sm.detectActiveSlots(screen)
-	return sm.applyDetectedPositions(activeXs)
+// RefreshPositionsAfterDeployment is used by the post-deploy checkpoint. The
+// card just tapped may already have disappeared visually even though its
+// TrackedSlot is not marked Deployed until this same checkpoint succeeds.
+func (sm *SlotManager) RefreshPositionsAfterDeployment(screen gocv.Mat, deployed *TrackedSlot) bool {
+	if sm == nil || screen.Empty() {
+		return false
+	}
+	return sm.applyDetectedPositionsAfter(sm.detectActiveSlots(screen), deployed)
 }
 
 // applyDetectedPositions is the pure remapping half of RefreshPositions. It is
 // split out so compaction semantics are testable without constructing a full
 // OpenCV battle frame.
 func (sm *SlotManager) applyDetectedPositions(activeXs []int) bool {
+	return sm.applyDetectedPositionsAfter(activeXs, nil)
+}
+
+func (sm *SlotManager) applyDetectedPositionsAfter(activeXs []int, justDeployed *TrackedSlot) bool {
 	if sm == nil || len(activeXs) == 0 {
 		return false
 	}
@@ -38,10 +50,15 @@ func (sm *SlotManager) applyDetectedPositions(activeXs []int) bool {
 		if slot == nil {
 			continue
 		}
+		if slot.State == SlotFailed {
+			continue
+		}
 		if slot.State == SlotDeployed && slot.Category != "Hero" {
 			continue
 		}
-		if slot.State == SlotFailed {
+		// Troop/spell/siege cards can vanish immediately after their last
+		// charge is tapped. Heroes stay because their button becomes Ability.
+		if justDeployed != nil && slot == justDeployed && slot.Category != "Hero" {
 			continue
 		}
 		visible = append(visible, slot)
