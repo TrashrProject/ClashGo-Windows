@@ -467,55 +467,6 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) (retErr erro
 	return fmt.Errorf("new account did not reach MainVillage within switch timeout")
 }
 
-func (b *Bot) ResolveMultiAccountRecovery(accountID string) (config.ManagedAccount, error) {
-	if b == nil || b.multiAccount == nil {
-		return config.ManagedAccount{}, fmt.Errorf("multi-account scheduler unavailable")
-	}
-	recoveryRequired, _ := b.multiAccount.RecoveryStatus()
-	if !recoveryRequired {
-		return config.ManagedAccount{}, fmt.Errorf("no interrupted account switch requires confirmation")
-	}
-	account, ok := b.multiAccount.Account(accountID)
-	if !ok {
-		return config.ManagedAccount{}, fmt.Errorf("unknown or disabled multi-account profile %q", accountID)
-	}
-	prepared, err := b.prepareManagedAccount(account)
-	if err != nil {
-		return config.ManagedAccount{}, fmt.Errorf("confirmed account preflight failed: %w", err)
-	}
-
-	// Rebind the in-memory config and all account-scoped intelligence before
-	// clearing recovery. If persistence fails here the scheduler remains
-	// recovery-blocked, so no attack can run with stale account state.
-	if err := b.applyPreparedManagedAccount(prepared, account); err != nil {
-		return config.ManagedAccount{}, err
-	}
-	if err := b.multiAccount.ResolveRecovery(account.ID); err != nil {
-		return config.ManagedAccount{}, fmt.Errorf("resolve interrupted account identity: %w", err)
-	}
-	b.wallUpgradePending.Store(b.cfg.Upgrade.UpgradeWalls)
-	b.logger.Info().
-		Str("account_id", account.ID).
-		Str("account_label", account.Label).
-		Str("player_tag", account.PlayerTag).
-		Msg("multi-account identity manually confirmed; automation remains paused")
-	return account, nil
-}
-
-func (b *Bot) ConfirmMultiAccountRecovery(accountID string) error {
-	account, err := b.ResolveMultiAccountRecovery(accountID)
-	if err != nil {
-		return err
-	}
-	b.paused.Store(false)
-	b.recordActivity()
-	b.logger.Info().
-		Str("account_id", account.ID).
-		Str("player_tag", account.PlayerTag).
-		Msg("multi-account recovery confirmed; automation resumed")
-	return nil
-}
-
 type preparedManagedAccount struct {
 	cfg           config.BotConfig
 	adaptive      *intelligence.AdaptiveEngine
