@@ -274,7 +274,7 @@ func (b *Bot) maybeCollectVillageResources(screen gocv.Mat) {
 			if b.ctx.Err() != nil || b.seqRunning.Load() || b.paused.Load() {
 				return
 			}
-			confirmed, ok := b.confirmCollectorTarget(target)
+			confirmed, before, ok := b.confirmCollectorTarget(target)
 			if !ok {
 				b.logger.Debug().Str("collector", target.kind).Msg("collector candidate did not survive two-frame verification")
 				continue
@@ -285,34 +285,43 @@ func (b *Bot) maybeCollectVillageResources(screen gocv.Mat) {
 				continue
 			}
 			b.recordActivity()
-			b.logger.Info().
+
+			verifiedGain := false
+			select {
+			case <-b.ctx.Done():
+				return
+			case <-time.After(450 * time.Millisecond):
+			}
+			if fresh, err := b.runtimeFrameFresh(1500 * time.Millisecond); err == nil && !fresh.Empty() {
+				after := b.readCollectorResourceSnapshot(fresh)
+				verifiedGain = collectorResourceIncreased(target.kind, before, after)
+				fresh.Close()
+			}
+
+			logEvent := b.logger.Info().
 				Str("collector", target.kind).
 				Int("x", target.point.X).
 				Int("y", target.point.Y).
 				Float64("confidence_score", target.score).
-				Msg("collector resource bubble tapped")
-			select {
-			case <-b.ctx.Done():
-				return
-			case <-time.After(260 * time.Millisecond):
-			}
+				Bool("resource_gain_verified", verifiedGain)
+			logEvent.Msg("collector resource bubble tapped")
 		}
 	}(targets)
 }
 
-func (b *Bot) confirmCollectorTarget(original collectorTarget) (collectorTarget, bool) {
+func (b *Bot) confirmCollectorTarget(original collectorTarget) (collectorTarget, game.VillageResourceSnapshot, bool) {
 	fresh, err := b.runtimeFrameFresh(1500 * time.Millisecond)
 	if err != nil || fresh.Empty() {
 		if err == nil {
 			fresh.Close()
 		}
-		return collectorTarget{}, false
+		return collectorTarget{}, game.VillageResourceSnapshot{}, false
 	}
 	defer fresh.Close()
 
 	state, _ := b.classify(fresh)
 	if state != game.StateMainVillage {
-		return collectorTarget{}, false
+		return collectorTarget{}, game.VillageResourceSnapshot{}, false
 	}
 
 	candidates := b.findCollectorTargets(fresh)
@@ -325,10 +334,34 @@ func (b *Bot) confirmCollectorTarget(original collectorTarget) (collectorTarget,
 		dx := math.Abs(float64(candidate.point.X - original.point.X))
 		dy := math.Abs(float64(candidate.point.Y - original.point.Y))
 		if dx <= maxDX && dy <= maxDY {
-			return candidate, true
+			return candidate, b.readCollectorResourceSnapshot(fresh), true
 		}
 	}
-	return collectorTarget{}, false
+	return collectorTarget{}, game.VillageResourceSnapshot{}, false
+}
+
+func (b *Bot) readCollectorResourceSnapshot(screen gocv.Mat) game.VillageResourceSnapshot {
+	if b == nil || b.cal == nil || b.templates == nil || screen.Empty() {
+		return game.VillageResourceSnapshot{}
+	}
+	// Use a short-lived reader so the collector verification never races the
+	// background resource tracker through the recognizer's internal buffers.
+	reader := game.NewVillageResourceReader(b.cal, b.templates, b.logger)
+	defer reader.Close()
+	return reader.Read(screen)
+}
+
+func collectorResourceIncreased(kind string, before, after game.VillageResourceSnapshot) bool {
+	switch kind {
+	case "gold":
+		return before.GoldValid && after.GoldValid && after.Gold > before.Gold
+	case "elixir":
+		return before.ElixirValid && after.ElixirValid && after.Elixir > before.Elixir
+	case "dark_elixir":
+		return before.DarkValid && after.DarkValid && after.DarkElixir > before.DarkElixir
+	default:
+		return false
+	}
 }
 
 // findCollectorTargets finds at most one compact, high-saturation resource
