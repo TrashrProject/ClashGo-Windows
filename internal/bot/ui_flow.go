@@ -112,6 +112,13 @@ func (b *Bot) waitAndClickButton(templateName, stepName string, timeout time.Dur
 
 		// Cheap, high-confidence color evidence before the more expensive
 		// multiscale template pass.
+		if templateName == "btn_find_match" {
+			if x, y, ok := b.locateFindMatchButtonColor(screen); ok {
+				clickX, clickY = x, y
+				matched = true
+				confidence = 1.0
+			}
+		}
 		if templateName == "btn_attack" {
 			if pp, ok := villagePinpoints[templateName]; ok {
 				px, py := b.cal.ScaleRef(pp.X, pp.Y)
@@ -153,7 +160,7 @@ func (b *Bot) waitAndClickButton(templateName, stepName string, timeout time.Dur
 				Float64("confidence", confidence).
 				Int("x", clickX).
 				Int("y", clickY).
-				Msg("visual target ready; clicking immediately")
+				Msg("visual target ready; clicking " + stepName)
 			if err := b.client.TapFast(clickX, clickY, 1.2); err != nil {
 				b.logger.Warn().Err(err).Str("step", stepName).Msg("visual target tap failed")
 				return false
@@ -179,7 +186,7 @@ func (b *Bot) waitAndClickButton(templateName, stepName string, timeout time.Dur
 	b.logger.Warn().
 		Str("step", stepName).
 		Dur("visual_timeout", timeout).
-		Msg("visual target not confirmed; refusing blind fallback tap")
+		Msg("visual target not confirmed for " + stepName + "; refusing blind fallback tap")
 	return false
 }
 
