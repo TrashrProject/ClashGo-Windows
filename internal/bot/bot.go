@@ -551,6 +551,11 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 
 	b.attackExec.SetClassifier(b.classify)
 	b.attackExec.SetFrameProvider(b.runtimeFrameFresh)
+	if b.cfg.Account.MultiAccount.Enabled {
+		b.attackExec.SetArmyInspectionPath(AccountArmySnapshotPath(b.cfg))
+	} else {
+		b.attackExec.SetArmyInspectionPath("")
+	}
 	b.attackExec.OnPlanReady = func(duration time.Duration, edge string) {
 		b.lastPlanningUS.Store(duration.Microseconds())
 		b.logger.Info().Dur("planning", duration).Str("edge", edge).Msg("attack plan committed; starting deployment")
