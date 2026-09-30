@@ -97,11 +97,12 @@ func normalizeTag(tag string) string {
 
 func (m *Manager) reconcileActiveLocked(currentTag string) {
 	currentTag = normalizeTag(currentTag)
-	if m.accountByIDLocked(m.state.ActiveAccountID) != nil {
+	if active := m.accountByIDLocked(m.state.ActiveAccountID); active != nil && active.Enabled {
 		return
 	}
-	if m.cfg.ActiveAccountID != "" && m.accountByIDLocked(m.cfg.ActiveAccountID) != nil {
+	if configured := m.accountByIDLocked(m.cfg.ActiveAccountID); m.cfg.ActiveAccountID != "" && configured != nil && configured.Enabled {
 		m.state.ActiveAccountID = m.cfg.ActiveAccountID
+		m.state.AttacksThisTurn = 0
 		return
 	}
 	for i := range m.cfg.Accounts {
