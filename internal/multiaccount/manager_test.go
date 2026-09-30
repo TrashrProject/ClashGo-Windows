@@ -98,3 +98,29 @@ func TestPerAccountAttackLimitOverridesDefault(t *testing.T) {
 		t.Fatalf("expected immediate rotation to b, got %+v due=%v", next, due)
 	}
 }
+
+
+func TestManagerDoesNotKeepDisabledActiveAccount(t *testing.T) {
+	cfg := testConfig()
+	path := filepath.Join(t.TempDir(), "multi.json")
+
+	m, err := NewManager(path, cfg, "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.MarkSwitched("b"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg.Accounts[1].Enabled = false
+	if err := m.UpdateConfig(cfg, "#AAA"); err != nil {
+		t.Fatal(err)
+	}
+	active, ok := m.Active()
+	if !ok {
+		t.Fatal("expected fallback active account")
+	}
+	if active.ID != "a" {
+		t.Fatalf("active=%q want a after disabling b", active.ID)
+	}
+}
