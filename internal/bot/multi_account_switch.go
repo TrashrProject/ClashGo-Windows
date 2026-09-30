@@ -42,8 +42,52 @@ type multiAccountSwitchCalibration struct {
 	AccountSlots        map[string]multiAccountRect `json:"account_slots"`
 }
 
+type MultiAccountRect = multiAccountRect
+type MultiAccountSwitchCalibration = multiAccountSwitchCalibration
+
+
 func multiAccountSwitchCalibrationPath() string {
 	return paths.ResolveConfig("multi_account_switch.json")
+}
+
+func LoadMultiAccountSwitchCalibration() (MultiAccountSwitchCalibration, error) {
+	return loadMultiAccountSwitchCalibration()
+}
+
+func SaveMultiAccountSwitchCalibration(c MultiAccountSwitchCalibration) error {
+	if c.Version <= 0 {
+		c.Version = 1
+	}
+	if c.Width <= 0 || c.Height <= 0 {
+		return fmt.Errorf("multi-account calibration has invalid screen dimensions")
+	}
+	if !c.SettingsButton.valid(c.Width, c.Height) ||
+		!c.SupercellIDButton.valid(c.Width, c.Height) ||
+		!c.SwitchAccountButton.valid(c.Width, c.Height) {
+		return fmt.Errorf("multi-account calibration is incomplete")
+	}
+	if len(c.AccountSlots) == 0 {
+		return fmt.Errorf("multi-account calibration has no account slots")
+	}
+	for key, rect := range c.AccountSlots {
+		if strings.TrimSpace(key) == "" || !rect.valid(c.Width, c.Height) {
+			return fmt.Errorf("invalid account slot calibration %q", key)
+		}
+	}
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := multiAccountSwitchCalibrationPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	_ = os.Remove(path)
+	return os.Rename(tmp, path)
 }
 
 func loadMultiAccountSwitchCalibration() (multiAccountSwitchCalibration, error) {
