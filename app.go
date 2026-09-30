@@ -3725,6 +3725,12 @@ type MemberAutomationProfile struct {
 	CollectorMinutes    int                           `json:"collector_minutes"`
 	PrivacyMaskUsername *bool                         `json:"privacy_mask_username,omitempty"`
 	SaveAcceptedBases   *bool                         `json:"save_accepted_bases,omitempty"`
+	DryRun              *bool                         `json:"dry_run,omitempty"`
+	MaxRunMinutes       int                           `json:"max_run_minutes"`
+	EmergencyStopHotkey string                        `json:"emergency_stop_hotkey,omitempty"`
+	SaveNearMissBases   *bool                         `json:"save_near_miss_bases,omitempty"`
+	NearMissSampleEvery int                           `json:"near_miss_sample_every"`
+	NearMissWithinPct   int                           `json:"near_miss_within_percent"`
 	FarmEnabled         bool                          `json:"farm_enabled"`
 	FarmTownHall        int                           `json:"farm_town_hall"`
 	FarmProfiles        map[string]config.FarmProfile `json:"farm_profiles,omitempty"`
@@ -3738,6 +3744,8 @@ func memberAutomationFromConfig(cfg *config.BotConfig) MemberAutomationProfile {
 	autoCollectors := cfg.Automation.AutoCollectors
 	privacyMaskUsername := cfg.Automation.PrivacyMaskUsername
 	saveAcceptedBases := cfg.Search.SaveAcceptedBaseScreenshots
+	dryRun := cfg.Attack.DryRun
+	saveNearMissBases := cfg.Search.SaveNearMissBaseScreenshots
 	profile := MemberAutomationProfile{
 		SimpleMode:        &simpleMode,
 		SearchEnabled:     cfg.Search.Enabled,
@@ -3754,6 +3762,12 @@ func memberAutomationFromConfig(cfg *config.BotConfig) MemberAutomationProfile {
 		CollectorMinutes:    int(cfg.Automation.CollectorInterval.Duration / time.Minute),
 		PrivacyMaskUsername: &privacyMaskUsername,
 		SaveAcceptedBases:   &saveAcceptedBases,
+		DryRun:              &dryRun,
+		MaxRunMinutes:       cfg.Automation.MaxRunMinutes,
+		EmergencyStopHotkey: cfg.Automation.EmergencyStopHotkey,
+		SaveNearMissBases:   &saveNearMissBases,
+		NearMissSampleEvery: cfg.Search.NearMissSampleEvery,
+		NearMissWithinPct:   cfg.Search.NearMissWithinPercent,
 		FarmEnabled:         cfg.Attack.Farm.Enabled,
 		FarmTownHall:      cfg.Attack.Farm.TownHall,
 		FarmProfiles:      map[string]config.FarmProfile{},
@@ -3778,6 +3792,25 @@ func sanitizeMemberAutomationProfile(profile MemberAutomationProfile) MemberAuto
 	if profile.CollectorMinutes > 1440 {
 		profile.CollectorMinutes = 1440
 	}
+	profile.MaxRunMinutes = max(0, min(7*24*60, profile.MaxRunMinutes))
+	switch strings.ToLower(strings.TrimSpace(profile.EmergencyStopHotkey)) {
+	case "", "ctrl+shift+end":
+		profile.EmergencyStopHotkey = "ctrl+shift+end"
+	case "end":
+		profile.EmergencyStopHotkey = "end"
+	case "off", "disabled", "none":
+		profile.EmergencyStopHotkey = "off"
+	default:
+		profile.EmergencyStopHotkey = "ctrl+shift+end"
+	}
+	if profile.NearMissSampleEvery <= 0 {
+		profile.NearMissSampleEvery = 20
+	}
+	profile.NearMissSampleEvery = min(1000, profile.NearMissSampleEvery)
+	if profile.NearMissWithinPct <= 0 {
+		profile.NearMissWithinPct = 10
+	}
+	profile.NearMissWithinPct = min(50, profile.NearMissWithinPct)
 	if profile.FarmTownHall < 8 || profile.FarmTownHall > 18 {
 		profile.FarmTownHall = 18
 	}
@@ -3815,6 +3848,18 @@ func applyMemberAutomationToConfig(cfg *config.BotConfig, profile MemberAutomati
 	if profile.SaveAcceptedBases != nil {
 		cfg.Search.SaveAcceptedBaseScreenshots = *profile.SaveAcceptedBases
 	}
+	if profile.DryRun != nil {
+		cfg.Attack.DryRun = *profile.DryRun
+	}
+	cfg.Automation.MaxRunMinutes = profile.MaxRunMinutes
+	if profile.EmergencyStopHotkey != "" {
+		cfg.Automation.EmergencyStopHotkey = profile.EmergencyStopHotkey
+	}
+	if profile.SaveNearMissBases != nil {
+		cfg.Search.SaveNearMissBaseScreenshots = *profile.SaveNearMissBases
+	}
+	cfg.Search.NearMissSampleEvery = profile.NearMissSampleEvery
+	cfg.Search.NearMissWithinPercent = profile.NearMissWithinPct
 
 	if profile.StrategyFile != "" {
 		candidate := paths.Resolve(filepath.Join("strategies", filepath.Base(profile.StrategyFile)))
@@ -5347,6 +5392,65 @@ func (a *App) SaveClashCoreFeatures(autoCollectors bool, collectorMinutes int, p
 // SaveFarmComposition persists the selected HDV farm profile.
 // profileJSON is used instead of a large Wails struct signature so the UI can
 // edit a profile freely without regenerating a bespoke binding for every field.
+// SaveAdvancedSafetyFeatures persists the newer safety/forensics controls
+// separately so the long-lived SaveConfig and SaveClashCoreFeatures Wails
+// signatures remain backward compatible with existing beta clients.
+func (a *App) SaveAdvancedSafetyFeatures(dryRun bool, maxRunMinutes int, emergencyStopHotkey string, saveNearMissBases bool, nearMissSampleEvery int, nearMissWithinPercent int) error {
+	if a.testSessionRestorePending() {
+		return fmt.Errorf("session test active: wait for it to finish before changing automation")
+	}
+	if maxRunMinutes < 0 || maxRunMinutes > 7*24*60 {
+		return fmt.Errorf("maximum runtime must be between 0 and 10080 minutes")
+	}
+	hotkey := strings.ToLower(strings.TrimSpace(emergencyStopHotkey))
+	switch hotkey {
+	case "", "ctrl+shift+end":
+		hotkey = "ctrl+shift+end"
+	case "end":
+	case "off", "disabled", "none":
+		hotkey = "off"
+	default:
+		return fmt.Errorf("emergency stop hotkey must be ctrl+shift+end, end, or off")
+	}
+	if nearMissSampleEvery < 1 || nearMissSampleEvery > 1000 {
+		return fmt.Errorf("near-miss sampling interval must be between 1 and 1000")
+	}
+	if nearMissWithinPercent < 1 || nearMissWithinPercent > 50 {
+		return fmt.Errorf("near-miss window must be between 1 and 50 percent")
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Attack.DryRun = dryRun
+	cfg.Automation.MaxRunMinutes = maxRunMinutes
+	cfg.Automation.EmergencyStopHotkey = hotkey
+	cfg.Search.SaveNearMissBaseScreenshots = saveNearMissBases
+	cfg.Search.NearMissSampleEvery = nearMissSampleEvery
+	cfg.Search.NearMissWithinPercent = nearMissWithinPercent
+
+	automationPath := a.memberAutomationPath()
+	oldAutomation, hadOldAutomation := loadMemberAutomationFile(automationPath)
+	if err := a.persistMemberAutomation(cfg); err != nil {
+		return err
+	}
+	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldAutomation {
+			_ = saveMemberAutomationFile(automationPath, oldAutomation)
+		} else if automationPath != "" {
+			_ = os.Remove(automationPath)
+			_ = os.Remove(automationPath + ".bak")
+			_ = os.Remove(automationPath + ".tmp")
+		}
+		return err
+	}
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	return nil
+}
+
 func (a *App) SaveFarmComposition(enabled bool, townHall int, profileJSON string) error {
 	if a.testSessionRestorePending() {
 		return fmt.Errorf("session test active: wait for it to finish before changing farm composition")
