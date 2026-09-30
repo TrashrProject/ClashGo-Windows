@@ -1394,6 +1394,22 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 		// — it returns the same b.lastFrame string from atomic.Value
 		// without burning the bridge. See App.GetLiveScreenshot.
 
+		b.OnAccountChanged = func(playerTag, accountID, label string) {
+			if err := a.persistMemberAccountTag(playerTag); err != nil {
+				log.Warn().Err(err).
+					Str("account_id", accountID).
+					Msg("account switched but member player-tag cache could not be updated")
+			}
+			clearCachedPlayerProfileIfDifferent(playerTag)
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "multi_account_switched", map[string]any{
+					"player_tag": playerTag,
+					"account_id": accountID,
+					"label": label,
+				})
+			}
+		}
+
 		b.OnStatsUpdate = func() {
 			// The bot's in-memory history is authoritative while a session is
 			// running. Mirror it directly into the App cache instead of forcing
