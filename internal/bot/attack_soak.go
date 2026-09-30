@@ -14,16 +14,24 @@ func (b *Bot) resetAttackSoak(reason string) {
 	}
 }
 
-func (b *Bot) recordAttackSoak(rep AttackReport, recoveryDelta int32) {
+func (b *Bot) recordAttackSoak(rep AttackReport, recoveryDelta, blueStacksRestartDelta int32) {
 	if b == nil {
 		return
 	}
 	clean := rep.DeploySuccess &&
 		rep.ReturnHomeSuccess &&
 		rep.ParsedResults &&
-		recoveryDelta == 0
+		recoveryDelta == 0 &&
+		blueStacksRestartDelta == 0
 
 	if !clean {
+		b.logger.Warn().
+			Bool("deploy_success", rep.DeploySuccess).
+			Bool("return_home_success", rep.ReturnHomeSuccess).
+			Bool("parsed_results", rep.ParsedResults).
+			Int32("recovery_delta", recoveryDelta).
+			Int32("bluestacks_restart_delta", blueStacksRestartDelta).
+			Msg("attack does not qualify for clean soak streak")
 		b.resetAttackSoak("attack_not_clean")
 		return
 	}
