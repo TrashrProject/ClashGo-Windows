@@ -417,7 +417,7 @@ func (e *Executor) captureFrame(timeout time.Duration) (gocv.Mat, error) {
 	if e.frameProvider != nil {
 		return e.frameProvider(timeout)
 	}
-	return e.captureFrame(2 * time.Second)
+	return e.client.CaptureToMat()
 }
 
 // SetLootRecognizer injects the Bot's session-owned recognizer. Executor does
