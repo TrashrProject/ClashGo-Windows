@@ -1,6 +1,6 @@
 package main
 
-// Build marker: beta pipeline validation after file-backed BlueStacks PNG capture.
+// Build marker: beta pipeline validation after Xingchen-style camera normalization.
 import (
 	"bytes"
 	"context"
