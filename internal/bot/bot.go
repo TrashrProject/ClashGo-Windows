@@ -2736,6 +2736,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	liveBarRescans, avgLiveBarRescanMS, avgSlotDetectMS, avgSlotClassifyMS, templatesTried, templatesMatched, avgSelectedCardOCRMS := b.attackExec.LiveBarMetrics()
 	battleLootOCRSamples, avgBattleLootOCRMS := b.attackExec.BattleLootOCRMetrics()
 	battleEndWaitMS, lootExitPercent := b.attackExec.BattleExitMetrics()
+	starExit := b.attackExec.StarExitMetrics()
 	deploySafety := b.attackExec.DeploymentSafety()
 	attackTelemetry := telemetry.Snapshot{}
 	sessionID := ""
@@ -2809,8 +2810,13 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		PrepBattleButtonMS:    b.lastPrepTimings.BattleButtonMS,
 		PrepMatchmakingReadyMS: b.lastPrepTimings.MatchmakingReadyMS,
 		CooldownDurationMS:    cooldownDurationMS,
-		BattleEndReason:  b.attackExec.LastBattleEndReason(),
-		DestructionPct:   b.attackExec.LastDestructionPercent(),
+		BattleEndReason:       b.attackExec.LastBattleEndReason(),
+		StarExitTarget:        starExit.Target,
+		StarExitSeen:          starExit.Seen,
+		StarExitConfirmations: starExit.Confirmations,
+		StarExitTriggered:     starExit.Triggered,
+		StarExitElapsedMS:     starExit.ElapsedMS,
+		DestructionPct:        b.attackExec.LastDestructionPercent(),
 		TownHallDestroyed: b.attackExec.ThDestroyed(),
 		SafetyMode: deploySafety.Mode,
 		RedZoneValid: deploySafety.RedZoneValid,
@@ -2829,7 +2835,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 
 	if b.telemetry != nil {
-		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "cooldown_ms": rep.CooldownDurationMS, "prep_ms": rep.PreparationDurationMS, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore, "live_bar_rescans": rep.LiveBarRescans, "live_bar_rescan_ms": rep.AvgLiveBarRescanMS, "slot_detect_ms": rep.AvgSlotDetectMS, "slot_classify_ms": rep.AvgSlotClassifyMS, "templates_tried": rep.TemplatesTried, "templates_matched": rep.TemplatesMatched, "selected_card_ocr_ms": rep.AvgSelectedCardOCRMS, "battle_loot_ocr_samples": rep.BattleLootOCRSamples, "battle_loot_ocr_ms": rep.AvgBattleLootOCRMS, "battle_end_wait_ms": rep.BattleEndWaitMS, "loot_exit_percent": rep.LootExitPercent, "stars_source": rep.StarsSource, "loot_source": rep.LootSource, "result_confidence": rep.ResultConfidence, "end_reason": rep.BattleEndReason, "destruction_pct": rep.DestructionPct, "town_hall_destroyed": rep.TownHallDestroyed, "safety_mode": rep.SafetyMode, "red_zone_valid": rep.RedZoneValid, "corridor_verified": rep.CorridorVerified, "hud_safe": rep.HUDSafe, "red_zone_x1": rep.RedZoneX1, "red_zone_y1": rep.RedZoneY1, "red_zone_x2": rep.RedZoneX2, "red_zone_y2": rep.RedZoneY2, "deploy_line_x1": rep.DeployLineX1, "deploy_line_y1": rep.DeployLineY1, "deploy_line_x2": rep.DeployLineX2, "deploy_line_y2": rep.DeployLineY2, "deploy_free_space": rep.DeployFreeSpace})
+		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "cooldown_ms": rep.CooldownDurationMS, "prep_ms": rep.PreparationDurationMS, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore, "live_bar_rescans": rep.LiveBarRescans, "live_bar_rescan_ms": rep.AvgLiveBarRescanMS, "slot_detect_ms": rep.AvgSlotDetectMS, "slot_classify_ms": rep.AvgSlotClassifyMS, "templates_tried": rep.TemplatesTried, "templates_matched": rep.TemplatesMatched, "selected_card_ocr_ms": rep.AvgSelectedCardOCRMS, "battle_loot_ocr_samples": rep.BattleLootOCRSamples, "battle_loot_ocr_ms": rep.AvgBattleLootOCRMS, "battle_end_wait_ms": rep.BattleEndWaitMS, "loot_exit_percent": rep.LootExitPercent, "stars_source": rep.StarsSource, "loot_source": rep.LootSource, "result_confidence": rep.ResultConfidence, "end_reason": rep.BattleEndReason, "star_exit_target": rep.StarExitTarget, "star_exit_seen": rep.StarExitSeen, "star_exit_confirmations": rep.StarExitConfirmations, "star_exit_triggered": rep.StarExitTriggered, "star_exit_elapsed_ms": rep.StarExitElapsedMS, "destruction_pct": rep.DestructionPct, "town_hall_destroyed": rep.TownHallDestroyed, "safety_mode": rep.SafetyMode, "red_zone_valid": rep.RedZoneValid, "corridor_verified": rep.CorridorVerified, "hud_safe": rep.HUDSafe, "red_zone_x1": rep.RedZoneX1, "red_zone_y1": rep.RedZoneY1, "red_zone_x2": rep.RedZoneX2, "red_zone_y2": rep.RedZoneY2, "deploy_line_x1": rep.DeployLineX1, "deploy_line_y1": rep.DeployLineY1, "deploy_line_x2": rep.DeployLineX2, "deploy_line_y2": rep.DeployLineY2, "deploy_free_space": rep.DeployFreeSpace})
 	}
 
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
@@ -4508,8 +4514,13 @@ type AttackReport struct {
 	PrepBattleButtonMS     int64 `json:"prep_battle_button_ms"`
 	PrepMatchmakingReadyMS int64 `json:"prep_matchmaking_ready_ms"`
 	CooldownDurationMS     int64 `json:"cooldown_duration_ms"`
-	BattleEndReason   string  `json:"battle_end_reason"`
-	DestructionPct    int     `json:"destruction_pct"`
+	BattleEndReason       string `json:"battle_end_reason"`
+	StarExitTarget        int    `json:"star_exit_target"`
+	StarExitSeen          int    `json:"star_exit_seen"`
+	StarExitConfirmations int    `json:"star_exit_confirmations"`
+	StarExitTriggered     bool   `json:"star_exit_triggered"`
+	StarExitElapsedMS     int64  `json:"star_exit_elapsed_ms"`
+	DestructionPct        int    `json:"destruction_pct"`
 	TownHallDestroyed     bool  `json:"town_hall_destroyed"`
 	SafetyMode            string `json:"safety_mode"`
 	RedZoneValid          bool   `json:"red_zone_valid"`
