@@ -3893,6 +3893,11 @@ func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 		return
 	}
 	b.cfg = cfg
+	if b.multiAccount != nil {
+		if err := b.multiAccount.UpdateConfig(cfg.Account.MultiAccount, cfg.Account.PlayerTag); err != nil {
+			b.logger.Warn().Err(err).Msg("multi-account scheduler config update failed")
+		}
+	}
 	if b.attackExec != nil {
 		b.attackExec.UpdateConfig(&cfg.Attack)
 		b.attackExec.SetArmyGuardEnabled(cfg.Automation.AutoArmyGuard)
