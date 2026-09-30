@@ -110,7 +110,9 @@ type Bot struct {
 	rewardDismissInFlight atomic.Bool
 	splashDismissInFlight atomic.Bool
 	connLostDismissInFlight atomic.Bool
+	collectorSweepInFlight atomic.Bool
 	lastArmyCampGuardLog    time.Time
+	lastCollectorSweep      time.Time
 	startedAt             time.Time
 	watchdogMu           sync.RWMutex
 	lastAction            time.Time
@@ -1366,6 +1368,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 
 	if !b.seqRunning.Load() && (state == game.StateMainVillage || gc.State == game.StateMainVillage) {
 		b.maybeScanVillageResources(screen)
+		b.maybeCollectVillageResources(screen)
 	}
 
 	if state == game.StateChestReward {
@@ -2278,6 +2281,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			acceptedTargetElixir = loot.Elixir
 			acceptedTargetDE = loot.DarkElixir
 			acceptedTargetScore = decision.Score
+			b.saveAcceptedBaseScreenshot(screen, loot.Gold, loot.Elixir, loot.DarkElixir, decision.Score)
 
 			b.logger.Info().
 				Int("score", decision.Score).
