@@ -640,49 +640,14 @@ func (hm *HeroManager) deploySiegeFromFormula(unit strategy.Unit, slot *TrackedS
 // "+1 when count >= 6" safety pad for OCR under-reads. The dedicated
 // formula-only helper is no longer reachable.
 
-// liveCountAndEmpty is a thin shim to the shared captureSlotLiveCount
-// helper in live_count.go. Kept as a method to keep call-site code
-// readable inside HeroManager.DeployTroops's reconcile loop.
-func (hm *HeroManager) liveCountAndEmpty(slot *TrackedSlot, postDeploy bool) (int, bool) {
-	if hm == nil || hm.executor == nil || hm.slotManager == nil || slot == nil {
-		return 0, false
-	}
-	screen, err := hm.executor.CaptureFresh()
-	if err != nil || screen.Empty() {
-		if !screen.Empty() {
-			screen.Close()
-		}
-		return 0, false
-	}
-	defer screen.Close()
-
-	// Reuse the same checkpoint frame to follow CoC's compacting troop bar.
-	// No portrait scan and no second capture are needed.
-	if postDeploy {
-		_ = hm.slotManager.RefreshPositionsAfterDeployment(screen, slot)
-	} else {
-		_ = hm.slotManager.RefreshPositions(screen)
-	}
-
-	count := 0
-	if hm.troopCounter != nil && hm.troopCounter.HasDigitTemplates() {
-		count = hm.troopCounter.DetectCount(screen, slot, hm.slotManager.GetBarY())
-	}
-	empty := isSlotEmptyStatic(screen, slot.X, slot.Y, hm.w, hm.h)
-	return count, empty
-}
-
 // resolveLiveTapCount chooses the canonical tap count for the main pass.
 // Order of precedence:
 //
-//  1. Live OCR count from the pre-deploy screen (most authoritative —
-//     captures whatever CoC currently shows). Padded by +1 when ≥ 6 to
-//     absorb single-digit OCR under-reads.
-//  2. detectedCount (the once-cached orchestrator-start OCR). Same +1
-//     pad. Fallback when live OCR is unavailable (e.g. troopCounter
-//     not threaded through).
-//  3. YAML amount (parseAmount with the "All" → 0 → default path).
-//  4. Safe heuristic default (8) — reconcile corrects under-firing.
+//  1. detectedCount from the once-cached planning OCR. Padded by +1 when
+//     >= 6 to absorb single-digit OCR under-reads.
+//  2. YAML amount (parseAmount with the "All" -> 0 -> default path).
+//  3. Safe heuristic default (8). The single post-deploy checkpoint may
+//     perform one targeted top-up if CoC swallowed part of the sequence.
 func (hm *HeroManager) resolveLiveTapCount(unit strategy.Unit, slot *TrackedSlot, liveCount, detectedCount int) int {
 	const padFloor = 6
 	pad := func(n int) int {
