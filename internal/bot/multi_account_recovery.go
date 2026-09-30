@@ -180,3 +180,62 @@ func ResolveMultiAccountRecovery(cfg *config.BotConfig, accountID string) error 
 	}
 	return nil
 }
+
+
+// ResolveMultiAccountRecovery resolves an interrupted physical switch while
+// the bot is running. The human explicitly identifies the village visible in
+// BlueStacks; ClashGO then verifies MainVillage, preloads that account's
+// intelligence, atomically rebinds runtime state, and only then clears the
+// fail-closed recovery journal.
+func (b *Bot) ResolveMultiAccountRecovery(accountID string) (config.ManagedAccount, error) {
+	if b == nil || b.multiAccount == nil {
+		return config.ManagedAccount{}, fmt.Errorf("multi-account scheduler unavailable")
+	}
+	accountID = strings.TrimSpace(accountID)
+	if accountID == "" {
+		return config.ManagedAccount{}, fmt.Errorf("account id is required")
+	}
+	if b.seqRunning.Load() || b.multiAccountSwitchInFlight.Load() {
+		return config.ManagedAccount{}, fmt.Errorf("wait for the current automation action to finish")
+	}
+	if b.recoveryInFlight.Load() || b.restartInFlight.Load() {
+		return config.ManagedAccount{}, fmt.Errorf("runtime recovery is active")
+	}
+	required, _ := b.multiAccount.RecoveryStatus()
+	if !required {
+		return config.ManagedAccount{}, fmt.Errorf("multi-account recovery is not required")
+	}
+	account, ok := b.multiAccount.Account(accountID)
+	if !ok {
+		return config.ManagedAccount{}, fmt.Errorf("unknown or disabled multi-account profile %q", accountID)
+	}
+
+	state, err := b.accountState(2 * time.Second)
+	if err != nil {
+		return config.ManagedAccount{}, fmt.Errorf("verify visible village: %w", err)
+	}
+	if state != game.StateMainVillage {
+		return config.ManagedAccount{}, fmt.Errorf("confirm the account only from MainVillage, got %s", state.String())
+	}
+
+	prepared, err := b.prepareManagedAccount(account)
+	if err != nil {
+		return config.ManagedAccount{}, fmt.Errorf("prepare confirmed account: %w", err)
+	}
+	if err := b.applyPreparedManagedAccount(prepared, account); err != nil {
+		return config.ManagedAccount{}, fmt.Errorf("apply confirmed account: %w", err)
+	}
+	if err := b.multiAccount.ResolveRecovery(account.ID); err != nil {
+		return config.ManagedAccount{}, fmt.Errorf("persist recovery resolution: %w", err)
+	}
+
+	b.wallUpgradePending.Store(b.cfg.Upgrade.UpgradeWalls)
+	b.paused.Store(false)
+	b.recordActivity()
+	b.logger.Info().
+		Str("account_id", account.ID).
+		Str("account_label", account.Label).
+		Str("player_tag", account.PlayerTag).
+		Msg("multi-account recovery resolved; account intelligence rebound")
+	return account, nil
+}
