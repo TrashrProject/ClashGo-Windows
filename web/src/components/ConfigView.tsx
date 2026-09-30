@@ -21,6 +21,16 @@ interface ConfigViewProps {
   setLootExitEnabled: (v: boolean) => void;
   lootExitPercent: number;
   setLootExitPercent: (v: number) => void;
+  endAtStars: number;
+  setEndAtStars: (v: number) => void;
+  autoCollectors: boolean;
+  setAutoCollectors: (v: boolean) => void;
+  collectorMinutes: number;
+  setCollectorMinutes: (v: number) => void;
+  privacyMaskUsername: boolean;
+  setPrivacyMaskUsername: (v: boolean) => void;
+  saveAcceptedBases: boolean;
+  setSaveAcceptedBases: (v: boolean) => void;
   simpleMode: boolean;
   testSessionActive?: boolean;
   automationActive?: boolean;
@@ -61,6 +71,11 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   stallTimer, setStallTimer,
   lootExitEnabled, setLootExitEnabled,
   lootExitPercent, setLootExitPercent,
+  endAtStars, setEndAtStars,
+  autoCollectors, setAutoCollectors,
+  collectorMinutes, setCollectorMinutes,
+  privacyMaskUsername, setPrivacyMaskUsername,
+  saveAcceptedBases, setSaveAcceptedBases,
   simpleMode,
   testSessionActive = false,
   automationActive = false,
@@ -168,7 +183,9 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
 
   const stallInvalid = invalid(stallTimer, STALL_MAX);
   const lootExitInvalid = invalid(lootExitPercent, 100);
-  const anyInvalid = stallInvalid || lootExitInvalid || thresholdItems.some((t) => invalid(t.value, THRESHOLD_MAX));
+  const starExitInvalid = !Number.isFinite(endAtStars) || endAtStars < 0 || endAtStars > 3;
+  const collectorInvalid = !Number.isFinite(collectorMinutes) || collectorMinutes < 1 || collectorMinutes > 1440;
+  const anyInvalid = stallInvalid || lootExitInvalid || starExitInvalid || collectorInvalid || thresholdItems.some((t) => invalid(t.value, THRESHOLD_MAX));
 
   const settingsLocked = testSessionActive || automationActive;
 
@@ -532,6 +549,113 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
               </div>
             </div>
           </div>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <div className="space-y-4">
+            <div>
+              <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Arrêt selon les étoiles</span>
+              <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">
+                Après déploiement complet, ClashGO peut quitter dès que le nombre d’étoiles choisi est confirmé.
+              </span>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              {[0, 1, 2, 3].map((stars) => (
+                <button
+                  key={stars}
+                  type="button"
+                  onClick={() => setEndAtStars(stars)}
+                  className={
+                    'rounded-2xl border px-3 py-3 text-sm font-black transition ' +
+                    (endAtStars === stars
+                      ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                      : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:border-zinc-300 dark:hover:border-zinc-700')
+                  }
+                >
+                  {stars === 0 ? 'Off' : stars + ' ★'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <div className="space-y-5">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoCollectors}
+              onClick={() => setAutoCollectors(!autoCollectors)}
+              className="w-full flex items-center justify-between group cursor-pointer text-left"
+            >
+              <div className="max-w-[80%]">
+                <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Collecteurs automatiques</span>
+                <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">
+                  Au village uniquement, détecte les bulles de ressources à haute confiance et effectue au maximum un clic par type.
+                </span>
+              </div>
+              <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${autoCollectors ? 'bg-emerald-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
+                <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${autoCollectors ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
+              </div>
+            </button>
+
+            <div className={`rounded-2xl border p-5 transition-all ${autoCollectors ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-zinc-100 dark:border-zinc-800 opacity-45'}`}>
+              <label className="block text-[11px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-3">Intervalle de collecte</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={1}
+                  max={1440}
+                  value={collectorMinutes}
+                  disabled={!autoCollectors}
+                  aria-invalid={collectorInvalid}
+                  onChange={(e) => setCollectorMinutes(Math.max(1, Math.min(1440, Number(e.target.value) || 1)))}
+                  className={`w-28 bg-white dark:bg-zinc-950 border rounded-xl py-2.5 px-3 text-sm font-black tabular-nums focus:outline-none focus:ring-4 transition-all ${collectorInvalid ? 'border-rose-400 focus:ring-rose-500/10' : 'border-zinc-200 dark:border-zinc-700 focus:ring-emerald-500/10'}`}
+                />
+                <span className="text-xs font-medium text-zinc-500">minutes entre deux passages au village.</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={saveAcceptedBases}
+            onClick={() => setSaveAcceptedBases(!saveAcceptedBases)}
+            className="w-full flex items-center justify-between group cursor-pointer text-left"
+          >
+            <div className="max-w-[80%]">
+              <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Capturer les villages acceptés</span>
+              <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">
+                Enregistre l’image exacte du village qui a passé les seuils, avant le premier déploiement.
+              </span>
+            </div>
+            <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${saveAcceptedBases ? 'bg-emerald-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
+              <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${saveAcceptedBases ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
+            </div>
+          </button>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={privacyMaskUsername}
+            onClick={() => setPrivacyMaskUsername(!privacyMaskUsername)}
+            className="w-full flex items-center justify-between group cursor-pointer text-left"
+          >
+            <div className="max-w-[80%]">
+              <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Masquer l’identité sur les captures</span>
+              <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">
+                Applique un flou fort à la zone d’identité avant d’écrire les captures de diagnostic et les villages acceptés sur le disque.
+              </span>
+            </div>
+            <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${privacyMaskUsername ? 'bg-emerald-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
+              <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${privacyMaskUsername ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
+            </div>
+          </button>
 
           <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
 
