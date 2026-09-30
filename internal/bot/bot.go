@@ -2923,17 +2923,24 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 	if b.multiAccount != nil {
 		if next, due := b.multiAccount.NextDue(); due {
-			b.logger.Info().
-				Str("next_account_id", next.ID).
-				Str("next_account_label", next.Label).
-				Int("switch_slot", next.SwitchSlot).
-				Msg("multi-account rotation is due; waiting for safe calibrated switch")
-			// Actual Supercell-ID navigation is fail-closed and lives in
-			// switchMultiAccountIfReady. If calibration is unavailable, the
-			// current account keeps farming rather than receiving blind taps.
-			if err := b.switchMultiAccountIfReady(next); err != nil {
-				_ = b.multiAccount.MarkSwitchFailed(err)
-				b.logger.Warn().Err(err).Msg("multi-account switch deferred safely")
+			if allowed, remaining := b.multiAccount.SwitchAttemptAllowed(time.Now()); !allowed {
+				b.logger.Debug().
+					Dur("retry_in", remaining).
+					Str("next_account_id", next.ID).
+					Msg("multi-account switch still in failure backoff")
+			} else {
+				b.logger.Info().
+					Str("next_account_id", next.ID).
+					Str("next_account_label", next.Label).
+					Int("switch_slot", next.SwitchSlot).
+					Msg("multi-account rotation is due; waiting for safe calibrated switch")
+				// Actual Supercell-ID navigation is fail-closed and lives in
+				// switchMultiAccountIfReady. If calibration is unavailable, the
+				// current account keeps farming rather than receiving blind taps.
+				if err := b.switchMultiAccountIfReady(next); err != nil {
+					_ = b.multiAccount.MarkSwitchFailed(err)
+					b.logger.Warn().Err(err).Msg("multi-account switch deferred safely")
+				}
 			}
 		}
 	}
