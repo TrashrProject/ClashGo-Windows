@@ -72,3 +72,18 @@ func learningEnvironmentStatePath(cfg *config.BotConfig, name string) string {
 		name,
 	))
 }
+
+
+func multiAccountStatePath(cfg *config.BotConfig) string {
+	if cfg == nil {
+		return paths.ResolveConfig(filepath.Join("multi_account", "default", "state.json"))
+	}
+	seed := strings.Join([]string{
+		strings.ToLower(strings.TrimSpace(cfg.Device.DeviceID)),
+		strings.ToLower(strings.TrimSpace(cfg.Device.BlueStacksInstance)),
+		fmt.Sprintf("%dx%d@%d", cfg.Device.Width, cfg.Device.Height, cfg.Device.DPI),
+	}, "|")
+	sum := sha256.Sum256([]byte(seed))
+	key := hex.EncodeToString(sum[:10])
+	return paths.ResolveConfig(filepath.Join("multi_account", key, "state.json"))
+}
