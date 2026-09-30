@@ -164,7 +164,7 @@ func captureWallFrame(h *WallUpgradeHooks, timeout time.Duration) (gocv.Mat, err
 	if h.Client == nil {
 		return gocv.NewMat(), fmt.Errorf("wall-upgrade client unavailable")
 	}
-	return captureWallFrame(h, 2*time.Second)
+	return h.Client.CaptureToMat()
 }
 
 // UpgradeWalls executes the wall-upgrade sequence repeatedly until no
