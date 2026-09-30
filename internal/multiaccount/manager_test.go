@@ -453,3 +453,39 @@ func TestManagerResolveRecoveryRejectsDisabledAccount(t *testing.T) {
 		t.Fatal("failed confirmation must keep recovery guard active")
 	}
 }
+
+
+func TestManagerAmbiguousSwitchRequiresManualRecovery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multi.json")
+	cfg := testConfig()
+	m, err := NewManager(path, cfg, "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.BeginSwitch("b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.MarkSwitchAmbiguous("b", fmt.Errorf("loading transition timed out")); err != nil {
+		t.Fatal(err)
+	}
+
+	required, target := m.RecoveryStatus()
+	if !required || target != "b" {
+		t.Fatalf("required=%v target=%q want true/b", required, target)
+	}
+	if m.Enabled() {
+		t.Fatal("rotation must be disabled while account identity is ambiguous")
+	}
+	if _, due := m.NextDue(); due {
+		t.Fatal("ambiguous identity must suppress automatic rotation")
+	}
+
+	reloaded, err := NewManager(path, cfg, "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	required, target = reloaded.RecoveryStatus()
+	if !required || target != "b" {
+		t.Fatalf("reloaded recovery required=%v target=%q want true/b", required, target)
+	}
+}
