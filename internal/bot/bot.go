@@ -2120,6 +2120,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	resultConfidence := "low"
 
 	if b.attackExec.WaitForBattleEndCtx(b.ctx, 4*time.Minute) {
+		b.setRuntimePhase(PhaseParsingResult)
 
 		// WaitForBattleEnd returns the moment the result overlay's Return
 		// Home button is detected, but the overlay is still animating in:
@@ -2451,6 +2452,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		b.OnStatsUpdate()
 	}
 
+	b.setRuntimePhase(PhaseReturningHome)
 	returnHomeStarted := time.Now()
 	returnedHome := false
 	if err := b.attackExec.ReturnHome(); err == nil {
