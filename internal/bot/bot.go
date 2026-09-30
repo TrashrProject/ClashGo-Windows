@@ -94,6 +94,21 @@ type Bot struct {
 	safePacingUntilUS   atomic.Int64
 	wallUpgradePending  atomic.Bool
 
+	// Feature-specific safety circuits. Optional village features fail open
+	// toward farming: repeated uncertainty disables only that feature.
+	collectorFailureStreak   atomic.Int32
+	collectorDisabledUntilUS atomic.Int64
+	wallFailureStreak        atomic.Int32
+	wallDisabledUntilUS      atomic.Int64
+
+	// Runtime health governor blocks new attacks temporarily under severe
+	// degradation and bounds critical restart storms.
+	healthHoldUntilUS        atomic.Int64
+	healthCriticalStreak     atomic.Int32
+	healthPolicyMu           sync.Mutex
+	healthRestartWindowStart time.Time
+	healthRestartsInWindow   int
+
 	// Xingchen-style runtime supervision: independent heartbeat, phase/state
 	// tracking, and single-flight recovery/restart guards.
 	captureHeartbeat atomic.Int64
@@ -1521,6 +1536,11 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		// start another farming cycle until ResumeAutomation is called.
 		return
 	}
+	if b.healthAttackHoldActive() {
+		// Automatic health holds are temporary and independent of the user's
+		// Pause switch. Recovery/supervision continues while no new raid starts.
+		return
+	}
 
 	if b.zoomedOut.Load() && (gc.State == game.StateMainVillage || gc.State == game.StateUnknown) && b.findAttackButton(screen, 0.30) {
 		b.logger.Info().Msg("attack button detected, starting sequence")
@@ -2086,7 +2106,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			screen.Close()
 			if state == game.StateMainVillage {
 				b.logger.Info().Msg("pending wall-upgrade stage detected; retrying before next attack")
-				if b.UpgradeWalls(gc) {
+				if b.runWallUpgradeWithCircuit(gc) {
 					b.wallUpgradePending.Store(false)
 				}
 			}
@@ -3024,7 +3044,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		// ReturnHome already verified the village; a short settle is sufficient
 		// before the evidence-driven wall stage starts.
 		time.Sleep(450 * time.Millisecond)
-		if b.UpgradeWalls(gc) {
+		if b.runWallUpgradeWithCircuit(gc) {
 			b.wallUpgradePending.Store(false)
 		}
 	} else {
@@ -4255,18 +4275,8 @@ func (b *Bot) Stats() BotStats {
 	if uiAnchorAttempts > 0 {
 		uiAnchorHitRate = float64(uiAnchorHits) * 100 / float64(uiAnchorAttempts)
 	}
-	healthScore := 100
-	healthScore -= adbHealth.ConsecutiveFails * 8
-	failedRecoveries := int(b.recoveryAttempts.Load() - b.recoverySuccesses.Load())
-	if failedRecoveries > 0 { healthScore -= failedRecoveries * 6 }
-	healthScore -= int(b.blueStacksRestarts.Load()) * 2
-	captureHealthMS := adbHealth.AvgCaptureMs
-	if adbHealth.FastCaptureMs > captureHealthMS {
-		captureHealthMS = adbHealth.FastCaptureMs
-	}
-	if captureHealthMS > 1200 { healthScore -= 15 } else if captureHealthMS > 700 { healthScore -= 7 }
-	if healthScore < 0 { healthScore = 0 }
-	if healthScore > 100 { healthScore = 100 }
+	runtimeHealth := b.RuntimeHealth()
+	featureCircuits := b.FeatureCircuits()
 
 	runtimeSearchMode := chooseSearchPacing(adbHealth).Mode
 	if b.safePacingForced() {
@@ -4310,7 +4320,15 @@ func (b *Bot) Stats() BotStats {
 		TelemetryEvents:    tm.Events,
 		Anomalies:          tm.Anomalies,
 		TargetsSkipped:     tm.TargetsSkipped,
-		HealthScore:          healthScore,
+		HealthScore:          runtimeHealth.Overall,
+		ADBHealthScore:       runtimeHealth.ADB,
+		CaptureHealthScore:   runtimeHealth.Capture,
+		VisionHealthScore:    runtimeHealth.Vision,
+		UIHealthScore:        runtimeHealth.UI,
+		RecoveryHealthScore:  runtimeHealth.Recovery,
+		RuntimeHealthMode:    runtimeHealth.Mode,
+		CollectorCircuitOpen: featureCircuits.CollectorsOpen,
+		WallCircuitOpen:      featureCircuits.WallsOpen,
 		SpeedProfile:         runtimeSearchMode,
 		MemberSpeedProfile:   memberSpeedProfile,
 		TargetsSeen:          tm.TargetsFound,
@@ -4388,6 +4406,14 @@ type BotStats struct {
 	Anomalies        int64   `json:"anomalies"`
 	TargetsSkipped   int64   `json:"targets_skipped"`
 	HealthScore          int     `json:"health_score"`
+	ADBHealthScore       int     `json:"adb_health_score"`
+	CaptureHealthScore   int     `json:"capture_health_score"`
+	VisionHealthScore    int     `json:"vision_health_score"`
+	UIHealthScore        int     `json:"ui_health_score"`
+	RecoveryHealthScore  int     `json:"recovery_health_score"`
+	RuntimeHealthMode    string  `json:"runtime_health_mode"`
+	CollectorCircuitOpen bool    `json:"collector_circuit_open"`
+	WallCircuitOpen      bool    `json:"wall_circuit_open"`
 	SpeedProfile         string  `json:"speed_profile"`
 	MemberSpeedProfile   string  `json:"member_speed_profile"`
 	TargetsSeen          int64   `json:"targets_seen"`
