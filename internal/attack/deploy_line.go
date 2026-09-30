@@ -69,6 +69,19 @@ func (d *DeployLineCalculator) Calculate(
 	yTop := yTopMin
 	yBot := uiCutoff - yBotPad
 
+	// Prefer the real red-line contour when available. The old BBox-only
+	// geometry turns every base into a rectangle; following the contour keeps
+	// deployment points consistently outside irregular/diamond-shaped bases.
+	if contourPoints := d.contourAwarePoints(zone, side, xLo, xHi, yTop, yBot, count); len(contourPoints) == count {
+		anchor := contourPoints[len(contourPoints)/2]
+		d.logger.Info().
+			Str("side", side).
+			Int("points", len(contourPoints)).
+			Interface("anchor", anchor).
+			Msg("calculated contour-aware deployment line")
+		return DeployLine{Points: contourPoints, Side: side, Anchor: anchor, Outside: true}
+	}
+
 	var points []image.Point
 
 	switch side {
@@ -213,6 +226,107 @@ func (d *DeployLineCalculator) linspaceX(xStart, xEnd, y, count int) []image.Poi
 		points[i] = image.Pt(x, y)
 	}
 	return points
+}
+
+
+func (d *DeployLineCalculator) contourAwarePoints(zone RedZone, side string, xLo, xHi, yTop, yBot, count int) []image.Point {
+	if len(zone.Boundary) < 8 || count < 2 {
+		return nil
+	}
+
+	points := make([]image.Point, 0, count)
+	band := 10
+
+	switch side {
+	case "left", "right":
+		yStart := clamp(zone.BBox.Min.Y+margin, yTop, yBot)
+		yEnd := clamp(zone.BBox.Max.Y-margin, yTop, yBot)
+		if yEnd <= yStart {
+			return nil
+		}
+		stepBand := (yEnd - yStart) / count
+		if stepBand/2 > band {
+			band = stepBand / 2
+		}
+		for i := 0; i < count; i++ {
+			t := float64(i) / float64(count-1)
+			y := yStart + int(float64(yEnd-yStart)*t)
+			edge := 0
+			found := false
+			if side == "left" {
+				edge = zone.BBox.Min.X
+			} else {
+				edge = zone.BBox.Max.X
+			}
+			for _, p := range zone.Boundary {
+				if absInt(p.Y-y) > band {
+					continue
+				}
+				if !found || (side == "left" && p.X < edge) || (side == "right" && p.X > edge) {
+					edge = p.X
+					found = true
+				}
+			}
+			if !found {
+				return nil
+			}
+			x := edge - standoff
+			if side == "right" {
+				x = edge + standoff
+			}
+			points = append(points, image.Pt(clamp(x, xLo, xHi), y))
+		}
+
+	case "top", "bottom":
+		xStart := clamp(zone.BBox.Min.X+margin, xLo, xHi)
+		xEnd := clamp(zone.BBox.Max.X-margin, xLo, xHi)
+		if xEnd <= xStart {
+			return nil
+		}
+		stepBand := (xEnd - xStart) / count
+		if stepBand/2 > band {
+			band = stepBand / 2
+		}
+		for i := 0; i < count; i++ {
+			t := float64(i) / float64(count-1)
+			x := xStart + int(float64(xEnd-xStart)*t)
+			edge := 0
+			found := false
+			if side == "top" {
+				edge = zone.BBox.Min.Y
+			} else {
+				edge = zone.BBox.Max.Y
+			}
+			for _, p := range zone.Boundary {
+				if absInt(p.X-x) > band {
+					continue
+				}
+				if !found || (side == "top" && p.Y < edge) || (side == "bottom" && p.Y > edge) {
+					edge = p.Y
+					found = true
+				}
+			}
+			if !found {
+				return nil
+			}
+			y := edge - standoff
+			if side == "bottom" {
+				y = edge + standoff
+			}
+			points = append(points, image.Pt(x, clamp(y, yTop, yBot)))
+		}
+	default:
+		return nil
+	}
+
+	return points
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 func clamp(v, min, max int) int {
