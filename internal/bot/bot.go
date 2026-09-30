@@ -2153,6 +2153,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			}
 
 			b.attackExec.SetInitialLoot(loot.Gold, loot.Elixir, loot.DarkElixir)
+			// Reset the per-attack learned exit policy before planning. A previous
+			// attack's policy must never leak into a strategy that cannot be parsed.
+			b.attackExec.SetAdaptiveFarmExit(false, 0, 12*time.Second)
 			b.setRuntimePhase(PhasePlanning)
 			deployStarted := time.Now()
 
@@ -2191,6 +2194,26 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 							Str("scope", rec.ProfileScope).
 							Str("reason", rec.Reason).
 							Msg("Intelligence V3 selected attack edge")
+					}
+
+					exitRec := b.contextual.RecommendFarmExit(strat.Name, b.cfg.Attack.Farm.TownHall)
+					exitEnabled := exitRec.Enabled &&
+						!b.safePacingForced() &&
+						b.client.Health().ConsecutiveFails == 0 &&
+						!b.recoveryInFlight.Load()
+					b.attackExec.SetAdaptiveFarmExit(
+						exitEnabled,
+						exitRec.MinLootPercent,
+						time.Duration(exitRec.StallSeconds)*time.Second,
+					)
+					if exitRec.Enabled {
+						b.logger.Info().
+							Bool("enabled", exitEnabled).
+							Int("min_loot_percent", exitRec.MinLootPercent).
+							Int("stall_seconds", exitRec.StallSeconds).
+							Int("samples", exitRec.Samples).
+							Str("reason", exitRec.Reason).
+							Msg("Intelligence V3 prepared farm-throughput battle exit")
 					}
 				}
 
@@ -3844,6 +3867,7 @@ func contextualOutcomeFromReport(rep AttackReport, townHall, recoveryCount, blue
 		FullRoutineDurationMS: rep.FullRoutineDurationMS,
 		SearchDurationMS: rep.SearchDurationMS,
 		SearchSkips: rep.SearchSkips,
+		BattleDurationMS: rep.BattleDurationMS,
 		DeploySuccess: rep.DeploySuccess,
 		ReturnHomeSuccess: rep.ReturnHomeSuccess,
 		SafeDeployment: rep.RedZoneValid && rep.HUDSafe,
