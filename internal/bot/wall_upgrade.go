@@ -154,6 +154,7 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 		lastSearchAttempt float64
 		lastWallConf      float64
 		upgradesLearned   int
+		verifiedUpgrades  int
 		retryableFailure  bool
 		terminalReason    string
 		persistedWallAttempt = -1
@@ -204,27 +205,10 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 			}
 
 		case "upgrade_success":
+			// UI success is only a claim. Positive learning is recorded later,
+			// after the resource-spend watchdog proves that gold/elixir moved.
 			upgradesLearned++
 			retryableFailure = false
-			if b.villageMemory != nil {
-				_ = b.villageMemory.MarkEntityResult(wallMemoryID, true)
-			}
-			if b.adaptive != nil {
-				reward := 75.0
-				_, _ = b.adaptive.Observe(intelligence.LearningOutcome{
-					Domain: "wall_upgrade",
-					Parameters: map[string]float64{
-						"wall_search_attempt": lastSearchAttempt,
-						"builder_open_settle_ms": 850,
-					},
-					Clean: true,
-					DeploySuccess: true,
-					ReturnHomeSuccess: true,
-					SafeDeployment: true,
-					ParsedResults: true,
-					RewardOverride: &reward,
-				})
-			}
 
 		case "all_unaffordable":
 			terminalReason = step
@@ -284,6 +268,31 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 			(elixirComparable && after.Elixir < before.Elixir)
 		return spent, true
 	}
+	recordVerifiedSuccess := func(count int) {
+		if count <= 0 {
+			return
+		}
+		verifiedUpgrades += count
+		if b.villageMemory != nil {
+			_ = b.villageMemory.MarkEntityResult(wallMemoryID, true)
+		}
+		if b.adaptive != nil {
+			reward := 75.0
+			_, _ = b.adaptive.Observe(intelligence.LearningOutcome{
+				Domain: "wall_upgrade",
+				Parameters: map[string]float64{
+					"wall_search_attempt": lastSearchAttempt,
+					"builder_open_settle_ms": 850,
+				},
+				Clean: true,
+				DeploySuccess: true,
+				ReturnHomeSuccess: true,
+				SafeDeployment: true,
+				ParsedResults: true,
+				RewardOverride: &reward,
+			})
+		}
+	}
 
 	stageStarted := time.Now()
 	attempts := 0
@@ -304,28 +313,29 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 			if claimsSinceCheck < 2 {
 				return true
 			}
-			claimsSinceCheck = 0
 			now := readResources()
 			spent, comparable := resourcesSpent(resourceBaseline, now)
 			if !comparable {
-				if now.Valid {
-					resourceBaseline = now
-				}
+				// Keep the claims pending. The next success/run-boundary probe gets
+				// another chance to verify them instead of teaching from uncertainty.
 				return true
 			}
 			if spent {
 				resourceVerified = true
+				recordVerifiedSuccess(claimsSinceCheck)
+				claimsSinceCheck = 0
 				resourceBaseline = now
 				return true
 			}
 			retryableFailure = true
 			terminalReason = "resource_progress_unverified"
 			b.logger.Warn().
+				Int("claimed_since_check", claimsSinceCheck).
 				Int("before_gold", resourceBaseline.Gold).
 				Int("after_gold", now.Gold).
 				Int("before_elixir", resourceBaseline.Elixir).
 				Int("after_elixir", now.Elixir).
-				Msg("two wall upgrades were reported but no resource spend was observed; aborting fast loop")
+				Msg("wall upgrades were reported but no resource spend was observed; aborting fast loop")
 			return false
 		}
 
@@ -346,16 +356,20 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 		// Catch a single claimed upgrade as well: the batched watchdog above
 		// fires every two, so compare once at the run boundary when needed.
 		claimedThisRun := upgradesLearned - runStartUpgrades
-		if claimedThisRun > 0 && !retryableFailure {
+		if claimedThisRun > 0 && !retryableFailure && claimsSinceCheck > 0 {
 			afterRun := readResources()
 			if spent, comparable := resourcesSpent(resourceBaseline, afterRun); comparable {
 				if spent {
 					resourceVerified = true
-				} else if claimsSinceCheck > 0 {
+					recordVerifiedSuccess(claimsSinceCheck)
+					claimsSinceCheck = 0
+					resourceBaseline = afterRun
+				} else {
 					retryableFailure = true
 					terminalReason = "resource_spend_unverified"
 					b.logger.Warn().
 						Int("claimed_upgrades", claimedThisRun).
+						Int("unverified_claims", claimsSinceCheck).
 						Msg("wall upgrade was claimed but final resource spend could not be verified")
 				}
 			}
@@ -376,7 +390,8 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 
 	completed := b.ctx.Err() == nil && !retryableFailure && terminalReason == "all_unaffordable"
 	b.logger.Info().
-		Int("learned_wall_upgrades", upgradesLearned).
+		Int("claimed_wall_upgrades", upgradesLearned).
+		Int("verified_wall_upgrades", verifiedUpgrades).
 		Int("wall_stage_attempts", attempts).
 		Dur("wall_stage_duration", time.Since(stageStarted)).
 		Bool("resource_spend_verified", resourceVerified).
