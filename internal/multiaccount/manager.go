@@ -212,6 +212,19 @@ func (m *Manager) Account(accountID string) (config.ManagedAccount, bool) {
 	return *a, true
 }
 
+func (m *Manager) Account(accountID string) (config.ManagedAccount, bool) {
+	if m == nil {
+		return config.ManagedAccount{}, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a := m.accountByIDLocked(strings.TrimSpace(accountID))
+	if a == nil || !a.Enabled {
+		return config.ManagedAccount{}, false
+	}
+	return *a, true
+}
+
 
 func (m *Manager) ObserveAttack() error {
 	if m == nil {
@@ -372,6 +385,48 @@ func (m *Manager) RecoveryStatus() (bool, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.state.RecoveryRequired, m.state.RecoveryTargetAccountID
+}
+
+func (m *Manager) ResolveRecovery(accountID string) error {
+	if m == nil {
+		return fmt.Errorf("multi-account manager unavailable")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	accountID = strings.TrimSpace(accountID)
+	target := m.accountByIDLocked(accountID)
+	if target == nil || !target.Enabled {
+		return fmt.Errorf("unknown or disabled multi-account profile %q", accountID)
+	}
+	if !m.state.RecoveryRequired {
+		return nil
+	}
+
+	now := time.Now()
+	if m.state.ActiveAccountID != accountID {
+		m.state.TotalSwitches++
+	}
+	m.state.ActiveAccountID = accountID
+	m.state.AttacksThisTurn = 0
+	m.state.LastSwitchAt = now
+	m.state.LastSwitchAttemptAt = now
+	m.state.ConsecutiveSwitchFailures = 0
+	m.state.RecoveryRequired = false
+	m.state.RecoveryTargetAccountID = ""
+	m.state.LastError = "account identity manually confirmed"
+	m.state.UpdatedAt = now
+
+	// Persist the confirmed identity before deleting the ambiguous journal.
+	// If the journal removal fails, the next boot safely asks for confirmation
+	// again rather than forgetting that a switch was interrupted.
+	if err := m.saveLocked(); err != nil {
+		return err
+	}
+	if err := m.removeSwitchJournalLocked(); err != nil {
+		return fmt.Errorf("confirmed account persisted but switch journal could not be cleared: %w", err)
+	}
+	return nil
 }
 
 func (m *Manager) ResolveRecovery(accountID string) error {
