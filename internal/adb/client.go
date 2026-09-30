@@ -127,7 +127,10 @@ func NewClient(opts ...Option) *Client {
 		jitterDelays:    true,
 		maxJitterPixels: 2.0,
 		jitterFraction:  0.15,
-		minCaptureGap:   120 * time.Millisecond,
+		// 180 ms keeps normal vision responsive while avoiding the sustained
+		// 8+ FPS ADB screencap pressure that can destabilize BlueStacks 5.
+		// Failed captures back off further in captureGapForFailures.
+		minCaptureGap:   180 * time.Millisecond,
 	}
 	for _, o := range opts {
 		o(c)
@@ -333,15 +336,37 @@ func (c *Client) CaptureScreen() ([]byte, error) {
 	return c.captureScreenRaw()
 }
 
+func captureGapForFailures(base time.Duration, consecutiveFails int) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	if consecutiveFails < 0 {
+		consecutiveFails = 0
+	}
+	// Exponential backoff after failed screencaps prevents a sick BlueStacks
+	// instance from being hammered by reconnect -> screencap -> reconnect loops.
+	// Cap at 1.5 s so recovery remains responsive.
+	shift := consecutiveFails
+	if shift > 3 {
+		shift = 3
+	}
+	gap := base * time.Duration(1<<shift)
+	if gap > 1500*time.Millisecond {
+		gap = 1500 * time.Millisecond
+	}
+	return gap
+}
+
 func (c *Client) waitForCaptureBudget() {
 	c.captureGateMu.Lock()
 	defer c.captureGateMu.Unlock()
 
-	if c.minCaptureGap <= 0 {
+	gap := captureGapForFailures(c.minCaptureGap, c.Health().ConsecutiveFails)
+	if gap <= 0 {
 		c.lastCaptureStart = time.Now()
 		return
 	}
-	if wait := c.minCaptureGap - time.Since(c.lastCaptureStart); wait > 0 {
+	if wait := gap - time.Since(c.lastCaptureStart); wait > 0 {
 		time.Sleep(wait)
 	}
 	c.lastCaptureStart = time.Now()
@@ -386,7 +411,10 @@ func (c *Client) CaptureToMat() (gocv.Mat, error) {
 
 	bufPtr, n, err := transport.CaptureScreenPooled()
 	if err != nil {
+		// Give BlueStacks/adbd a short settle window after reconnecting instead
+		// of immediately issuing another heavy raw screencap on the new socket.
 		if reconnErr := transport.Reconnect(); reconnErr == nil {
+			time.Sleep(200 * time.Millisecond)
 			bufPtr, n, err = transport.CaptureScreenPooled()
 		}
 	}
