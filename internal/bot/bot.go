@@ -54,7 +54,8 @@ type Bot struct {
 
 	attackExec *attack.Executor
 	governor   *autopolicy.Governor
-	adaptive   *intelligence.AdaptiveEngine
+	adaptive      *intelligence.AdaptiveEngine
+	villageMemory *intelligence.VillageMemory
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -359,6 +360,16 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		b.logger.Info().
 			Str("mode", string(adaptive.Mode())).
 			Msg("adaptive intelligence active")
+	}
+
+	villageMemory, villageErr := intelligence.NewVillageMemory(paths.ResolveConfig("village_model.json"))
+	if villageErr != nil {
+		b.logger.Warn().Err(villageErr).Msg("village memory unavailable; continuing without persistent village model")
+	} else {
+		b.villageMemory = villageMemory
+		b.logger.Info().
+			Int("known_entities", len(villageMemory.Snapshot().Entities)).
+			Msg("persistent village memory loaded")
 	}
 
 	// Resolve the strategy's declared army slot once at boot so the
