@@ -18,6 +18,7 @@ import {
   GetLogs,
   SaveConfig,
   SaveClashCoreFeatures,
+  SaveAdvancedSafetyFeatures,
   StartBot,
   StopBot,
   StopAfterCurrentAttack,
@@ -406,6 +407,12 @@ function App() {
   const [collectorMinutes, setCollectorMinutes] = useState(10);
   const [privacyMaskUsername, setPrivacyMaskUsername] = useState(true);
   const [saveAcceptedBases, setSaveAcceptedBases] = useState(true);
+  const [dryRun, setDryRun] = useState(false);
+  const [maxRunMinutes, setMaxRunMinutes] = useState(0);
+  const [emergencyStopHotkey, setEmergencyStopHotkey] = useState('ctrl+shift+end');
+  const [saveNearMissBases, setSaveNearMissBases] = useState(true);
+  const [nearMissSampleEvery, setNearMissSampleEvery] = useState(20);
+  const [nearMissWithinPercent, setNearMissWithinPercent] = useState(10);
   const [simpleMode, setSimpleMode] = useState(true);
 
   const syncMemberScopedView = useCallback(async (activated: boolean) => {
@@ -473,6 +480,12 @@ function App() {
       }
       setPrivacyMaskUsername(conf.automation?.privacy_mask_username ?? true);
       setSaveAcceptedBases(conf.search.save_accepted_base_screenshots ?? true);
+      setDryRun(conf.attack.dry_run ?? false);
+      setMaxRunMinutes(conf.automation?.max_run_minutes ?? 0);
+      setEmergencyStopHotkey(conf.automation?.emergency_stop_hotkey || 'ctrl+shift+end');
+      setSaveNearMissBases(conf.search.save_near_miss_base_screenshots ?? true);
+      setNearMissSampleEvery(conf.search.near_miss_sample_every ?? 20);
+      setNearMissWithinPercent(conf.search.near_miss_within_percent ?? 10);
       setSimpleMode(conf.automation?.simple_mode ?? true);
     }
     if (accountResult.status === 'fulfilled') {
@@ -586,6 +599,12 @@ function App() {
         }
         setPrivacyMaskUsername(conf.automation?.privacy_mask_username ?? true);
         setSaveAcceptedBases(conf.search.save_accepted_base_screenshots ?? true);
+        setDryRun(conf.attack.dry_run ?? false);
+        setMaxRunMinutes(conf.automation?.max_run_minutes ?? 0);
+        setEmergencyStopHotkey(conf.automation?.emergency_stop_hotkey || 'ctrl+shift+end');
+        setSaveNearMissBases(conf.search.save_near_miss_base_screenshots ?? true);
+        setNearMissSampleEvery(conf.search.near_miss_sample_every ?? 20);
+        setNearMissWithinPercent(conf.search.near_miss_within_percent ?? 10);
         const configuredSimpleMode = conf.automation?.simple_mode ?? true;
         setSimpleMode(configuredSimpleMode);
         setIsRunning(running);
@@ -1107,6 +1126,14 @@ function App() {
       privacyMaskUsername,
       saveAcceptedBases,
       endAtStars,
+    );
+    await SaveAdvancedSafetyFeatures(
+      dryRun,
+      maxRunMinutes,
+      emergencyStopHotkey,
+      saveNearMissBases,
+      nearMissSampleEvery,
+      nearMissWithinPercent,
     );
   };
 
@@ -1730,6 +1757,12 @@ function App() {
     collectorMinutes, setCollectorMinutes,
     privacyMaskUsername, setPrivacyMaskUsername,
     saveAcceptedBases, setSaveAcceptedBases,
+    dryRun, setDryRun,
+    maxRunMinutes, setMaxRunMinutes,
+    emergencyStopHotkey, setEmergencyStopHotkey,
+    saveNearMissBases, setSaveNearMissBases,
+    nearMissSampleEvery, setNearMissSampleEvery,
+    nearMissWithinPercent, setNearMissWithinPercent,
     simpleMode,
     testSessionActive,
     automationActive: isRunning || isStarting,
@@ -1764,7 +1797,9 @@ function App() {
     goldThreshold, elixirThreshold, deThreshold,
     selectedStrategy, strategies, searchEnabled, upgradeWalls, stallTimer,
     lootExitEnabled, lootExitPercent, endAtStars, autoCollectors, collectorMinutes,
-    privacyMaskUsername, saveAcceptedBases, simpleMode, testSessionActive, isRunning, isStarting, refreshStartupReadiness
+    privacyMaskUsername, saveAcceptedBases, dryRun, maxRunMinutes, emergencyStopHotkey,
+    saveNearMissBases, nearMissSampleEvery, nearMissWithinPercent,
+    simpleMode, testSessionActive, isRunning, isStarting, refreshStartupReadiness
   ]);
 
   if (!licenseAccessReady) {
