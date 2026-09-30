@@ -172,7 +172,16 @@ func captureWallFrame(h *WallUpgradeHooks, timeout time.Duration) (gocv.Mat, err
 // wrapper that delegates to runWallUpgradeLoop with the production
 // Bot's dependencies. The diagnostic tool at cmd/test_wall_upgrade
 // calls runWallUpgradeLoop directly with a hand-built hooks struct.
-func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
+func (b *Bot) UpgradeWalls(gc *game.GameContext) (completed bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			completed = false
+			b.logger.Error().
+				Interface("panic", r).
+				Msg("recovered panic in wall-upgrade stage; keeping wall work pending")
+		}
+	}()
+
 	const wallMemoryID = "builder_menu_wall_entry"
 	var (
 		lastSearchAttempt float64
@@ -418,7 +427,7 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 		}
 	}
 
-	completed := b.ctx.Err() == nil &&
+	completed = b.ctx.Err() == nil &&
 		!retryableFailure &&
 		terminalReason == "all_unaffordable" &&
 		(upgradesLearned == 0 || verifiedUpgrades > 0 || !verificationEvidenceAvailable)
