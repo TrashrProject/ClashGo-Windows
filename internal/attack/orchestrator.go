@@ -289,20 +289,35 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		return 0, fmt.Errorf("no active slots detected")
 	}
 
-	// 5. Detect troop counts once. No pre-deploy rescan loop.
+	// 5. Detect troop counts once. When every strategy card was identified,
+	// OCR only those cards; otherwise fall back to the whole bar. Farm-profile
+	// validation intentionally keeps the full-bar path.
 	countStarted := time.Now()
 	troopCounter := NewTroopCounter(pCfg.Width, pCfg.Height, e.logger)
 	defer troopCounter.Close()
-	troopCounts := troopCounter.DetectCounts(deployScreen, slotMgr.GetAllSlots(), mBarY)
+	farmProfile, farmControlled := e.cfg.Farm.ActiveProfile()
+	countSlots := slotMgr.GetAllSlots()
+	countFastPath := false
+	if !farmControlled {
+		if selected, ok := strategyCountSlots(slotMgr, s); ok {
+			countSlots = selected
+			countFastPath = true
+		}
+	}
+	troopCounts := troopCounter.DetectCounts(deployScreen, countSlots, mBarY)
 	countMS := time.Since(countStarted).Milliseconds()
 	countMap := GetAllCounts(troopCounts)
-	farmProfile, farmControlled := e.cfg.Farm.ActiveProfile()
 	if farmControlled {
 		writeArmyInspection(slotMgr.GetAllSlots(), troopCounts, &farmProfile)
 	} else {
 		writeArmyInspection(slotMgr.GetAllSlots(), troopCounts, nil)
 	}
-	e.logger.Debug().Interface("counts", countMap).Msg("detected troop counts")
+	e.logger.Debug().
+		Bool("fast_path", countFastPath).
+		Int("ocr_slots", len(countSlots)).
+		Int("bar_slots", len(slotMgr.GetAllSlots())).
+		Interface("counts", countMap).
+		Msg("detected troop counts")
 
 	// Windows-safe deployment path.
 	//
