@@ -285,6 +285,22 @@ func (m *Manager) MarkSwitchFailed(err error) error {
 	return m.saveLocked()
 }
 
+func (m *Manager) MarkSwitchWarning(err error) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err != nil {
+		m.state.LastError = err.Error()
+	}
+	m.state.UpdatedAt = time.Now()
+	// A warning happens only after the physical account switch has already
+	// been verified. Do not increment failure/backoff counters or the bot may
+	// later re-click Supercell ID for an account that is already active.
+	return m.saveLocked()
+}
+
 func (m *Manager) UpdateConfig(cfg config.MultiAccountConfig, currentTag string) error {
 	if m == nil {
 		return nil
