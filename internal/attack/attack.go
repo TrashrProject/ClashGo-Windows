@@ -417,7 +417,7 @@ func (e *Executor) captureFrame(timeout time.Duration) (gocv.Mat, error) {
 	if e.frameProvider != nil {
 		return e.frameProvider(timeout)
 	}
-	return e.client.CaptureToMat()
+	return e.captureFrame(2 * time.Second)
 }
 
 // SetLootRecognizer injects the Bot's session-owned recognizer. Executor does
@@ -816,7 +816,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 
 		if lastBar.Closed() || lastBar.Empty() {
 			var err error
-			lastBar, err = e.client.CaptureToMat()
+			lastBar, err = e.captureFrame(2 * time.Second)
 			if err != nil {
 				e.logger.Warn().Err(err).Msg("failed initial phase capture")
 				continue
@@ -854,7 +854,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 				if ok && !tpl.Empty() {
 					if lastBar.Closed() || lastBar.Empty() {
 						var err error
-						lastBar, err = e.client.CaptureToMat()
+						lastBar, err = e.captureFrame(2 * time.Second)
 						if err != nil {
 							e.logger.Warn().Err(err).Msg("failed capture")
 							continue
@@ -1050,7 +1050,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 		}
 	}
 
-	sweepScreen, err := e.client.CaptureToMat()
+	sweepScreen, err := e.captureFrame(2 * time.Second)
 	if err == nil {
 		e.SweepRemainingSlots(sweepScreen, pCfg, targetEdge, w, h, mBarY, globalUsedSlots, siegeXs, slots, slotY)
 		sweepScreen.Close()
@@ -1061,7 +1061,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 	e.logger.Debug().Msg("verifying deployment success...")
 	var remainingCount int
 	for attempt := 1; attempt <= 2; attempt++ {
-		verifyScreen, err := e.client.CaptureToMat()
+		verifyScreen, err := e.captureFrame(2 * time.Second)
 		if err != nil {
 			break
 		}
@@ -1174,7 +1174,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 				}
 
 				time.Sleep(80 * time.Millisecond)
-				checkMat, err := e.client.CaptureToMat()
+				checkMat, err := e.captureFrame(2 * time.Second)
 				if err != nil {
 					break
 				}
@@ -1293,7 +1293,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 				return false
 			}
 		} else {
-			verify, err := e.client.CaptureToMat()
+			verify, err := e.captureFrame(2 * time.Second)
 			if err == nil {
 				defer verify.Close()
 				if e.isSlotEmpty(verify, uPt.X, uPt.Y) {
@@ -1316,7 +1316,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 			return false
 		}
 	} else {
-		verify, err := e.client.CaptureToMat()
+		verify, err := e.captureFrame(2 * time.Second)
 		if err == nil {
 			defer verify.Close()
 			if e.isSlotEmpty(verify, uPt.X, uPt.Y) {
@@ -1740,7 +1740,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 					e.client.HumanSleep(sleepBase, sleepDev)
 
 					if i < len(points) {
-						if verify, err := e.client.CaptureToMat(); err == nil {
+						if verify, err := e.captureFrame(2 * time.Second); err == nil {
 							empty := e.isSlotEmpty(verify, match.Point.X, slotY)
 							verify.Close()
 							if empty {
@@ -1801,7 +1801,7 @@ func (e *Executor) EndBattle() error {
 		ex, ey = int(float64(sCfg.EndButton.X)*scaleX), int(float64(sCfg.EndButton.Y)*scaleY)
 		e.logger.Info().Int("x", ex).Int("y", ey).Msg("using pinpoint End Battle button")
 	} else {
-		screen, err := e.client.CaptureToMat()
+		screen, err := e.captureFrame(2 * time.Second)
 		if err == nil {
 			defer screen.Close()
 			positions := []image.Point{
@@ -1879,7 +1879,7 @@ func (e *Executor) ReturnHome() error {
 	deadline := time.Now().Add(pacing.Window)
 	lastState := game.StateUnknown
 	for {
-		screen, err := e.client.CaptureToMat()
+		screen, err := e.captureFrame(2 * time.Second)
 		if err != nil {
 			return err
 		}
@@ -2122,7 +2122,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			return false
 		case <-ticker.C:
 			battleTick++
-			screen, err := e.client.CaptureToMat()
+			screen, err := e.captureFrame(2 * time.Second)
 			if err != nil {
 				e.logger.Warn().Err(err).Msg("battle-end wait capture failed; retrying next tick")
 				continue
@@ -2436,7 +2436,7 @@ func (e *Executor) SweepRemainingSlots(screen gocv.Mat, pCfg PrecisionConfig, ta
 				}
 
 				time.Sleep(200 * time.Millisecond)
-				checkMat, err := e.client.CaptureToMat()
+				checkMat, err := e.captureFrame(2 * time.Second)
 				if err != nil {
 					break
 				}
