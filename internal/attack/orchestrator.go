@@ -880,6 +880,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			Int64("count_ms", countMS).
 			Msg("attack preparation exceeded 5s target")
 	}
+	if e.OnPlanReady != nil {
+		e.OnPlanReady(time.Since(analysisStarted), targetEdge)
+	}
 
 	// 8. Collect strategy unit names
 	strategyNames := GetStrategyUnitNames(s)
