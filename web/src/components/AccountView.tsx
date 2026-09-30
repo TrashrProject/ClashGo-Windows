@@ -42,19 +42,6 @@ type MultiAccountConfigView = {
   accounts: ManagedAccount[];
 };
 
-type MultiAccountRuntimeStatus = {
-  enabled: boolean;
-  active_account_id?: string;
-  active_account_label?: string;
-  attacks_this_turn: number;
-  next_account_id?: string;
-  next_account_label?: string;
-  rotation_due: boolean;
-  total_switches: number;
-  last_switch_at?: string;
-  last_error?: string;
-};
-
 type MultiAccountRuntimeStatusView = {
   enabled: boolean;
   active_account_id?: string;
@@ -403,7 +390,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
         default_attacks_per_turn: Math.max(1, Number(value.default_attacks_per_turn || 10)),
         accounts: Array.isArray(value.accounts) ? value.accounts : [],
       });
-      setMultiAccountStatus(status ? status as MultiAccountRuntimeStatus : null);
+      setMultiAccountStatus(status ? status as MultiAccountRuntimeStatusView : null);
       setMultiAccountCalibrated(Boolean(String(calibration || '').trim()));
     }).catch(() => {
       // Multi-account is optional; leave the single-account UI unaffected.
@@ -411,22 +398,6 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     return () => { active = false; };
   }, [memberPage]);
 
-  React.useEffect(() => {
-    if (memberPage !== 'account') return;
-    let active = true;
-    const refreshStatus = async () => {
-      try {
-        const status = await GetMultiAccountStatus();
-        if (active) setMultiAccountStatus(status as MultiAccountRuntimeStatus);
-      } catch {}
-    };
-    void refreshStatus();
-    const id = window.setInterval(refreshStatus, 3000);
-    return () => {
-      active = false;
-      window.clearInterval(id);
-    };
-  }, [memberPage, automationActive]);
   const [confirmDeactivate, setConfirmDeactivate] = React.useState(false);
   const [supportCodeCopied, setSupportCodeCopied] = React.useState(false);
   const [supportSummaryCopied, setSupportSummaryCopied] = React.useState(false);
@@ -458,7 +429,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     const refresh = async () => {
       try {
         const status = await GetMultiAccountStatus();
-        if (!cancelled) setMultiAccountStatus(status as MultiAccountRuntimeStatusView);
+        if (!cancelled) setMultiAccountStatus(status as MultiAccountRuntimeStatusViewView);
       } catch {
         // Runtime status is best-effort while the Wails bridge starts.
       }
