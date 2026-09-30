@@ -4285,10 +4285,110 @@ func (a *App) GetMultiAccountStatus() bot.MultiAccountRuntimeStatus {
 		return b.MultiAccountStatus()
 	}
 	cfg := config.LoadOrDefault("config.json")
-	return bot.MultiAccountRuntimeStatus{
-		Enabled:         cfg.Account.MultiAccount.Enabled,
-		ActiveAccountID: cfg.Account.MultiAccount.ActiveAccountID,
+	manager, err := bot.OpenMultiAccountManager(cfg)
+	if err != nil {
+		return bot.MultiAccountRuntimeStatus{
+			Enabled:         cfg.Account.MultiAccount.Enabled,
+			ActiveAccountID: cfg.Account.MultiAccount.ActiveAccountID,
+			LastError:       err.Error(),
+		}
 	}
+	st := manager.State()
+	recoveryRequired, recoveryTarget := manager.RecoveryStatus()
+	out := bot.MultiAccountRuntimeStatus{
+		Enabled:          manager.Enabled(),
+		ActiveAccountID:  st.ActiveAccountID,
+		AttacksThisTurn:  st.AttacksThisTurn,
+		TotalSwitches:    st.TotalSwitches,
+		LastSwitchAt:     st.LastSwitchAt,
+		LastError:        st.LastError,
+		RecoveryRequired: recoveryRequired,
+		RecoveryTargetID: recoveryTarget,
+	}
+	if active, ok := manager.Active(); ok {
+		out.ActiveAccountLabel = active.Label
+	}
+	if next, due := manager.NextDue(); due {
+		out.RotationDue = true
+		out.NextAccountID = next.ID
+		out.NextAccountLabel = next.Label
+	}
+	return out
+}
+
+func (a *App) ResolveMultiAccountRecovery(accountID string) error {
+	accountID = strings.TrimSpace(accountID)
+	if accountID == "" {
+		return fmt.Errorf("choose the Clash account currently visible in BlueStacks")
+	}
+
+	a.mu.Lock()
+	b := a.bot
+	a.mu.Unlock()
+	if b != nil {
+		account, err := b.ResolveMultiAccountRecovery(accountID)
+		if err != nil {
+			return err
+		}
+		if err := a.persistMemberAccountTag(account.PlayerTag); err != nil {
+			log.Warn().Err(err).Msg("multi-account identity confirmed but member tag cache could not be updated")
+		}
+		clearCachedPlayerProfileIfDifferent(account.PlayerTag)
+		return nil
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	manager, err := bot.OpenMultiAccountManager(cfg)
+	if err != nil {
+		return err
+	}
+	recoveryRequired, _ := manager.RecoveryStatus()
+	if !recoveryRequired {
+		return fmt.Errorf("no interrupted account switch requires confirmation")
+	}
+	account, ok := manager.Account(accountID)
+	if !ok {
+		return fmt.Errorf("unknown or disabled multi-account profile %q", accountID)
+	}
+
+	tag, err := normalizePlayerTag(account.PlayerTag)
+	if err != nil {
+		return fmt.Errorf("confirmed account has invalid player tag: %w", err)
+	}
+	cfg.Account.PlayerTag = tag
+	cfg.Account.MultiAccount.ActiveAccountID = account.ID
+	if account.TownHall != 0 {
+		if account.TownHall < 8 || account.TownHall > 18 {
+			return fmt.Errorf("confirmed account has unsupported town hall %d", account.TownHall)
+		}
+		if _, ok := cfg.Attack.Farm.Profiles[strconv.Itoa(account.TownHall)]; !ok {
+			return fmt.Errorf("farm profile TH%d is unavailable", account.TownHall)
+		}
+		cfg.Attack.Farm.TownHall = account.TownHall
+		cfg.Attack.Farm.Enabled = true
+	}
+	if raw := strings.TrimSpace(account.StrategyFile); raw != "" {
+		name := filepath.Base(raw)
+		candidate := paths.Resolve(filepath.Join("strategies", name))
+		if info, statErr := os.Stat(candidate); statErr != nil || info.IsDir() {
+			return fmt.Errorf("strategy %q for account %q is unavailable", name, account.ID)
+		}
+		cfg.Attack.StrategyFile = candidate
+	}
+
+	// Keep the recovery gate active until both account metadata stores are
+	// durable. A failure before ResolveRecovery therefore cannot start farming.
+	if err := config.Save("config.json", cfg); err != nil {
+		return err
+	}
+	if err := a.persistMemberAccountTag(tag); err != nil {
+		return err
+	}
+	if err := manager.ResolveRecovery(account.ID); err != nil {
+		return err
+	}
+	clearCachedPlayerProfileIfDifferent(tag)
+	return nil
 }
 
 func (a *App) ConfirmMultiAccountRecovery(accountID string) (bot.MultiAccountRuntimeStatus, error) {
