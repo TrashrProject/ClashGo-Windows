@@ -194,6 +194,10 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) error {
 	if b == nil || b.multiAccount == nil {
 		return fmt.Errorf("multi-account scheduler unavailable")
 	}
+	if !b.multiAccountSwitchInFlight.CompareAndSwap(false, true) {
+		return fmt.Errorf("multi-account switch already in progress")
+	}
+	defer b.multiAccountSwitchInFlight.Store(false)
 	if strings.TrimSpace(next.ID) == "" || !next.Enabled {
 		return fmt.Errorf("target multi-account profile is invalid or disabled")
 	}
@@ -202,6 +206,9 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) error {
 	}
 	if b.recoveryInFlight.Load() || b.restartInFlight.Load() || b.safePacingForced() {
 		return fmt.Errorf("runtime safety governor is active")
+	}
+	if b.wallUpgradePending.Load() {
+		return fmt.Errorf("pending wall upgrades must finish before account rotation")
 	}
 	if b.client.Health().ConsecutiveFails != 0 {
 		return fmt.Errorf("ADB health is not clean enough for an account switch")
