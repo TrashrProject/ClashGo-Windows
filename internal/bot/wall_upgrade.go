@@ -2,6 +2,7 @@ package bot
 
 import (
 	"encoding/json"
+	"fmt"
 	"image"
 	"math"
 	"os"
@@ -110,6 +111,12 @@ type WallUpgradeHooks struct {
 	Cal       *game.Calibration
 	Templates *game.TemplateStore
 
+	// Capture provides the next runtime frame. Production wires this to the
+	// FrameBroker-backed Bot.runtimeFrameFresh so wall automation never creates
+	// a second ADB screencap stream. Nil preserves direct capture for the manual
+	// diagnostic tool and pre-Start tests only.
+	Capture func(timeout time.Duration) (gocv.Mat, error)
+
 	// Classify is invoked with each capture during the MainVillage
 	// verify loop and to detect interruption dialogs. May be nil.
 	Classify func(gocv.Mat) (game.GameState, int)
@@ -142,6 +149,22 @@ type WallUpgradeHooks struct {
 
 	// OnStep is the optional phase-boundary instrumentation hook.
 	OnStep func(step string, data map[string]any)
+}
+
+func captureWallFrame(h *WallUpgradeHooks, timeout time.Duration) (gocv.Mat, error) {
+	if h == nil {
+		return gocv.NewMat(), fmt.Errorf("nil wall-upgrade hooks")
+	}
+	if timeout <= 0 {
+		timeout = 2 * time.Second
+	}
+	if h.Capture != nil {
+		return h.Capture(timeout)
+	}
+	if h.Client == nil {
+		return gocv.NewMat(), fmt.Errorf("wall-upgrade client unavailable")
+	}
+	return captureWallFrame(h, 2*time.Second)
 }
 
 // UpgradeWalls executes the wall-upgrade sequence repeatedly until no
@@ -349,6 +372,7 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 			Client:                b.client,
 			Cal:                   b.cal,
 			Templates:             b.templates,
+			Capture:               b.runtimeFrameFresh,
 			Classify:              b.classify,
 			Dismiss:               b.dismissSelection,
 			StopCheck:             func() bool { return b.ctx.Err() != nil },
@@ -686,12 +710,12 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 		upSwipes := 0
 		for {
 			attempt := upSwipes
-			screen, err := h.Client.CaptureToMat()
+			screen, err := captureWallFrame(h, 2*time.Second)
 			if err != nil {
 				// Retry the same viewport once rather than scrolling past a row
 				// merely because ADB dropped one frame.
 				time.Sleep(300 * time.Millisecond)
-				screen, err = h.Client.CaptureToMat()
+				screen, err = captureWallFrame(h, 2*time.Second)
 			}
 			if err == nil && !screen.Empty() {
 				matches, _ := vision.MatchMultiScaleROICached(screen, wallTpl, "text_wall", 0.3, 1.5, 20, 0.78, menuROI)
@@ -860,7 +884,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 				}
 				time.Sleep(650 * time.Millisecond)
 
-				modalScreen, modalErr := h.Client.CaptureToMat()
+				modalScreen, modalErr := captureWallFrame(h, 2*time.Second)
 				if modalErr != nil {
 					h.Logger.Error().Err(modalErr).Msg("asset-driven modal capture failed; defensively tapping x_popup_centers then aborting iteration (single-tap flow has no retry chain to absorb an undismissed popup)")
 					// See defensiveDualTapAndLogClose for the rationale on
@@ -936,7 +960,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 					}
 
 					// Final verify: did both popups dismiss?
-					verCap, verErr := h.Client.CaptureToMat()
+					verCap, verErr := captureWallFrame(h, 2*time.Second)
 					if verErr != nil {
 						h.Logger.Warn().Err(verErr).Msg("verify-capture failed; defensively tapping both X centers then aborting iteration")
 						defensiveDualTapAndLogClose(h, xcx, xcy, xPopupAlt, btn.name, "capture_failed")
@@ -1106,7 +1130,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 				}
 				time.Sleep(1200 * time.Millisecond)
 
-				modalScreen, modalErr := h.Client.CaptureToMat()
+				modalScreen, modalErr := captureWallFrame(h, 2*time.Second)
 				if modalErr != nil {
 					h.Logger.Error().Err(modalErr).Msg("hardcoded modal capture failed; dismissing modal defensively before trying next button")
 					// Defensive: if a capture failed mid-modal, a previous
@@ -1231,7 +1255,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 				hasCapture = false
 			}
 			var err error
-			captureScreen, err = h.Client.CaptureToMat()
+			captureScreen, err = captureWallFrame(h, 2*time.Second)
 			if err != nil {
 				lastErr = err
 				h.Logger.Warn().Err(err).Int("retry", retry).Msg("capture during upgrade-button retry failed")
@@ -1354,7 +1378,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 			// while we look, which would invalidate the post-match
 			// capture. Per-candidate capture cost is ~150ms — tight
 			// enough that we don't amortize across candidates.
-			costScreen, costErr := h.Client.CaptureToMat()
+			costScreen, costErr := captureWallFrame(h, 2*time.Second)
 			if costErr == nil {
 				scale := match.Scale
 				if scale < 0.5 {
@@ -1452,7 +1476,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 			}
 			time.Sleep(1200 * time.Millisecond) // Wait for confirm dialog or gem popup
 
-			confirmScreen, err := h.Client.CaptureToMat()
+			confirmScreen, err := captureWallFrame(h, 2*time.Second)
 			if err != nil {
 				h.Logger.Error().Err(err).Msg("Failed to capture screen for confirm check")
 				_ = h.Client.Back()
@@ -1596,7 +1620,7 @@ func waitForWallUpgradeTray(h *WallUpgradeHooks, timeout time.Duration) bool {
 	attempt := 0
 	for {
 		attempt++
-		screen, err := h.Client.CaptureToMat()
+		screen, err := captureWallFrame(h, 2*time.Second)
 		if err == nil && !screen.Empty() {
 			bottomROI := image.Rect(0, int(390*h.Cal.ScaleY), screen.Cols(), screen.Rows())
 			matches, _ := vision.MatchMultiScaleROICached(
@@ -1630,7 +1654,7 @@ func waitForWallUpgradeTray(h *WallUpgradeHooks, timeout time.Duration) bool {
 func waitForMainVillage(h *WallUpgradeHooks, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		screen, err := h.Client.CaptureToMat()
+		screen, err := captureWallFrame(h, 2*time.Second)
 		if err != nil {
 			time.Sleep(500 * time.Millisecond)
 			continue
@@ -1663,7 +1687,7 @@ func dismissInterruptionsFor(h *WallUpgradeHooks) {
 	if h.Classify == nil {
 		return
 	}
-	screen, err := h.Client.CaptureToMat()
+	screen, err := captureWallFrame(h, 2*time.Second)
 	if err != nil {
 		return
 	}
