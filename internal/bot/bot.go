@@ -1942,7 +1942,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			return
 		}
 
-		if !b.sleepResponsive(800 * time.Millisecond) {
+		if !b.sleepResponsive(120 * time.Millisecond) {
 			return
 		}
 
@@ -2105,7 +2105,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 		// Xingchen-style transition settle: do not poll repeatedly while
 		// BlueStacks is animating clouds / loading the next opponent.
-		if !b.sleepResponsive(1400 * time.Millisecond) {
+		if !b.sleepResponsive(450 * time.Millisecond) {
 			return
 		}
 	}
