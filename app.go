@@ -3716,10 +3716,10 @@ type MemberAutomationProfile struct {
 	LootExitEnabled     bool                          `json:"loot_exit_enabled"`
 	LootExitPercent     int                           `json:"loot_exit_percent"`
 	EndAtStars          int                           `json:"end_at_stars"`
-	AutoCollectors      bool                          `json:"auto_collectors"`
+	AutoCollectors      *bool                         `json:"auto_collectors,omitempty"`
 	CollectorMinutes    int                           `json:"collector_minutes"`
-	PrivacyMaskUsername bool                          `json:"privacy_mask_username"`
-	SaveAcceptedBases   bool                          `json:"save_accepted_bases"`
+	PrivacyMaskUsername *bool                         `json:"privacy_mask_username,omitempty"`
+	SaveAcceptedBases   *bool                         `json:"save_accepted_bases,omitempty"`
 	FarmEnabled         bool                          `json:"farm_enabled"`
 	FarmTownHall        int                           `json:"farm_town_hall"`
 	FarmProfiles        map[string]config.FarmProfile `json:"farm_profiles,omitempty"`
@@ -3730,6 +3730,9 @@ func memberAutomationFromConfig(cfg *config.BotConfig) MemberAutomationProfile {
 		cfg = config.DefaultConfig()
 	}
 	simpleMode := cfg.Automation.SimpleMode
+	autoCollectors := cfg.Automation.AutoCollectors
+	privacyMaskUsername := cfg.Automation.PrivacyMaskUsername
+	saveAcceptedBases := cfg.Search.SaveAcceptedBaseScreenshots
 	profile := MemberAutomationProfile{
 		SimpleMode:        &simpleMode,
 		SearchEnabled:     cfg.Search.Enabled,
@@ -3742,10 +3745,10 @@ func memberAutomationFromConfig(cfg *config.BotConfig) MemberAutomationProfile {
 		LootExitEnabled:     cfg.Attack.LootExitEnabled,
 		LootExitPercent:     cfg.Attack.LootExitPercent,
 		EndAtStars:          cfg.Attack.EndAtStars,
-		AutoCollectors:      cfg.Automation.AutoCollectors,
+		AutoCollectors:      &autoCollectors,
 		CollectorMinutes:    int(cfg.Automation.CollectorInterval.Duration / time.Minute),
-		PrivacyMaskUsername: cfg.Automation.PrivacyMaskUsername,
-		SaveAcceptedBases:   cfg.Search.SaveAcceptedBaseScreenshots,
+		PrivacyMaskUsername: &privacyMaskUsername,
+		SaveAcceptedBases:   &saveAcceptedBases,
 		FarmEnabled:         cfg.Attack.Farm.Enabled,
 		FarmTownHall:      cfg.Attack.Farm.TownHall,
 		FarmProfiles:      map[string]config.FarmProfile{},
@@ -3797,10 +3800,16 @@ func applyMemberAutomationToConfig(cfg *config.BotConfig, profile MemberAutomati
 	cfg.Attack.LootExitEnabled = profile.LootExitEnabled
 	cfg.Attack.LootExitPercent = profile.LootExitPercent
 	cfg.Attack.EndAtStars = profile.EndAtStars
-	cfg.Automation.AutoCollectors = profile.AutoCollectors
+	if profile.AutoCollectors != nil {
+		cfg.Automation.AutoCollectors = *profile.AutoCollectors
+	}
 	cfg.Automation.CollectorInterval = config.Duration{Duration: time.Duration(profile.CollectorMinutes) * time.Minute}
-	cfg.Automation.PrivacyMaskUsername = profile.PrivacyMaskUsername
-	cfg.Search.SaveAcceptedBaseScreenshots = profile.SaveAcceptedBases
+	if profile.PrivacyMaskUsername != nil {
+		cfg.Automation.PrivacyMaskUsername = *profile.PrivacyMaskUsername
+	}
+	if profile.SaveAcceptedBases != nil {
+		cfg.Search.SaveAcceptedBaseScreenshots = *profile.SaveAcceptedBases
+	}
 
 	if profile.StrategyFile != "" {
 		candidate := paths.Resolve(filepath.Join("strategies", filepath.Base(profile.StrategyFile)))
