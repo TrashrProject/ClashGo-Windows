@@ -87,3 +87,8 @@ func multiAccountStatePath(cfg *config.BotConfig) string {
 	key := hex.EncodeToString(sum[:10])
 	return paths.ResolveConfig(filepath.Join("multi_account", key, "state.json"))
 }
+
+
+func accountAttackHistoryPath(cfg *config.BotConfig) string {
+	return learningAccountStatePath(cfg, "attack_history.json")
+}
