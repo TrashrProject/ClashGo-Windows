@@ -38,15 +38,51 @@ func (p RuntimePhase) String() string {
 	}
 }
 
+func validRuntimePhaseTransition(from, to RuntimePhase) bool {
+	if from == to || to == PhaseIdle {
+		return true
+	}
+	switch from {
+	case PhaseIdle:
+		return to == PhaseAttackNavigation
+	case PhaseAttackNavigation:
+		return to == PhaseSearching
+	case PhaseSearching:
+		return to == PhasePlanning
+	case PhasePlanning:
+		// Planning may fall through to battle monitoring even when deployment
+		// partially fails; recovery happens from the battle checkpoint.
+		return to == PhaseDeploying || to == PhaseBattle
+	case PhaseDeploying:
+		return to == PhaseBattle
+	case PhaseBattle:
+		return to == PhaseParsingResult || to == PhaseReturningHome
+	case PhaseParsingResult:
+		return to == PhaseReturningHome
+	case PhaseReturningHome:
+		return to == PhaseAttackNavigation
+	default:
+		return false
+	}
+}
+
 func (b *Bot) setRuntimePhase(phase RuntimePhase) {
 	old := RuntimePhase(b.runtimePhase.Swap(int32(phase)))
 	if old == phase {
 		return
 	}
 	now := time.Now()
-	b.runtimePhaseSince.Store(now.UnixNano())
+	previousSince := b.runtimePhaseSince.Swap(now.UnixNano())
 	b.runtimeProgress.Store(now.UnixNano())
-	b.logger.Info().
+
+	event := b.logger.Info()
+	if !validRuntimePhaseTransition(old, phase) {
+		event = b.logger.Warn().Bool("unexpected_transition", true)
+	}
+	if previousSince > 0 {
+		event = event.Dur("previous_phase_duration", now.Sub(time.Unix(0, previousSince)))
+	}
+	event.
 		Str("from_phase", old.String()).
 		Str("to_phase", phase.String()).
 		Msg("runtime phase transition")
