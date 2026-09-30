@@ -58,7 +58,11 @@ var DefaultSafeBounds = map[string]ParameterBounds{
 	"card_settle_ms":      {Min: 100, Max: 250, MaxStep: 15},
 	"red_zone_margin_px":  {Min: 50, Max: 110, MaxStep: 5},
 	"camera_zoom_steps":   {Min: 1, Max: 3, MaxStep: 1},
-	"camera_pan_steps":    {Min: 0, Max: 2, MaxStep: 1},
+	"camera_pan_steps":       {Min: 0, Max: 2, MaxStep: 1},
+	"wall_search_attempt":    {Min: 0, Max: 12, MaxStep: 1},
+	"builder_open_settle_ms": {Min: 900, Max: 2000, MaxStep: 100},
+	"wall_focus_settle_ms":   {Min: 1500, Max: 4000, MaxStep: 250},
+	"wall_scroll_step_ms":    {Min: 300, Max: 1200, MaxStep: 100},
 }
 
 type LearningOutcome struct {
