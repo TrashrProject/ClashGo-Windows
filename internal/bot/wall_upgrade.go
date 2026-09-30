@@ -130,6 +130,11 @@ type WallUpgradeHooks struct {
 	// transient menu animation cannot make the wall stage disappear entirely.
 	DeepSearch bool
 
+	// VerifyUpgradeProgress is called immediately after a claimed wall upgrade.
+	// Production uses a cheap batched resource-spend watchdog. Returning false
+	// aborts the current loop so a false-success UI path cannot repeat forever.
+	VerifyUpgradeProgress func() bool
+
 	// OnStep is the optional phase-boundary instrumentation hook.
 	OnStep func(step string, data map[string]any)
 }
@@ -931,6 +936,10 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 			if success {
 				h.Logger.Info().Msg("Wall upgrade completed (asset-driven flow). Continuing to next wall...")
 				h.step("upgrade_success", nil)
+				if h.VerifyUpgradeProgress != nil && !h.VerifyUpgradeProgress() {
+					h.step("upgrade_progress_unverified", nil)
+					break
+				}
 				continue
 			}
 			h.Logger.Warn().Msg("Wall upgrade failed (asset-driven flow): both gold and elixir options unaffordable. Ending loop.")
@@ -1072,6 +1081,10 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 			if successHardcoded {
 				h.Logger.Info().Msg("Wall upgrade completed (hardcoded flow). Continuing to next wall...")
 				h.step("upgrade_success", nil)
+				if h.VerifyUpgradeProgress != nil && !h.VerifyUpgradeProgress() {
+					h.step("upgrade_progress_unverified", nil)
+					break
+				}
 				continue
 			}
 			h.Logger.Warn().Msg("Wall upgrade failed (hardcoded flow): both gold and elixir options unaffordable. Ending loop.")
@@ -1457,6 +1470,10 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 		if success {
 			h.Logger.Info().Msg("Wall upgrade completed successfully! Continuing to next wall...")
 			h.step("upgrade_success", nil)
+			if h.VerifyUpgradeProgress != nil && !h.VerifyUpgradeProgress() {
+				h.step("upgrade_progress_unverified", nil)
+				break
+			}
 		} else {
 			h.Logger.Warn().Msg("Failed to upgrade wall: all options checked, none were affordable. Ending loop.")
 			h.step("all_unaffordable", nil)
