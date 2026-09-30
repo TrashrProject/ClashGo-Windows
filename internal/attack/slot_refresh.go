@@ -22,7 +22,14 @@ func (sm *SlotManager) RefreshPositions(screen gocv.Mat) bool {
 	}
 
 	activeXs := sm.detectActiveSlots(screen)
-	if len(activeXs) == 0 {
+	return sm.applyDetectedPositions(activeXs)
+}
+
+// applyDetectedPositions is the pure remapping half of RefreshPositions. It is
+// split out so compaction semantics are testable without constructing a full
+// OpenCV battle frame.
+func (sm *SlotManager) applyDetectedPositions(activeXs []int) bool {
+	if sm == nil || len(activeXs) == 0 {
 		return false
 	}
 
