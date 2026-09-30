@@ -1701,63 +1701,15 @@ func (b *Bot) hasAttackButtonColor(screen gocv.Mat) bool {
 func (b *Bot) locateFindMatchButtonColor(screen gocv.Mat) (int, int, bool) {
 	x0, y0 := b.cal.ScaleRef(40, 420)
 	x1, y1 := b.cal.ScaleRef(420, 640)
-
-	if x0 < 0 { x0 = 0 }
-	if y0 < 0 { y0 = 0 }
-	if x1 > screen.Cols() { x1 = screen.Cols() }
-	if y1 > screen.Rows() { y1 = screen.Rows() }
-	if x1-x0 < 2 || y1-y0 < 2 {
-		return 0, 0, false
+	roi := image.Rect(x0, y0, x1, y1)
+	x, y, ok := b.findLocalizedFindMatchButton(screen, roi)
+	if ok {
+		b.logger.Debug().
+			Int("x", x).
+			Int("y", y).
+			Msg("Find Match button verified via language-independent HSV region")
 	}
-
-	roi := screen.Region(image.Rect(x0, y0, x1, y1))
-	defer roi.Close()
-
-	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
-	defer vision.PutMat(mask)
-
-	gocv.InRangeWithScalar(
-		roi,
-		gocv.NewScalar(0, 70, 110, 0),
-		gocv.NewScalar(210, 255, 255, 0),
-		&mask,
-	)
-
-	contours := gocv.FindContours(mask, gocv.RetrievalExternal, gocv.ChainApproxSimple)
-	defer contours.Close()
-
-	bestArea := 0.0
-	bestRect := image.Rectangle{}
-	for i := 0; i < contours.Size(); i++ {
-		contour := contours.At(i)
-		area := gocv.ContourArea(contour)
-		if area <= bestArea {
-			continue
-		}
-		rect := gocv.BoundingRect(contour)
-		if rect.Dx() < 55 || rect.Dy() < 24 {
-			continue
-		}
-		bestArea = area
-		bestRect = rect
-	}
-
-	if bestArea < 900 || bestRect.Empty() {
-		return 0, 0, false
-	}
-
-	x := x0 + bestRect.Min.X + bestRect.Dx()/2
-	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
-
-	b.logger.Debug().
-		Float64("area", bestArea).
-		Int("x", x).
-		Int("y", y).
-		Int("w", bestRect.Dx()).
-		Int("h", bestRect.Dy()).
-		Msg("Find Match button verified via localized orange region")
-
-	return x, y, true
+	return x, y, ok
 }
 
 // locateAttackButtonColor returns the center of the largest orange/gold blob
@@ -3484,10 +3436,14 @@ func (b *Bot) recoverAttackNavigationLocally() {
 	}
 
 	switch state {
-	case game.StateFindMatch, game.StateArmySelection, game.StateArmyCamp, game.StateSettings, game.StateUnknown:
-		b.logger.Info().Str("state", state.String()).Msg("local navigation recovery: backing out one UI level")
+	case game.StateFindMatch, game.StateArmySelection, game.StateArmyCamp, game.StateSettings:
+		b.logger.Info().Str("state", state.String()).Msg("local navigation recovery: backing out one verified UI level")
 		_ = b.client.Back()
 		_ = b.sleepResponsive(700 * time.Millisecond)
+	case game.StateUnknown:
+		// Never press Back from Unknown. If this is actually the main village,
+		// Back would open the quit-confirm dialog and create another recovery loop.
+		b.logger.Warn().Msg("local navigation recovery: UI state unknown; leaving screen untouched for next visual pass")
 	default:
 		// For loading/search/battle states, never inject Back; those transitions
 		// can still settle naturally and the runtime supervisor owns recovery.
