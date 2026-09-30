@@ -1,24 +1,37 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
+import HomeView from './components/HomeView';
+import DeveloperView from './components/DeveloperView';
+import LicenseGate from './components/LicenseGate';
 import Analytics from './components/Analytics';
 import ConfigView from './components/ConfigView';
 import SettingsView from './components/SettingsView';
 import AccountView from './components/AccountView';
-import AccountOnboarding from './components/AccountOnboarding';
 import { EventsOn } from '../wailsjs/runtime';
 import {
   GetStats,
   GetAttackHistory,
+  GetLatestAttackReplay,
+  GetSessionReport,
+  GetActivity,
   GetLogs,
   SaveConfig,
+  SaveClashCoreFeatures,
+  SaveAdvancedSafetyFeatures,
   StartBot,
   StopBot,
+  StopAfterCurrentAttack,
+  IsPaused,
+  ResumeBot,
+  PauseBot,
   IsRunning,
   ResetStats,
   GetConfig,
   GetStrategies,
   GetSystemDiagnostics,
+  GetStartupReadiness,
+  GetLatestBootReport,
   ExportDiagnostics,
   SetBlueStacksInstance,
   GetUpdateStatus,
@@ -30,12 +43,27 @@ import {
   SkipCurrentVersion,
   ClearSkippedVersion,
   GetAccountConfig,
+  GetLicenseState,
+  RefreshLicense,
+  GetMemberInterfaceLevel,
+  ApplyMemberPreset,
+  SetSimpleMode,
+  StartTestSession,
+  StartQuickTestSession,
   GetPlayerProfile,
   GetVillageResourceHistory,
-  SetSimpleMode,
+  GetCurrentArmy,
+  SaveMemberInterfaceLevel,
+  SetMemberSpeedProfile,
+  ExtendSessionAttacks,
+  GetScheduledSessionStop,
+  CancelScheduledSessionStop,
+  ScheduleSessionStop,
+  ClearSessionLootGoal,
+  SetSessionLootGoal,
 } from '../wailsjs/go/main/App';
 import { bot } from '../wailsjs/go/models';
-import { TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot } from './types';
+import { InterfaceLevel, TabType, UpdateStatus, DEFAULT_UPDATE_STATUS, SystemDiagnostics, VillageResourceSnapshot, ActivityEvent, AttackReplayView, SessionReportView, BotStats, AttackReport } from './types';
 import UpdateBanner from './components/UpdateBanner';
 import './App.css';
 
@@ -77,13 +105,91 @@ function safeEventsOn(
   }
 }
 
+type CurrentArmyStatus = {
+  timestamp?: string;
+  ready: boolean;
+  uncertain: boolean;
+  warnings?: string[];
+  units?: Array<{ name: string; category: string; count: number; confidence: number; slot_x: number }>;
+  target_town_hall?: number;
+  target_label?: string;
+};
+
+const friendlyBotErrorMessage = (value: string): string => {
+  const raw = value.trim();
+  const text = raw.toLowerCase();
+
+  if (text.includes('bluestacks 5 was not detected') || text.includes('bluestacks player')) {
+    return 'BlueStacks 5 n’est pas détecté. Vérifie son installation puis ouvre Paramètres > État Windows.';
+  }
+  if (text.includes('adb was not detected') || text.includes('adb executable') || text.includes('adb not found')) {
+    return 'ADB n’est pas détecté. ClashGO peut utiliser Android platform-tools ou le HD-Adb de BlueStacks.';
+  }
+  if (text.includes('no adb devices found') || text.includes('no running bluestacks device found')) {
+    return 'Aucun appareil BlueStacks actif n’est visible par ADB. Démarre BlueStacks, attends l’écran du village puis utilise Re-tester maintenant.';
+  }
+  if (text.includes('timeout waiting for adb connection') || text.includes('adb dial') || text.includes('transport connect')) {
+    return 'ClashGO n’arrive pas à joindre BlueStacks via ADB. Vérifie que l’instance est démarrée puis relance le pré-contrôle.';
+  }
+  if (text.includes('boot probe') || text.includes('timeout waiting for boot')) {
+    return 'BlueStacks est encore en démarrage ou ne répond pas correctement. Attends quelques secondes puis utilise Re-tester maintenant.';
+  }
+  if (text.includes('screen size') || text.includes('parse wm size')) {
+    return 'ClashGO ne parvient pas à lire correctement la résolution de BlueStacks. Vérifie l’instance sélectionnée dans Paramètres > État Windows.';
+  }
+  if (text.includes('screencap') && (text.includes('too short') || text.includes('invalid') || text.includes('incomplete'))) {
+    return 'La capture de l’écran BlueStacks est invalide ou incomplète. ClashGO a arrêté le démarrage pour éviter une mauvaise automatisation.';
+  }
+  if (text.includes('touchscreen device not found')) {
+    return 'Le périphérique tactile Android n’a pas été détecté. Redémarre l’instance BlueStacks puis relance le pré-contrôle.';
+  }
+  if (text.includes('no bluestacks instance') || text.includes('preferred instance')) {
+    return 'Aucune instance BlueStacks n’est disponible. Lance ton instance une fois puis réessaie.';
+  }
+  if (text.includes('license has expired') || text.includes('license expired')) {
+    return 'Ta licence ClashGO est expirée. Renouvelle-la puis actualise ta licence dans Mon ClashGO.';
+  }
+  if (text.includes('license is invalid') || text.includes('license is invalid or revoked')) {
+    return 'Ta licence ClashGO est invalide ou désactivée.';
+  }
+  if (text.includes('already activated on another machine') || text.includes('machine mismatch')) {
+    return 'Cette licence est liée à un autre PC. Une réinitialisation de machine est nécessaire.';
+  }
+  if (text.includes('runtime assets missing')) {
+    return 'Des fichiers nécessaires à ClashGO sont manquants. Ouvre Paramètres > État Windows pour voir lesquels.';
+  }
+  if (text.includes('precision calibration') || text.includes('deployment calibration') || text.includes('calibration')) {
+    return 'La calibration de déploiement n’est pas prête. Ouvre Paramètres > État Windows puis relance le pré-contrôle.';
+  }
+  if (text.includes('strategy') && (text.includes('not found') || text.includes('missing') || text.includes('unavailable'))) {
+    return 'La stratégie d’attaque sélectionnée est introuvable. Ouvre Automatisation > Comportement et choisis une stratégie disponible.';
+  }
+  if (text.includes('army') && (text.includes('mismatch') || text.includes('not ready'))) {
+    return 'L’armée détectée ne correspond pas encore au plan de farm. ClashGO attend une composition fiable avant d’attaquer.';
+  }
+  if (text.includes('army') && (text.includes('uncertain') || text.includes('confidence'))) {
+    return 'ClashGO n’est pas assez sûr de la composition de l’armée. L’attaque est mise en attente plutôt que de prendre un risque.';
+  }
+  if (text.includes('session test active')) {
+    return 'Une session test est en cours. Attends sa fin ou arrête-la proprement avant de modifier ces réglages.';
+  }
+  if (text.includes('account service unavailable') || text.includes('clashgo account service unavailable')) {
+    return 'Le service de profil Clash est temporairement indisponible. Le bot peut continuer avec les données locales déjà enregistrées.';
+  }
+  if (text.includes('startup was cancelled') || text.includes('boot cancelled')) {
+    return 'Le démarrage du bot a été annulé.';
+  }
+
+  return raw || 'Une erreur inconnue a empêché le démarrage du bot.';
+};
+
 const normalizeBotErrorMessage = (payload: unknown, fallback: string): string => {
-  if (typeof payload === 'string' && payload.trim()) return payload.trim();
+  if (typeof payload === 'string' && payload.trim()) return friendlyBotErrorMessage(payload);
   if (payload && typeof payload === 'object' && 'message' in payload) {
     const message = (payload as { message?: unknown }).message;
-    if (typeof message === 'string' && message.trim()) return message.trim();
+    if (typeof message === 'string' && message.trim()) return friendlyBotErrorMessage(message);
   }
-  return fallback;
+  return friendlyBotErrorMessage(fallback);
 };
 
 const getInitialDarkMode = (): boolean => {
@@ -105,53 +211,101 @@ const getInitialDarkMode = (): boolean => {
   }
 };
 
+const getInitialInterfaceLevel = (): InterfaceLevel => {
+  try {
+    const stored = localStorage.getItem('interfaceLevel');
+    if (stored === 'developer' || stored === 'advanced' || stored === 'simple') return stored;
+  } catch {
+    // Fall through to the newcomer-safe default.
+  }
+  return 'simple';
+};
+
 const getInitialSidebarExpanded = (): boolean => {
   try {
     const stored = localStorage.getItem('sidebarExpanded');
     if (stored !== null) return stored === 'true';
-    return true;
+    // Keep the 1024px minimum window comfortable for first-time users.
+    // Hover still expands the sidebar instantly and the explicit preference
+    // is persisted after the first interaction.
+    return typeof window !== 'undefined' ? window.innerWidth >= 1180 : true;
   } catch {
     return true;
   }
 };
 
+const getInitialAccountPage = (): 'account' | 'settings' | 'village' => {
+  try {
+    const stored = localStorage.getItem('clashgo_member_page');
+    if (stored === 'settings' || stored === 'village') return stored;
+  } catch {
+    // Use the newcomer-safe account summary.
+  }
+  return 'account';
+};
+
+const createEmptyStats = (): BotStats => new bot.BotStats({
+  attacks_completed: 0,
+  search_skips: 0,
+  total_gold: 0,
+  total_elixir: 0,
+  total_de: 0,
+  stars_0: 0,
+  stars_1: 0,
+  stars_2: 0,
+  stars_3: 0,
+  uptime: 0,
+  cpu_time_sec: 0,
+  cpu_cores: 0,
+  recovery_attempts: 0,
+  recovery_successes: 0,
+  bluestacks_restarts: 0,
+  adb_health: {
+    last_capture: null,
+    avg_capture_ms: 0,
+    consecutive_fails: 0,
+    captures_total: 0,
+    errors_total: 0,
+    last_error: "",
+  },
+}) as unknown as BotStats;
+
 function App() {
   const [tab, setTab] = useState<TabType>('dashboard');
-  const [stats, setStats] = useState<bot.BotStats>(new bot.BotStats({
-    attacks_completed: 0,
-    search_skips: 0,
-    total_gold: 0,
-    total_elixir: 0,
-    total_de: 0,
-    stars_0: 0,
-    stars_1: 0,
-    stars_2: 0,
-    stars_3: 0,
-    uptime: 0,
-    cpu_time_sec: 0,
-    cpu_cores: 0,
-    recovery_attempts: 0,
-    recovery_successes: 0,
-    bluestacks_restarts: 0,
-    adb_health: {
-      last_capture: null,
-      avg_capture_ms: 0,
-      consecutive_fails: 0,
-      captures_total: 0,
-      errors_total: 0,
-      last_error: ""
-    }
-  }));
+  const tabRef = useRef<TabType>('dashboard');
+  const [accountPage, setAccountPage] = useState<'account' | 'settings' | 'village'>(getInitialAccountPage);
+  const [stats, setStats] = useState<BotStats>(() => createEmptyStats());
   const [isRunning, setIsRunning] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
-  const [history, setHistory] = useState<bot.AttackReport[]>([]);
+  const [gracefulStopPending, setGracefulStopPending] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [scheduledStopAt, setScheduledStopAt] = useState('');
+  const [sessionLootGoal, setSessionLootGoal] = useState<{ gold: number; elixir: number; dark_elixir: number; active: boolean }>({
+    gold: 0,
+    elixir: 0,
+    dark_elixir: 0,
+    active: false,
+  });
+  const [history, setHistory] = useState<AttackReport[]>([]);
   const [resourceHistory, setResourceHistory] = useState<VillageResourceSnapshot[]>([]);
+  const [currentArmy, setCurrentArmy] = useState<CurrentArmyStatus | null>(null);
+  const [activity, setActivity] = useState<ActivityEvent[]>([]);
+  const [replay, setReplay] = useState<AttackReplayView>({ available: false, complete: false, events: [] });
+  const [sessionReport, setSessionReport] = useState<SessionReportView | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [adbPort, setAdbPort] = useState(5555);
   const [darkMode, setDarkMode] = useState(getInitialDarkMode);
   const [sidebarExpanded, setSidebarExpanded] = useState(getInitialSidebarExpanded);
+  const [interfaceLevel, setInterfaceLevel] = useState<InterfaceLevel>(getInitialInterfaceLevel);
   const [playerTag, setPlayerTag] = useState('');
   const [accountReady, setAccountReady] = useState(false);
+  const [licenseAccessReady, setLicenseAccessReady] = useState(false);
+  const [licenseActivated, setLicenseActivated] = useState(false);
+  const [licenseEnforced, setLicenseEnforced] = useState(true);
+  const [licenseRole, setLicenseRole] = useState<'member' | 'developer' | 'admin' | ''>('');
+  const [licenseMemberName, setLicenseMemberName] = useState('');
+  const [licensePlan, setLicensePlan] = useState('');
+  const [licenseExpiresAt, setLicenseExpiresAt] = useState('');
 
   // Updater state — pushed via `updater_status` event from Go.
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>(DEFAULT_UPDATE_STATUS);
@@ -160,6 +314,82 @@ function App() {
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [botError, setBotError] = useState('');
   const [botDiagnosticPath, setBotDiagnosticPath] = useState('');
+  const [memberNotice, setMemberNotice] = useState('');
+  const [testSessionActive, setTestSessionActive] = useState(false);
+  const [startupCheck, setStartupCheck] = useState<{
+    ready: boolean;
+    checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
+  } | null>(null);
+  const [latestBootReport, setLatestBootReport] = useState<{
+    started_at?: string;
+    completed_at?: string;
+    outcome?: string;
+    final_error?: string;
+    suggested_action?: string;
+    recovery_used?: string[];
+    attempts?: number;
+  } | null>(null);
+  const [startupCheckRunning, setStartupCheckRunning] = useState(false);
+  const startupCheckAutoRan = useRef(false);
+  const startInFlightRef = useRef(false);
+  const testSessionInFlightRef = useRef(false);
+  const lastLicenseFocusRefreshRef = useRef(0);
+  // Prevent a slow previous-license restore from overwriting the UI after a
+  // fast deactivate/reactivate or member switch.
+  const memberSyncGenerationRef = useRef(0);
+
+  useEffect(() => {
+    tabRef.current = tab;
+  }, [tab]);
+
+  useEffect(() => {
+    try { localStorage.setItem('clashgo_member_page', accountPage); } catch {}
+  }, [accountPage]);
+
+  useEffect(() => {
+    // Refresh the data that becomes visible immediately when navigating,
+    // while the background recovery polls remain context-aware.
+    if (tab === 'settings' || tab === 'developer') {
+      void GetLogs()
+        .then((values) => setLogs(values ?? []))
+        .catch((err: unknown) => console.warn('Log refresh failed:', err));
+    }
+    if (tab === 'settings') {
+      void GetSystemDiagnostics()
+        .then((value) => setSystemDiagnostics(value as SystemDiagnostics))
+        .catch((err: unknown) => console.warn('GetSystemDiagnostics failed:', err));
+    }
+    if (tab === 'dashboard') {
+      void Promise.all([GetAttackHistory(), GetCurrentArmy(), GetSessionReport(), GetActivity()])
+        .then(([h, army, report, activityValue]) => {
+          setHistory((h ?? []) as unknown as AttackReport[]);
+          setCurrentArmy((army || null) as unknown as CurrentArmyStatus | null);
+          setActivity((activityValue ?? []) as unknown as ActivityEvent[]);
+          const typed = report as unknown as SessionReportView;
+          setSessionReport(typed && (typed.attacks || 0) > 0 ? typed : null);
+        })
+        .catch((err: unknown) => console.warn('Home refresh failed:', err));
+    }
+    if (tab === 'activity') {
+      void Promise.all([GetAttackHistory(), GetLatestAttackReplay(), GetSessionReport(), GetActivity()])
+        .then(([h, latest, report, activityValue]) => {
+          setHistory((h ?? []) as unknown as AttackReport[]);
+          setReplay((latest ?? { available: false, complete: false, events: [] }) as unknown as AttackReplayView);
+          setActivity((activityValue ?? []) as unknown as ActivityEvent[]);
+          const typed = report as unknown as SessionReportView;
+          setSessionReport(typed && (typed.attacks || 0) > 0 ? typed : null);
+        })
+        .catch((err: unknown) => console.warn('Activity refresh failed:', err));
+    }
+    if (tab === 'analytics') {
+      void Promise.all([GetAttackHistory(), GetVillageResourceHistory()])
+        .then(([h, rh]) => {
+          setHistory((h ?? []) as unknown as AttackReport[]);
+          setResourceHistory((rh ?? []) as VillageResourceSnapshot[]);
+        })
+        .catch((err: unknown) => console.warn('Analytics refresh failed:', err));
+    }
+  }, [tab]);
 
   // Config states
   const [goldThreshold, setGoldThreshold] = useState(400000);
@@ -172,7 +402,172 @@ function App() {
   const [stallTimer, setStallTimer] = useState(30);
   const [lootExitEnabled, setLootExitEnabled] = useState(false);
   const [lootExitPercent, setLootExitPercent] = useState(100);
+  const [endAtStars, setEndAtStars] = useState(0);
+  const [autoCollectors, setAutoCollectors] = useState(false);
+  const [collectorMinutes, setCollectorMinutes] = useState(10);
+  const [privacyMaskUsername, setPrivacyMaskUsername] = useState(true);
+  const [saveAcceptedBases, setSaveAcceptedBases] = useState(true);
+  const [dryRun, setDryRun] = useState(false);
+  const [maxRunMinutes, setMaxRunMinutes] = useState(0);
+  const [emergencyStopHotkey, setEmergencyStopHotkey] = useState('ctrl+shift+end');
+  const [saveNearMissBases, setSaveNearMissBases] = useState(true);
+  const [nearMissSampleEvery, setNearMissSampleEvery] = useState(20);
+  const [nearMissWithinPercent, setNearMissWithinPercent] = useState(10);
   const [simpleMode, setSimpleMode] = useState(true);
+
+  const syncMemberScopedView = useCallback(async (activated: boolean) => {
+    const generation = ++memberSyncGenerationRef.current;
+    startupCheckAutoRan.current = false;
+    setStartupCheck(null);
+    if (!activated) {
+      // Clear every member-scoped surface immediately. This prevents the next
+      // license (or the activation screen) from briefly displaying the
+      // previous member's counters, diagnostics or logs while its own state
+      // is being restored.
+      setPlayerTag('');
+      setStats(createEmptyStats());
+      setHistory([]);
+      setResourceHistory([]);
+      setCurrentArmy(null);
+      setActivity([]);
+      setReplay({ available: false, complete: false, events: [] });
+      setSessionReport(null);
+      setLogs([]);
+      setLatestBootReport(null);
+      setBotError('');
+      setBotDiagnosticPath('');
+      setMemberNotice('');
+      setTestSessionActive(false);
+      return;
+    }
+
+    const [configResult, accountResult, statsResult, historyResult, resourceResult, armyResult, activityResult, replayResult, reportResult, bootResult] = await Promise.allSettled([
+      GetConfig(),
+      GetAccountConfig(),
+      GetStats(),
+      GetAttackHistory(),
+      GetVillageResourceHistory(),
+      GetCurrentArmy(),
+      GetActivity(),
+      GetLatestAttackReplay(),
+      GetSessionReport(),
+      GetLatestBootReport(),
+    ]);
+
+    if (generation !== memberSyncGenerationRef.current) {
+      return;
+    }
+
+    if (configResult.status === 'fulfilled') {
+      const conf = configResult.value;
+      setGoldThreshold(conf.search.min_loot_gold);
+      setElixirThreshold(conf.search.min_loot_elixir);
+      setDeThreshold(conf.search.min_loot_de);
+      setSearchEnabled(conf.search.enabled);
+      setUpgradeWalls(conf.upgrade.upgrade_walls);
+      setSelectedStrategy(conf.attack.strategy_file);
+      setStallTimer(conf.attack.stall_timer_seconds);
+      setLootExitEnabled(conf.attack.loot_exit_enabled ?? false);
+      setLootExitPercent(conf.attack.loot_exit_percent ?? 100);
+      setEndAtStars(conf.attack.end_at_stars ?? 0);
+      setAutoCollectors(conf.automation?.auto_collectors ?? false);
+      {
+        const rawInterval = String(conf.automation?.collector_interval ?? '');
+        const h = rawInterval.match(/([0-9.]+)h/);
+        const m = rawInterval.match(/([0-9.]+)m/);
+        const parsedMinutes = (h ? Number(h[1]) * 60 : 0) + (m ? Number(m[1]) : 0);
+        setCollectorMinutes(parsedMinutes > 0 ? Math.max(1, Math.round(parsedMinutes)) : 10);
+      }
+      setPrivacyMaskUsername(conf.automation?.privacy_mask_username ?? true);
+      setSaveAcceptedBases(conf.search.save_accepted_base_screenshots ?? true);
+      setDryRun(conf.attack.dry_run ?? false);
+      setMaxRunMinutes(conf.automation?.max_run_minutes ?? 0);
+      setEmergencyStopHotkey(conf.automation?.emergency_stop_hotkey || 'ctrl+shift+end');
+      setSaveNearMissBases(conf.search.save_near_miss_base_screenshots ?? true);
+      setNearMissSampleEvery(conf.search.near_miss_sample_every ?? 20);
+      setNearMissWithinPercent(conf.search.near_miss_within_percent ?? 10);
+      setSimpleMode(conf.automation?.simple_mode ?? true);
+    }
+    if (accountResult.status === 'fulfilled') {
+      setPlayerTag(accountResult.value?.player_tag || '');
+    }
+    if (statsResult.status === 'fulfilled') {
+      setStats(statsResult.value as unknown as BotStats);
+    }
+    if (historyResult.status === 'fulfilled') {
+      setHistory((historyResult.value ?? []) as unknown as AttackReport[]);
+    }
+    if (resourceResult.status === 'fulfilled') {
+      setResourceHistory((resourceResult.value ?? []) as VillageResourceSnapshot[]);
+    }
+    if (armyResult.status === 'fulfilled') {
+      setCurrentArmy((armyResult.value || null) as unknown as CurrentArmyStatus | null);
+    }
+    if (activityResult.status === 'fulfilled') {
+      setActivity((activityResult.value ?? []) as unknown as ActivityEvent[]);
+    }
+    if (replayResult.status === 'fulfilled') {
+      setReplay((replayResult.value ?? { available: false, complete: false, events: [] }) as unknown as AttackReplayView);
+    }
+    if (reportResult.status === 'fulfilled') {
+      const report = reportResult.value as unknown as SessionReportView;
+      setSessionReport(report && (report.attacks || 0) > 0 ? report : null);
+    }
+    if (bootResult.status === 'fulfilled') {
+      setLatestBootReport((bootResult.value || null) as typeof latestBootReport);
+    }
+  }, []);
+
+  const handleLicenseReady = useCallback((state: { activated: boolean; role?: string; member_name?: string; plan?: string; expires_at?: string }, policy: { enforced: boolean }) => {
+    const role = state?.role === 'admin'
+      ? 'admin'
+      : state?.role === 'developer'
+        ? 'developer'
+        : state?.activated
+          ? 'member'
+          : '';
+    setLicenseActivated(Boolean(state?.activated));
+    setLicenseEnforced(Boolean(policy.enforced));
+    setLicenseRole(role);
+    setLicenseMemberName(state?.member_name || '');
+    setLicensePlan(state?.plan || '');
+    setLicenseExpiresAt(state?.expires_at || '');
+
+    if (role === 'developer' || role === 'admin') {
+      setInterfaceLevel('developer');
+    } else if (state?.activated) {
+      // Clamp immediately so a previous developer/admin session can never
+      // flash privileged UI while this member's saved level is loading.
+      setInterfaceLevel('simple');
+      void GetMemberInterfaceLevel()
+        .then((saved: unknown) => {
+          const level: InterfaceLevel = saved === 'advanced' ? 'advanced' : 'simple';
+          setInterfaceLevel(level);
+        })
+        .catch(() => {
+          setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
+        });
+      setTab((current) => current === 'developer' ? 'dashboard' : current);
+    } else {
+      setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
+      setTab((current) => current === 'developer' ? 'dashboard' : current);
+    }
+
+    void syncMemberScopedView(Boolean(state?.activated));
+
+    if (!policy.enforced || state?.activated) {
+      setLicenseAccessReady(true);
+    }
+  }, [syncMemberScopedView]);
+
+  const handleInterfaceLevelChange = useCallback((level: InterfaceLevel) => {
+    setInterfaceLevel(level);
+    if (level !== 'developer') {
+      void SaveMemberInterfaceLevel(level).catch((err: unknown) => {
+        console.warn('Failed to save member interface level:', err);
+      });
+    }
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -193,7 +588,25 @@ function App() {
         setStallTimer(conf.attack.stall_timer_seconds);
         setLootExitEnabled(conf.attack.loot_exit_enabled ?? false);
         setLootExitPercent(conf.attack.loot_exit_percent ?? 100);
-        setSimpleMode(conf.automation?.simple_mode ?? true);
+        setEndAtStars(conf.attack.end_at_stars ?? 0);
+        setAutoCollectors(conf.automation?.auto_collectors ?? false);
+        {
+          const rawInterval = String(conf.automation?.collector_interval ?? '');
+          const h = rawInterval.match(/([0-9.]+)h/);
+          const m = rawInterval.match(/([0-9.]+)m/);
+          const parsedMinutes = (h ? Number(h[1]) * 60 : 0) + (m ? Number(m[1]) : 0);
+          setCollectorMinutes(parsedMinutes > 0 ? Math.max(1, Math.round(parsedMinutes)) : 10);
+        }
+        setPrivacyMaskUsername(conf.automation?.privacy_mask_username ?? true);
+        setSaveAcceptedBases(conf.search.save_accepted_base_screenshots ?? true);
+        setDryRun(conf.attack.dry_run ?? false);
+        setMaxRunMinutes(conf.automation?.max_run_minutes ?? 0);
+        setEmergencyStopHotkey(conf.automation?.emergency_stop_hotkey || 'ctrl+shift+end');
+        setSaveNearMissBases(conf.search.save_near_miss_base_screenshots ?? true);
+        setNearMissSampleEvery(conf.search.near_miss_sample_every ?? 20);
+        setNearMissWithinPercent(conf.search.near_miss_within_percent ?? 10);
+        const configuredSimpleMode = conf.automation?.simple_mode ?? true;
+        setSimpleMode(configuredSimpleMode);
         setIsRunning(running);
         setIsStarting(false);
         // Never let a null from the Go side reach the Config page — a
@@ -209,7 +622,7 @@ function App() {
         // the Go backend auto-select the matching farm HDV before the user
         // ever opens the Account page.
         if (account?.player_tag) {
-          void GetPlayerProfile().catch((err) => {
+          void GetPlayerProfile().catch((err: unknown) => {
             console.warn('Background account sync failed:', err);
           });
         }
@@ -232,25 +645,83 @@ function App() {
       } catch (err) {
         console.warn('GetUpdateStatus failed:', err);
       }
+      try {
+        const license = await GetLicenseState();
+        if (license?.activated && (license.role === 'developer' || license.role === 'admin')) {
+          setLicenseActivated(true);
+          setLicenseRole(license.role);
+          setLicenseMemberName(license.member_name || '');
+          setLicensePlan(license.plan || '');
+          setLicenseExpiresAt(license.expires_at || '');
+          setInterfaceLevel('developer');
+        } else if (license?.activated) {
+          setLicenseActivated(true);
+          setLicenseRole('member');
+          setLicenseMemberName(license.member_name || '');
+          setLicensePlan(license.plan || '');
+          setLicenseExpiresAt(license.expires_at || '');
+          try {
+            const savedLevel = await GetMemberInterfaceLevel();
+            setInterfaceLevel(savedLevel === 'advanced' ? 'advanced' : 'simple');
+          } catch {
+            setInterfaceLevel('simple');
+          }
+        } else {
+          setLicenseActivated(false);
+          setLicenseRole('');
+          setLicenseMemberName('');
+          setLicensePlan('');
+          setLicenseExpiresAt('');
+          setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
+        }
+      } catch (err) {
+        console.warn('GetLicenseState failed:', err);
+      }
     };
     init();
 
-    const fetchData = async () => {
+    const uiVisible = () => typeof document === 'undefined' || document.visibilityState !== 'hidden';
+
+    const fetchFastData = async () => {
+      if (!uiVisible()) return;
       try {
-        const [s, h, l] = await Promise.all([
-          GetStats(),
-          GetAttackHistory(),
-          GetLogs(),
-        ]);
-        setStats(s);
-        setHistory(h);
-        setLogs(l);
+        const statsValue = await GetStats();
+        setStats(statsValue as unknown as BotStats);
+
+        if (tabRef.current === 'dashboard' || tabRef.current === 'activity') {
+          const activityValue = await GetActivity();
+          setActivity((activityValue ?? []) as unknown as ActivityEvent[]);
+        }
       } catch (err) {
-        console.error('Data fetch failed:', err);
+        console.error('Fast data fetch failed:', err);
+      }
+    };
+
+    const fetchHistory = async () => {
+      if (!uiVisible()) return;
+      if (!['dashboard', 'activity', 'analytics'].includes(tabRef.current)) return;
+      try {
+        const h = await GetAttackHistory();
+        setHistory((h ?? []) as unknown as AttackReport[]);
+      } catch (err) {
+        console.warn('Attack history refresh failed:', err);
+      }
+    };
+
+    const fetchLogs = async () => {
+      if (!uiVisible()) return;
+      if (tabRef.current !== 'settings' && tabRef.current !== 'developer') return;
+      try {
+        const l = await GetLogs();
+        setLogs(l ?? []);
+      } catch (err) {
+        console.warn('Log refresh failed:', err);
       }
     };
 
     const fetchResourceHistory = async () => {
+      if (!uiVisible()) return;
+      if (tabRef.current !== 'analytics') return;
       try {
         const rh = await GetVillageResourceHistory();
         setResourceHistory((rh ?? []) as VillageResourceSnapshot[]);
@@ -259,12 +730,62 @@ function App() {
       }
     };
 
-    fetchData();
+    const fetchReplay = async () => {
+      if (!uiVisible()) return;
+      if (tabRef.current !== 'activity') return;
+      try {
+        const latest = await GetLatestAttackReplay();
+        setReplay((latest ?? { available: false, complete: false, events: [] }) as unknown as AttackReplayView);
+      } catch (err) {
+        console.warn('Attack replay refresh failed:', err);
+      }
+    };
+
+    const fetchCurrentArmy = async () => {
+      if (!uiVisible()) return;
+      if (tabRef.current !== 'dashboard') return;
+      try {
+        const army = await GetCurrentArmy();
+        setCurrentArmy((army || null) as unknown as CurrentArmyStatus | null);
+      } catch (err) {
+        console.warn('Current army refresh failed:', err);
+      }
+    };
+
+    const fetchSessionReport = async () => {
+      if (!uiVisible()) return;
+      if (tabRef.current !== 'dashboard' && tabRef.current !== 'activity') return;
+      try {
+        const report = await GetSessionReport();
+        const typed = report as unknown as SessionReportView;
+        setSessionReport(typed && (typed.attacks || 0) > 0 ? typed : null);
+      } catch (err) {
+        console.warn('Session report refresh failed:', err);
+      }
+    };
+
+    void fetchFastData();
+    void fetchHistory();
+    void fetchLogs();
     void fetchResourceHistory();
-    const interval = setInterval(fetchData, 2000);
+    void fetchCurrentArmy();
+    void fetchReplay();
+    void fetchSessionReport();
+
+    // Keep the high-frequency poll tiny: only live counters + compact activity.
+    // History is event-driven at attack completion, logs do not need 2 Hz, and
+    // replay changes only after an attack. This removes avoidable Wails IPC and
+    // JSON work while the bot is farming.
+    const fastInterval = setInterval(fetchFastData, 2000);
+    const logInterval = setInterval(fetchLogs, 4000);
+    const historyInterval = setInterval(fetchHistory, 30000); // recovery fallback
     const resourceInterval = setInterval(fetchResourceHistory, 15000);
+    const armyInterval = setInterval(fetchCurrentArmy, 7000);
+    const replayInterval = setInterval(fetchReplay, 30000); // recovery fallback
+    const sessionReportInterval = setInterval(fetchSessionReport, 30000); // cold-start/stop fallback
 
     const fetchDiagnostics = async () => {
+      if (!uiVisible()) return;
       try {
         const d = await GetSystemDiagnostics();
         setSystemDiagnostics(d as SystemDiagnostics);
@@ -274,6 +795,31 @@ function App() {
     };
     fetchDiagnostics();
     const diagnosticsInterval = setInterval(fetchDiagnostics, 5000);
+
+    const handleVisibilityChange = () => {
+      if (!uiVisible()) return;
+      // Resync the member surface immediately after restoring/minimizing the
+      // Wails window instead of waiting for each poll interval independently.
+      void fetchFastData();
+      void fetchHistory();
+      void fetchResourceHistory();
+      void fetchCurrentArmy();
+      void fetchSessionReport();
+      void fetchDiagnostics();
+      const now = Date.now();
+      if (now - lastLicenseFocusRefreshRef.current >= 30_000) {
+        lastLicenseFocusRefreshRef.current = now;
+        void GetLicenseState()
+          .then((state) => {
+            if (state?.activated) void RefreshLicense();
+          })
+          .catch(() => {});
+      }
+      if (tabRef.current === 'settings' || tabRef.current === 'developer') {
+        void fetchLogs();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // The 1 Hz screenshot poll used to live here. It moved into
     // <Feed/>'s own useEffect so it only runs when the Live View tab
@@ -294,57 +840,235 @@ function App() {
       }
     });
 
+    const unsubLicense = safeEventsOn("license_state", (payload: { activated?: boolean; role?: string; member_name?: string; plan?: string; expires_at?: string; error?: string }) => {
+      const role = payload?.role === 'admin'
+        ? 'admin'
+        : payload?.role === 'developer'
+          ? 'developer'
+          : payload?.activated
+            ? 'member'
+            : '';
+      setLicenseActivated(Boolean(payload?.activated));
+      setLicenseRole(role);
+      setLicenseMemberName(payload?.member_name || '');
+      setLicensePlan(payload?.plan || '');
+      setLicenseExpiresAt(payload?.expires_at || '');
+      setLicenseAccessReady(Boolean(payload?.activated));
+      startupCheckAutoRan.current = false;
+      setStartupCheck(null);
+      void syncMemberScopedView(Boolean(payload?.activated));
+      if (payload?.activated) {
+        void GetStartupReadiness()
+          .then((result: unknown) => {
+            setStartupCheck(result as unknown as {
+              ready: boolean;
+              checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
+            });
+            startupCheckAutoRan.current = true;
+          })
+          .catch(() => {
+            startupCheckAutoRan.current = false;
+          });
+      }
+
+      if (role === 'developer' || role === 'admin') {
+        setInterfaceLevel('developer');
+      } else if (payload?.activated) {
+        // Same immediate clamp for live licence switches/revalidation events.
+        setInterfaceLevel('simple');
+        void GetMemberInterfaceLevel()
+          .then((saved: unknown) => setInterfaceLevel(saved === 'advanced' ? 'advanced' : 'simple'))
+          .catch(() => setInterfaceLevel('simple'));
+        setTab((current) => current === 'developer' ? 'dashboard' : current);
+      } else {
+        setInterfaceLevel((current) => current === 'developer' ? 'simple' : current);
+        setTab((current) => current === 'developer' ? 'dashboard' : current);
+      }
+
+    });
+
     // StartBot returns running=true immediately while the boot runs in
     // the background (BlueStacks launch + ADB connect can take minutes
     // on a cold start). When the boot fails, Go emits bot_error /
     // bot_init_failed — without listening, the sidebar stays on
     // "STOP BOT" forever and Stop becomes a confusing no-op (there's
     // no bot to stop). Flip the button back to START on either event.
+    const refreshBootReport = () => {
+      window.setTimeout(() => {
+        void GetLatestBootReport()
+          .then((report: unknown) => setLatestBootReport((report || null) as typeof latestBootReport))
+          .catch(() => {});
+      }, 250);
+    };
+
     const unsubBotError = safeEventsOn("bot_error", (payload: unknown) => {
+      setScheduledStopAt('');
+      setIsPaused(false);
+      setGracefulStopPending(false);
+      setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(false);
-      setBotError(normalizeBotErrorMessage(payload, 'The bot failed to start.'));
+      setBotError(normalizeBotErrorMessage(payload, 'Le bot n’a pas pu démarrer.'));
+      refreshBootReport();
     });
     const unsubBotInitFailed = safeEventsOn("bot_init_failed", (payload: unknown) => {
+      setScheduledStopAt('');
+      setIsPaused(false);
+      setGracefulStopPending(false);
+      setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(false);
-      setBotError(normalizeBotErrorMessage(payload, 'BlueStacks / ADB initialization failed.'));
+      setBotError(normalizeBotErrorMessage(payload, 'L’initialisation BlueStacks / ADB a échoué.'));
+      refreshBootReport();
     });
     const unsubBotStarted = safeEventsOn("bot_started", () => {
+      setIsPaused(false);
+      setGracefulStopPending(false);
       setIsStarting(false);
       setIsRunning(true);
       setBotError('');
+      refreshBootReport();
     });
-    const unsubBotBootCancelled = safeEventsOn("bot_boot_cancelled", (payload: unknown) => {
+    const unsubBotStopped = safeEventsOn("bot_stopped", (payload: unknown) => {
+      setSessionLootGoal({ gold: 0, elixir: 0, dark_elixir: 0, active: false });
+      setScheduledStopAt('');
+      setIsPaused(false);
+      setGracefulStopPending(false);
+      setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(false);
-      setBotError(normalizeBotErrorMessage(payload, 'Bot startup was cancelled.'));
+      setBotError('');
+
+      if (payload && typeof payload === 'object') {
+        const value = payload as { automatic?: boolean; reason?: string; message?: string };
+        if (value.automatic && value.message) {
+          setMemberNotice(value.message);
+          window.setTimeout(() => setMemberNotice(''), 8000);
+        }
+      }
+
+      void fetchFastData();
+      void fetchHistory();
+      void fetchSessionReport();
+    });
+    const unsubMemberTestRestored = safeEventsOn("member_test_session_restored", (payload: unknown) => {
+      setTestSessionActive(false);
+      const message = normalizeBotErrorMessage(payload, 'Session test terminée · tes réglages personnels ont été restaurés.');
+      setMemberNotice(message || 'Session test terminée · tes réglages personnels ont été restaurés.');
+      window.setTimeout(() => setMemberNotice(''), 8000);
     });
 
-    const unsubAttackHistory = safeEventsOn("attack_history_updated", (payload: bot.AttackReport[]) => {
+    const unsubBotBootCancelled = safeEventsOn("bot_boot_cancelled", (payload: unknown) => {
+      setScheduledStopAt('');
+      setIsPaused(false);
+      setGracefulStopPending(false);
+      setIsStarting(false);
+      setIsRunning(false);
+      setBotError(normalizeBotErrorMessage(payload, 'Le démarrage du bot a été annulé.'));
+      refreshBootReport();
+    });
+
+    const unsubAttackHistory = safeEventsOn("attack_history_updated", (payload: unknown) => {
       if (Array.isArray(payload)) {
-        setHistory(payload);
+        setHistory(payload as unknown as AttackReport[]);
       }
+      // Deployment traces and session aggregates are ready at the attack
+      // boundary, so refresh them event-driven instead of adding hot polling.
+      void fetchReplay();
+      void fetchSessionReport();
     });
     const unsubStatsUpdated = safeEventsOn("stats_updated", (payload: bot.BotStats) => {
       if (payload && typeof payload === 'object') {
-        setStats(payload);
+        setStats(payload as unknown as BotStats);
       }
     });
 
+    const unsubGracefulScheduled = safeEventsOn("graceful_stop_scheduled", (payload: unknown) => {
+      setGracefulStopPending(true);
+      const message = normalizeBotErrorMessage(payload, 'Arrêt programmé après l’attaque en cours.');
+      setMemberNotice(message);
+    });
+    const unsubGracefulCompleted = safeEventsOn("graceful_stop_completed", (payload: unknown) => {
+      setGracefulStopPending(false);
+      const message = normalizeBotErrorMessage(payload, 'Attaque terminée · arrêt propre de ClashGO.');
+      setMemberNotice(message);
+      window.setTimeout(() => setMemberNotice(''), 6000);
+    });
+
+    const unsubBotPaused = safeEventsOn("bot_paused", (payload: unknown) => {
+      setIsPaused(true);
+      const message = normalizeBotErrorMessage(payload, 'Pause activée.');
+      setMemberNotice(message);
+    });
+    const unsubBotResumed = safeEventsOn("bot_resumed", (payload: unknown) => {
+      setIsPaused(false);
+      const message = normalizeBotErrorMessage(payload, 'Session reprise.');
+      setMemberNotice(message);
+      window.setTimeout(() => setMemberNotice(''), 4000);
+    });
+
+    const unsubScheduledStop = safeEventsOn("scheduled_session_stop", (payload: unknown) => {
+      if (payload && typeof payload === 'object' && 'at' in payload) {
+        const at = (payload as { at?: unknown }).at;
+        if (typeof at === 'string') setScheduledStopAt(at);
+      }
+    });
+    const unsubScheduledStopCancelled = safeEventsOn("scheduled_session_stop_cancelled", () => {
+      setScheduledStopAt('');
+    });
+    const unsubScheduledStopTriggered = safeEventsOn("scheduled_session_stop_triggered", () => {
+      setScheduledStopAt('');
+    });
+
+    const unsubLootGoal = safeEventsOn("session_loot_goal", (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      const goal = payload as { gold?: number; elixir?: number; dark_elixir?: number; active?: boolean };
+      setSessionLootGoal({
+        gold: Number(goal.gold || 0),
+        elixir: Number(goal.elixir || 0),
+        dark_elixir: Number(goal.dark_elixir || 0),
+        active: Boolean(goal.active),
+      });
+    });
+
+    const unsubLootGoalReached = safeEventsOn("session_loot_goal_reached", (payload: unknown) => {
+      setSessionLootGoal({ gold: 0, elixir: 0, dark_elixir: 0, active: false });
+      const message = normalizeBotErrorMessage(payload, 'Objectif de butin atteint · arrêt propre de la session.');
+      setMemberNotice(message);
+      window.setTimeout(() => setMemberNotice(''), 7000);
+    });
+
     return () => {
-      clearInterval(interval);
+      clearInterval(fastInterval);
+      clearInterval(logInterval);
+      clearInterval(historyInterval);
       clearInterval(resourceInterval);
+      clearInterval(armyInterval);
+      clearInterval(replayInterval);
+      clearInterval(sessionReportInterval);
       clearInterval(diagnosticsInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       unsubUpdater();
+      unsubLicense();
       unsubBotError();
       unsubBotInitFailed();
       unsubBotStarted();
+      unsubBotStopped();
+      unsubMemberTestRestored();
       unsubBotBootCancelled();
       unsubAttackHistory();
       unsubStatsUpdated();
+      unsubGracefulScheduled();
+      unsubGracefulCompleted();
+      unsubBotPaused();
+      unsubBotResumed();
+      unsubScheduledStop();
+      unsubScheduledStopCancelled();
+      unsubScheduledStopTriggered();
+      unsubLootGoal();
+      unsubLootGoalReached();
     };
-  }, []);
+  }, [syncMemberScopedView]);
 
   useEffect(() => {
     if (darkMode) {
@@ -367,6 +1091,23 @@ function App() {
     }
   }, [sidebarExpanded]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('interfaceLevel', interfaceLevel);
+    } catch (e) {
+      console.warn('Failed to save interface level:', e);
+    }
+    if (tab === 'developer' && licenseRole !== 'developer' && licenseRole !== 'admin') {
+      setTab('dashboard');
+      return;
+    }
+    // Settings stays hidden from the Simple sidebar, but may be opened
+    // contextually from Home when ClashGO detects a Windows/ADB problem.
+    if (interfaceLevel === 'simple' && (tab === 'activity' || tab === 'analytics' || tab === 'developer')) {
+      setTab('dashboard');
+    }
+  }, [interfaceLevel, tab, licenseRole]);
+
   const saveSettings = async () => {
     await SaveConfig(
       goldThreshold,
@@ -379,12 +1120,221 @@ function App() {
       lootExitEnabled,
       lootExitPercent,
     );
+    await SaveClashCoreFeatures(
+      autoCollectors,
+      collectorMinutes,
+      privacyMaskUsername,
+      saveAcceptedBases,
+      endAtStars,
+    );
+    await SaveAdvancedSafetyFeatures(
+      dryRun,
+      maxRunMinutes,
+      emergencyStopHotkey,
+      saveNearMissBases,
+      nearMissSampleEvery,
+      nearMissWithinPercent,
+    );
+  };
+
+  const handleStartupCheck = useCallback(async () => {
+    if (startupCheckRunning) return;
+    setStartupCheckRunning(true);
+    try {
+      const result = await GetStartupReadiness();
+      setStartupCheck(result as unknown as {
+        ready: boolean;
+        checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
+      });
+    } catch (err) {
+      console.warn('Startup readiness check failed:', err);
+      setStartupCheck({
+        ready: false,
+        checks: [{
+          id: 'internal',
+          label: 'Diagnostic',
+          ok: false,
+          message: 'Le pré-contrôle n’a pas pu être exécuté.',
+        }],
+      });
+    } finally {
+      setStartupCheckRunning(false);
+    }
+  }, [startupCheckRunning]);
+
+  useEffect(() => {
+    if (!accountReady || !licenseAccessReady || startupCheckAutoRan.current) return;
+    startupCheckAutoRan.current = true;
+    void handleStartupCheck();
+  }, [accountReady, licenseAccessReady, handleStartupCheck]);
+
+  useEffect(() => {
+    if (!accountReady || !licenseAccessReady || isRunning || isStarting) return;
+
+    let cancelled = false;
+    const refreshQuietly = async () => {
+      try {
+        const result = await GetStartupReadiness();
+        if (cancelled) return;
+        setStartupCheck(result as unknown as {
+          ready: boolean;
+          checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
+        });
+        startupCheckAutoRan.current = true;
+      } catch {
+        // Keep the last known preflight state. The explicit "Tout vérifier"
+        // action still surfaces an error if the user asks for a manual check.
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void refreshQuietly();
+    }, 15_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [accountReady, licenseAccessReady, isRunning, isStarting]);
+
+  const refreshStartupReadiness = useCallback(async () => {
+    startupCheckAutoRan.current = true;
+    setStartupCheckRunning(true);
+    try {
+      const result = await GetStartupReadiness();
+      setStartupCheck(result as unknown as {
+        ready: boolean;
+        checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
+      });
+    } catch (err) {
+      console.warn('Startup readiness refresh failed:', err);
+      setStartupCheck(null);
+      startupCheckAutoRan.current = false;
+    } finally {
+      setStartupCheckRunning(false);
+    }
+  }, []);
+
+  const handleSetLootGoal = async (gold: number, elixir: number, dark: number) => {
+    if (!isRunning) return;
+    try {
+      const goal = await SetSessionLootGoal(gold, elixir, dark);
+      const typed = goal as unknown as { gold?: number; elixir?: number; dark_elixir?: number; active?: boolean };
+      setSessionLootGoal({
+        gold: Number(typed.gold || 0),
+        elixir: Number(typed.elixir || 0),
+        dark_elixir: Number(typed.dark_elixir || 0),
+        active: Boolean(typed.active),
+      });
+      setMemberNotice('Objectif de butin activé.');
+      window.setTimeout(() => setMemberNotice(''), 3500);
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const handleClearLootGoal = async () => {
+    try {
+      await ClearSessionLootGoal();
+      setSessionLootGoal({ gold: 0, elixir: 0, dark_elixir: 0, active: false });
+      setMemberNotice('Objectif de butin désactivé.');
+      window.setTimeout(() => setMemberNotice(''), 3000);
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const handleScheduleStop = async (minutes: number) => {
+    if (!isRunning) return;
+    try {
+      const at = await ScheduleSessionStop(minutes);
+      setScheduledStopAt(String(at || ''));
+      setMemberNotice('Arrêt propre programmé dans ' + (minutes < 60 ? minutes + ' min' : (minutes / 60) + ' h') + '.');
+      window.setTimeout(() => setMemberNotice(''), 4500);
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const handleCancelScheduledStop = async () => {
+    try {
+      await CancelScheduledSessionStop();
+      setScheduledStopAt('');
+      setMemberNotice('Arrêt programmé annulé.');
+      window.setTimeout(() => setMemberNotice(''), 3500);
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const handleExtendSession = async (extra: number) => {
+    if (!isRunning) return;
+    try {
+      await ExtendSessionAttacks(extra);
+      const fresh = await GetStats();
+      setStats(fresh as unknown as BotStats);
+      setMemberNotice('Session prolongée de ' + extra + ' attaques.');
+      window.setTimeout(() => setMemberNotice(''), 4000);
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const handleLiveSpeedChange = async (profile: 'cautious' | 'normal' | 'fast') => {
+    try {
+      await SetMemberSpeedProfile(profile);
+      await syncMemberScopedView(true);
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const handleStartWithPreset = async (preset: 'short' | 'balanced' | 'fast') => {
+    if (startInFlightRef.current || isRunning || isStarting) return;
+    if (updateInstallBusy) {
+      setBotError('Une mise à jour ClashGO est en cours d’installation. Attends le redémarrage avant de lancer le bot.');
+      return;
+    }
+
+    try {
+      await ApplyMemberPreset(preset);
+      await syncMemberScopedView(true);
+      await refreshStartupReadiness();
+      await handleStart();
+    } catch (err) {
+      console.error('Preset session start failed:', err);
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
   };
 
   const handleStart = async () => {
+    if (startInFlightRef.current || isRunning || isStarting) return;
+    if (updateInstallBusy) {
+      setBotError('Une mise à jour ClashGO est en cours d’installation. Attends le redémarrage avant de lancer le bot.');
+      return;
+    }
+    startInFlightRef.current = true;
     setBotError('');
     setBotDiagnosticPath('');
     try {
+      setStartupCheckRunning(true);
+      const readiness = await GetStartupReadiness();
+      const typedReadiness = readiness as unknown as {
+        ready: boolean;
+        checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
+      };
+      setStartupCheck(typedReadiness);
+      setStartupCheckRunning(false);
+
+      if (!typedReadiness.ready) {
+        const firstBlocked = typedReadiness.checks.find((check) => !check.ok && check.blocking !== false);
+        const blockedMessage = firstBlocked
+          ? `${firstBlocked.label} : ${firstBlocked.message}`
+          : 'La configuration ClashGO n’est pas prête.';
+        setBotError(friendlyBotErrorMessage(blockedMessage));
+        return;
+      }
+
       const res = await StartBot(goldThreshold, elixirThreshold, deThreshold, upgradeWalls, searchEnabled);
       if (res.running) {
         // "running=true" from StartBot means the asynchronous boot was
@@ -396,20 +1346,125 @@ function App() {
         setIsStarting(false);
         setIsRunning(false);
         if (res.message) {
-          setBotError(res.message);
+          setBotError(friendlyBotErrorMessage(res.message));
         }
       }
     } catch (err) {
       console.error('Start failed:', err);
+      setStartupCheckRunning(false);
       setIsStarting(false);
       setIsRunning(false);
-      setBotError(err instanceof Error ? err.message : String(err));
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    } finally {
+      startInFlightRef.current = false;
+    }
+  };
+
+  const handleStartQuickTestSession = async () => {
+    if (testSessionInFlightRef.current || startInFlightRef.current || isRunning || isStarting) return;
+    if (updateInstallBusy) {
+      setBotError('Une mise à jour ClashGO est en cours d’installation. La session test pourra démarrer après le redémarrage.');
+      return;
+    }
+    testSessionInFlightRef.current = true;
+    setBotError('');
+    setBotDiagnosticPath('');
+    try {
+      setStartupCheckRunning(true);
+      const readiness = await GetStartupReadiness();
+      const typedReadiness = readiness as unknown as {
+        ready: boolean;
+        checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
+      };
+      setStartupCheck(typedReadiness);
+      setStartupCheckRunning(false);
+
+      if (!typedReadiness.ready) {
+        const firstBlocked = typedReadiness.checks.find((check) => !check.ok && check.blocking !== false);
+        setBotError(friendlyBotErrorMessage(firstBlocked
+          ? `${firstBlocked.label} : ${firstBlocked.message}`
+          : 'La configuration ClashGO n’est pas prête.'));
+        return;
+      }
+
+      const res = await StartQuickTestSession(goldThreshold, elixirThreshold, deThreshold, upgradeWalls, searchEnabled);
+      await syncMemberScopedView(true);
+
+      if (res.running) {
+        setTestSessionActive(true);
+        setIsStarting(true);
+        setIsRunning(false);
+      } else {
+        setIsStarting(false);
+        setIsRunning(false);
+        if (res.message) setBotError(friendlyBotErrorMessage(res.message));
+      }
+    } catch (err) {
+      console.error('Quick test session start failed:', err);
+      setStartupCheckRunning(false);
+      setIsStarting(false);
+      setIsRunning(false);
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    } finally {
+      testSessionInFlightRef.current = false;
+    }
+  };
+
+  const handleStartTestSession = async () => {
+    if (testSessionInFlightRef.current || startInFlightRef.current || isRunning || isStarting) return;
+    if (updateInstallBusy) {
+      setBotError('Une mise à jour ClashGO est en cours d’installation. La session de validation pourra démarrer après le redémarrage.');
+      return;
+    }
+    testSessionInFlightRef.current = true;
+    setBotError('');
+    setBotDiagnosticPath('');
+    try {
+      setStartupCheckRunning(true);
+      const readiness = await GetStartupReadiness();
+      const typedReadiness = readiness as unknown as {
+        ready: boolean;
+        checks: Array<{ id: string; label: string; ok: boolean; blocking?: boolean; message: string; action?: string; action_label?: string }>;
+      };
+      setStartupCheck(typedReadiness);
+      setStartupCheckRunning(false);
+
+      if (!typedReadiness.ready) {
+        const firstBlocked = typedReadiness.checks.find((check) => !check.ok && check.blocking !== false);
+        setBotError(friendlyBotErrorMessage(firstBlocked
+          ? `${firstBlocked.label} : ${firstBlocked.message}`
+          : 'La configuration ClashGO n’est pas prête.'));
+        return;
+      }
+
+      const res = await StartTestSession(goldThreshold, elixirThreshold, deThreshold, upgradeWalls, searchEnabled);
+      await syncMemberScopedView(true);
+
+      if (res.running) {
+        setTestSessionActive(true);
+        setIsStarting(true);
+        setIsRunning(false);
+      } else {
+        setIsStarting(false);
+        setIsRunning(false);
+        if (res.message) setBotError(friendlyBotErrorMessage(res.message));
+      }
+    } catch (err) {
+      console.error('Test session start failed:', err);
+      setStartupCheckRunning(false);
+      setIsStarting(false);
+      setIsRunning(false);
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    } finally {
+      testSessionInFlightRef.current = false;
     }
   };
 
   const handleStop = async () => {
     try {
+      setGracefulStopPending(false);
       const res = await StopBot();
+      setTestSessionActive(false);
       setIsStarting(false);
       setIsRunning(res.running);
     } catch (err) {
@@ -417,10 +1472,57 @@ function App() {
     }
   };
 
+  const handlePause = async () => {
+    if (!isRunning || isPaused) return;
+    try {
+      const res = await PauseBot();
+      if (res.running) {
+        setIsPaused(true);
+        setMemberNotice(res.message || 'Pause activée.');
+        window.setTimeout(() => setMemberNotice(''), 5000);
+      }
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const handleResume = async () => {
+    if (!isRunning || !isPaused) return;
+    try {
+      const res = await ResumeBot();
+      if (res.running) {
+        setIsPaused(false);
+        setMemberNotice(res.message || 'Session reprise.');
+        window.setTimeout(() => setMemberNotice(''), 5000);
+      }
+    } catch (err) {
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  const handleStopAfterAttack = async () => {
+    if (!isRunning || gracefulStopPending) return;
+    try {
+      const res = await StopAfterCurrentAttack();
+      if (res.running) {
+        setGracefulStopPending(true);
+        setMemberNotice(res.message || 'Arrêt programmé après l’attaque en cours.');
+        window.setTimeout(() => setMemberNotice(''), 5000);
+      } else {
+        setGracefulStopPending(false);
+        setIsRunning(false);
+      }
+    } catch (err) {
+      console.error('Graceful stop failed:', err);
+      setBotError(friendlyBotErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
   const handleSetBlueStacksInstance = async (instance: string): Promise<void> => {
     await SetBlueStacksInstance(instance);
     const d = await GetSystemDiagnostics();
     setSystemDiagnostics(d as SystemDiagnostics);
+    await refreshStartupReadiness();
   };
 
   const handleExportDiagnostics = async (): Promise<string> => {
@@ -438,7 +1540,7 @@ function App() {
       const path = await handleExportDiagnostics();
       setBotDiagnosticPath(path);
     } catch {
-      setBotDiagnosticPath('Diagnostic export failed — check the system console.');
+      setBotDiagnosticPath('Échec de l’export du diagnostic — consulte la console système.');
     }
   };
 
@@ -446,7 +1548,7 @@ function App() {
     try {
       await ResetStats();
       const s = await GetStats();
-      setStats(s);
+      setStats(s as unknown as BotStats);
     } catch (err) {
       console.error('Reset failed:', err);
     }
@@ -493,11 +1595,16 @@ function App() {
     setUpdateStatus(s);
   };
 
+  const updateInstallBusy = updateStatus?.state === 'installing' || updateStatus?.state === 'restarting';
+
   const dashboardProps = useMemo(() => ({
     stats,
     history,
+    activity,
+    replay,
+    sessionReport,
     logs,
-  }), [stats, history, logs]);
+  }), [stats, history, activity, replay, sessionReport, logs]);
 
   // ADB connection state — drives the header status pill. Labels stop
   // calling the local ADB server "localhost:{port}" because the bot
@@ -514,12 +1621,125 @@ function App() {
           : 'disconnected';
   const adbStateLabel =
     adbState === 'connected'
-      ? 'Connected'
+      ? 'Connecté'
       : adbState === 'degraded'
-        ? 'Degraded'
+        ? 'Dégradé'
         : adbState === 'disconnected'
-          ? 'Disconnected'
-          : 'Awaiting';
+          ? 'Déconnecté'
+          : 'En attente';
+
+  const licenseExpiryNotice = useMemo(() => {
+    if (!licenseActivated || !licenseExpiresAt) return null;
+    const expiry = Date.parse(licenseExpiresAt);
+    if (!Number.isFinite(expiry)) return null;
+    const remainingMs = expiry - Date.now();
+    if (remainingMs <= 0) {
+      return { urgent: true, text: 'Ta licence ClashGO est expirée.' };
+    }
+    const remainingHours = Math.ceil(remainingMs / (60 * 60 * 1000));
+    if (remainingHours <= 72) {
+      const text = remainingHours <= 24
+        ? 'Ta licence ClashGO expire aujourd’hui.'
+        : `Ta licence ClashGO expire dans ${Math.ceil(remainingHours / 24)} jours.`;
+      return { urgent: remainingHours <= 24, text };
+    }
+    return null;
+  }, [licenseActivated, licenseExpiresAt]);
+
+  const windowsPreflightReady = useMemo(() => (
+    systemDiagnostics
+      ? Boolean(
+          systemDiagnostics.assets_ready &&
+          systemDiagnostics.emulator?.adb_found &&
+          systemDiagnostics.emulator?.bluestacks_player_found &&
+          systemDiagnostics.emulator?.preferred_instance
+        )
+      : false
+  ), [systemDiagnostics]);
+
+  // The backend pre-control is the source of truth whenever available.
+  // This keeps the sidebar button aligned with the exact checks StartBot will
+  // enforce (license, runtime assets, BlueStacks/ADB, strategy and member
+  // pacing). The Clash account remains advisory and never blocks startup.
+  const blockingStartupCheck = startupCheck?.checks.find((check) => !check.ok && check.blocking !== false);
+  const startReady = !updateInstallBusy && (startupCheck
+    ? startupCheck.ready
+    : licenseAccessReady && windowsPreflightReady);
+  const startBlockedReason = updateInstallBusy
+    ? 'Mise à jour en cours · ClashGO va redémarrer automatiquement.'
+    : blockingStartupCheck
+      ? `${blockingStartupCheck.label} : ${blockingStartupCheck.message}`
+      : !licenseAccessReady
+      ? 'Active ta licence dans Mon ClashGO.'
+      : !systemDiagnostics
+        ? 'Vérification de l’environnement Windows en cours…'
+        : !windowsPreflightReady
+          ? 'Vérifie BlueStacks et ADB dans Paramètres > État Windows.'
+          : '';
+
+  const openStartupFix = useCallback((action?: string) => {
+    switch (action) {
+      case 'license_account':
+        setAccountPage('account');
+        setTab('account');
+        break;
+      case 'member_settings':
+        setAccountPage('settings');
+        setTab('account');
+        break;
+      case 'village':
+      case 'account':
+        setAccountPage('village');
+        setTab('account');
+        break;
+      case 'automation':
+        setTab('config');
+        break;
+      case 'settings':
+        setTab('settings');
+        break;
+      default:
+        setTab('dashboard');
+        break;
+    }
+  }, []);
+
+  const readinessIssues = useMemo(() => {
+    if (!systemDiagnostics) return [] as string[];
+    const issues: string[] = [];
+    if (!systemDiagnostics.assets_ready) {
+      const missing = systemDiagnostics.missing_assets ?? [];
+      issues.push(missing.length
+        ? `Fichiers ClashGO manquants : ${missing.slice(0, 3).join(', ')}`
+        : 'Certains fichiers nécessaires à ClashGO sont manquants.');
+    }
+    if (!systemDiagnostics.emulator?.bluestacks_player_found) {
+      issues.push('BlueStacks 5 n’est pas détecté.');
+    }
+    if (!systemDiagnostics.emulator?.adb_found) {
+      issues.push('ADB n’est pas détecté.');
+    }
+    if (systemDiagnostics.emulator?.bluestacks_player_found && !systemDiagnostics.emulator?.bluestacks_running) {
+      issues.push('BlueStacks est installé mais ne semble pas démarré.');
+    }
+    if (!systemDiagnostics.emulator?.preferred_instance) {
+      issues.push('Aucune instance BlueStacks utilisable n’est sélectionnée.');
+    }
+    if (systemDiagnostics.emulator?.adb_setting_present && !systemDiagnostics.emulator?.adb_enabled) {
+      issues.push('ADB est désactivé dans la configuration BlueStacks.');
+    }
+    return issues;
+  }, [systemDiagnostics]);
+
+  const tabTitle: Record<TabType, string> = {
+    dashboard: 'Accueil',
+    config: 'Automatisation',
+    account: 'Mon ClashGO',
+    activity: 'Activité',
+    analytics: 'Statistiques',
+    settings: 'Paramètres',
+    developer: licenseRole === 'admin' ? 'Administration' : 'Support',
+  };
 
   const configProps = useMemo(() => ({
     goldThreshold, setGoldThreshold,
@@ -532,10 +1752,37 @@ function App() {
     stallTimer, setStallTimer,
     lootExitEnabled, setLootExitEnabled,
     lootExitPercent, setLootExitPercent,
+    endAtStars, setEndAtStars,
+    autoCollectors, setAutoCollectors,
+    collectorMinutes, setCollectorMinutes,
+    privacyMaskUsername, setPrivacyMaskUsername,
+    saveAcceptedBases, setSaveAcceptedBases,
+    dryRun, setDryRun,
+    maxRunMinutes, setMaxRunMinutes,
+    emergencyStopHotkey, setEmergencyStopHotkey,
+    saveNearMissBases, setSaveNearMissBases,
+    nearMissSampleEvery, setNearMissSampleEvery,
+    nearMissWithinPercent, setNearMissWithinPercent,
     simpleMode,
+    testSessionActive,
+    automationActive: isRunning || isStarting,
     onSetSimpleMode: async (enabled: boolean) => {
+      const level: InterfaceLevel = enabled ? 'simple' : 'advanced';
+      // The Go automation mode is authoritative. Reflect it immediately after
+      // the backend commit succeeds; the interface-level preference is a
+      // secondary convenience and must never leave the UI showing the opposite
+      // runtime mode if its own persistence fails.
       await SetSimpleMode(enabled);
       setSimpleMode(enabled);
+      if (interfaceLevel !== 'developer') {
+        setInterfaceLevel(level);
+      }
+      try {
+        await SaveMemberInterfaceLevel(level);
+      } catch (err) {
+        console.warn('Automation mode changed but interface preference could not be saved:', err);
+      }
+      await refreshStartupReadiness();
     },
     onSave: async () => {
       // Errors intentionally bubble so ConfigView's save-status
@@ -544,17 +1791,26 @@ function App() {
       // which made save feel broken when SaveConfig (the Wails IPC)
       // rejected (e.g. backend down, malformed payload).
       await saveSettings();
+      await refreshStartupReadiness();
     }
   }), [
     goldThreshold, elixirThreshold, deThreshold,
     selectedStrategy, strategies, searchEnabled, upgradeWalls, stallTimer,
-    lootExitEnabled, lootExitPercent, simpleMode
+    lootExitEnabled, lootExitPercent, endAtStars, autoCollectors, collectorMinutes,
+    privacyMaskUsername, saveAcceptedBases, dryRun, maxRunMinutes, emergencyStopHotkey,
+    saveNearMissBases, nearMissSampleEvery, nearMissWithinPercent,
+    simpleMode, testSessionActive, isRunning, isStarting, refreshStartupReadiness
   ]);
+
+  if (!licenseAccessReady) {
+    return <LicenseGate onReady={handleLicenseReady} />;
+  }
 
   return (
     <div className="app-shell bg-zinc-50 dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50 transition-colors duration-500" style={{ display: 'flex', width: '100vw', height: '100vh' }}>
       <Sidebar 
-        tab={tab} 
+        tab={tab}
+        interfaceLevel={interfaceLevel}
         setTab={setTab}
         expanded={sidebarExpanded}
         setExpanded={setSidebarExpanded}
@@ -562,6 +1818,18 @@ function App() {
         starting={isStarting}
         onStart={handleStart}
         onStop={handleStop}
+        licenseActivated={licenseActivated}
+        licenseRole={licenseRole}
+        memberName={licenseMemberName}
+        licensePlan={licensePlan}
+        licenseExpiresAt={licenseExpiresAt}
+        speedProfile={String(stats.member_speed_profile || stats.speed_profile || 'normal')}
+        paused={isPaused}
+        sessionAttacks={Number(stats.session_attacks || 0)}
+        sessionCap={Number(stats.session_attack_cap || 0)}
+        scheduledStopAt={scheduledStopAt}
+        startReady={startReady}
+        startBlockedReason={startBlockedReason}
       />
 
       <main 
@@ -576,16 +1844,16 @@ function App() {
                   <span className={`w-1.5 h-1.5 rounded-full ${isRunning ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-300 dark:bg-zinc-800'}`}></span>
                   <span className="w-1.5 h-1.5 bg-zinc-300 dark:bg-zinc-800 rounded-full"></span>
                 </div>
-                <h2 className="text-[11px] text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.4em] font-black">ClashGO System</h2>
+                <h2 className="text-[11px] text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.4em] font-black">ClashGO</h2>
               </div>
-              <h1 className="font-headline text-5xl font-bold tracking-tight capitalize text-zinc-950 dark:text-white">{tab}</h1>
+              <h1 className="font-headline text-5xl font-bold tracking-tight text-zinc-950 dark:text-white">{tabTitle[tab]}</h1>
             </div>
             <div className="flex gap-4 items-center">
               {!updateDismissed && (
                 <UpdateBanner
                   status={updateStatus}
                   appVersion={appVersion}
-                  isBotRunning={isRunning}
+                  isBotRunning={isRunning || isStarting}
                   onCheckNow={handleUpdaterCheck}
                   onDownload={handleUpdaterDownload}
                   onApply={handleUpdaterApply}
@@ -613,13 +1881,61 @@ function App() {
             </div>
           </header>
 
+          {licenseExpiryNotice && (
+            <section className={
+              'mb-4 rounded-2xl border px-4 py-3 ' +
+              (licenseExpiryNotice.urgent
+                ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300'
+                : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300')
+            }>
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <span className="material-symbols-outlined text-lg">{licenseExpiryNotice.urgent ? 'error' : 'schedule'}</span>
+                  <div>
+                    <div className="text-xs font-black uppercase tracking-wider">Licence</div>
+                    <div className="mt-0.5 text-sm font-semibold">{licenseExpiryNotice.text}</div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTab('account')}
+                  className="shrink-0 rounded-xl border border-current/20 px-4 py-2 text-[10px] font-black uppercase tracking-widest"
+                >
+                  Mon ClashGO
+                </button>
+              </div>
+            </section>
+          )}
+
+          {memberNotice && (
+            <section className="mb-4 no-drag rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-3 text-emerald-700 dark:text-emerald-300" role="status">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <span className="material-symbols-outlined text-lg">task_alt</span>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-[0.2em]">Session test</div>
+                    <div className="mt-0.5 text-sm font-semibold">{memberNotice}</div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMemberNotice('')}
+                  className="rounded-xl p-2 text-emerald-600/70 transition hover:bg-emerald-500/10 hover:text-emerald-700 dark:text-emerald-300"
+                  aria-label="Fermer le message"
+                >
+                  <span className="material-symbols-outlined text-lg">close</span>
+                </button>
+              </div>
+            </section>
+          )}
+
           {botError && (
             <section className="mb-6 no-drag rounded-2xl border border-rose-500/30 bg-rose-500/10 px-5 py-4 shadow-sm" role="alert">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
                     <span className="material-symbols-outlined text-lg">error</span>
-                    <span className="text-[10px] font-black uppercase tracking-[0.22em]">Bot startup failed</span>
+                    <span className="text-[10px] font-black uppercase tracking-[0.22em]">Démarrage du bot impossible</span>
                   </div>
                   <p className="mt-1 break-words text-sm font-semibold text-zinc-800 dark:text-zinc-200">{botError}</p>
                   {botDiagnosticPath && (
@@ -627,25 +1943,46 @@ function App() {
                   )}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
+                  {blockingStartupCheck?.action && (
+                    <button
+                      type="button"
+                      onClick={() => openStartupFix(blockingStartupCheck.action)}
+                      className="rounded-xl bg-zinc-950 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+                    >
+                      {blockingStartupCheck.action_label || 'Corriger maintenant'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void GetSystemDiagnostics()
+                        .then((value) => setSystemDiagnostics(value as SystemDiagnostics))
+                        .catch((err: unknown) => console.warn('GetSystemDiagnostics failed:', err));
+                      void refreshStartupReadiness();
+                    }}
+                    className="rounded-xl border border-rose-300/60 bg-rose-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-rose-700 transition hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-300"
+                  >
+                    Re-tester maintenant
+                  </button>
                   <button
                     type="button"
                     onClick={() => setTab('settings')}
                     className="rounded-xl border border-zinc-300/70 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
                   >
-                    Windows readiness
+                    État Windows
                   </button>
                   <button
                     type="button"
                     onClick={() => void handleBotDiagnosticExport()}
                     className="rounded-xl bg-rose-600 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white transition hover:bg-rose-500"
                   >
-                    Export diagnostics
+                    Exporter le diagnostic
                   </button>
                   <button
                     type="button"
                     onClick={() => { setBotError(''); setBotDiagnosticPath(''); }}
                     className="rounded-xl px-3 py-2 text-zinc-500 transition hover:bg-rose-500/10 hover:text-rose-600 dark:text-zinc-400"
-                    aria-label="Dismiss startup error"
+                    aria-label="Fermer l’erreur de démarrage"
                   >
                     <span className="material-symbols-outlined text-lg">close</span>
                   </button>
@@ -654,22 +1991,88 @@ function App() {
             </section>
           )}
 
-          {tab === 'dashboard' && <Dashboard {...dashboardProps} />}
+          {tab === 'dashboard' && (
+            <HomeView
+              stats={stats}
+              history={history}
+              activity={activity}
+              sessionReport={sessionReport}
+              testSessionActive={testSessionActive}
+              showValidationTools={interfaceLevel !== 'simple'}
+              running={isRunning}
+              starting={isStarting}
+              onStart={handleStart}
+              onStartWithPreset={(preset) => void handleStartWithPreset(preset)}
+              onSpeedChange={(profile) => void handleLiveSpeedChange(profile)}
+              onExtendSession={(extra) => void handleExtendSession(extra)}
+              onScheduleStop={(minutes) => void handleScheduleStop(minutes)}
+              onCancelScheduledStop={() => void handleCancelScheduledStop()}
+              scheduledStopAt={scheduledStopAt}
+              sessionLootGoal={sessionLootGoal}
+              onSetLootGoal={(gold, elixir, dark) => void handleSetLootGoal(gold, elixir, dark)}
+              onClearLootGoal={() => void handleClearLootGoal()}
+              onStartTestSession={handleStartTestSession}
+              onStartQuickTestSession={handleStartQuickTestSession}
+              onStop={handleStop}
+              onPause={handlePause}
+              onResume={handleResume}
+              paused={isPaused}
+              onStopAfterAttack={handleStopAfterAttack}
+              gracefulStopPending={gracefulStopPending}
+              onOpenAutomation={() => setTab('config')}
+              onOpenAccount={() => {
+                setAccountPage('account');
+                setTab('account');
+              }}
+              onOpenMemberSettings={() => {
+                setAccountPage('settings');
+                setTab('account');
+              }}
+              onOpenVillage={() => {
+                setAccountPage('village');
+                setTab('account');
+              }}
+              onOpenSettings={() => setTab('settings')}
+              licenseReady={licenseActivated}
+              licenseRequired={licenseEnforced}
+              memberName={licenseMemberName}
+              licensePlan={licensePlan}
+              licenseExpiresAt={licenseExpiresAt}
+              accountLinked={Boolean(playerTag)}
+              windowsReady={systemDiagnostics ? windowsPreflightReady : null}
+              readinessIssues={readinessIssues}
+              startupCheck={startupCheck}
+              startupCheckRunning={startupCheckRunning}
+              onRunStartupCheck={() => void handleStartupCheck()}
+              latestBootReport={latestBootReport}
+              currentArmy={currentArmy}
+            />
+          )}
+          {tab === 'activity' && <Dashboard {...dashboardProps} />}
           {tab === 'account' && (
             <AccountView
               playerTag={playerTag}
+              interfaceLevel={interfaceLevel}
+              initialPage={accountPage}
+              testSessionActive={testSessionActive}
+              automationActive={isRunning || isStarting || testSessionActive}
+              onInterfaceLevelChange={handleInterfaceLevelChange}
               onAccountChanged={(tag) => {
                 setPlayerTag(tag);
                 if (tag) setTab('account');
               }}
+              onReadinessChanged={() => { void refreshStartupReadiness(); }}
+              onPageChange={setAccountPage}
             />
           )}
           {tab === 'analytics' && <Analytics stats={stats} resourceHistory={resourceHistory} history={history as any} />}
           {tab === 'config' && <ConfigView {...configProps} />}
+          {tab === 'developer' && <DeveloperView />}
           {tab === 'settings' && (
             <SettingsView
               stats={stats}
               isRunning={isRunning}
+              isStarting={isStarting}
               adbPort={adbPort}
               darkMode={darkMode}
               setDarkMode={setDarkMode}
@@ -686,14 +2089,6 @@ function App() {
         </div>
       </main>
 
-      {accountReady && !playerTag && (
-        <AccountOnboarding
-          onLinked={(tag) => {
-            setPlayerTag(tag);
-            setTab('account');
-          }}
-        />
-      )}
     </div>
   );
 }

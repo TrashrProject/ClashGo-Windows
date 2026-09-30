@@ -1,6 +1,7 @@
 package attack
 
 import (
+	"image"
 	"strings"
 	"sync"
 	"time"
@@ -37,17 +38,39 @@ type ArmyStateSnapshot struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 }
 
+type ArmyReplayEvent struct {
+	At         time.Time   `json:"at"`
+	OffsetMS   int64       `json:"offset_ms"`
+	Kind       string      `json:"kind"`
+	Name       string      `json:"name,omitempty"`
+	Category   string      `json:"category,omitempty"`
+	Count      int         `json:"count,omitempty"`
+	SlotX      int         `json:"slot_x,omitempty"`
+	SlotY      int         `json:"slot_y,omitempty"`
+	DeploySide string      `json:"deploy_side,omitempty"`
+	P1         image.Point `json:"p1,omitempty"`
+	P2         image.Point `json:"p2,omitempty"`
+}
+
+
 // ArmyStateManager is the attack-time source of truth. Vision supplies
 // observations; the farm profile supplies intent. Keeping both in one place
 // prevents the deploy loop from independently guessing quantities and status.
 type ArmyStateManager struct {
-	mu sync.Mutex
-	th int
-	units map[string]*ArmyUnitState
+	mu        sync.Mutex
+	th        int
+	units     map[string]*ArmyUnitState
+	startedAt time.Time
+	events    []ArmyReplayEvent
 }
 
 func NewArmyStateManager(profile config.FarmProfile) *ArmyStateManager {
-	m := &ArmyStateManager{th: profile.TownHall, units: make(map[string]*ArmyUnitState)}
+	m := &ArmyStateManager{
+		th: profile.TownHall,
+		units: make(map[string]*ArmyUnitState),
+		startedAt: time.Now(),
+		events: make([]ArmyReplayEvent, 0, 24),
+	}
 	for _, u := range profile.Troops {
 		m.add(u.Name, "Troop", u.Count)
 	}
@@ -184,6 +207,46 @@ func (m *ArmyStateManager) IncompleteUnits() []ArmyUnitState {
 			out = append(out, *u)
 		}
 	}
+	return out
+}
+
+func (m *ArmyStateManager) RecordDeploy(name, category string, count, slotX, slotY int, deploySide string, p1, p2 image.Point) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	m.events = append(m.events, ArmyReplayEvent{
+		At: now,
+		OffsetMS: now.Sub(m.startedAt).Milliseconds(),
+		Kind: "deploy",
+		Name: strings.TrimSpace(name),
+		Category: strings.TrimSpace(category),
+		Count: count,
+		SlotX: slotX,
+		SlotY: slotY,
+		DeploySide: deploySide,
+		P1: p1,
+		P2: p2,
+	})
+}
+
+func (m *ArmyStateManager) RecordReplayEvent(kind, name, category string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	m.events = append(m.events, ArmyReplayEvent{
+		At: now,
+		OffsetMS: now.Sub(m.startedAt).Milliseconds(),
+		Kind: kind,
+		Name: strings.TrimSpace(name),
+		Category: strings.TrimSpace(category),
+	})
+}
+
+func (m *ArmyStateManager) ReplayEvents() []ArmyReplayEvent {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]ArmyReplayEvent, len(m.events))
+	copy(out, m.events)
 	return out
 }
 

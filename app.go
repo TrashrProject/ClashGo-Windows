@@ -1,7 +1,10 @@
 package main
 
+// Build marker: final beta validation for single-broker fast attack pipeline.
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,20 +13,42 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Ducky705/ClashGO/internal/adb"
+	"github.com/Ducky705/ClashGO/internal/attack"
 	"github.com/Ducky705/ClashGO/internal/bot"
 	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/logger"
+	"github.com/Ducky705/ClashGO/internal/licensing"
 	"github.com/Ducky705/ClashGO/internal/paths"
+	"github.com/Ducky705/ClashGO/internal/support"
+	"github.com/Ducky705/ClashGO/internal/telemetry"
 	"github.com/Ducky705/ClashGO/internal/updater"
 	"github.com/labstack/echo/v4"
 	"github.com/rs/zerolog/log"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"gocv.io/x/gocv"
 )
+
+func gracefulStopReached(history []bot.AttackReport, sequenceStartUnix int64) bool {
+	if sequenceStartUnix <= 0 || len(history) == 0 {
+		return false
+	}
+	latest := history[0]
+	if latest.ReturnHomeDurationMS <= 0 {
+		return false
+	}
+	reportAt, err := time.Parse(time.RFC3339, latest.Timestamp)
+	if err != nil {
+		return false
+	}
+	return reportAt.Unix() >= sequenceStartUnix
+}
 
 // App struct
 type App struct {
@@ -32,22 +57,39 @@ type App struct {
 	botCtx    context.Context
 	cancel    context.CancelFunc
 	mu        sync.Mutex
-	stopping  bool
-	lastStats bot.BotStats
+	stopping    bool
+	lastStats   bot.BotStats
+	lastActivity []telemetry.Event
+	gracefulStopRequested bool
+	sessionStopTimer       *time.Timer
+	sessionStopAt          time.Time
+	sessionGoldGoal        int64
+	sessionElixirGoal      int64
+	sessionDarkGoal        int64
+	gracefulStopSequenceStartUnix int64
+
+	// Logs are high-frequency and unrelated to bot lifecycle ownership.
+	// Keep them off the main App mutex so console traffic cannot delay
+	// Start/Stop/GetStats or bot assignment.
+	logMu     sync.RWMutex
 	logBuffer []string
 
-	// cachedHistory is the in-memory mirror of attack_history.json
-	// so React's 2 s poll for GetAttackHistory doesn't hit the
-	// filesystem on every tick. Refreshed lazily on first call
-	// (cold start) and eagerly on each bot.statsUpdate callback
-	// (end of every attack — bounded to ~once per attack, plus the
-	// per-search-skip refresh, both far below the 0.5 Hz React
-	// poll). RWMutex because read dominates on the hot IPC path.
+	// cachedHistory is the in-memory mirror of attack history so React never
+	// needs filesystem I/O on its normal poll/event path. It is loaded lazily
+	// from disk on cold start and, while the bot runs, replaced directly from
+	// Bot.HistorySnapshot() at attack boundaries. Matchmaking skips intentionally never
+	// refresh history: their counters are atomic and React already polls live
+	// stats, so disk I/O stays off the search hot path. RWMutex because read
+	// dominates on the hot IPC path.
 	// Every eager refresh is a FORCED disk re-read (see
 	// refreshHistory) — a warm cache must never be treated as
 	// authoritative, or the latest attack would never surface.
 	cachedHistory   []bot.AttackReport
 	cachedHistoryMu sync.RWMutex
+
+	// License + automatic support reporting.
+	license         *licensing.Service
+	supportReporter *support.Reporter
 
 	// Updater wiring
 	updater       *updater.Service
@@ -68,21 +110,25 @@ type WailsLogWriter struct {
 func (w *WailsLogWriter) Write(p []byte) (n int, err error) {
 	msg := string(p)
 
-	w.app.mu.Lock()
+	w.app.logMu.Lock()
 	w.app.logBuffer = append(w.app.logBuffer, msg)
 	if len(w.app.logBuffer) > 100 {
 		w.app.logBuffer = w.app.logBuffer[len(w.app.logBuffer)-100:]
 	}
-	w.app.mu.Unlock()
+	w.app.logMu.Unlock()
 
 	return len(p), nil
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
+	cfg := config.LoadOrDefault("config.json")
+	controlURL := clashControlServiceURL(cfg)
+	licenseService := licensing.New(controlURL, version)
 	return &App{
 		logBuffer: make([]string, 0, 100),
-		updater:   updater.New(updater.DefaultConfig(version)),
+		license:   licenseService,
+		updater:   updater.New(updater.DefaultConfigWithChannel(version, updateChannel)),
 	}
 }
 
@@ -91,15 +137,50 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	// Setup log bridge
+	// Setup license state + automatic support reporter before the logger so
+	// error/fatal/panic records can be queued from the first startup failure.
+	if a.license == nil {
+		cfg := config.LoadOrDefault("config.json")
+		a.license = licensing.New(clashControlServiceURL(cfg), version)
+	}
+	if a.license.GetState().Activated {
+		if err := a.applyMemberProfileForCurrentLicense(); err != nil {
+			log.Warn().Err(err).Msg("failed to restore member settings profile")
+		}
+		if err := a.restoreTestSessionSettings(); err != nil {
+			log.Warn().Err(err).Msg("failed to recover interrupted test-session settings")
+		}
+		if err := a.applyMemberAccountForCurrentLicense(); err != nil {
+			log.Warn().Err(err).Msg("failed to restore member Clash account")
+		}
+		if err := a.applyMemberAutomationForCurrentLicense(); err != nil {
+			log.Warn().Err(err).Msg("failed to restore member automation preferences")
+		}
+		if err := a.restoreMemberRuntimeState(true); err != nil {
+			log.Warn().Err(err).Msg("failed to restore member runtime state")
+		}
+	}
+	cfg := config.LoadOrDefault("config.json")
+	a.supportReporter = support.New(clashControlServiceURL(cfg), version, a.license)
+
+	// Setup log bridge.
 	wailsWriter := &WailsLogWriter{app: a}
-	logger.Init(os.Getenv("DEBUG") != "", wailsWriter)
+	logger.Init(os.Getenv("DEBUG") != "", wailsWriter, a.supportReporter)
 	a.loadPersistedStats()
+
+	// Validate a previously activated license without blocking first paint.
+	go func() {
+		state := a.license.Validate(context.Background())
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "license_state", state)
+		}
+		a.supportReporter.Flush(context.Background())
+	}()
 
 	// Bring up the updater service. If NewApp wasn't used (rare
 	// test scaffold), construct lazily.
 	if a.updater == nil {
-		a.updater = updater.New(updater.DefaultConfig(version))
+		a.updater = updater.New(updater.DefaultConfigWithChannel(version, updateChannel))
 	}
 	a.updater.CleanupOrphanDownloads()
 	bgCtx, bgCancel := context.WithCancel(context.Background())
@@ -107,6 +188,8 @@ func (a *App) startup(ctx context.Context) {
 	a.updaterBgStop = bgCancel
 	a.updater.StartBackgroundPoller(bgCtx)
 	go a.forwardUpdaterStatus(bgCtx)
+	go a.licenseValidationLoop(bgCtx)
+	go a.accountProfileSyncLoop(bgCtx)
 
 	// Skip the standalone web dashboard on `wails dev`. Wails injects
 	// its own dev proxy at :34115 → Vite at :5173 by parsing stdout
@@ -125,6 +208,276 @@ func (a *App) startup(ctx context.Context) {
 	if runtime.Environment(ctx).BuildType != "dev" {
 		// Start Web Server for Remote Access (production-only).
 		go a.startWebServer()
+	}
+}
+
+var memberRuntimeStateFiles = []string{
+	"stats.json",
+	"attack_history.json",
+	"last_attack_report.json",
+	"village_resources.json",
+	"village_resource_history.json",
+	"current_army.json",
+	filepath.Join("logs", "last_boot_report.json"),
+	filepath.Join("output", "session_reports", "latest.json"),
+}
+
+var memberRuntimeStateDirs = []string{
+	"learning",
+}
+
+func (a *App) memberRuntimeStateDir() string {
+	if a == nil || a.license == nil {
+		return ""
+	}
+	id := strings.TrimSpace(a.license.ProfileID())
+	if id == "" {
+		return ""
+	}
+	return paths.ResolveConfig(filepath.Join("members", id, "state"))
+}
+
+func copyRuntimeStateFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+
+	tmp := dst + ".tmp"
+	backup := dst + ".bak"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+
+	_ = os.Remove(backup)
+	hadOriginal := false
+	if _, err := os.Stat(dst); err == nil {
+		if err := os.Rename(dst, backup); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+		hadOriginal = true
+	}
+
+	if err := os.Rename(tmp, dst); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backup, dst)
+		}
+		_ = os.Remove(tmp)
+		return err
+	}
+	_ = os.Remove(backup)
+	return nil
+}
+
+func copyRuntimeStateDir(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("runtime state path is not a directory: %s", src)
+	}
+	if err := os.RemoveAll(dst); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	return filepath.Walk(src, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return nil
+		}
+		return copyRuntimeStateFile(path, target)
+	})
+}
+
+func (a *App) archiveMemberRuntimeState(clearShared bool) error {
+	dir := a.memberRuntimeStateDir()
+	if dir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	for _, rel := range memberRuntimeStateFiles {
+		src := paths.ResolveConfig(rel)
+		dst := filepath.Join(dir, rel)
+
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			// Absence is meaningful (for example after ResetStats): remove any
+			// older archived copy so deleted member data cannot reappear later.
+			_ = os.Remove(dst)
+			_ = os.Remove(dst + ".bak")
+			_ = os.Remove(dst + ".tmp")
+			continue
+		}
+
+		if err := copyRuntimeStateFile(src, dst); err != nil {
+			return fmt.Errorf("archive member state %s: %w", rel, err)
+		}
+		if clearShared {
+			_ = os.Remove(src)
+		}
+	}
+	for _, rel := range memberRuntimeStateDirs {
+		src := paths.ResolveConfig(rel)
+		dst := filepath.Join(dir, rel)
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			_ = os.RemoveAll(dst)
+			continue
+		}
+		if err := copyRuntimeStateDir(src, dst); err != nil {
+			return fmt.Errorf("archive member state dir %s: %w", rel, err)
+		}
+		if clearShared {
+			_ = os.RemoveAll(src)
+		}
+	}
+	marker := filepath.Join(dir, ".initialized")
+	if err := os.WriteFile(marker, []byte("1"), 0o600); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *App) restoreMemberRuntimeState(adoptShared bool) error {
+	dir := a.memberRuntimeStateDir()
+	if dir == "" {
+		return nil
+	}
+	marker := filepath.Join(dir, ".initialized")
+
+	if adoptShared {
+		// A persisted local activation means the shared runtime files belong to
+		// this same member from the previous process. If any are present, they
+		// are newer than (or equal to) the archived snapshot and therefore are
+		// authoritative. Refresh the member archive without clearing them.
+		hasShared := false
+		for _, rel := range memberRuntimeStateFiles {
+			if _, err := os.Stat(paths.ResolveConfig(rel)); err == nil {
+				hasShared = true
+				break
+			}
+		}
+		if !hasShared {
+			for _, rel := range memberRuntimeStateDirs {
+				if _, err := os.Stat(paths.ResolveConfig(rel)); err == nil {
+					hasShared = true
+					break
+				}
+			}
+		}
+		if hasShared {
+			return a.archiveMemberRuntimeState(false)
+		}
+	}
+
+	if _, err := os.Stat(marker); os.IsNotExist(err) {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		// A newly activated license must start clean. A startup migration with
+		// no shared data also starts clean and simply initializes its namespace.
+		if !adoptShared {
+			for _, rel := range memberRuntimeStateFiles {
+				_ = os.Remove(paths.ResolveConfig(rel))
+			}
+			for _, rel := range memberRuntimeStateDirs {
+				_ = os.RemoveAll(paths.ResolveConfig(rel))
+			}
+		}
+		return os.WriteFile(marker, []byte("1"), 0o600)
+	}
+
+	for _, rel := range memberRuntimeStateFiles {
+		src := filepath.Join(dir, rel)
+		dst := paths.ResolveConfig(rel)
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			_ = os.Remove(dst)
+			continue
+		}
+		if err := copyRuntimeStateFile(src, dst); err != nil {
+			return fmt.Errorf("restore member state %s: %w", rel, err)
+		}
+	}
+	for _, rel := range memberRuntimeStateDirs {
+		src := filepath.Join(dir, rel)
+		dst := paths.ResolveConfig(rel)
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			_ = os.RemoveAll(dst)
+			continue
+		}
+		if err := copyRuntimeStateDir(src, dst); err != nil {
+			return fmt.Errorf("restore member state dir %s: %w", rel, err)
+		}
+	}
+	return nil
+}
+
+func (a *App) clearInMemoryMemberRuntimeState() {
+	a.mu.Lock()
+	a.lastStats = bot.BotStats{}
+	a.lastActivity = nil
+	a.mu.Unlock()
+
+	a.cachedHistoryMu.Lock()
+	a.cachedHistory = nil
+	a.cachedHistoryMu.Unlock()
+
+	// Logs can contain member-specific runtime context (village state,
+	// strategy decisions, device errors). Never carry that buffer into the
+	// next locally activated licence in the same desktop process.
+	a.logMu.Lock()
+	a.logBuffer = nil
+	a.logMu.Unlock()
+}
+
+func clearSharedMemberRuntimeStateFiles() {
+	for _, rel := range memberRuntimeStateFiles {
+		_ = os.Remove(paths.ResolveConfig(rel))
+	}
+	for _, rel := range memberRuntimeStateDirs {
+		_ = os.RemoveAll(paths.ResolveConfig(rel))
+	}
+}
+
+func (a *App) waitForBotTeardown(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		a.mu.Lock()
+		active := a.bot != nil || a.cancel != nil || a.stopping
+		a.mu.Unlock()
+		if !active {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("bot startup/teardown did not finish within %s", timeout)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -165,6 +518,11 @@ func (a *App) loadPersistedStats() {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	if a.supportReporter != nil {
+		a.supportReporter.Flush(context.Background())
+		a.supportReporter.Close()
+	}
+
 	// Stop the updater's background poller so it can't fire an HTTP
 	// check mid-teardown.
 	if a.updaterBgStop != nil {
@@ -189,11 +547,82 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 	a.mu.Unlock()
 
-	// Persist final stats. saveStats writes through the async writer;
-	// with the worker now flushing synchronously-blocked requests
-	// immediately (see AsyncWriter.worker), this returns in ~1ms
-	// instead of stalling the close for up to the 5s ticker.
+	// Persist final stats. saveStats is a synchronous barrier through the
+	// process-global writer, so attack-history writes queued before it are on
+	// disk before we refresh the member snapshot.
 	a.saveStats()
+	if a.license != nil && a.license.GetState().Activated {
+		if err := a.archiveMemberRuntimeState(false); err != nil {
+			log.Warn().Err(err).Msg("failed to persist member runtime state on shutdown")
+		}
+	}
+	bot.CloseAsyncWriter()
+}
+
+func (a *App) accountProfileSyncLoop(ctx context.Context) {
+	// Keep the linked Clash profile fresh independently of which React page is
+	// open. The UI may additionally refresh its visible card, but the backend
+	// owns the actual automation contract.
+	first := time.NewTimer(20 * time.Second)
+	defer first.Stop()
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-first.C:
+	}
+
+	syncOnce := func() {
+		cfg := config.LoadOrDefault("config.json")
+		if cfg == nil || !cfg.Automation.AutoProfileSync || strings.TrimSpace(cfg.Account.PlayerTag) == "" {
+			return
+		}
+		if _, err := a.GetPlayerProfile(); err != nil {
+			log.Debug().Err(err).Msg("automatic Clash profile sync deferred")
+			return
+		}
+		log.Debug().Msg("automatic Clash profile sync completed")
+	}
+
+	syncOnce()
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			syncOnce()
+		}
+	}
+}
+
+func (a *App) licenseValidationLoop(ctx context.Context) {
+	if a.license == nil || !a.GetLicensePolicy().Enforced {
+		return
+	}
+
+	// The startup validation runs immediately in startup(). Subsequent checks
+	// keep server-side revocations and role changes effective without requiring
+	// an application restart.
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			state := a.license.Validate(ctx)
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "license_state", state)
+			}
+			if !state.Activated && a.botSessionActiveOrStarting() {
+				log.Warn().Str("reason", state.Error).Msg("license became invalid; stopping active or starting bot")
+				_ = a.StopBot()
+			}
+		}
+	}
 }
 
 // forwardUpdaterStatus pushes the updater's status to the React side
@@ -224,22 +653,35 @@ func (a *App) forwardUpdaterStatus(ctx context.Context) {
 	}
 }
 
-func (a *App) saveStats() {
+func (a *App) marshalStatsSnapshot() ([]byte, error) {
 	a.mu.Lock()
 	stats := a.lastStats
 	if a.bot != nil {
 		stats = mergeStats(a.lastStats, a.bot.Stats())
 	}
 	a.mu.Unlock()
+	return json.MarshalIndent(stats, "", "  ")
+}
 
-	bytes, err := json.MarshalIndent(stats, "", "  ")
+func (a *App) saveStats() {
+	bytes, err := a.marshalStatsSnapshot()
 	if err != nil {
 		log.Error().Err(err).Msg("failed to marshal stats")
 		return
 	}
-
 	if err := bot.AsyncWriteFile(paths.ResolveConfig("stats.json"), bytes, 0644); err != nil {
 		log.Error().Err(err).Msg("failed to write stats.json")
+	}
+}
+
+func (a *App) saveStatsSoon() {
+	bytes, err := a.marshalStatsSnapshot()
+	if err != nil {
+		log.Error().Err(err).Msg("failed to marshal stats")
+		return
+	}
+	if err := bot.AsyncWriteFileSoon(paths.ResolveConfig("stats.json"), bytes, 0644); err != nil {
+		log.Error().Err(err).Msg("failed to queue stats.json")
 	}
 }
 
@@ -248,24 +690,94 @@ func (a *App) saveStats() {
 // are acc + current. AdbHealth and CPU metrics are live values and are
 // always taken from current.
 func mergeStats(acc, current bot.BotStats) bot.BotStats {
-	return bot.BotStats{
-		AttacksCompleted: acc.AttacksCompleted + current.AttacksCompleted,
-		SearchSkips:      acc.SearchSkips + current.SearchSkips,
-		TotalGold:        acc.TotalGold + current.TotalGold,
-		TotalElixir:      acc.TotalElixir + current.TotalElixir,
-		TotalDE:          acc.TotalDE + current.TotalDE,
-		Stars0:           acc.Stars0 + current.Stars0,
-		Stars1:           acc.Stars1 + current.Stars1,
-		Stars2:           acc.Stars2 + current.Stars2,
-		Stars3:           acc.Stars3 + current.Stars3,
-		Uptime:           acc.Uptime + current.Uptime,
-		AdbHealth:        current.AdbHealth,
-		CPUTimeSec:       current.CPUTimeSec,
+	res := bot.BotStats{
+		AttacksCompleted:  acc.AttacksCompleted + current.AttacksCompleted,
+		SessionAttacks:    current.SessionAttacks,
+		SessionAttackCap:  current.SessionAttackCap,
+		SearchSkips:       acc.SearchSkips + current.SearchSkips,
+		TotalGold:         acc.TotalGold + current.TotalGold,
+		TotalElixir:       acc.TotalElixir + current.TotalElixir,
+		TotalDE:           acc.TotalDE + current.TotalDE,
+		Stars0:            acc.Stars0 + current.Stars0,
+		Stars1:            acc.Stars1 + current.Stars1,
+		Stars2:            acc.Stars2 + current.Stars2,
+		Stars3:            acc.Stars3 + current.Stars3,
+		Uptime:            acc.Uptime + current.Uptime,
+		AdbHealth:         current.AdbHealth,
+		CPUTimeSec:        current.CPUTimeSec,
 		CPUCores:          current.CPUCores,
 		RecoveryAttempts:  acc.RecoveryAttempts + current.RecoveryAttempts,
 		RecoverySuccesses: acc.RecoverySuccesses + current.RecoverySuccesses,
 		BlueStacksRestarts: acc.BlueStacksRestarts + current.BlueStacksRestarts,
+
+		// These are runtime-quality metrics, not additive counters. While the
+		// bot is active the newest live value is authoritative; persisting them
+		// still gives the stopped dashboard a useful last-known snapshot.
+		AverageCaptureMS:        current.AverageCaptureMS,
+		LastCaptureMS:           current.LastCaptureMS,
+		TelemetryEvents:         current.TelemetryEvents,
+		Anomalies:               current.Anomalies,
+		TargetsSkipped:          current.TargetsSkipped,
+		HealthScore:             current.HealthScore,
+		SpeedProfile:            current.SpeedProfile,
+		TargetsSeen:             current.TargetsSeen,
+		TargetsAccepted:         current.TargetsAccepted,
+		TargetAcceptanceRate:    current.TargetAcceptanceRate,
+		AvgSkipsPerAttack:       current.AvgSkipsPerAttack,
+		AverageTargetScanMS:     current.AverageTargetScanMS,
+		LastTargetScanMS:        current.LastTargetScanMS,
+		AverageReturnHomeMS:     current.AverageReturnHomeMS,
+		LastReturnHomeMS:        current.LastReturnHomeMS,
+		AverageNextTransitionMS: current.AverageNextTransitionMS,
+		LastNextTransitionMS:    current.LastNextTransitionMS,
+		NextTransitions:         current.NextTransitions,
+		NextRetries:             current.NextRetries,
+		NextFirstPassRate:       current.NextFirstPassRate,
+		AvgNextVerifyProbes:     current.AvgNextVerifyProbes,
+		AvgAcceptedGE:           current.AvgAcceptedGE,
+		AvgRejectedGE:           current.AvgRejectedGE,
+		AvgAcceptedDE:           current.AvgAcceptedDE,
+		AvgRejectedDE:           current.AvgRejectedDE,
+		AvgAcceptedScore:        current.AvgAcceptedScore,
+		AvgRejectedScore:        current.AvgRejectedScore,
+		PreferredScaleAttempts:  current.PreferredScaleAttempts,
+		PreferredScaleHits:      current.PreferredScaleHits,
+		PreferredScaleFallbacks: current.PreferredScaleFallbacks,
+		PreferredScaleHitRate:   current.PreferredScaleHitRate,
+		PreferredScaleEnabled:   current.PreferredScaleEnabled,
+		UIAnchorAttempts:        current.UIAnchorAttempts,
+		UIAnchorHits:            current.UIAnchorHits,
+		UIAnchorFallbacks:       current.UIAnchorFallbacks,
+		UIAnchorHitRate:         current.UIAnchorHitRate,
+		UIAnchorEnabled:         current.UIAnchorEnabled,
+		NearMissTargets:         current.NearMissTargets,
+		NearMiss5Targets:        current.NearMiss5Targets,
+		NearMiss10Targets:       current.NearMiss10Targets,
+		NearMiss15Targets:       current.NearMiss15Targets,
+		TopRejectedTargets:      current.TopRejectedTargets,
 	}
+
+	// Recovery rate is meaningful over the persisted + live totals.
+	if res.RecoveryAttempts > 0 {
+		res.RecoverySuccessRate = float64(res.RecoverySuccesses) * 100 / float64(res.RecoveryAttempts)
+	}
+
+	// Lifetime rates use the same accumulated counters and accumulated uptime,
+	// so restarting the app does not make Gold/h jump merely because the new
+	// process has only been alive for a few minutes.
+	hours := res.Uptime.Hours()
+	if hours > 0 {
+		res.GoldPerHour = float64(res.TotalGold) / hours
+		res.ElixirPerHour = float64(res.TotalElixir) / hours
+		res.DEPerHour = float64(res.TotalDE) / hours
+	}
+	if res.AttacksCompleted > 0 {
+		totalStars := int64(res.Stars1) + 2*int64(res.Stars2) + 3*int64(res.Stars3)
+		res.AverageStars = float64(totalStars) / float64(res.AttacksCompleted)
+		res.ThreeStarRate = float64(res.Stars3) * 100 / float64(res.AttacksCompleted)
+	}
+
+	return res
 }
 
 func (a *App) ResetStats() error {
@@ -281,16 +793,29 @@ func (a *App) ResetStats() error {
 	a.cachedHistory = nil
 	a.cachedHistoryMu.Unlock()
 
-	if err := os.Remove(paths.ResolveConfig("stats.json")); err != nil && !os.IsNotExist(err) {
-		return err
+	// Remove every persisted runtime artifact that belongs to the active
+	// member, including the latest session report. Using the same canonical
+	// list as archive/restore prevents new state files from being forgotten
+	// when ResetStats evolves.
+	for _, rel := range memberRuntimeStateFiles {
+		path := paths.ResolveConfig(rel)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
-	if err := os.Remove(paths.ResolveConfig("attack_history.json")); err != nil && !os.IsNotExist(err) {
-		return err
+
+	// Purge the per-license snapshot immediately as well. Otherwise a crash
+	// between ResetStats and the next archive could restore stale statistics
+	// on the following launch.
+	if stateDir := a.memberRuntimeStateDir(); stateDir != "" {
+		for _, rel := range memberRuntimeStateFiles {
+			path := filepath.Join(stateDir, rel)
+			_ = os.Remove(path)
+			_ = os.Remove(path + ".bak")
+			_ = os.Remove(path + ".tmp")
+		}
 	}
-	_ = os.Remove(paths.ResolveConfig("last_attack_report.json"))
-	_ = os.Remove(paths.ResolveConfig("village_resources.json"))
-	_ = os.Remove(paths.ResolveConfig("village_resource_history.json"))
-	_ = os.Remove(paths.ResolveConfig("current_army.json"))
+
 	if traces, globErr := filepath.Glob(paths.ResolveConfig("output/attack_traces/*.json")); globErr == nil {
 		for _, trace := range traces {
 			_ = os.Remove(trace)
@@ -348,6 +873,379 @@ type BotStatus struct {
 	Message string `json:"message"`
 }
 
+type StartupCheckItem struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	OK          bool   `json:"ok"`
+	Blocking    bool   `json:"blocking"`
+	Message     string `json:"message"`
+	Action      string `json:"action,omitempty"`
+	ActionLabel string `json:"action_label,omitempty"`
+}
+
+type StartupReadiness struct {
+	Ready  bool               `json:"ready"`
+	Checks []StartupCheckItem `json:"checks"`
+}
+
+func newStartupCheckItem(id, label string, ok bool, message, action, actionLabel string) StartupCheckItem {
+	if ok {
+		action = ""
+		actionLabel = ""
+	}
+	return StartupCheckItem{
+		ID: id, Label: label, OK: ok, Blocking: !ok, Message: message,
+		Action: action, ActionLabel: actionLabel,
+	}
+}
+
+func newStartupAdvisoryItem(id, label string, ok bool, message, action, actionLabel string) StartupCheckItem {
+	item := newStartupCheckItem(id, label, ok, message, action, actionLabel)
+	item.Blocking = false
+	if !ok {
+		item.Action = action
+		item.ActionLabel = actionLabel
+	}
+	return item
+}
+
+func memberRuntimeConfigReady(cfg *config.BotConfig) (bool, string) {
+	if cfg == nil {
+		return false, "Configuration membre indisponible"
+	}
+	speed := strings.ToLower(strings.TrimSpace(cfg.Automation.SpeedProfile))
+	if speed != "cautious" && speed != "normal" && speed != "fast" {
+		return false, "Profil de vitesse invalide"
+	}
+	if cfg.Automation.MaxAttacksPerHour < 1 || cfg.Automation.MaxAttacksPerHour > 24 {
+		return false, "La limite d’attaques par heure doit être comprise entre 1 et 24"
+	}
+	if cfg.Attack.MaxAttackPerSession < 1 || cfg.Attack.MaxAttackPerSession > 500 {
+		return false, "La limite d’attaques par session doit être comprise entre 1 et 500"
+	}
+	if cfg.Automation.BreakEveryAttacks < 0 || cfg.Automation.BreakEveryAttacks > 20 {
+		return false, "La fréquence des pauses doit être comprise entre 0 et 20 attaques"
+	}
+	breakMinutes := int(cfg.Automation.BreakDuration.Duration / time.Minute)
+	if breakMinutes < 0 || breakMinutes > 30 {
+		return false, "La durée des pauses doit être comprise entre 0 et 30 minutes"
+	}
+	return true, fmt.Sprintf(
+		"%s · %d attaques/h · %d/session",
+		map[string]string{"cautious": "Prudente", "normal": "Normale", "fast": "Rapide"}[speed],
+		cfg.Automation.MaxAttacksPerHour,
+		cfg.Attack.MaxAttackPerSession,
+	)
+}
+
+func attackStrategyReady(cfg *config.BotConfig) (bool, string) {
+	if cfg == nil {
+		return false, "Configuration d’attaque indisponible"
+	}
+	strategyPath := strings.TrimSpace(cfg.Attack.StrategyFile)
+	if strategyPath == "" {
+		return false, "Aucune stratégie d’attaque configurée"
+	}
+	if !filepath.IsAbs(strategyPath) {
+		strategyPath = paths.Resolve(filepath.Join("strategies", filepath.Base(strategyPath)))
+	}
+	info, err := os.Stat(strategyPath)
+	if err != nil || info.IsDir() {
+		return false, "Fichier de stratégie introuvable : " + filepath.Base(strategyPath)
+	}
+	return true, "Stratégie disponible : " + filepath.Base(strategyPath)
+}
+
+func precisionConfigReady() (bool, string) {
+	path := paths.Resolve("precision_config.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, "Calibration de déploiement absente : precision_config.json"
+	}
+	var precision attack.PrecisionConfig
+	if err := json.Unmarshal(data, &precision); err != nil {
+		return false, "Calibration de déploiement illisible"
+	}
+	if precision.Width <= 0 || precision.Height <= 0 || precision.BarY <= 0 || len(precision.Edges) == 0 {
+		return false, "Calibration de déploiement incomplète"
+	}
+	return true, fmt.Sprintf("Calibration prête · %dx%d", precision.Width, precision.Height)
+}
+
+func farmProfileStatus(cfg *config.BotConfig) (bool, string) {
+	if cfg == nil {
+		return false, "Profil farm indisponible"
+	}
+	if !cfg.Attack.Farm.Enabled {
+		return false, "Aucun profil farm actif · la stratégie manuelle reste utilisable"
+	}
+	profile, ok := cfg.Attack.Farm.ActiveProfile()
+	if !ok {
+		return false, fmt.Sprintf("Aucun profil farm disponible pour HDV %d", cfg.Attack.Farm.TownHall)
+	}
+	return true, profile.Label
+}
+
+func startupArmyAdvisory(army *CurrentArmySnapshot, now time.Time) StartupCheckItem {
+	if army == nil {
+		return newStartupAdvisoryItem(
+			"army_snapshot",
+			"Armée",
+			false,
+			"Pas encore détectée · ClashGO la vérifiera automatiquement avant l’attaque",
+			"village",
+			"Voir l’armée",
+		)
+	}
+	age := now.Sub(army.Timestamp)
+	fresh := age >= 0 && age <= 10*time.Minute
+	if army.Ready && !army.Uncertain && fresh {
+		return newStartupAdvisoryItem(
+			"army_snapshot",
+			"Armée",
+			true,
+			fmt.Sprintf("Armée prête · %d type(s) détecté(s)", len(army.Units)),
+			"village",
+			"Voir l’armée",
+		)
+	}
+	if !fresh {
+		return newStartupAdvisoryItem(
+			"army_snapshot",
+			"Armée",
+			false,
+			"Détection ancienne · ClashGO la relira automatiquement avant l’attaque",
+			"village",
+			"Actualiser l’état",
+		)
+	}
+	msg := "Composition à confirmer avant attaque"
+	if len(army.Warnings) > 0 {
+		msg = army.Warnings[0]
+	}
+	return newStartupAdvisoryItem(
+		"army_snapshot",
+		"Armée",
+		false,
+		msg,
+		"village",
+		"Voir l’armée",
+	)
+}
+
+func startupResourcesAdvisory(resources *VillageResourceSnapshot, now time.Time) StartupCheckItem {
+	if resources == nil {
+		return newStartupAdvisoryItem(
+			"resources_snapshot",
+			"Ressources",
+			false,
+			"Pas encore lues · actualisation automatique au prochain passage au village",
+			"village",
+			"Voir le village",
+		)
+	}
+	age := now.Sub(resources.Timestamp)
+	fresh := age >= 0 && age <= 10*time.Minute
+	message := "Dernière lecture ancienne · actualisation automatique au prochain passage au village"
+	if fresh {
+		message = fmt.Sprintf("Village lu récemment · Or %d · Élixir %d", resources.Gold, resources.Elixir)
+	}
+	return newStartupAdvisoryItem(
+		"resources_snapshot",
+		"Ressources",
+		fresh,
+		message,
+		"village",
+		"Voir le village",
+	)
+}
+
+func (a *App) GetStartupReadiness() StartupReadiness {
+	checks := make([]StartupCheckItem, 0, 12)
+	add := func(id, label string, ok bool, message, action, actionLabel string) {
+		checks = append(checks, newStartupCheckItem(id, label, ok, message, action, actionLabel))
+	}
+
+	licenseOK := true
+	licenseMessage := "Mode beta local"
+	if a.GetLicensePolicy().Enforced {
+		licenseOK = false
+		licenseMessage = "Licence absente, expirée ou invalide"
+		if a.license != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+			state := a.license.Validate(ctx)
+			cancel()
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "license_state", state)
+			}
+			licenseOK = state.Activated
+			if licenseOK {
+				if strings.Contains(strings.ToLower(state.Error), "offline") {
+					licenseMessage = "Licence valide · mode hors ligne temporaire"
+				} else {
+					licenseMessage = "Licence valide"
+				}
+			} else if msg := strings.TrimSpace(state.Error); msg != "" {
+				licenseMessage = msg
+			}
+		}
+	}
+	add("license", "Licence", licenseOK, licenseMessage, "license_account", "Ouvrir Mon ClashGO")
+
+	cfg := config.LoadOrDefault("config.json")
+	accountOK := strings.TrimSpace(cfg.Account.PlayerTag) != ""
+	accountMessage := "Compte Clash lié · profil HDV automatique disponible"
+	if !accountOK {
+		accountMessage = "Aucun tag joueur lié · optionnel, la configuration locale reste utilisable"
+	}
+	checks = append(checks, newStartupAdvisoryItem(
+		"account", "Compte Clash", accountOK, accountMessage, "village", "Lier le compte",
+	))
+
+	diag := collectSystemDiagnostics()
+	add("assets", "Fichiers ClashGO", diag.AssetsReady, func() string {
+		if diag.AssetsReady {
+			return "Tous les fichiers nécessaires sont présents"
+		}
+		if len(diag.MissingAssets) > 0 {
+			return "Manquants : " + strings.Join(diag.MissingAssets, ", ")
+		}
+		return "Certains fichiers nécessaires sont manquants"
+	}(), "settings", "Voir le diagnostic")
+
+	if goruntime.GOOS == "windows" {
+		add("bluestacks", "BlueStacks 5", diag.Emulator.BlueStacksPlayerFound, func() string {
+			if diag.Emulator.BlueStacksPlayerFound {
+				if diag.Emulator.BlueStacksRunning {
+					return "BlueStacks est installé et démarré"
+				}
+				return "BlueStacks est installé · ClashGO le lancera automatiquement au démarrage"
+			}
+			return "BlueStacks 5 n’est pas détecté"
+		}(), "settings", "Configurer Windows")
+		add("adb", "ADB", diag.Emulator.ADBFound, func() string {
+			if diag.Emulator.ADBFound {
+				return "ADB est disponible"
+			}
+			return "ADB n’est pas détecté"
+		}(), "settings", "Configurer ADB")
+		instanceOK := strings.TrimSpace(diag.Emulator.PreferredInstance) != ""
+		add("instance", "Instance", instanceOK, func() string {
+			if instanceOK {
+				return "Instance : " + diag.Emulator.PreferredInstance
+			}
+			return "Aucune instance BlueStacks utilisable"
+		}(), "settings", "Choisir l’instance")
+	}
+
+	strategyOK, strategyMessage := attackStrategyReady(cfg)
+	add("strategy", "Stratégie", strategyOK, strategyMessage, "automation", "Ouvrir Automatisation")
+
+	precisionOK, precisionMessage := precisionConfigReady()
+	add("precision", "Calibration attaque", precisionOK, precisionMessage, "settings", "Voir le diagnostic")
+
+	farmOK, farmMessage := farmProfileStatus(cfg)
+	checks = append(checks, newStartupAdvisoryItem(
+		"farm_profile", "Profil farm", farmOK, farmMessage, "village", "Voir le profil",
+	))
+
+	pacingOK, pacingMessage := memberRuntimeConfigReady(cfg)
+	add("member_pacing", "Cadence membre", pacingOK, pacingMessage, "member_settings", "Ouvrir Réglages bot")
+
+	now := time.Now()
+	checks = append(checks, startupArmyAdvisory(a.GetCurrentArmy(), now))
+	checks = append(checks, startupResourcesAdvisory(a.GetVillageResources(), now))
+
+	ready := true
+	for _, check := range checks {
+		if !check.OK && check.Blocking {
+			ready = false
+			break
+		}
+	}
+	return StartupReadiness{Ready: ready, Checks: checks}
+}
+
+type AttackReplayPoint struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+}
+
+type AttackReplayEventView struct {
+	OffsetMS   int64             `json:"offset_ms"`
+	Kind       string            `json:"kind"`
+	Name       string            `json:"name,omitempty"`
+	Category   string            `json:"category,omitempty"`
+	Count      int               `json:"count,omitempty"`
+	SlotX      int               `json:"slot_x,omitempty"`
+	SlotY      int               `json:"slot_y,omitempty"`
+	DeploySide string            `json:"deploy_side,omitempty"`
+	P1         AttackReplayPoint `json:"p1"`
+	P2         AttackReplayPoint `json:"p2"`
+}
+
+type AttackReplayView struct {
+	Available bool                    `json:"available"`
+	Timestamp string                  `json:"timestamp,omitempty"`
+	Strategy  string                  `json:"strategy,omitempty"`
+	Complete  bool                    `json:"complete"`
+	Events    []AttackReplayEventView `json:"events"`
+}
+
+func (a *App) GetLatestAttackReplay() AttackReplayView {
+	dir := paths.ResolveConfig("output/attack_traces")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return AttackReplayView{Events: []AttackReplayEventView{}}
+	}
+
+	var latest string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".json") {
+			continue
+		}
+		if entry.Name() > latest {
+			latest = entry.Name()
+		}
+	}
+	if latest == "" {
+		return AttackReplayView{Events: []AttackReplayEventView{}}
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, latest))
+	if err != nil {
+		return AttackReplayView{Events: []AttackReplayEventView{}}
+	}
+	var trace attack.AttackTrace
+	if err := json.Unmarshal(data, &trace); err != nil {
+		return AttackReplayView{Events: []AttackReplayEventView{}}
+	}
+
+	view := AttackReplayView{
+		Available: true,
+		Timestamp: trace.Timestamp.Format(time.RFC3339Nano),
+		Strategy: trace.Strategy,
+		Complete: trace.DeployComplete,
+		Events: make([]AttackReplayEventView, 0, len(trace.Events)),
+	}
+	for _, ev := range trace.Events {
+		view.Events = append(view.Events, AttackReplayEventView{
+			OffsetMS: ev.OffsetMS,
+			Kind: ev.Kind,
+			Name: ev.Name,
+			Category: ev.Category,
+			Count: ev.Count,
+			SlotX: ev.SlotX,
+			SlotY: ev.SlotY,
+			DeploySide: ev.DeploySide,
+			P1: AttackReplayPoint{X: ev.P1.X, Y: ev.P1.Y},
+			P2: AttackReplayPoint{X: ev.P2.X, Y: ev.P2.Y},
+		})
+	}
+	return view
+}
+
+
 // StartBot starts the bot with the given thresholds
 //
 // The returned BotStatus reports running=true immediately: the boot
@@ -359,23 +1257,59 @@ type BotStatus struct {
 // instead of finishing the boot and starting anyway (the old
 // behavior — see the concurrency notes in StopBot).
 func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled bool) BotStatus {
+	if a.GetLicensePolicy().Enforced {
+		if a.license == nil {
+			return BotStatus{Running: false, Message: "Le service de licence ClashGO est indisponible"}
+		}
+
+		// Revalidate at the exact moment the user starts the bot. The background
+		// validation loop runs every 15 minutes, but Start must never rely on a
+		// stale in-memory entitlement after a revoke, expiry or machine reset.
+		// A short timeout keeps Start responsive; Validate still preserves the
+		// configured offline grace when the control service is temporarily down.
+		licenseCtx, cancelLicense := context.WithTimeout(context.Background(), 4*time.Second)
+		state := a.license.Validate(licenseCtx)
+		cancelLicense()
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "license_state", state)
+		}
+		if !state.Activated {
+			msg := "Une licence ClashGO valide est nécessaire"
+			if strings.TrimSpace(state.Error) != "" {
+				msg += ": " + state.Error
+			}
+			return BotStatus{Running: false, Message: msg}
+		}
+	}
+
+	cfgForPacing := config.LoadOrDefault("config.json")
+	if pacingOK, pacingMessage := memberRuntimeConfigReady(cfgForPacing); !pacingOK {
+		return BotStatus{Running: false, Message: "Réglage membre invalide : " + pacingMessage}
+	}
+	if strategyOK, strategyMessage := attackStrategyReady(cfgForPacing); !strategyOK {
+		return BotStatus{Running: false, Message: "Stratégie invalide : " + strategyMessage}
+	}
+	if precisionOK, precisionMessage := precisionConfigReady(); !precisionOK {
+		return BotStatus{Running: false, Message: "Calibration attaque invalide : " + precisionMessage}
+	}
+
 	diag := collectSystemDiagnostics()
 	if !diag.AssetsReady {
 		return BotStatus{
 			Running: false,
-			Message: "Runtime assets missing: " + strings.Join(diag.MissingAssets, ", "),
+			Message: "Fichiers nécessaires manquants : " + strings.Join(diag.MissingAssets, ", "),
 		}
 	}
 
 	if goruntime.GOOS == "windows" {
 		if !diag.Emulator.BlueStacksPlayerFound {
-			return BotStatus{Running: false, Message: "BlueStacks 5 was not detected. Install BlueStacks 5 or configure CLASHGO_BLUESTACKS_PLAYER."}
+			return BotStatus{Running: false, Message: "BlueStacks 5 n’a pas été détecté. Installe ou démarre BlueStacks 5 puis réessaie."}
 		}
 		if !diag.Emulator.ADBFound {
-			return BotStatus{Running: false, Message: "ADB was not detected. ClashGO can use Android platform-tools or BlueStacks HD-Adb.exe."}
+			return BotStatus{Running: false, Message: "ADB n’a pas été détecté. Redémarre BlueStacks ou vérifie son installation."}
 		}
 		if strings.TrimSpace(diag.Emulator.PreferredInstance) == "" {
-			return BotStatus{Running: false, Message: "No BlueStacks instance was detected. Start an instance once from BlueStacks Multi-instance Manager, then retry."}
+			return BotStatus{Running: false, Message: "Aucune instance BlueStacks n’a été détectée. Démarre ton instance depuis le gestionnaire multi-instance puis réessaie."}
 		}
 	}
 
@@ -383,15 +1317,15 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 
 	if a.stopping {
 		a.mu.Unlock()
-		return BotStatus{Running: false, Message: "Previous bot session is still closing — retry in a moment"}
+		return BotStatus{Running: false, Message: "La session précédente est encore en cours de fermeture — réessaie dans un instant"}
 	}
 	if a.bot != nil {
 		a.mu.Unlock()
-		return BotStatus{Running: true, Message: "Bot already running"}
+		return BotStatus{Running: true, Message: "Le bot est déjà en cours"}
 	}
 	if a.cancel != nil {
 		a.mu.Unlock()
-		return BotStatus{Running: true, Message: "Bot is still starting up — wait for it to connect or press Stop first"}
+		return BotStatus{Running: true, Message: "Le bot est encore en cours de démarrage — attends la connexion ou arrête-le d’abord"}
 	}
 
 	cfg := config.LoadOrDefault("config.json")
@@ -420,11 +1354,14 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 				// was intentional.
 				log.Info().Msg("bot boot cancelled during startup")
 				runtime.EventsEmit(a.ctx, "bot_boot_cancelled", map[string]interface{}{
-					"message": "Bot startup was cancelled.",
+					"message": "Le démarrage du bot a été annulé.",
 				})
 				a.mu.Lock()
 				a.clearStartStateLocked()
 				a.mu.Unlock()
+				if err := a.restoreTestSessionSettings(); err != nil {
+					log.Error().Err(err).Msg("failed to restore member settings after cancelled test startup")
+				}
 				return
 			}
 
@@ -434,7 +1371,7 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			// surfaces `error="..."` so the user no longer has to
 			// grep app.log to see what failed.
 			log.Error().Err(err).Msg("failed to initialize bot")
-			runtime.EventsEmit(a.ctx, "bot_error", fmt.Sprintf("Initialization Error: %v", err))
+			runtime.EventsEmit(a.ctx, "bot_error", fmt.Sprintf("Erreur d’initialisation : %v", err))
 			runtime.EventsEmit(a.ctx, "bot_init_failed", map[string]interface{}{
 				"message": err.Error(),
 			})
@@ -442,6 +1379,9 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			a.mu.Lock()
 			a.clearStartStateLocked()
 			a.mu.Unlock()
+			if err := a.restoreTestSessionSettings(); err != nil {
+				log.Error().Err(err).Msg("failed to restore member settings after test startup failure")
+			}
 			return
 		}
 
@@ -455,16 +1395,80 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 		// — it returns the same b.lastFrame string from atomic.Value
 		// without burning the bridge. See App.GetLiveScreenshot.
 
+		b.OnAccountChanged = func(playerTag, accountID, label string) {
+			if err := a.persistMemberAccountTag(playerTag); err != nil {
+				log.Warn().Err(err).
+					Str("account_id", accountID).
+					Msg("account switched but member player-tag cache could not be updated")
+			}
+			clearCachedPlayerProfileIfDifferent(playerTag)
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "multi_account_switched", map[string]any{
+					"player_tag": playerTag,
+					"account_id": accountID,
+					"label": label,
+				})
+			}
+		}
+
 		b.OnStatsUpdate = func() {
-			// Refresh persisted history/stats, then push the fresh history to
-			// React immediately. The dashboard still keeps its low-frequency
-			// polling as a recovery path, but attack rows no longer wait up to
-			// two seconds (or a tab remount) to appear.
-			a.refreshHistory()
-			a.saveStats()
+			// The bot's in-memory history is authoritative while a session is
+			// running. Mirror it directly into the App cache instead of forcing
+			// attack_history.json to be written and re-read before React can see
+			// the new row.
+			history := b.HistorySnapshot()
+			a.cachedHistoryMu.Lock()
+			a.cachedHistory = make([]bot.AttackReport, len(history))
+			copy(a.cachedHistory, history)
+			a.cachedHistoryMu.Unlock()
+
+			shouldStopGracefully := false
+			lootGoalReached := false
+			currentStats := b.Stats()
+			a.mu.Lock()
+			if a.gracefulStopRequested && gracefulStopReached(history, a.gracefulStopSequenceStartUnix) {
+				a.gracefulStopRequested = false
+				a.gracefulStopSequenceStartUnix = 0
+				shouldStopGracefully = true
+			}
+			if len(history) > 0 && history[0].ReturnHomeDurationMS > 0 {
+				goldReached := a.sessionGoldGoal > 0 && currentStats.TotalGold >= a.sessionGoldGoal
+				elixirReached := a.sessionElixirGoal > 0 && currentStats.TotalElixir >= a.sessionElixirGoal
+				darkReached := a.sessionDarkGoal > 0 && currentStats.TotalDE >= a.sessionDarkGoal
+				if goldReached || elixirReached || darkReached {
+					lootGoalReached = true
+					shouldStopGracefully = true
+					a.sessionGoldGoal = 0
+					a.sessionElixirGoal = 0
+					a.sessionDarkGoal = 0
+				}
+			}
+			a.mu.Unlock()
+
+			a.saveStatsSoon()
+
+			if lootGoalReached && a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "session_loot_goal_reached", map[string]any{
+					"gold": currentStats.TotalGold,
+					"elixir": currentStats.TotalElixir,
+					"dark_elixir": currentStats.TotalDE,
+					"message": "Objectif de butin atteint · arrêt propre de la session.",
+				})
+			}
+			if shouldStopGracefully {
+				if a.ctx != nil {
+					message := "Attaque terminée · retour au village confirmé · arrêt de ClashGO."
+					if len(history) > 0 && !history[0].ReturnHomeSuccess {
+						message = "Attaque terminée · retour au village non confirmé · arrêt de sécurité de ClashGO."
+					}
+					runtime.EventsEmit(a.ctx, "graceful_stop_completed", map[string]any{
+						"message": message,
+					})
+				}
+				go a.StopBot()
+			}
 
 			if a.ctx != nil {
-				history := a.GetAttackHistory()
 				runtime.EventsEmit(a.ctx, "attack_history_updated", history)
 				runtime.EventsEmit(a.ctx, "stats_updated", a.GetStats())
 			}
@@ -480,8 +1484,11 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			a.mu.Unlock()
 			log.Info().Msg("bot boot finished after startup cancellation; discarding and shutting down")
 			runtime.EventsEmit(a.ctx, "bot_boot_cancelled", map[string]interface{}{
-				"message": "Bot startup was cancelled.",
+				"message": "Le démarrage du bot a été annulé.",
 			})
+			if err := a.restoreTestSessionSettings(); err != nil {
+				log.Error().Err(err).Msg("failed to restore member settings after discarded test startup")
+			}
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -507,11 +1514,14 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 				// tear down the booted bot so the next Start is clean.
 				log.Info().Msg("bot start aborted by startup cancellation; discarding")
 				runtime.EventsEmit(a.ctx, "bot_boot_cancelled", map[string]interface{}{
-					"message": "Bot startup was cancelled.",
+					"message": "Le démarrage du bot a été annulé.",
 				})
 				a.mu.Lock()
 				a.clearStartStateLocked()
 				a.mu.Unlock()
+				if err := a.restoreTestSessionSettings(); err != nil {
+					log.Error().Err(err).Msg("failed to restore member settings after cancelled test start")
+				}
 				go func() {
 					defer func() {
 						if r := recover(); r != nil {
@@ -524,7 +1534,7 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			}
 
 			log.Error().Err(err).Msg("failed to start bot")
-			runtime.EventsEmit(a.ctx, "bot_error", fmt.Sprintf("Start Error: %v", err))
+			runtime.EventsEmit(a.ctx, "bot_error", fmt.Sprintf("Erreur de démarrage : %v", err))
 
 			// Clear the WHOLE start placeholder (bot AND cancel/botCtx)
 			// — leaving a.cancel set would make every future StartBot
@@ -532,6 +1542,9 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 			a.mu.Lock()
 			a.clearStartStateLocked()
 			a.mu.Unlock()
+			if err := a.restoreTestSessionSettings(); err != nil {
+				log.Error().Err(err).Msg("failed to restore member settings after failed test start")
+			}
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -549,19 +1562,97 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 		// while BlueStacks/ADB are still booting.
 		log.Info().Msg("bot startup complete; runtime active")
 		runtime.EventsEmit(a.ctx, "bot_started", map[string]interface{}{
-			"message": "Bot is running.",
+			"message": "Le bot est en cours.",
 		})
 
-		// Two lightweight supervisors share the bot's own lifetime:
-		//  - End key = immediate user emergency stop on Windows.
-		//  - Done watcher = cleans up sessions that stop themselves because a
-		//    runtime/raid limit was reached, so the UI cannot remain stuck on
-		//    "Running" after the bot has already cancelled its context.
+		// Watch the bot-owned runtime context. This is essential for autonomous
+		// stops such as the per-session attack cap: no UI action calls StopBot
+		// in that path, so without this watcher a.bot would stay non-nil and the
+		// frontend would keep showing "Bot en cours" after automation ended.
+		go a.watchBotRuntime(b)
+
+		// Windows-only physical emergency stop. The non-Windows implementation
+		// is a no-op so this call remains portable.
 		go a.watchEmergencyStopKey(bootCtx, b)
-		go a.watchAutomaticBotStop(b)
 	}(bootCtx)
 
-	return BotStatus{Running: true, Message: "Bot initialization started in background"}
+	return BotStatus{Running: true, Message: "Initialisation du bot démarrée"}
+}
+
+func autonomousStopDetails(stats bot.BotStats) (string, string) {
+	if stats.SessionAttackCap > 0 && int(stats.SessionAttacks) >= stats.SessionAttackCap {
+		return "attack_cap", fmt.Sprintf(
+			"Session terminée · limite de %d attaques atteinte.",
+			stats.SessionAttackCap,
+		)
+	}
+	return "runtime_ended", "La session ClashGO est terminée."
+}
+
+func (a *App) watchBotRuntime(b *bot.Bot) {
+	if a == nil || b == nil {
+		return
+	}
+	<-b.Done()
+
+	a.mu.Lock()
+	// Manual StopBot clears a.bot before cancelling/tearing down. In that
+	// case it already owns cleanup, so this watcher must be a no-op.
+	if a.bot != b {
+		a.mu.Unlock()
+		return
+	}
+
+	current := b.Stats()
+	recentActivity := b.RecentActivity(24)
+	a.lastStats = mergeStats(a.lastStats, current)
+	a.lastActivity = append([]telemetry.Event(nil), recentActivity...)
+	a.bot = nil
+	a.cancel = nil
+	a.botCtx = nil
+	a.stopping = true
+	a.mu.Unlock()
+
+	stopReason, stopMessage := autonomousStopDetails(current)
+
+	log.Info().
+		Str("reason", stopReason).
+		Int32("session_attacks", current.SessionAttacks).
+		Int("session_cap", current.SessionAttackCap).
+		Msg("bot runtime ended autonomously; synchronizing application state")
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "bot_stopped", map[string]interface{}{
+			"message": stopMessage,
+			"automatic": true,
+			"reason": stopReason,
+			"attacks": current.SessionAttacks,
+			"cap": current.SessionAttackCap,
+		})
+	}
+
+	// Runtime cancellation is already visible immediately. Do heavier native
+	// teardown asynchronously so React never waits on OpenCV/ADB cleanup.
+	go func() {
+		defer func() {
+			a.mu.Lock()
+			a.stopping = false
+			a.mu.Unlock()
+			if r := recover(); r != nil {
+				log.Error().Interface("panic", r).Msg("recovered panic during autonomous bot teardown")
+			}
+		}()
+		b.Stop()
+		a.saveStats()
+		if err := a.restoreTestSessionSettings(); err != nil {
+			log.Error().Err(err).Msg("failed to restore member settings after test session")
+		}
+		a.cachedHistoryMu.Lock()
+		a.cachedHistory = nil
+		a.cachedHistoryMu.Unlock()
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "stats_updated", a.GetStats())
+		}
+	}()
 }
 
 // clearStartStateLocked resets the start placeholder after a failed
@@ -571,85 +1662,6 @@ func (a *App) clearStartStateLocked() {
 	a.bot = nil
 	a.cancel = nil
 	a.botCtx = nil
-}
-
-// watchAutomaticBotStop finalizes sessions that terminate themselves (for
-// example max attacks or max runtime). Manual StopBot detaches a.bot before
-// cancelling, so the identity check makes this watcher a no-op for manual
-// shutdown and prevents double teardown.
-func (a *App) watchAutomaticBotStop(b *bot.Bot) {
-	<-b.Done()
-
-	a.mu.Lock()
-	if a.bot != b {
-		a.mu.Unlock()
-		return
-	}
-	current := b.Stats()
-	a.lastStats = mergeStats(a.lastStats, current)
-	a.bot = nil
-	a.cancel = nil
-	a.botCtx = nil
-	a.stopping = true
-	a.mu.Unlock()
-
-	if a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "bot_stopped", map[string]interface{}{
-			"message": "Bot session finished automatically.",
-		})
-		runtime.EventsEmit(a.ctx, "stats_updated", a.GetStats())
-	}
-
-	go func() {
-		defer func() {
-			a.mu.Lock()
-			a.stopping = false
-			a.mu.Unlock()
-			if r := recover(); r != nil {
-				log.Error().Interface("panic", r).Msg("recovered panic during automatic bot teardown")
-			}
-		}()
-		b.Stop()
-		a.saveStats()
-		a.cachedHistoryMu.Lock()
-		a.cachedHistory = nil
-		a.cachedHistoryMu.Unlock()
-	}()
-}
-
-// watchEmergencyStopKey mirrors ClashCore's immediate End-key stop on
-// Windows. The key is edge-triggered so holding End cannot repeatedly call
-// StopBot. It intentionally lives at the App layer: StopBot updates the UI
-// state and performs the same safe asynchronous teardown as the normal button.
-func (a *App) watchEmergencyStopKey(ctx context.Context, b *bot.Bot) {
-	if goruntime.GOOS != "windows" {
-		return
-	}
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	wasPressed := false
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-b.Done():
-			return
-		case <-ticker.C:
-			pressed := endKeyPressed()
-			if pressed && !wasPressed {
-				a.mu.Lock()
-				active := a.bot == b
-				a.mu.Unlock()
-				if active {
-					log.Warn().Msg("End key pressed; stopping bot immediately")
-					_ = a.StopBot()
-				}
-				return
-			}
-			wasPressed = pressed
-		}
-	}
 }
 
 // StopBot stops the bot instantly.
@@ -680,8 +1692,222 @@ func (a *App) watchEmergencyStopKey(ctx context.Context, b *bot.Bot) {
 // the next NewAsyncWriter — acceptable, since the previous code path
 // had the same constraint and the new behaviour is strictly an
 // improvement on the slow path.
+type SessionLootGoal struct {
+	Gold       int64 `json:"gold"`
+	Elixir     int64 `json:"elixir"`
+	DarkElixir int64 `json:"dark_elixir"`
+	Active     bool  `json:"active"`
+}
+
+func (a *App) SetSessionLootGoal(gold, elixir, dark int64) SessionLootGoal {
+	clamp := func(v int64) int64 {
+		if v < 0 { return 0 }
+		if v > 100000000 { return 100000000 }
+		return v
+	}
+	gold, elixir, dark = clamp(gold), clamp(elixir), clamp(dark)
+
+	a.mu.Lock()
+	a.sessionGoldGoal = gold
+	a.sessionElixirGoal = elixir
+	a.sessionDarkGoal = dark
+	b := a.bot
+	a.mu.Unlock()
+
+	goal := SessionLootGoal{
+		Gold: gold, Elixir: elixir, DarkElixir: dark,
+		Active: gold > 0 || elixir > 0 || dark > 0,
+	}
+
+	// If the target is set after the session has already passed it, honor it
+	// immediately. StopAfterCurrentAttack remains safe if a sequence is active.
+	if b != nil && goal.Active {
+		stats := b.Stats()
+		reached := (gold > 0 && stats.TotalGold >= gold) ||
+			(elixir > 0 && stats.TotalElixir >= elixir) ||
+			(dark > 0 && stats.TotalDE >= dark)
+		if reached {
+			go a.StopAfterCurrentAttack()
+		}
+	}
+
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "session_loot_goal", goal)
+	}
+	return goal
+}
+
+func (a *App) ClearSessionLootGoal() {
+	a.mu.Lock()
+	a.sessionGoldGoal = 0
+	a.sessionElixirGoal = 0
+	a.sessionDarkGoal = 0
+	a.mu.Unlock()
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "session_loot_goal", SessionLootGoal{})
+	}
+}
+
+func (a *App) GetSessionLootGoal() SessionLootGoal {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return SessionLootGoal{
+		Gold: a.sessionGoldGoal,
+		Elixir: a.sessionElixirGoal,
+		DarkElixir: a.sessionDarkGoal,
+		Active: a.sessionGoldGoal > 0 || a.sessionElixirGoal > 0 || a.sessionDarkGoal > 0,
+	}
+}
+
+func (a *App) ScheduleSessionStop(minutes int) (string, error) {
+	if minutes < 5 {
+		minutes = 5
+	}
+	if minutes > 8*60 {
+		minutes = 8 * 60
+	}
+
+	a.mu.Lock()
+	if a.bot == nil {
+		a.mu.Unlock()
+		return "", fmt.Errorf("bot is not running")
+	}
+	if a.sessionStopTimer != nil {
+		a.sessionStopTimer.Stop()
+	}
+	stopAt := time.Now().Add(time.Duration(minutes) * time.Minute)
+	a.sessionStopAt = stopAt
+	a.sessionStopTimer = time.AfterFunc(time.Until(stopAt), func() {
+		status := a.StopAfterCurrentAttack()
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "scheduled_session_stop_triggered", map[string]any{
+				"message": status.Message,
+			})
+		}
+	})
+	a.mu.Unlock()
+
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "scheduled_session_stop", map[string]any{
+			"at": stopAt.UTC().Format(time.RFC3339),
+			"minutes": minutes,
+		})
+	}
+	return stopAt.UTC().Format(time.RFC3339), nil
+}
+
+func (a *App) CancelScheduledSessionStop() {
+	a.mu.Lock()
+	if a.sessionStopTimer != nil {
+		a.sessionStopTimer.Stop()
+		a.sessionStopTimer = nil
+	}
+	// The time-based stop and loot goal are independent controls.
+	// Cancelling the timer must not silently erase an active loot target.
+	a.sessionStopAt = time.Time{}
+	a.mu.Unlock()
+
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "scheduled_session_stop_cancelled", map[string]any{
+			"message": "Arrêt programmé annulé.",
+		})
+	}
+}
+
+func (a *App) GetScheduledSessionStop() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sessionStopAt.IsZero() || time.Now().After(a.sessionStopAt) {
+		return ""
+	}
+	return a.sessionStopAt.UTC().Format(time.RFC3339)
+}
+
+func (a *App) PauseBot() BotStatus {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.bot == nil {
+		if a.cancel != nil {
+			return BotStatus{Running: false, Message: "Le bot est encore en démarrage"}
+		}
+		return BotStatus{Running: false, Message: "Bot non démarré"}
+	}
+	a.bot.PauseAutomation()
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "bot_paused", map[string]any{
+			"message": "Pause demandée · ClashGO terminera l’attaque en cours avant de rester au village.",
+		})
+	}
+	return BotStatus{Running: true, Message: "Pause activée"}
+}
+
+func (a *App) ResumeBot() BotStatus {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.bot == nil {
+		return BotStatus{Running: false, Message: "Bot non démarré"}
+	}
+	a.bot.ResumeAutomation()
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "bot_resumed", map[string]any{
+			"message": "ClashGO reprend la session.",
+		})
+	}
+	return BotStatus{Running: true, Message: "Session reprise"}
+}
+
+func (a *App) IsPaused() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.bot != nil && a.bot.IsPaused()
+}
+
+func (a *App) StopAfterCurrentAttack() BotStatus {
+	a.mu.Lock()
+	if a.stopping {
+		a.mu.Unlock()
+		return BotStatus{Running: false, Message: "Arrêt déjà en cours"}
+	}
+	if a.bot == nil {
+		starting := a.cancel != nil
+		a.mu.Unlock()
+		if starting {
+			return a.StopBot()
+		}
+		return BotStatus{Running: false, Message: "Bot non démarré"}
+	}
+	if !a.bot.IsSequenceRunning() {
+		a.mu.Unlock()
+		return a.StopBot()
+	}
+	sequenceStartUnix := a.bot.SequenceStartedAtUnix()
+	if sequenceStartUnix <= 0 {
+		a.mu.Unlock()
+		return a.StopBot()
+	}
+	a.gracefulStopRequested = true
+	a.gracefulStopSequenceStartUnix = sequenceStartUnix
+	a.mu.Unlock()
+
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "graceful_stop_scheduled", map[string]any{
+			"message": "Arrêt programmé après le retour au village.",
+		})
+	}
+	return BotStatus{Running: true, Message: "Arrêt programmé après l’attaque en cours"}
+}
+
 func (a *App) StopBot() BotStatus {
 	a.mu.Lock()
+	a.gracefulStopRequested = false
+	if a.sessionStopTimer != nil {
+		a.sessionStopTimer.Stop()
+		a.sessionStopTimer = nil
+	}
+	a.sessionStopAt = time.Time{}
+	a.gracefulStopSequenceStartUnix = 0
 
 	if a.stopping {
 		a.mu.Unlock()
@@ -708,7 +1934,9 @@ func (a *App) StopBot() BotStatus {
 	// Capture and accumulate final stats before stopping. All counters
 	// are atomic.Int* loads, so this is O(1) and non-blocking.
 	current := a.bot.Stats()
+	recentActivity := a.bot.RecentActivity(24)
 	a.lastStats = mergeStats(a.lastStats, current)
+	a.lastActivity = append([]telemetry.Event(nil), recentActivity...)
 
 	// Snapshot the bot pointer + synchronously cancel its context so
 	// the captureLoop and any in-flight executeAttackSequence see the
@@ -745,6 +1973,9 @@ func (a *App) StopBot() BotStatus {
 		}()
 		bot.Stop()
 		a.saveStats()
+		if err := a.restoreTestSessionSettings(); err != nil {
+			log.Error().Err(err).Msg("failed to restore member settings after stopped test session")
+		}
 		// Re-seed attack-history cache after teardown. If the user
 		// manually edited attack_history.json while the bot was
 		// stopped, the next React poll re-reads from disk instead
@@ -754,7 +1985,7 @@ func (a *App) StopBot() BotStatus {
 		a.cachedHistoryMu.Unlock()
 	}()
 
-	return BotStatus{Running: false, Message: "Bot stopped"}
+	return BotStatus{Running: false, Message: "Bot arrêté"}
 }
 
 // IsRunning returns if the bot is currently running
@@ -762,6 +1993,665 @@ func (a *App) IsRunning() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.bot != nil
+}
+
+func (a *App) botSessionActiveOrStarting() bool {
+	if a == nil {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.bot != nil || a.cancel != nil || a.stopping
+}
+
+type LicensePolicy struct {
+	Enforced          bool   `json:"enforced"`
+	ServiceConfigured bool   `json:"service_configured"`
+	ServiceURL        string `json:"service_url,omitempty"`
+}
+
+func (a *App) ReportUIError(message string, componentStack string) {
+	message = strings.TrimSpace(message)
+	componentStack = strings.TrimSpace(componentStack)
+	if message == "" {
+		message = "unknown frontend error"
+	}
+	if len(message) > 4000 {
+		message = message[:4000]
+	}
+	if len(componentStack) > 12000 {
+		componentStack = componentStack[:12000]
+	}
+
+	log.Error().
+		Str("surface", "frontend").
+		Str("ui_error", message).
+		Str("component_stack", componentStack).
+		Msg("ClashGO UI crash")
+}
+
+func (a *App) GetLatestBootReport() *bot.BootReportView {
+	data, err := os.ReadFile(paths.ResolveConfig("logs/last_boot_report.json"))
+	if err != nil {
+		return nil
+	}
+	var report bot.BootReportView
+	if json.Unmarshal(data, &report) != nil || report.StartedAt.IsZero() {
+		return nil
+	}
+	return &report
+}
+
+func (a *App) GetLicensePolicy() LicensePolicy {
+	cfg := config.LoadOrDefault("config.json")
+	serviceURL := clashControlServiceURL(cfg)
+
+	// Licensing becomes mandatory only when a real control endpoint has been
+	// explicitly configured for the build/runtime. The localhost fallback is
+	// intentionally development-only and must never lock beta testers out.
+	explicit := clashControlServiceConfigured(cfg)
+
+	return LicensePolicy{
+		Enforced:          explicit,
+		ServiceConfigured: explicit && strings.TrimSpace(serviceURL) != "",
+		ServiceURL:        func() string {
+			if explicit {
+				return serviceURL
+			}
+			return ""
+		}(),
+	}
+}
+
+type ControlServiceConfig struct {
+	ServiceURL      string `json:"service_url,omitempty"`
+	Configured      bool   `json:"configured"`
+	Embedded        bool   `json:"embedded"`
+	OverrideAllowed bool   `json:"override_allowed"`
+	RequiresRestart bool   `json:"requires_restart"`
+}
+
+func (a *App) GetControlServiceConfig() ControlServiceConfig {
+	cfg := config.LoadOrDefault("config.json")
+	embedded := embeddedControlServiceURL()
+	if embedded != "" {
+		return ControlServiceConfig{
+			ServiceURL: embedded,
+			Configured: true,
+			Embedded: true,
+			OverrideAllowed: false,
+		}
+	}
+	if !betaControlOverrideAllowed() {
+		return ControlServiceConfig{OverrideAllowed: false}
+	}
+	raw := strings.TrimRight(strings.TrimSpace(cfg.Account.ControlURL), "/")
+	return ControlServiceConfig{
+		ServiceURL: raw,
+		Configured: raw != "",
+		OverrideAllowed: true,
+	}
+}
+
+func normalizeControlServiceURL(raw string) (string, error) {
+	raw = strings.TrimRight(strings.TrimSpace(raw), "/")
+	if raw == "" {
+		return "", fmt.Errorf("control service URL is required")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return "", fmt.Errorf("invalid control service URL")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if parsed.Scheme != "https" {
+		local := host == "localhost" || host == "127.0.0.1" || host == "::1"
+		if parsed.Scheme != "http" || !local {
+			return "", fmt.Errorf("control service URL must use https")
+		}
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("control service URL must not contain credentials, query parameters or fragments")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func probeControlServiceURL(baseURL string) error {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return fmt.Errorf("control service URL is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/healthz", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "ClashGO/"+version)
+
+	resp, err := (&http.Client{Timeout: 4 * time.Second}).Do(req)
+	if err != nil {
+		return fmt.Errorf("control service unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("control service health check returned %s", resp.Status)
+	}
+
+	var payload struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&payload); err != nil {
+		return fmt.Errorf("invalid control service health response: %w", err)
+	}
+	if !payload.OK {
+		return fmt.Errorf("control service health check failed")
+	}
+	return nil
+}
+
+func (a *App) SetBetaControlServiceURL(raw string) (ControlServiceConfig, error) {
+	if !betaControlOverrideAllowed() {
+		return a.GetControlServiceConfig(), fmt.Errorf("local control-service override is disabled in stable builds")
+	}
+	if embeddedControlServiceURL() != "" {
+		return a.GetControlServiceConfig(), fmt.Errorf("the control service is embedded in this build")
+	}
+	if a.botSessionActiveOrStarting() {
+		return a.GetControlServiceConfig(), fmt.Errorf("stop ClashGO automation before changing the control service")
+	}
+	normalized, err := normalizeControlServiceURL(raw)
+	if err != nil {
+		return a.GetControlServiceConfig(), err
+	}
+	if err := probeControlServiceURL(normalized); err != nil {
+		return a.GetControlServiceConfig(), err
+	}
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Account.ControlURL = normalized
+	if err := config.Save("config.json", cfg); err != nil {
+		return a.GetControlServiceConfig(), err
+	}
+
+	// Switch the existing services in place so the logger keeps the same
+	// reporter writer and the member can activate immediately without a
+	// process restart.
+	if a.license != nil {
+		a.license.SetBaseURL(normalized)
+	}
+	if a.supportReporter != nil {
+		a.supportReporter.SetBaseURL(normalized)
+	}
+
+	return ControlServiceConfig{
+		ServiceURL: normalized,
+		Configured: true,
+		OverrideAllowed: true,
+		RequiresRestart: false,
+	}, nil
+}
+
+// GetLicenseState exposes safe activation metadata to the UI. The full
+// license key is intentionally never returned through Wails.
+func (a *App) GetLicenseState() licensing.State {
+	if a.license == nil {
+		return licensing.State{}
+	}
+	return a.license.GetState()
+}
+
+func (a *App) RefreshLicense() licensing.State {
+	if a.license == nil {
+		return licensing.State{Activated: false, Error: "license service is unavailable"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	state := a.license.Validate(ctx)
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "license_state", state)
+	}
+
+	// A manual refresh is an explicit entitlement check. If the server says
+	// the licence is no longer valid, enforce that result immediately instead
+	// of waiting for the periodic 15-minute validation loop.
+	if !state.Activated && a.botSessionActiveOrStarting() {
+		log.Warn().Str("reason", state.Error).Msg("manual license refresh invalidated active/starting session")
+		_ = a.StopBot()
+	}
+	return state
+}
+
+// ActivateLicense validates and binds a license to this Windows machine.
+func (a *App) ActivateLicense(key string) (licensing.State, error) {
+	if a.license == nil {
+		cfg := config.LoadOrDefault("config.json")
+		a.license = licensing.New(clashControlServiceURL(cfg), version)
+	}
+
+	key = strings.ToUpper(strings.TrimSpace(key))
+	currentState := a.license.GetState()
+	currentKey := strings.ToUpper(strings.TrimSpace(a.license.LicenseKey()))
+	if a.botSessionActiveOrStarting() {
+		return currentState, fmt.Errorf("stop ClashGO before activating a license")
+	}
+	if currentState.Activated && currentKey != "" && key != currentKey {
+		return currentState, fmt.Errorf("deactivate the current ClashGO license before activating another one")
+	}
+
+	state, err := a.license.Activate(context.Background(), key)
+	if err != nil {
+		return state, err
+	}
+	if err := a.applyMemberProfileForCurrentLicense(); err != nil {
+		log.Warn().Err(err).Msg("license activated but member preferences could not be restored")
+	}
+	if err := a.applyMemberAccountForCurrentLicense(); err != nil {
+		log.Warn().Err(err).Msg("license activated but member Clash account could not be restored")
+	}
+	if err := a.applyMemberAutomationForCurrentLicense(); err != nil {
+		log.Warn().Err(err).Msg("license activated but member automation preferences could not be restored")
+	}
+	a.clearInMemoryMemberRuntimeState()
+	if err := a.restoreMemberRuntimeState(false); err != nil {
+		log.Warn().Err(err).Msg("license activated but member runtime state could not be restored")
+	}
+	a.loadPersistedStats()
+	if a.supportReporter != nil {
+		a.supportReporter.Flush(context.Background())
+	}
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "license_state", state)
+	}
+	return state, nil
+}
+
+// DeactivateLicense removes only the local activation data. Server-side
+// machine binding remains until an authorized developer/admin resets it.
+func (a *App) DeactivateLicense() error {
+	if a.license == nil {
+		return nil
+	}
+
+	// A local deactivation must immediately end an active OR in-flight
+	// automation session. A boot that already passed license validation must
+	// never be allowed to finish after the local entitlement is removed.
+	if a.botSessionActiveOrStarting() {
+		_ = a.StopBot()
+	}
+	if err := a.waitForBotTeardown(20 * time.Second); err != nil {
+		return err
+	}
+
+	// Flush and snapshot the current member without deleting shared runtime
+	// files yet. Every destructive step happens only after the entitlement and
+	// cleared runtime config can both be committed successfully.
+	a.saveStats()
+	if err := a.archiveMemberRuntimeState(false); err != nil {
+		return err
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	oldTag := strings.TrimSpace(cfg.Account.PlayerTag)
+	if err := a.persistMemberAccountTag(oldTag); err != nil {
+		return err
+	}
+
+	cfg.Account.PlayerTag = ""
+	cfg.Account.LegacyAPIKey = ""
+	if err := config.Save("config.json", cfg); err != nil {
+		return err
+	}
+
+	if err := a.license.DeactivateLocal(); err != nil {
+		// Best-effort rollback: the member still owns the active entitlement,
+		// so restore their account into the shared runtime config.
+		cfg.Account.PlayerTag = oldTag
+		_ = config.Save("config.json", cfg)
+		return err
+	}
+
+	// The entitlement is now locally removed and the shared config no longer
+	// carries member identity. It is safe to clear shared runtime artifacts.
+	clearSharedMemberRuntimeStateFiles()
+	a.clearInMemoryMemberRuntimeState()
+	_ = os.Remove(accountProfileCachePath())
+
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "license_state", a.license.GetState())
+	}
+	return nil
+}
+
+func (a *App) developerControlGET(path string) ([]map[string]any, error) {
+	if a.license == nil {
+		return nil, fmt.Errorf("license service is not initialized")
+	}
+	state := a.license.GetState()
+	if !state.Activated || (state.Role != licensing.RoleDeveloper && state.Role != licensing.RoleAdmin) {
+		return nil, fmt.Errorf("developer license required")
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	baseURL := clashControlServiceURL(cfg)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-ClashGO-License", a.license.LicenseKey())
+	req.Header.Set("X-ClashGO-Machine", a.license.MachineID())
+	req.Header.Set("User-Agent", "ClashGO/"+version)
+
+	resp, err := (&http.Client{Timeout: 12 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		var payload struct {
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		if payload.Message == "" {
+			payload.Message = resp.Status
+		}
+		return nil, fmt.Errorf("developer support service: %s", payload.Message)
+	}
+
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, err
+	}
+	var rows []map[string]any
+	for _, key := range []string{"incidents", "licenses", "events"} {
+		if raw, ok := envelope[key]; ok {
+			if err := json.Unmarshal(raw, &rows); err != nil {
+				return nil, err
+			}
+			return rows, nil
+		}
+	}
+	return []map[string]any{}, nil
+}
+
+func (a *App) GetDeveloperIncidents() ([]map[string]any, error) {
+	return a.developerControlGET("/v1/developer/incidents")
+}
+
+func (a *App) GetDeveloperLicenses() ([]map[string]any, error) {
+	return a.developerControlGET("/v1/developer/licenses")
+}
+
+func (a *App) GetAdminLicenseHistory() ([]map[string]any, error) {
+	if a.license == nil {
+		return nil, fmt.Errorf("license service is not initialized")
+	}
+	state := a.license.GetState()
+	if !state.Activated || state.Role != licensing.RoleAdmin {
+		return nil, fmt.Errorf("admin license required")
+	}
+	return a.developerControlGET("/v1/developer/history")
+}
+
+func (a *App) adminControlPOST(path string, payload any) (map[string]any, error) {
+	if a.license == nil {
+		return nil, fmt.Errorf("license service is not initialized")
+	}
+	state := a.license.GetState()
+	if !state.Activated || state.Role != licensing.RoleAdmin {
+		return nil, fmt.Errorf("admin license required")
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	cfg := config.LoadOrDefault("config.json")
+	baseURL := clashControlServiceURL(cfg)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-ClashGO-License", a.license.LicenseKey())
+	req.Header.Set("X-ClashGO-Machine", a.license.MachineID())
+	req.Header.Set("User-Agent", "ClashGO/"+version)
+
+	resp, err := (&http.Client{Timeout: 12 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var apiErr struct {
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(responseBody, &apiErr)
+		if strings.TrimSpace(apiErr.Message) == "" {
+			apiErr.Message = resp.Status
+		}
+		return nil, fmt.Errorf("admin license service: %s", apiErr.Message)
+	}
+	if len(responseBody) == 0 {
+		return map[string]any{"ok": true}, nil
+	}
+	var result map[string]any
+	if err := json.Unmarshal(responseBody, &result); err != nil {
+		return nil, fmt.Errorf("decode admin response: %w", err)
+	}
+	return result, nil
+}
+
+func (a *App) AdminResetLicenseMachine(licenseID string) error {
+	licenseID = strings.TrimSpace(licenseID)
+	if licenseID == "" {
+		return fmt.Errorf("license id is required")
+	}
+	_, err := a.adminControlPOST("/v1/developer/licenses/reset-machine", map[string]any{
+		"license_id": licenseID,
+	})
+	return err
+}
+
+func (a *App) AdminSetLicenseActive(licenseID string, active bool) error {
+	licenseID = strings.TrimSpace(licenseID)
+	if licenseID == "" {
+		return fmt.Errorf("license id is required")
+	}
+	_, err := a.adminControlPOST("/v1/developer/licenses/set-active", map[string]any{
+		"license_id": licenseID,
+		"active":     active,
+	})
+	return err
+}
+
+func (a *App) AdminSetLicenseRole(licenseID, role string) error {
+	licenseID = strings.TrimSpace(licenseID)
+	if licenseID == "" {
+		return fmt.Errorf("license id is required")
+	}
+	role = strings.ToLower(strings.TrimSpace(role))
+	switch role {
+	case "member", "developer", "admin":
+	default:
+		return fmt.Errorf("invalid role")
+	}
+	_, err := a.adminControlPOST("/v1/developer/licenses/set-role", map[string]any{
+		"license_id": licenseID,
+		"role":       role,
+	})
+	return err
+}
+
+func (a *App) AdminUpdateLicenseCustomer(licenseID, customerName, customerContact, customerNotes string) error {
+	licenseID = strings.TrimSpace(licenseID)
+	customerName = strings.TrimSpace(customerName)
+	customerContact = strings.TrimSpace(customerContact)
+	customerNotes = strings.TrimSpace(customerNotes)
+	if licenseID == "" {
+		return fmt.Errorf("license id is required")
+	}
+	if customerName == "" {
+		return fmt.Errorf("customer name is required")
+	}
+	_, err := a.adminControlPOST("/v1/developer/licenses/update-customer", map[string]any{
+		"license_id":       licenseID,
+		"customer_name":    customerName,
+		"customer_contact": customerContact,
+		"customer_notes":   customerNotes,
+	})
+	return err
+}
+
+func (a *App) AdminRenewLicense(licenseID, plan string, amountCents int, paymentStatus, note string) (map[string]any, error) {
+	licenseID = strings.TrimSpace(licenseID)
+	if licenseID == "" {
+		return nil, fmt.Errorf("license id is required")
+	}
+	plan = strings.ToLower(strings.TrimSpace(plan))
+	switch plan {
+	case "free_2d", "week_1", "month_1", "lifetime":
+	default:
+		return nil, fmt.Errorf("invalid license plan")
+	}
+	if amountCents < 0 {
+		amountCents = 0
+	}
+	if amountCents > 100000000 {
+		amountCents = 100000000
+	}
+	paymentStatus = strings.ToLower(strings.TrimSpace(paymentStatus))
+	switch paymentStatus {
+	case "paid", "pending", "offered", "free":
+	default:
+		paymentStatus = "unknown"
+	}
+	return a.adminControlPOST("/v1/developer/licenses/renew", map[string]any{
+		"license_id":      licenseID,
+		"plan":            plan,
+		"amount_cents":    amountCents,
+		"payment_status":  paymentStatus,
+		"note":            strings.TrimSpace(note),
+	})
+}
+
+type AdminLicenseRequest struct {
+	Role            string `json:"role"`
+	Plan            string `json:"plan"`
+	CustomerName    string `json:"customer_name,omitempty"`
+	CustomerContact string `json:"customer_contact,omitempty"`
+	CustomerNotes   string `json:"customer_notes,omitempty"`
+	AmountCents     int    `json:"amount_cents,omitempty"`
+	PaymentStatus   string `json:"payment_status,omitempty"`
+	PaymentNote     string `json:"note,omitempty"`
+}
+
+type AdminLicenseResult struct {
+	Role         string   `json:"role"`
+	Plan         string   `json:"plan"`
+	DurationDays int      `json:"duration_days"`
+	Licenses     []string `json:"licenses"`
+}
+
+func (a *App) CreateAdminLicense(input AdminLicenseRequest) (AdminLicenseResult, error) {
+	if a.license == nil {
+		return AdminLicenseResult{}, fmt.Errorf("license service is not initialized")
+	}
+	state := a.license.GetState()
+	if !state.Activated || state.Role != licensing.RoleAdmin {
+		return AdminLicenseResult{}, fmt.Errorf("admin license required")
+	}
+
+	role := strings.ToLower(strings.TrimSpace(input.Role))
+	switch role {
+	case "member", "developer", "admin":
+	default:
+		role = "member"
+	}
+	plan := strings.ToLower(strings.TrimSpace(input.Plan))
+	switch plan {
+	case "free_2d", "week_1", "month_1", "lifetime":
+	default:
+		plan = "month_1"
+	}
+
+	if input.AmountCents < 0 {
+		input.AmountCents = 0
+	}
+	paymentStatus := strings.ToLower(strings.TrimSpace(input.PaymentStatus))
+	switch paymentStatus {
+	case "paid", "pending", "offered", "free":
+	default:
+		paymentStatus = "unknown"
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"role":             role,
+		"plan":             plan,
+		"count":            1,
+		"customer_name":    strings.TrimSpace(input.CustomerName),
+		"customer_contact": strings.TrimSpace(input.CustomerContact),
+		"customer_notes":   strings.TrimSpace(input.CustomerNotes),
+		"amount_cents":     input.AmountCents,
+		"payment_status":   paymentStatus,
+		"note":             strings.TrimSpace(input.PaymentNote),
+	})
+	if err != nil {
+		return AdminLicenseResult{}, err
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	baseURL := clashControlServiceURL(cfg)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, baseURL+"/v1/developer/licenses", bytes.NewReader(payload))
+	if err != nil {
+		return AdminLicenseResult{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-ClashGO-License", a.license.LicenseKey())
+	req.Header.Set("X-ClashGO-Machine", a.license.MachineID())
+	req.Header.Set("User-Agent", "ClashGO/"+version)
+
+	resp, err := (&http.Client{Timeout: 12 * time.Second}).Do(req)
+	if err != nil {
+		return AdminLicenseResult{}, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+	if err != nil {
+		return AdminLicenseResult{}, err
+	}
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		var apiErr struct {
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(body, &apiErr)
+		if strings.TrimSpace(apiErr.Message) == "" {
+			apiErr.Message = resp.Status
+		}
+		return AdminLicenseResult{}, fmt.Errorf("license creation failed: %s", apiErr.Message)
+	}
+
+	var result AdminLicenseResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		return AdminLicenseResult{}, fmt.Errorf("decode license creation response: %w", err)
+	}
+	if len(result.Licenses) == 0 {
+		return AdminLicenseResult{}, fmt.Errorf("license service returned no key")
+	}
+	return result, nil
 }
 
 // GetConfig returns the current config.json settings
@@ -827,7 +2717,11 @@ func normalizePlayerTag(tag string) (string, error) {
 	if !strings.HasPrefix(tag, "#") {
 		tag = "#" + tag
 	}
-	for _, r := range tag[1:] {
+	body := tag[1:]
+	if len(body) < 5 || len(body) > 15 {
+		return "", fmt.Errorf("invalid player tag length")
+	}
+	for _, r := range body {
 		if !(r >= '0' && r <= '9') && !(r >= 'A' && r <= 'Z') {
 			return "", fmt.Errorf("invalid player tag")
 		}
@@ -852,6 +2746,55 @@ func clashAccountServiceURL(cfg *config.BotConfig) string {
 	return "http://127.0.0.1:8787"
 }
 
+func clashAccountServiceConfigured(cfg *config.BotConfig) bool {
+	if strings.TrimSpace(os.Getenv("CLASHGO_ACCOUNT_API_URL")) != "" {
+		return true
+	}
+	if strings.TrimSpace(accountServiceURL) != "" {
+		return true
+	}
+	return cfg != nil && strings.TrimSpace(cfg.Account.ProxyURL) != ""
+}
+
+func embeddedControlServiceURL() string {
+	if raw := strings.TrimSpace(os.Getenv("CLASHGO_CONTROL_API_URL")); raw != "" {
+		return strings.TrimRight(raw, "/")
+	}
+	if raw := strings.TrimSpace(controlServiceURL); raw != "" {
+		return strings.TrimRight(raw, "/")
+	}
+	return ""
+}
+
+func betaControlOverrideAllowed() bool {
+	channel := strings.ToLower(strings.TrimSpace(updateChannel))
+	buildVersion := strings.ToLower(strings.TrimSpace(version))
+	return channel == "beta" ||
+		strings.Contains(buildVersion, "beta") ||
+		strings.Contains(buildVersion, "dev")
+}
+
+func clashControlServiceURL(cfg *config.BotConfig) string {
+	if raw := embeddedControlServiceURL(); raw != "" {
+		return raw
+	}
+	if betaControlOverrideAllowed() && cfg != nil {
+		if raw := strings.TrimSpace(cfg.Account.ControlURL); raw != "" {
+			return strings.TrimRight(raw, "/")
+		}
+	}
+	// Local development reuses the combined Go service when no dedicated
+	// control endpoint has been configured.
+	return clashAccountServiceURL(cfg)
+}
+
+func clashControlServiceConfigured(cfg *config.BotConfig) bool {
+	if embeddedControlServiceURL() != "" {
+		return true
+	}
+	return betaControlOverrideAllowed() && cfg != nil && strings.TrimSpace(cfg.Account.ControlURL) != ""
+}
+
 // GetAccountConfig returns safe account metadata only. End users never see,
 // create, or store a Clash developer API key in the desktop application.
 func (a *App) GetAccountConfig() ClashAccountPublicConfig {
@@ -859,13 +2802,102 @@ func (a *App) GetAccountConfig() ClashAccountPublicConfig {
 	serviceURL := clashAccountServiceURL(cfg)
 	return ClashAccountPublicConfig{
 		PlayerTag:         cfg.Account.PlayerTag,
-		ServiceConfigured: strings.TrimSpace(serviceURL) != "",
+		ServiceConfigured: clashAccountServiceConfigured(cfg),
 		ServiceURL:        serviceURL,
 	}
 }
 
 func accountProfileCachePath() string {
 	return paths.ResolveConfig("account_profile.json")
+}
+
+func savePlayerProfileFile(path string, profile *ClashPlayerProfile) error {
+	if strings.TrimSpace(path) == "" || profile == nil || strings.TrimSpace(profile.Tag) == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	tmpPath := path + ".tmp"
+	backupPath := path + ".bak"
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	_ = os.Remove(backupPath)
+	hadOriginal := false
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Rename(path, backupPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return err
+		}
+		hadOriginal = true
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backupPath, path)
+		}
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	_ = os.Remove(backupPath)
+	return nil
+}
+
+func loadPlayerProfileFile(path string) (*ClashPlayerProfile, bool) {
+	if strings.TrimSpace(path) == "" {
+		return nil, false
+	}
+	read := func(candidate string) (*ClashPlayerProfile, bool) {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			return nil, false
+		}
+		var profile ClashPlayerProfile
+		if json.Unmarshal(data, &profile) != nil || strings.TrimSpace(profile.Tag) == "" {
+			return nil, false
+		}
+		return &profile, true
+	}
+	if profile, ok := read(path); ok {
+		return profile, true
+	}
+	if profile, ok := read(path + ".bak"); ok {
+		_ = savePlayerProfileFile(path, profile)
+		return profile, true
+	}
+	return nil, false
+}
+
+func (a *App) memberPlayerProfilePath() string {
+	if a == nil || a.license == nil {
+		return ""
+	}
+	id := strings.TrimSpace(a.license.ProfileID())
+	if id == "" {
+		return ""
+	}
+	return paths.ResolveConfig(filepath.Join("members", id+".player.json"))
 }
 
 func applySimpleAutomationDefaults(cfg *config.BotConfig) {
@@ -901,32 +2933,1410 @@ func applySimpleAutomationDefaults(cfg *config.BotConfig) {
 // The UI can render this immediately at launch while the network refresh runs
 // in the background, so reopening ClashGO never presents an empty account page.
 func (a *App) GetCachedPlayerProfile() *ClashPlayerProfile {
-	data, err := os.ReadFile(accountProfileCachePath())
-	if err != nil {
+	profile, ok := loadPlayerProfileFile(accountProfileCachePath())
+	if !ok {
 		return nil
 	}
-	var profile ClashPlayerProfile
-	if json.Unmarshal(data, &profile) != nil || strings.TrimSpace(profile.Tag) == "" {
-		return nil
-	}
-	return &profile
+	return profile
 }
 
 func persistPlayerProfile(profile *ClashPlayerProfile) {
+	_ = savePlayerProfileFile(accountProfileCachePath(), profile)
+}
+
+func (a *App) persistPlayerProfileForCurrentLicense(profile *ClashPlayerProfile) {
 	if profile == nil || strings.TrimSpace(profile.Tag) == "" {
 		return
 	}
-	data, err := json.MarshalIndent(profile, "", "  ")
-	if err != nil {
-		return
+	persistPlayerProfile(profile)
+	if path := a.memberPlayerProfilePath(); path != "" {
+		if err := savePlayerProfileFile(path, profile); err != nil {
+			log.Warn().Err(err).Msg("could not persist per-license Clash profile cache")
+		}
 	}
-	_ = os.WriteFile(accountProfileCachePath(), data, 0600)
 }
 
 // SetSimpleMode toggles the one-click automation experience. Turning it on
 // also enables the dependent automatic behaviors so users do not have to hunt
 // through multiple settings pages to obtain a coherent setup.
+type MemberSettings struct {
+	InterfaceLevel       string `json:"interface_level,omitempty"`
+	SpeedProfile         string `json:"speed_profile"`
+	MaxAttacksPerHour    int    `json:"max_attacks_per_hour"`
+	MaxAttacksPerSession int    `json:"max_attacks_per_session"`
+	BreakEveryAttacks    int    `json:"break_every_attacks"`
+	BreakMinutes         int    `json:"break_minutes"`
+	AdaptiveSearch       bool   `json:"adaptive_search"`
+	AutoProfileSync      bool   `json:"auto_profile_sync"`
+	AutoArmyGuard        bool   `json:"auto_army_guard"`
+	AutoResourceTracking bool   `json:"auto_resource_tracking"`
+}
+
+func normalizeSpeedProfile(profile string) string {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "cautious":
+		return "cautious"
+	case "fast":
+		return "fast"
+	default:
+		return "normal"
+	}
+}
+
+func applyMemberSpeedProfile(cfg *config.BotConfig, profile string) {
+	if cfg == nil {
+		return
+	}
+	profile = normalizeSpeedProfile(profile)
+	cfg.Automation.SpeedProfile = profile
+
+	switch profile {
+	case "cautious":
+		cfg.Attack.DropDelay = config.Duration{Duration: 700 * time.Millisecond}
+		cfg.Attack.SpellDelay = config.Duration{Duration: 2200 * time.Millisecond}
+		cfg.Attack.MinSecondsBetweenAttacks = 45
+		cfg.Automation.MaxAttacksPerHour = 8
+		if cfg.Automation.BreakEveryAttacks <= 0 {
+			cfg.Automation.BreakEveryAttacks = 4
+		}
+		if cfg.Automation.BreakDuration.Duration <= 0 {
+			cfg.Automation.BreakDuration = config.Duration{Duration: 4 * time.Minute}
+		}
+	case "fast":
+		cfg.Attack.DropDelay = config.Duration{Duration: 300 * time.Millisecond}
+		cfg.Attack.SpellDelay = config.Duration{Duration: 1300 * time.Millisecond}
+		cfg.Attack.MinSecondsBetweenAttacks = 20
+		cfg.Automation.MaxAttacksPerHour = 16
+		if cfg.Automation.BreakEveryAttacks <= 0 {
+			cfg.Automation.BreakEveryAttacks = 6
+		}
+		if cfg.Automation.BreakDuration.Duration <= 0 {
+			cfg.Automation.BreakDuration = config.Duration{Duration: 2 * time.Minute}
+		}
+	default:
+		cfg.Attack.DropDelay = config.Duration{Duration: 500 * time.Millisecond}
+		cfg.Attack.SpellDelay = config.Duration{Duration: 2 * time.Second}
+		cfg.Attack.MinSecondsBetweenAttacks = 30
+		cfg.Automation.MaxAttacksPerHour = 12
+		if cfg.Automation.BreakEveryAttacks <= 0 {
+			cfg.Automation.BreakEveryAttacks = 5
+		}
+		if cfg.Automation.BreakDuration.Duration <= 0 {
+			cfg.Automation.BreakDuration = config.Duration{Duration: 3 * time.Minute}
+		}
+	}
+}
+
+func applyMemberPreset(settings MemberSettings, preset string) (MemberSettings, error) {
+	preset = strings.ToLower(strings.TrimSpace(preset))
+	settings = sanitizeMemberSettings(settings)
+
+	switch preset {
+	case "short":
+		settings.SpeedProfile = "normal"
+		settings.MaxAttacksPerHour = 12
+		settings.MaxAttacksPerSession = 10
+		settings.BreakEveryAttacks = 5
+		settings.BreakMinutes = 3
+		settings.AdaptiveSearch = true
+	case "balanced":
+		settings.SpeedProfile = "normal"
+		settings.MaxAttacksPerHour = 12
+		settings.MaxAttacksPerSession = 50
+		settings.BreakEveryAttacks = 5
+		settings.BreakMinutes = 3
+		settings.AdaptiveSearch = true
+	case "fast":
+		settings.SpeedProfile = "fast"
+		settings.MaxAttacksPerHour = 16
+		settings.MaxAttacksPerSession = 100
+		settings.BreakEveryAttacks = 6
+		settings.BreakMinutes = 2
+		settings.AdaptiveSearch = true
+	default:
+		return settings, fmt.Errorf("unknown member preset %q", preset)
+	}
+	return sanitizeMemberSettings(settings), nil
+}
+
+func sanitizeMemberSettings(settings MemberSettings) MemberSettings {
+	switch strings.ToLower(strings.TrimSpace(settings.InterfaceLevel)) {
+	case "advanced":
+		settings.InterfaceLevel = "advanced"
+	default:
+		settings.InterfaceLevel = "simple"
+	}
+	settings.SpeedProfile = normalizeSpeedProfile(settings.SpeedProfile)
+
+	if settings.MaxAttacksPerHour < 1 {
+		settings.MaxAttacksPerHour = 1
+	}
+	if settings.MaxAttacksPerHour > 24 {
+		settings.MaxAttacksPerHour = 24
+	}
+
+	// Zero is the migration value for profiles written before this setting
+	// existed. Keep their historical ClashGO default instead of turning an
+	// old profile into a one-attack session.
+	if settings.MaxAttacksPerSession <= 0 {
+		settings.MaxAttacksPerSession = 100
+	}
+	if settings.MaxAttacksPerSession > 500 {
+		settings.MaxAttacksPerSession = 500
+	}
+
+	if settings.BreakEveryAttacks < 0 {
+		settings.BreakEveryAttacks = 0
+	}
+	if settings.BreakEveryAttacks > 20 {
+		settings.BreakEveryAttacks = 20
+	}
+
+	if settings.BreakMinutes < 0 {
+		settings.BreakMinutes = 0
+	}
+	if settings.BreakMinutes > 30 {
+		settings.BreakMinutes = 30
+	}
+	return settings
+}
+
+func defaultMemberSettings() MemberSettings {
+	return MemberSettings{
+		InterfaceLevel:       "simple",
+		SpeedProfile:         "normal",
+		MaxAttacksPerHour:    12,
+		MaxAttacksPerSession: 100,
+		BreakEveryAttacks:    5,
+		BreakMinutes:         3,
+		AdaptiveSearch:       true,
+		AutoProfileSync:      true,
+		AutoArmyGuard:        true,
+		AutoResourceTracking: true,
+	}
+}
+
+func applyMemberSettingsToConfig(cfg *config.BotConfig, settings MemberSettings) {
+	if cfg == nil {
+		return
+	}
+	settings = sanitizeMemberSettings(settings)
+	applyMemberSpeedProfile(cfg, settings.SpeedProfile)
+	cfg.Automation.MaxAttacksPerHour = settings.MaxAttacksPerHour
+	cfg.Attack.MaxAttackPerSession = settings.MaxAttacksPerSession
+	cfg.Automation.BreakEveryAttacks = settings.BreakEveryAttacks
+	cfg.Automation.BreakDuration = config.Duration{Duration: time.Duration(settings.BreakMinutes) * time.Minute}
+	cfg.Search.AdaptiveSearch = settings.AdaptiveSearch
+	cfg.Automation.AutoProfileSync = settings.AutoProfileSync
+	cfg.Automation.AutoArmyGuard = settings.AutoArmyGuard
+	cfg.Automation.AutoResourceTracking = settings.AutoResourceTracking
+}
+
+func (a *App) memberProfilePath() string {
+	if a == nil || a.license == nil {
+		return ""
+	}
+	id := strings.TrimSpace(a.license.ProfileID())
+	if id == "" {
+		return ""
+	}
+	return paths.ResolveConfig(filepath.Join("members", id+".json"))
+}
+
+func saveMemberProfileFile(path string, settings MemberSettings) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	settings = sanitizeMemberSettings(settings)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	tmpPath := path + ".tmp"
+	backupPath := path + ".bak"
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	_ = os.Remove(backupPath)
+	hadOriginal := false
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Rename(path, backupPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return err
+		}
+		hadOriginal = true
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backupPath, path)
+		}
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	_ = os.Remove(backupPath)
+	return nil
+}
+
+func loadMemberProfileFile(path string) (MemberSettings, bool) {
+	if strings.TrimSpace(path) == "" {
+		return MemberSettings{}, false
+	}
+
+	read := func(candidate string) (MemberSettings, bool) {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			return MemberSettings{}, false
+		}
+		var settings MemberSettings
+		if json.Unmarshal(data, &settings) != nil {
+			return MemberSettings{}, false
+		}
+		return sanitizeMemberSettings(settings), true
+	}
+
+	if settings, ok := read(path); ok {
+		return settings, true
+	}
+	if settings, ok := read(path + ".bak"); ok {
+		// Best-effort self-heal so the next launch reads a valid primary file.
+		_ = saveMemberProfileFile(path, settings)
+		return settings, true
+	}
+	return MemberSettings{}, false
+}
+
+func (a *App) persistMemberProfile(settings MemberSettings) error {
+	return saveMemberProfileFile(a.memberProfilePath(), settings)
+}
+
+func (a *App) loadMemberProfile() (MemberSettings, bool) {
+	return loadMemberProfileFile(a.memberProfilePath())
+}
+
+
+type MemberPresetSlot struct {
+	Slot      int            `json:"slot"`
+	Name      string         `json:"name"`
+	UpdatedAt string         `json:"updated_at"`
+	Settings  MemberSettings `json:"settings"`
+}
+
+type memberPresetStore struct {
+	Slots []MemberPresetSlot `json:"slots"`
+}
+
+func (a *App) memberPresetStorePath() string {
+	if a == nil || a.license == nil {
+		return ""
+	}
+	id := strings.TrimSpace(a.license.ProfileID())
+	if id == "" {
+		return ""
+	}
+	return paths.ResolveConfig(filepath.Join("members", id+".presets.json"))
+}
+
+func sanitizeMemberPresetName(name string, slot int) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Sprintf("Profil %d", slot)
+	}
+	runes := []rune(name)
+	if len(runes) > 32 {
+		runes = runes[:32]
+	}
+	return string(runes)
+}
+
+func loadMemberPresetStore(path string) memberPresetStore {
+	empty := memberPresetStore{Slots: []MemberPresetSlot{}}
+	if strings.TrimSpace(path) == "" {
+		return empty
+	}
+
+	read := func(candidate string) (memberPresetStore, bool) {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			return empty, false
+		}
+		var store memberPresetStore
+		if json.Unmarshal(data, &store) != nil {
+			return empty, false
+		}
+		clean := make([]MemberPresetSlot, 0, 3)
+		seen := map[int]bool{}
+		for _, item := range store.Slots {
+			if item.Slot < 1 || item.Slot > 3 || seen[item.Slot] {
+				continue
+			}
+			item.Name = sanitizeMemberPresetName(item.Name, item.Slot)
+			item.Settings = sanitizeMemberSettings(item.Settings)
+			seen[item.Slot] = true
+			clean = append(clean, item)
+		}
+		store.Slots = clean
+		return store, true
+	}
+
+	if store, ok := read(path); ok {
+		return store
+	}
+	if store, ok := read(path + ".bak"); ok {
+		// A crash can occur after the old primary was renamed to .bak but
+		// before the new temp file became primary. Recover transparently.
+		_ = saveMemberPresetStore(path, store)
+		return store
+	}
+	return empty
+}
+
+func saveMemberPresetStore(path string, store memberPresetStore) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("member preset path unavailable")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(store, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	backup := path + ".bak"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	if f, err := os.Open(tmp); err == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
+
+	_ = os.Remove(backup)
+	hadOriginal := false
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Rename(path, backup); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+		hadOriginal = true
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backup, path)
+		}
+		_ = os.Remove(tmp)
+		return err
+	}
+	_ = os.Remove(backup)
+	return nil
+}
+
+func (a *App) GetMemberPresets() []MemberPresetSlot {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return []MemberPresetSlot{}
+	}
+	store := loadMemberPresetStore(a.memberPresetStorePath())
+	sort.Slice(store.Slots, func(i, j int) bool { return store.Slots[i].Slot < store.Slots[j].Slot })
+	return store.Slots
+}
+
+func (a *App) SaveMemberPreset(slot int, name string) ([]MemberPresetSlot, error) {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return nil, fmt.Errorf("active ClashGO license required")
+	}
+	if slot < 1 || slot > 3 {
+		return nil, fmt.Errorf("preset slot must be between 1 and 3")
+	}
+	if a.testSessionRestorePending() {
+		return nil, fmt.Errorf("session test active: wait for it to finish before saving a preset")
+	}
+
+	store := loadMemberPresetStore(a.memberPresetStorePath())
+	item := MemberPresetSlot{
+		Slot:      slot,
+		Name:      sanitizeMemberPresetName(name, slot),
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		Settings:  a.GetMemberSettings(),
+	}
+	replaced := false
+	for i := range store.Slots {
+		if store.Slots[i].Slot == slot {
+			store.Slots[i] = item
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		store.Slots = append(store.Slots, item)
+	}
+	sort.Slice(store.Slots, func(i, j int) bool { return store.Slots[i].Slot < store.Slots[j].Slot })
+	if err := saveMemberPresetStore(a.memberPresetStorePath(), store); err != nil {
+		return nil, err
+	}
+	return store.Slots, nil
+}
+
+func (a *App) ApplySavedMemberPreset(slot int) (MemberSettings, error) {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return MemberSettings{}, fmt.Errorf("active ClashGO license required")
+	}
+	if slot < 1 || slot > 3 {
+		return MemberSettings{}, fmt.Errorf("preset slot must be between 1 and 3")
+	}
+	if a.testSessionRestorePending() {
+		return MemberSettings{}, fmt.Errorf("session test active: wait for it to finish before applying a preset")
+	}
+	store := loadMemberPresetStore(a.memberPresetStorePath())
+	for _, item := range store.Slots {
+		if item.Slot == slot {
+			return a.saveMemberSettings(item.Settings, false)
+		}
+	}
+	return MemberSettings{}, fmt.Errorf("saved member preset not found")
+}
+
+func (a *App) DeleteMemberPreset(slot int) ([]MemberPresetSlot, error) {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return nil, fmt.Errorf("active ClashGO license required")
+	}
+	if slot < 1 || slot > 3 {
+		return nil, fmt.Errorf("preset slot must be between 1 and 3")
+	}
+	if a.testSessionRestorePending() {
+		return nil, fmt.Errorf("session test active: wait for it to finish before deleting a preset")
+	}
+	store := loadMemberPresetStore(a.memberPresetStorePath())
+	next := make([]MemberPresetSlot, 0, len(store.Slots))
+	for _, item := range store.Slots {
+		if item.Slot != slot {
+			next = append(next, item)
+		}
+	}
+	store.Slots = next
+	if err := saveMemberPresetStore(a.memberPresetStorePath(), store); err != nil {
+		return nil, err
+	}
+	return store.Slots, nil
+}
+
+func (a *App) memberPreviousProfilePath() string {
+	path := a.memberProfilePath()
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	return path + ".previous"
+}
+
+func (a *App) HasPreviousMemberSettings() bool {
+	_, ok := loadMemberProfileFile(a.memberPreviousProfilePath())
+	return ok
+}
+
+func (a *App) UndoMemberSettings() (MemberSettings, error) {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return MemberSettings{}, fmt.Errorf("active ClashGO license required")
+	}
+	if a.testSessionRestorePending() {
+		return MemberSettings{}, fmt.Errorf("session test active: wait for it to finish before restoring member settings")
+	}
+
+	previousPath := a.memberPreviousProfilePath()
+	previous, ok := loadMemberProfileFile(previousPath)
+	if !ok {
+		return MemberSettings{}, fmt.Errorf("no previous member settings are available")
+	}
+	current := a.GetMemberSettings()
+
+	restored, err := a.saveMemberSettings(previous, true)
+	if err != nil {
+		return MemberSettings{}, err
+	}
+
+	// Swap the snapshot instead of deleting it: the same button can undo an
+	// accidental undo without maintaining an unbounded local history.
+	if err := saveMemberProfileFile(previousPath, current); err != nil {
+		log.Warn().Err(err).Msg("member settings restored but previous snapshot could not be swapped")
+	}
+	return restored, nil
+}
+
+func (a *App) applyMemberProfileForCurrentLicense() error {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return nil
+	}
+	settings, ok := a.loadMemberProfile()
+	if !ok {
+		settings = defaultMemberSettings()
+		if err := a.persistMemberProfile(settings); err != nil {
+			return err
+		}
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	// InterfaceLevel is presentation only. Automatic/manual bot behaviour is
+	// restored independently by the per-license automation profile.
+	applyMemberSettingsToConfig(cfg, settings)
+	if err := config.Save("config.json", cfg); err != nil {
+		return err
+	}
+
+	a.mu.Lock()
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	a.mu.Unlock()
+	return nil
+}
+
+type memberAccountProfile struct {
+	PlayerTag string `json:"player_tag"`
+}
+
+func (a *App) memberAccountPath() string {
+	if a == nil || a.license == nil {
+		return ""
+	}
+	id := strings.TrimSpace(a.license.ProfileID())
+	if id == "" {
+		return ""
+	}
+	return paths.ResolveConfig(filepath.Join("members", id+".account.json"))
+}
+
+func saveMemberAccountFile(path, tag string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	payload := memberAccountProfile{PlayerTag: strings.TrimSpace(tag)}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	tmpPath := path + ".tmp"
+	backupPath := path + ".bak"
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	_ = os.Remove(backupPath)
+	hadOriginal := false
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Rename(path, backupPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return err
+		}
+		hadOriginal = true
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backupPath, path)
+		}
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	_ = os.Remove(backupPath)
+	return nil
+}
+
+func loadMemberAccountFile(path string) (string, bool) {
+	if strings.TrimSpace(path) == "" {
+		return "", false
+	}
+	read := func(candidate string) (string, bool) {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			return "", false
+		}
+		var profile memberAccountProfile
+		if json.Unmarshal(data, &profile) != nil {
+			return "", false
+		}
+		return strings.TrimSpace(profile.PlayerTag), true
+	}
+
+	if tag, ok := read(path); ok {
+		return tag, true
+	}
+	if tag, ok := read(path + ".bak"); ok {
+		_ = saveMemberAccountFile(path, tag)
+		return tag, true
+	}
+	return "", false
+}
+
+func (a *App) persistMemberAccountTag(tag string) error {
+	return saveMemberAccountFile(a.memberAccountPath(), tag)
+}
+
+func (a *App) loadMemberAccountTag() (string, bool) {
+	return loadMemberAccountFile(a.memberAccountPath())
+}
+
+func clearCachedPlayerProfileIfDifferent(tag string) {
+	data, err := os.ReadFile(accountProfileCachePath())
+	if err != nil {
+		return
+	}
+	var profile ClashPlayerProfile
+	if json.Unmarshal(data, &profile) != nil {
+		_ = os.Remove(accountProfileCachePath())
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(profile.Tag), strings.TrimSpace(tag)) {
+		_ = os.Remove(accountProfileCachePath())
+	}
+}
+
+func (a *App) applyMemberAccountForCurrentLicense() error {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return nil
+	}
+	cfg := config.LoadOrDefault("config.json")
+	storedTag, exists := a.loadMemberAccountTag()
+	tag := strings.TrimSpace(storedTag)
+
+	// Multi-account scheduler state is updated only after ClashGO has observed
+	// a real Supercell-ID loading transition and a verified MainVillage return.
+	// Prefer that durable truth over the older per-license single-account tag,
+	// otherwise a process restart could silently point metadata/learning back
+	// to the account used before automatic rotation.
+	if verifiedTag, ok := bot.ResolveMultiAccountActivePlayerTag(cfg); ok {
+		tag = verifiedTag
+		for _, account := range cfg.Account.MultiAccount.Accounts {
+			if account.Enabled && strings.EqualFold(strings.TrimSpace(account.PlayerTag), tag) {
+				cfg.Account.MultiAccount.ActiveAccountID = account.ID
+				break
+			}
+		}
+		if !exists || !strings.EqualFold(strings.TrimSpace(storedTag), tag) {
+			if err := a.persistMemberAccountTag(tag); err != nil {
+				return err
+			}
+		}
+	} else if cfg.Account.MultiAccount.Enabled {
+		// First multi-account boot may not have scheduler state yet. Keep a
+		// config tag that already matches the configured enabled active profile
+		// rather than replacing it with an older member snapshot.
+		current := strings.TrimSpace(cfg.Account.PlayerTag)
+		for _, account := range cfg.Account.MultiAccount.Accounts {
+			if account.Enabled &&
+				account.ID == cfg.Account.MultiAccount.ActiveAccountID &&
+				strings.EqualFold(strings.TrimSpace(account.PlayerTag), current) {
+				tag = current
+				if !exists || !strings.EqualFold(strings.TrimSpace(storedTag), tag) {
+					if err := a.persistMemberAccountTag(tag); err != nil {
+						return err
+					}
+				}
+				break
+			}
+		}
+	}
+
+	if strings.TrimSpace(tag) == "" && !exists {
+		// Migration path for the first version that introduces per-license
+		// accounts: the currently linked tag belongs to the currently active
+		// license. Deactivation clears it, so a future different license can
+		// never accidentally adopt the previous member's account.
+		tag = strings.TrimSpace(cfg.Account.PlayerTag)
+		if err := a.persistMemberAccountTag(tag); err != nil {
+			return err
+		}
+	}
+
+	cfg.Account.PlayerTag = tag
+	cfg.Account.LegacyAPIKey = ""
+	if err := config.Save("config.json", cfg); err != nil {
+		return err
+	}
+
+	// Restore the member's last successful public Clash profile so HDV/farm
+	// information is immediately available even when the account service is
+	// offline. Migrate the legacy shared cache into the current member profile
+	// only when its player tag matches.
+	memberCache := a.memberPlayerProfilePath()
+	if profile, ok := loadPlayerProfileFile(memberCache); ok && strings.EqualFold(strings.TrimSpace(profile.Tag), tag) {
+		_ = savePlayerProfileFile(accountProfileCachePath(), profile)
+	} else if legacy, ok := loadPlayerProfileFile(accountProfileCachePath()); ok && strings.EqualFold(strings.TrimSpace(legacy.Tag), tag) {
+		_ = savePlayerProfileFile(memberCache, legacy)
+	} else {
+		clearCachedPlayerProfileIfDifferent(tag)
+	}
+
+	a.mu.Lock()
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	a.mu.Unlock()
+	return nil
+}
+type MemberAutomationProfile struct {
+	SimpleMode          *bool                         `json:"simple_mode,omitempty"`
+	SearchEnabled       bool                          `json:"search_enabled"`
+	MinLootGold         int                           `json:"min_loot_gold"`
+	MinLootElixir       int                           `json:"min_loot_elixir"`
+	MinLootDarkElixir   int                           `json:"min_loot_dark_elixir"`
+	UpgradeWalls        bool                          `json:"upgrade_walls"`
+	StrategyFile        string                        `json:"strategy_file"`
+	StallTimerSeconds   int                           `json:"stall_timer_seconds"`
+	LootExitEnabled     bool                          `json:"loot_exit_enabled"`
+	LootExitPercent     int                           `json:"loot_exit_percent"`
+	EndAtStars          int                           `json:"end_at_stars"`
+	AutoCollectors      *bool                         `json:"auto_collectors,omitempty"`
+	CollectorMinutes    int                           `json:"collector_minutes"`
+	PrivacyMaskUsername *bool                         `json:"privacy_mask_username,omitempty"`
+	SaveAcceptedBases   *bool                         `json:"save_accepted_bases,omitempty"`
+	DryRun              *bool                         `json:"dry_run,omitempty"`
+	MaxRunMinutes       int                           `json:"max_run_minutes"`
+	EmergencyStopHotkey string                        `json:"emergency_stop_hotkey,omitempty"`
+	SaveNearMissBases   *bool                         `json:"save_near_miss_bases,omitempty"`
+	NearMissSampleEvery int                           `json:"near_miss_sample_every"`
+	NearMissWithinPct   int                           `json:"near_miss_within_percent"`
+	FarmEnabled         bool                          `json:"farm_enabled"`
+	FarmTownHall        int                           `json:"farm_town_hall"`
+	FarmProfiles        map[string]config.FarmProfile `json:"farm_profiles,omitempty"`
+}
+
+func memberAutomationFromConfig(cfg *config.BotConfig) MemberAutomationProfile {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	simpleMode := cfg.Automation.SimpleMode
+	autoCollectors := cfg.Automation.AutoCollectors
+	privacyMaskUsername := cfg.Automation.PrivacyMaskUsername
+	saveAcceptedBases := cfg.Search.SaveAcceptedBaseScreenshots
+	dryRun := cfg.Attack.DryRun
+	saveNearMissBases := cfg.Search.SaveNearMissBaseScreenshots
+	profile := MemberAutomationProfile{
+		SimpleMode:        &simpleMode,
+		SearchEnabled:     cfg.Search.Enabled,
+		MinLootGold:       cfg.Search.MinLootGold,
+		MinLootElixir:     cfg.Search.MinLootElixir,
+		MinLootDarkElixir: cfg.Search.MinLootDarkElixir,
+		UpgradeWalls:      cfg.Upgrade.UpgradeWalls,
+		StrategyFile:      filepath.Base(cfg.Attack.StrategyFile),
+		StallTimerSeconds: cfg.Attack.StallTimerSeconds,
+		LootExitEnabled:     cfg.Attack.LootExitEnabled,
+		LootExitPercent:     cfg.Attack.LootExitPercent,
+		EndAtStars:          cfg.Attack.EndAtStars,
+		AutoCollectors:      &autoCollectors,
+		CollectorMinutes:    int(cfg.Automation.CollectorInterval.Duration / time.Minute),
+		PrivacyMaskUsername: &privacyMaskUsername,
+		SaveAcceptedBases:   &saveAcceptedBases,
+		DryRun:              &dryRun,
+		MaxRunMinutes:       cfg.Automation.MaxRunMinutes,
+		EmergencyStopHotkey: cfg.Automation.EmergencyStopHotkey,
+		SaveNearMissBases:   &saveNearMissBases,
+		NearMissSampleEvery: cfg.Search.NearMissSampleEvery,
+		NearMissWithinPct:   cfg.Search.NearMissWithinPercent,
+		FarmEnabled:         cfg.Attack.Farm.Enabled,
+		FarmTownHall:      cfg.Attack.Farm.TownHall,
+		FarmProfiles:      map[string]config.FarmProfile{},
+	}
+	for key, value := range cfg.Attack.Farm.Profiles {
+		profile.FarmProfiles[key] = value
+	}
+	return sanitizeMemberAutomationProfile(profile)
+}
+
+func sanitizeMemberAutomationProfile(profile MemberAutomationProfile) MemberAutomationProfile {
+	const maxLootThreshold = 10_000_000
+	profile.MinLootGold = max(0, min(maxLootThreshold, profile.MinLootGold))
+	profile.MinLootElixir = max(0, min(maxLootThreshold, profile.MinLootElixir))
+	profile.MinLootDarkElixir = max(0, min(maxLootThreshold, profile.MinLootDarkElixir))
+	profile.StallTimerSeconds = max(0, min(600, profile.StallTimerSeconds))
+	profile.LootExitPercent = max(0, min(100, profile.LootExitPercent))
+	profile.EndAtStars = max(0, min(3, profile.EndAtStars))
+	if profile.CollectorMinutes <= 0 {
+		profile.CollectorMinutes = 10
+	}
+	if profile.CollectorMinutes > 1440 {
+		profile.CollectorMinutes = 1440
+	}
+	profile.MaxRunMinutes = max(0, min(7*24*60, profile.MaxRunMinutes))
+	switch strings.ToLower(strings.TrimSpace(profile.EmergencyStopHotkey)) {
+	case "", "ctrl+shift+end":
+		profile.EmergencyStopHotkey = "ctrl+shift+end"
+	case "end":
+		profile.EmergencyStopHotkey = "end"
+	case "off", "disabled", "none":
+		profile.EmergencyStopHotkey = "off"
+	default:
+		profile.EmergencyStopHotkey = "ctrl+shift+end"
+	}
+	if profile.NearMissSampleEvery <= 0 {
+		profile.NearMissSampleEvery = 20
+	}
+	profile.NearMissSampleEvery = min(1000, profile.NearMissSampleEvery)
+	if profile.NearMissWithinPct <= 0 {
+		profile.NearMissWithinPct = 10
+	}
+	profile.NearMissWithinPct = min(50, profile.NearMissWithinPct)
+	if profile.FarmTownHall < 8 || profile.FarmTownHall > 18 {
+		profile.FarmTownHall = 18
+	}
+	profile.StrategyFile = filepath.Base(strings.TrimSpace(profile.StrategyFile))
+	if profile.FarmProfiles == nil {
+		profile.FarmProfiles = map[string]config.FarmProfile{}
+	}
+	return profile
+}
+
+func applyMemberAutomationToConfig(cfg *config.BotConfig, profile MemberAutomationProfile) {
+	if cfg == nil {
+		return
+	}
+	profile = sanitizeMemberAutomationProfile(profile)
+	if profile.SimpleMode != nil {
+		cfg.Automation.SimpleMode = *profile.SimpleMode
+	}
+	cfg.Search.Enabled = profile.SearchEnabled
+	cfg.Search.MinLootGold = profile.MinLootGold
+	cfg.Search.MinLootElixir = profile.MinLootElixir
+	cfg.Search.MinLootDarkElixir = profile.MinLootDarkElixir
+	cfg.Upgrade.UpgradeWalls = profile.UpgradeWalls
+	cfg.Attack.StallTimerSeconds = profile.StallTimerSeconds
+	cfg.Attack.LootExitEnabled = profile.LootExitEnabled
+	cfg.Attack.LootExitPercent = profile.LootExitPercent
+	cfg.Attack.EndAtStars = profile.EndAtStars
+	if profile.AutoCollectors != nil {
+		cfg.Automation.AutoCollectors = *profile.AutoCollectors
+	}
+	cfg.Automation.CollectorInterval = config.Duration{Duration: time.Duration(profile.CollectorMinutes) * time.Minute}
+	if profile.PrivacyMaskUsername != nil {
+		cfg.Automation.PrivacyMaskUsername = *profile.PrivacyMaskUsername
+	}
+	if profile.SaveAcceptedBases != nil {
+		cfg.Search.SaveAcceptedBaseScreenshots = *profile.SaveAcceptedBases
+	}
+	if profile.DryRun != nil {
+		cfg.Attack.DryRun = *profile.DryRun
+	}
+	cfg.Automation.MaxRunMinutes = profile.MaxRunMinutes
+	if profile.EmergencyStopHotkey != "" {
+		cfg.Automation.EmergencyStopHotkey = profile.EmergencyStopHotkey
+	}
+	if profile.SaveNearMissBases != nil {
+		cfg.Search.SaveNearMissBaseScreenshots = *profile.SaveNearMissBases
+	}
+	cfg.Search.NearMissSampleEvery = profile.NearMissSampleEvery
+	cfg.Search.NearMissWithinPercent = profile.NearMissWithinPct
+
+	if profile.StrategyFile != "" {
+		candidate := paths.Resolve(filepath.Join("strategies", filepath.Base(profile.StrategyFile)))
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			cfg.Attack.StrategyFile = candidate
+		}
+	}
+
+	cfg.Attack.Farm.Enabled = profile.FarmEnabled
+	cfg.Attack.Farm.TownHall = profile.FarmTownHall
+	if len(profile.FarmProfiles) > 0 {
+		cfg.Attack.Farm.Profiles = make(map[string]config.FarmProfile, len(profile.FarmProfiles))
+		for key, value := range profile.FarmProfiles {
+			cfg.Attack.Farm.Profiles[key] = value
+		}
+	}
+}
+
+func (a *App) memberAutomationPath() string {
+	if a == nil || a.license == nil {
+		return ""
+	}
+	id := strings.TrimSpace(a.license.ProfileID())
+	if id == "" {
+		return ""
+	}
+	return paths.ResolveConfig(filepath.Join("members", id+".automation.json"))
+}
+
+func saveMemberAutomationFile(path string, profile MemberAutomationProfile) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	profile = sanitizeMemberAutomationProfile(profile)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmpPath := path + ".tmp"
+	backupPath := path + ".bak"
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	_ = os.Remove(backupPath)
+	hadOriginal := false
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Rename(path, backupPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return err
+		}
+		hadOriginal = true
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backupPath, path)
+		}
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	_ = os.Remove(backupPath)
+	return nil
+}
+
+func loadMemberAutomationFile(path string) (MemberAutomationProfile, bool) {
+	if strings.TrimSpace(path) == "" {
+		return MemberAutomationProfile{}, false
+	}
+	read := func(candidate string) (MemberAutomationProfile, bool) {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			return MemberAutomationProfile{}, false
+		}
+		var profile MemberAutomationProfile
+		if json.Unmarshal(data, &profile) != nil {
+			return MemberAutomationProfile{}, false
+		}
+		return sanitizeMemberAutomationProfile(profile), true
+	}
+	if profile, ok := read(path); ok {
+		return profile, true
+	}
+	if profile, ok := read(path + ".bak"); ok {
+		_ = saveMemberAutomationFile(path, profile)
+		return profile, true
+	}
+	return MemberAutomationProfile{}, false
+}
+
+func (a *App) persistMemberAutomation(cfg *config.BotConfig) error {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return nil
+	}
+	return saveMemberAutomationFile(a.memberAutomationPath(), memberAutomationFromConfig(cfg))
+}
+
+func (a *App) applyMemberAutomationForCurrentLicense() error {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return nil
+	}
+	cfg := config.LoadOrDefault("config.json")
+	profile, ok := loadMemberAutomationFile(a.memberAutomationPath())
+	if !ok {
+		// Upgrade migration: the first active licence adopts the user's current
+		// advanced automation choices exactly once.
+		return saveMemberAutomationFile(a.memberAutomationPath(), memberAutomationFromConfig(cfg))
+	}
+	if profile.SimpleMode == nil {
+		// Profiles written before automatic/manual mode became independent from
+		// the UI level inherit today's behavior once, then persist it.
+		current := cfg.Automation.SimpleMode
+		profile.SimpleMode = &current
+		if err := saveMemberAutomationFile(a.memberAutomationPath(), profile); err != nil {
+			return err
+		}
+	}
+	applyMemberAutomationToConfig(cfg, profile)
+
+	// In Simple mode the linked member account remains authoritative for the
+	// farm HDV. applyMemberAccountForCurrentLicense() has already restored this
+	// licence's cached Clash profile before this function is called, so this
+	// re-applies only the existing automatic defaults using the correct member
+	// cache. Advanced mode keeps the member's explicitly saved farm selection.
+	if cfg.Automation.SimpleMode {
+		applySimpleAutomationDefaults(cfg)
+	}
+
+	if err := config.Save("config.json", cfg); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	a.mu.Unlock()
+	return nil
+}
+
+func (a *App) GetMemberSettings() MemberSettings {
+	cfg := config.LoadOrDefault("config.json")
+	profile := normalizeSpeedProfile(cfg.Automation.SpeedProfile)
+	interfaceLevel := "simple"
+	if saved, ok := a.loadMemberProfile(); ok && saved.InterfaceLevel == "advanced" {
+		interfaceLevel = "advanced"
+	}
+	return MemberSettings{
+		InterfaceLevel:       interfaceLevel,
+		SpeedProfile:         profile,
+		MaxAttacksPerHour:    cfg.Automation.MaxAttacksPerHour,
+		MaxAttacksPerSession: cfg.Attack.MaxAttackPerSession,
+		BreakEveryAttacks:    cfg.Automation.BreakEveryAttacks,
+		BreakMinutes:         int(cfg.Automation.BreakDuration.Duration / time.Minute),
+		AdaptiveSearch:       cfg.Search.AdaptiveSearch,
+		AutoProfileSync:      cfg.Automation.AutoProfileSync,
+		AutoArmyGuard:        cfg.Automation.AutoArmyGuard,
+		AutoResourceTracking: cfg.Automation.AutoResourceTracking,
+	}
+}
+
+func (a *App) GetMemberInterfaceLevel() string {
+	if a == nil || a.license == nil || !a.license.GetState().Activated {
+		return ""
+	}
+	if settings, ok := a.loadMemberProfile(); ok {
+		return sanitizeMemberSettings(settings).InterfaceLevel
+	}
+	return "simple"
+}
+
+func (a *App) SaveMemberInterfaceLevel(level string) error {
+	level = strings.ToLower(strings.TrimSpace(level))
+	if level != "simple" && level != "advanced" {
+		return fmt.Errorf("member interface level must be simple or advanced")
+	}
+
+	// In unenforced/local beta mode the React localStorage preference remains
+	// the fallback. A licensed member stores this presentation preference in
+	// their own profile without mutating any bot automation setting.
+	if a.license == nil || !a.license.GetState().Activated {
+		return nil
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	cfg := config.LoadOrDefault("config.json")
+	settings, ok := a.loadMemberProfile()
+	if !ok {
+		settings = MemberSettings{
+			InterfaceLevel:       level,
+			SpeedProfile:         normalizeSpeedProfile(cfg.Automation.SpeedProfile),
+			MaxAttacksPerHour:    cfg.Automation.MaxAttacksPerHour,
+			MaxAttacksPerSession: cfg.Attack.MaxAttackPerSession,
+			BreakEveryAttacks:    cfg.Automation.BreakEveryAttacks,
+			BreakMinutes:         int(cfg.Automation.BreakDuration.Duration / time.Minute),
+			AdaptiveSearch:       cfg.Search.AdaptiveSearch,
+			AutoProfileSync:      cfg.Automation.AutoProfileSync,
+			AutoArmyGuard:        cfg.Automation.AutoArmyGuard,
+			AutoResourceTracking: cfg.Automation.AutoResourceTracking,
+		}
+	}
+	settings.InterfaceLevel = level
+	return a.persistMemberProfile(settings)
+}
+
+func (a *App) testSessionRestorePath() string {
+	if a != nil && a.license != nil {
+		if id := strings.TrimSpace(a.license.ProfileID()); id != "" {
+			return paths.ResolveConfig(filepath.Join("members", id+".test-session.json"))
+		}
+	}
+	return paths.ResolveConfig("test-session-restore.json")
+}
+
+func (a *App) testSessionRestorePending() bool {
+	if a == nil {
+		return false
+	}
+	path := a.testSessionRestorePath()
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+	if _, err := os.Stat(path + ".bak"); err == nil {
+		return true
+	}
+	return false
+}
+
+func removeTestSessionRestoreFiles(path string) {
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	_ = os.Remove(path)
+	_ = os.Remove(path + ".bak")
+	_ = os.Remove(path + ".tmp")
+}
+
+func (a *App) restoreTestSessionSettings() error {
+	if a == nil {
+		return nil
+	}
+	path := a.testSessionRestorePath()
+	settings, ok := loadMemberProfileFile(path)
+	if !ok {
+		return nil
+	}
+	// Internal restoration must be allowed while the runtime is tearing down.
+	// Public member edits stay blocked during a test session, but the cleanup
+	// path is precisely what owns the temporary profile and must be able to
+	// put the member's previous settings back before teardown completes.
+	if _, err := a.saveMemberSettings(settings, true); err != nil {
+		return err
+	}
+	removeTestSessionRestoreFiles(path)
+	log.Info().Msg("temporary test-session settings restored")
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "member_test_session_restored", map[string]interface{}{
+			"message": "Les réglages membre précédents ont été restaurés.",
+		})
+	}
+	return nil
+}
+
+func buildTemporaryTestSettings(original MemberSettings, limit int) (MemberSettings, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	settings, err := applyMemberPreset(original, "short")
+	if err != nil {
+		return MemberSettings{}, err
+	}
+	settings.MaxAttacksPerSession = limit
+	return sanitizeMemberSettings(settings), nil
+}
+
+func (a *App) startTemporaryTestSession(limit int, gold, elixir, dark int, upgradeWalls bool, searchEnabled bool) BotStatus {
+	if limit < 1 {
+		limit = 1
+	}
+	a.mu.Lock()
+	busy := a.bot != nil || a.cancel != nil || a.stopping
+	a.mu.Unlock()
+	if busy {
+		return BotStatus{Running: false, Message: "Une session ClashGO est déjà active ou en cours d’arrêt"}
+	}
+
+	// Recover an interrupted previous test before creating a new backup.
+	if err := a.restoreTestSessionSettings(); err != nil {
+		return BotStatus{Running: false, Message: "Impossible de restaurer les réglages avant le test : " + err.Error()}
+	}
+
+	original := a.GetMemberSettings()
+	path := a.testSessionRestorePath()
+	if err := saveMemberProfileFile(path, original); err != nil {
+		return BotStatus{Running: false, Message: "Impossible de sauvegarder les réglages avant le test : " + err.Error()}
+	}
+
+	testSettings, err := buildTemporaryTestSettings(original, limit)
+	if err != nil {
+		removeTestSessionRestoreFiles(path)
+		return BotStatus{Running: false, Message: err.Error()}
+	}
+	// Temporary validation settings must never become a user-facing edit:
+	// do not overwrite the one-step Undo snapshot and do not record a member
+	// settings-change activity event. The crash-safe restore file above remains
+	// the sole authority for returning to the exact pre-test profile.
+	if _, err := a.saveMemberSettings(testSettings, true); err != nil {
+		removeTestSessionRestoreFiles(path)
+		return BotStatus{Running: false, Message: "Impossible de préparer la session test : " + err.Error()}
+	}
+
+	status := a.StartBot(gold, elixir, dark, upgradeWalls, searchEnabled)
+	if !status.Running {
+		if err := a.restoreTestSessionSettings(); err != nil {
+			log.Error().Err(err).Msg("failed to restore member settings after rejected test session")
+		}
+	}
+	return status
+}
+
+func (a *App) StartTestSession(gold, elixir, dark int, upgradeWalls bool, searchEnabled bool) BotStatus {
+	return a.startTemporaryTestSession(10, gold, elixir, dark, upgradeWalls, searchEnabled)
+}
+
+func (a *App) StartQuickTestSession(gold, elixir, dark int, upgradeWalls bool, searchEnabled bool) BotStatus {
+	return a.startTemporaryTestSession(3, gold, elixir, dark, upgradeWalls, searchEnabled)
+}
+
+func (a *App) ExtendSessionAttacks(extra int) (MemberSettings, error) {
+	if extra < 1 {
+		extra = 1
+	}
+	if extra > 100 {
+		extra = 100
+	}
+
+	current := a.GetMemberSettings()
+	base := current.MaxAttacksPerSession
+
+	a.mu.Lock()
+	if a.bot != nil {
+		if completed := int(a.bot.Stats().SessionAttacks); completed > base {
+			base = completed
+		}
+	}
+	a.mu.Unlock()
+
+	current.MaxAttacksPerSession = base + extra
+	if current.MaxAttacksPerSession > 500 {
+		current.MaxAttacksPerSession = 500
+	}
+	return a.SaveMemberSettings(current)
+}
+
+func (a *App) SetMemberSpeedProfile(profile string) (MemberSettings, error) {
+	current := a.GetMemberSettings()
+	switch normalizeSpeedProfile(profile) {
+	case "cautious":
+		current.SpeedProfile = "cautious"
+		current.MaxAttacksPerHour = 8
+		current.BreakEveryAttacks = 4
+		current.BreakMinutes = 4
+	case "fast":
+		current.SpeedProfile = "fast"
+		current.MaxAttacksPerHour = 16
+		current.BreakEveryAttacks = 6
+		current.BreakMinutes = 2
+	default:
+		current.SpeedProfile = "normal"
+		current.MaxAttacksPerHour = 12
+		current.BreakEveryAttacks = 5
+		current.BreakMinutes = 3
+	}
+	// MaxAttacksPerSession and the other member preferences are intentionally
+	// preserved. This is a live pacing change, not a full session preset.
+	return a.SaveMemberSettings(current)
+}
+
+func (a *App) ApplyMemberPreset(preset string) (MemberSettings, error) {
+	current := a.GetMemberSettings()
+	next, err := applyMemberPreset(current, preset)
+	if err != nil {
+		return MemberSettings{}, err
+	}
+	return a.SaveMemberSettings(next)
+}
+
+func (a *App) SaveMemberSettings(settings MemberSettings) (MemberSettings, error) {
+	return a.saveMemberSettings(settings, false)
+}
+
+func (a *App) saveMemberSettings(settings MemberSettings, internalRestore bool) (MemberSettings, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// A temporary validation session owns the pacing profile until it finishes.
+	// Reject concurrent USER edits instead of accepting changes that would
+	// then be overwritten by the crash-safe restoration snapshot. Internal
+	// cleanup is intentionally exempt so Stop/autonomous completion can
+	// restore the exact previous profile while a.stopping is still true.
+	if !internalRestore && a.testSessionRestorePending() && (a.bot != nil || a.cancel != nil || a.stopping) {
+		return MemberSettings{}, fmt.Errorf("session test active: wait for it to finish before changing member settings")
+	}
+
+	oldProfile, hadOldProfile := a.loadMemberProfile()
+	if strings.TrimSpace(settings.InterfaceLevel) == "" && hadOldProfile {
+		settings.InterfaceLevel = oldProfile.InterfaceLevel
+	}
+	settings = sanitizeMemberSettings(settings)
+	cfg := config.LoadOrDefault("config.json")
+	applyMemberSettingsToConfig(cfg, settings)
+
+	// The runtime config and the per-license profile form one logical update.
+	// Persist the member copy first and restore it if config.json cannot be
+	// committed, so a failed save can never reappear as a different setting
+	// on the next launch.
+	profilePath := a.memberProfilePath()
+	if err := a.persistMemberProfile(settings); err != nil {
+		return MemberSettings{}, err
+	}
+	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldProfile {
+			_ = saveMemberProfileFile(profilePath, oldProfile)
+		} else if profilePath != "" {
+			_ = os.Remove(profilePath)
+			_ = os.Remove(profilePath + ".bak")
+			_ = os.Remove(profilePath + ".tmp")
+		}
+		return MemberSettings{}, err
+	}
+
+	if !internalRestore && hadOldProfile {
+		if err := saveMemberProfileFile(a.memberPreviousProfilePath(), oldProfile); err != nil {
+			log.Warn().Err(err).Msg("member settings saved but previous snapshot could not be persisted")
+		}
+	}
+
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+		if !internalRestore {
+			a.bot.RecordMemberSettingsChange(
+				settings.SpeedProfile,
+				settings.MaxAttacksPerHour,
+				settings.MaxAttacksPerSession,
+				settings.BreakEveryAttacks,
+				settings.BreakMinutes,
+			)
+		}
+	}
+	return a.GetMemberSettings(), nil
+}
+
 func (a *App) SetSimpleMode(enabled bool) error {
+	if a.testSessionRestorePending() {
+		return fmt.Errorf("session test active: wait for it to finish before changing automation mode")
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -935,19 +4345,426 @@ func (a *App) SetSimpleMode(enabled bool) error {
 	if enabled {
 		applySimpleAutomationDefaults(cfg)
 	}
+
+	automationPath := a.memberAutomationPath()
+	oldAutomation, hadOldAutomation := loadMemberAutomationFile(automationPath)
+	if err := a.persistMemberAutomation(cfg); err != nil {
+		return err
+	}
+	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldAutomation {
+			_ = saveMemberAutomationFile(automationPath, oldAutomation)
+		} else if automationPath != "" {
+			_ = os.Remove(automationPath)
+			_ = os.Remove(automationPath + ".bak")
+			_ = os.Remove(automationPath + ".tmp")
+		}
+		return err
+	}
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
 	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(paths.ResolveConfig("config.json"), data, 0600)
+	return nil
 }
 
 // SaveAccountConfig stores only the player's tag. The Clash API credential
 // lives on the ClashGO account service, never in the distributed EXE.
+func (a *App) GetMultiAccountConfig() config.MultiAccountConfig {
+	cfg := config.LoadOrDefault("config.json")
+	return cfg.Account.MultiAccount
+}
+
+type MultiAccountFarmStats struct {
+	AccountID     string  `json:"account_id"`
+	Label         string  `json:"label,omitempty"`
+	PlayerTag     string  `json:"player_tag,omitempty"`
+	Attacks       int     `json:"attacks"`
+	Gold          int64   `json:"gold"`
+	Elixir        int64   `json:"elixir"`
+	DarkElixir    int64   `json:"dark_elixir"`
+	RoutineMS     int64   `json:"routine_ms"`
+	GoldPerHour   float64 `json:"gold_per_hour"`
+	ElixirPerHour float64 `json:"elixir_per_hour"`
+	DEPerHour     float64 `json:"dark_elixir_per_hour"`
+	LastAttack    string  `json:"last_attack,omitempty"`
+}
+
+func (a *App) GetMultiAccountFarmStats() []MultiAccountFarmStats {
+	cfg := config.LoadOrDefault("config.json")
+	accounts := cfg.Account.MultiAccount.Accounts
+	if len(accounts) == 0 {
+		return []MultiAccountFarmStats{}
+	}
+
+	stats := make([]MultiAccountFarmStats, len(accounts))
+	byID := make(map[string]int, len(accounts))
+	byTag := make(map[string]int, len(accounts))
+	for i, account := range accounts {
+		tag := strings.ToUpper(strings.TrimSpace(account.PlayerTag))
+		if tag != "" && !strings.HasPrefix(tag, "#") {
+			tag = "#" + tag
+		}
+		stats[i] = MultiAccountFarmStats{
+			AccountID: account.ID,
+			Label:     account.Label,
+			PlayerTag: tag,
+		}
+		byID[account.ID] = i
+		if tag != "" {
+			byTag[tag] = i
+		}
+	}
+
+	for _, report := range a.GetAttackHistory() {
+		idx, ok := byID[strings.TrimSpace(report.AccountID)]
+		if !ok {
+			tag := strings.ToUpper(strings.TrimSpace(report.PlayerTag))
+			if tag != "" && !strings.HasPrefix(tag, "#") {
+				tag = "#" + tag
+			}
+			idx, ok = byTag[tag]
+		}
+		if !ok {
+			continue
+		}
+
+		row := &stats[idx]
+		row.Attacks++
+		row.Gold += int64(report.GoldStolen + report.BonusGold)
+		row.Elixir += int64(report.ElixirStolen + report.BonusElixir)
+		row.DarkElixir += int64(report.DarkElixirStolen + report.BonusDE)
+		if report.FullRoutineDurationMS > 0 {
+			row.RoutineMS += report.FullRoutineDurationMS
+		}
+		if row.LastAttack == "" {
+			row.LastAttack = report.Timestamp
+		}
+	}
+
+	for i := range stats {
+		if stats[i].RoutineMS <= 0 {
+			continue
+		}
+		hours := float64(stats[i].RoutineMS) / 3_600_000
+		if hours <= 0 {
+			continue
+		}
+		stats[i].GoldPerHour = float64(stats[i].Gold) / hours
+		stats[i].ElixirPerHour = float64(stats[i].Elixir) / hours
+		stats[i].DEPerHour = float64(stats[i].DarkElixir) / hours
+	}
+	return stats
+}
+
+func (a *App) GetMultiAccountStatus() bot.MultiAccountRuntimeStatus {
+	a.mu.Lock()
+	b := a.bot
+	a.mu.Unlock()
+	if b != nil {
+		return b.MultiAccountStatus()
+	}
+	cfg := config.LoadOrDefault("config.json")
+	manager, err := bot.OpenMultiAccountManager(cfg)
+	if err != nil {
+		return bot.MultiAccountRuntimeStatus{
+			Enabled:         cfg.Account.MultiAccount.Enabled,
+			ActiveAccountID: cfg.Account.MultiAccount.ActiveAccountID,
+			LastError:       err.Error(),
+		}
+	}
+	st := manager.State()
+	recoveryRequired, recoveryTarget := manager.RecoveryStatus()
+	out := bot.MultiAccountRuntimeStatus{
+		Enabled:          manager.Enabled(),
+		ActiveAccountID:  st.ActiveAccountID,
+		AttacksThisTurn:  st.AttacksThisTurn,
+		TotalSwitches:    st.TotalSwitches,
+		LastSwitchAt:     st.LastSwitchAt,
+		LastError:        st.LastError,
+		RecoveryRequired: recoveryRequired,
+		RecoveryTargetID: recoveryTarget,
+	}
+	if active, ok := manager.Active(); ok {
+		out.ActiveAccountLabel = active.Label
+	}
+	if next, due := manager.NextDue(); due {
+		out.RotationDue = true
+		out.NextAccountID = next.ID
+		out.NextAccountLabel = next.Label
+	}
+	return out
+}
+
+func (a *App) ResolveMultiAccountRecovery(accountID string) error {
+	accountID = strings.TrimSpace(accountID)
+	if accountID == "" {
+		return fmt.Errorf("choose the Clash account currently visible in BlueStacks")
+	}
+
+	a.mu.Lock()
+	b := a.bot
+	a.mu.Unlock()
+	if b != nil {
+		account, err := b.ResolveMultiAccountRecovery(accountID)
+		if err != nil {
+			return err
+		}
+		if err := a.persistMemberAccountTag(account.PlayerTag); err != nil {
+			log.Warn().Err(err).Msg("multi-account identity confirmed but member tag cache could not be updated")
+		}
+		clearCachedPlayerProfileIfDifferent(account.PlayerTag)
+		return nil
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	manager, err := bot.OpenMultiAccountManager(cfg)
+	if err != nil {
+		return err
+	}
+	recoveryRequired, _ := manager.RecoveryStatus()
+	if !recoveryRequired {
+		return fmt.Errorf("no interrupted account switch requires confirmation")
+	}
+	account, ok := manager.Account(accountID)
+	if !ok {
+		return fmt.Errorf("unknown or disabled multi-account profile %q", accountID)
+	}
+
+	tag, err := normalizePlayerTag(account.PlayerTag)
+	if err != nil {
+		return fmt.Errorf("confirmed account has invalid player tag: %w", err)
+	}
+	cfg.Account.PlayerTag = tag
+	cfg.Account.MultiAccount.ActiveAccountID = account.ID
+	if account.TownHall != 0 {
+		if account.TownHall < 8 || account.TownHall > 18 {
+			return fmt.Errorf("confirmed account has unsupported town hall %d", account.TownHall)
+		}
+		if _, ok := cfg.Attack.Farm.Profiles[strconv.Itoa(account.TownHall)]; !ok {
+			return fmt.Errorf("farm profile TH%d is unavailable", account.TownHall)
+		}
+		cfg.Attack.Farm.TownHall = account.TownHall
+		cfg.Attack.Farm.Enabled = true
+	}
+	if raw := strings.TrimSpace(account.StrategyFile); raw != "" {
+		name := filepath.Base(raw)
+		candidate := paths.Resolve(filepath.Join("strategies", name))
+		if info, statErr := os.Stat(candidate); statErr != nil || info.IsDir() {
+			return fmt.Errorf("strategy %q for account %q is unavailable", name, account.ID)
+		}
+		cfg.Attack.StrategyFile = candidate
+	}
+
+	// Keep the recovery gate active until both account metadata stores are
+	// durable. A failure before ResolveRecovery therefore cannot start farming.
+	if err := config.Save("config.json", cfg); err != nil {
+		return err
+	}
+	if err := a.persistMemberAccountTag(tag); err != nil {
+		return err
+	}
+	if err := manager.ResolveRecovery(account.ID); err != nil {
+		return err
+	}
+	clearCachedPlayerProfileIfDifferent(tag)
+	return nil
+}
+
+func (a *App) ConfirmMultiAccountRecovery(accountID string) (bot.MultiAccountRuntimeStatus, error) {
+	if err := a.ResolveMultiAccountRecovery(strings.TrimSpace(accountID)); err != nil {
+		return a.GetMultiAccountStatus(), err
+	}
+	return a.GetMultiAccountStatus(), nil
+}
+
+func (a *App) GetMultiAccountCalibration() (bot.MultiAccountSwitchCalibration, error) {
+	return bot.LoadMultiAccountSwitchCalibration()
+}
+
+type MultiAccountCalibrationFrame struct {
+	DataURL string `json:"data_url"`
+	Width   int    `json:"width"`
+	Height  int    `json:"height"`
+}
+
+func (a *App) CaptureMultiAccountCalibrationFrame() (MultiAccountCalibrationFrame, error) {
+	if a.botSessionActiveOrStarting() {
+		return MultiAccountCalibrationFrame{}, fmt.Errorf("stop ClashGO before capturing multi-account calibration")
+	}
+	cfg := config.LoadOrDefault("config.json")
+	client := adb.NewClient(
+		adb.WithHost(cfg.Device.ADBHost),
+		adb.WithPort(cfg.Device.ADBPort),
+		adb.WithTimeout(30*time.Second),
+		adb.WithBlueStacksInstance(cfg.Device.BlueStacksInstance),
+	)
+	client.DeviceID = strings.TrimSpace(cfg.Device.DeviceID)
+	defer client.Close()
+
+	if client.DeviceID == "" {
+		if err := client.AutoDetectDevice(); err != nil {
+			return MultiAccountCalibrationFrame{}, fmt.Errorf("detect BlueStacks device: %w", err)
+		}
+	}
+	if err := client.EnsureConnected(); err != nil {
+		return MultiAccountCalibrationFrame{}, fmt.Errorf("connect BlueStacks for calibration: %w", err)
+	}
+	frame, err := client.CaptureToMat()
+	if err != nil {
+		return MultiAccountCalibrationFrame{}, fmt.Errorf("capture BlueStacks calibration frame: %w", err)
+	}
+	defer frame.Close()
+	if frame.Empty() || frame.Cols() < 2 || frame.Rows() < 2 {
+		return MultiAccountCalibrationFrame{}, fmt.Errorf("BlueStacks returned an empty calibration frame")
+	}
+
+	dir := paths.ResolveConfig("multi_account")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return MultiAccountCalibrationFrame{}, err
+	}
+	preview := filepath.Join(dir, "calibration_preview.png")
+	if ok := gocv.IMWrite(preview, frame); !ok {
+		return MultiAccountCalibrationFrame{}, fmt.Errorf("could not encode calibration preview")
+	}
+	data, err := os.ReadFile(preview)
+	if err != nil {
+		return MultiAccountCalibrationFrame{}, err
+	}
+	return MultiAccountCalibrationFrame{
+		DataURL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(data),
+		Width:   frame.Cols(),
+		Height:  frame.Rows(),
+	}, nil
+}
+
+func (a *App) GetMultiAccountSwitchCalibration() (string, error) {
+	calibration, err := bot.LoadMultiAccountSwitchCalibration()
+	if err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(calibration)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func (a *App) SaveMultiAccountCalibration(raw string) error {
+	if a.botSessionActiveOrStarting() {
+		return fmt.Errorf("stop ClashGO before changing multi-account calibration")
+	}
+	var calibration bot.MultiAccountSwitchCalibration
+	if err := json.Unmarshal([]byte(raw), &calibration); err != nil {
+		return fmt.Errorf("invalid multi-account calibration: %w", err)
+	}
+	return bot.SaveMultiAccountSwitchCalibration(calibration)
+}
+
+func (a *App) SaveMultiAccountConfig(raw string) (config.MultiAccountConfig, error) {
+	if a.botSessionActiveOrStarting() {
+		return config.MultiAccountConfig{}, fmt.Errorf("stop ClashGO before changing multi-account profiles")
+	}
+
+	var next config.MultiAccountConfig
+	if err := json.Unmarshal([]byte(raw), &next); err != nil {
+		return config.MultiAccountConfig{}, fmt.Errorf("invalid multi-account configuration: %w", err)
+	}
+	if next.DefaultAttacksTurn <= 0 {
+		next.DefaultAttacksTurn = 10
+	}
+	if next.DefaultAttacksTurn > 500 {
+		return config.MultiAccountConfig{}, fmt.Errorf("default attacks per turn must be between 1 and 500")
+	}
+	if len(next.Accounts) > 20 {
+		return config.MultiAccountConfig{}, fmt.Errorf("multi-account supports at most 20 profiles")
+	}
+
+	seenID := map[string]bool{}
+	seenTag := map[string]bool{}
+	seenSlot := map[int]bool{}
+	enabled := 0
+	for i := range next.Accounts {
+		acct := &next.Accounts[i]
+		acct.ID = strings.TrimSpace(acct.ID)
+		acct.Label = strings.TrimSpace(acct.Label)
+		if acct.ID == "" {
+			acct.ID = fmt.Sprintf("account-%d", i+1)
+		}
+		if seenID[acct.ID] {
+			return config.MultiAccountConfig{}, fmt.Errorf("duplicate multi-account id %q", acct.ID)
+		}
+		seenID[acct.ID] = true
+
+		tag, err := normalizePlayerTag(acct.PlayerTag)
+		if err != nil {
+			return config.MultiAccountConfig{}, fmt.Errorf("account %q: %w", acct.Label, err)
+		}
+		acct.PlayerTag = tag
+		if seenTag[tag] {
+			return config.MultiAccountConfig{}, fmt.Errorf("duplicate player tag %s", tag)
+		}
+		seenTag[tag] = true
+
+		if acct.MaxAttacksPerTurn < 0 || acct.MaxAttacksPerTurn > 500 {
+			return config.MultiAccountConfig{}, fmt.Errorf("account %q attacks per turn must be between 0 and 500", acct.Label)
+		}
+		if acct.TownHall != 0 && (acct.TownHall < 8 || acct.TownHall > 18) {
+			return config.MultiAccountConfig{}, fmt.Errorf("account %q town hall must be between 8 and 18", acct.Label)
+		}
+		if rawStrategy := strings.TrimSpace(acct.StrategyFile); rawStrategy != "" {
+			name := filepath.Base(filepath.Clean(rawStrategy))
+			ext := strings.ToLower(filepath.Ext(name))
+			if ext != ".yaml" && ext != ".csv" {
+				return config.MultiAccountConfig{}, fmt.Errorf("account %q has unsupported strategy %q", acct.Label, name)
+			}
+			candidate := paths.Resolve(filepath.Join("strategies", name))
+			if info, err := os.Stat(candidate); err != nil || info.IsDir() {
+				return config.MultiAccountConfig{}, fmt.Errorf("account %q strategy %q was not found", acct.Label, name)
+			}
+			acct.StrategyFile = name
+		}
+		if acct.Enabled {
+			enabled++
+			if acct.SwitchSlot <= 0 || acct.SwitchSlot > 20 {
+				return config.MultiAccountConfig{}, fmt.Errorf("account %q requires a switch slot between 1 and 20", acct.Label)
+			}
+			if seenSlot[acct.SwitchSlot] {
+				return config.MultiAccountConfig{}, fmt.Errorf("switch slot %d is assigned to more than one account", acct.SwitchSlot)
+			}
+			seenSlot[acct.SwitchSlot] = true
+		}
+	}
+	if next.Enabled && enabled < 2 {
+		return config.MultiAccountConfig{}, fmt.Errorf("enable at least two accounts for multi-account rotation")
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	currentTag := strings.ToUpper(strings.TrimSpace(cfg.Account.PlayerTag))
+	matchedCurrent := ""
+	for _, acct := range next.Accounts {
+		if acct.Enabled && strings.EqualFold(strings.TrimSpace(acct.PlayerTag), currentTag) {
+			matchedCurrent = acct.ID
+			break
+		}
+	}
+	if next.Enabled && matchedCurrent == "" {
+		return config.MultiAccountConfig{}, fmt.Errorf("the currently linked player tag must be one of the enabled multi-account profiles")
+	}
+	if matchedCurrent != "" {
+		next.ActiveAccountID = matchedCurrent
+	}
+
+	cfg.Account.MultiAccount = next
+	if err := config.Save("config.json", cfg); err != nil {
+		return config.MultiAccountConfig{}, err
+	}
+	return next, nil
+}
+
 func (a *App) SaveAccountConfig(playerTag string) error {
+	if a.botSessionActiveOrStarting() {
+		return fmt.Errorf("stop ClashGO before changing the linked Clash account")
+	}
 	tag, err := normalizePlayerTag(playerTag)
 	if err != nil {
 		return err
@@ -958,35 +4775,95 @@ func (a *App) SaveAccountConfig(playerTag string) error {
 
 	cfg := config.LoadOrDefault("config.json")
 	cfg.Account.PlayerTag = tag
+	// A manually changed linked tag is only allowed to keep multi-account
+	// rotation enabled when that tag maps to one of its enabled profiles.
+	// Otherwise fail safe by disabling rotation rather than letting metadata
+	// claim a different active account than Clash of Clans actually has loaded.
+	if cfg.Account.MultiAccount.Enabled {
+		matched := ""
+		for _, account := range cfg.Account.MultiAccount.Accounts {
+			if account.Enabled && strings.EqualFold(strings.TrimSpace(account.PlayerTag), tag) {
+				matched = account.ID
+				break
+			}
+		}
+		if matched == "" {
+			cfg.Account.MultiAccount.Enabled = false
+			cfg.Account.MultiAccount.ActiveAccountID = ""
+		} else {
+			cfg.Account.MultiAccount.ActiveAccountID = matched
+		}
+	}
 	// Purge legacy desktop keys during the first save after upgrading.
 	cfg.Account.LegacyAPIKey = ""
 
+	oldTag, hadOldTag := a.loadMemberAccountTag()
+	accountPath := a.memberAccountPath()
+	if err := a.persistMemberAccountTag(tag); err != nil {
+		return err
+	}
+	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldTag {
+			_ = saveMemberAccountFile(accountPath, oldTag)
+		} else if accountPath != "" {
+			_ = os.Remove(accountPath)
+			_ = os.Remove(accountPath + ".bak")
+			_ = os.Remove(accountPath + ".tmp")
+		}
+		return err
+	}
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
 	}
-
-	bytes, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0600)
+	return nil
 }
 
 // ClearAccount removes the local player link. No developer credential is
 // stored on the client anymore, so unlinking is intentionally lightweight.
 func (a *App) ClearAccount() error {
+	if a.botSessionActiveOrStarting() {
+		return fmt.Errorf("stop ClashGO before unlinking the Clash account")
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	cfg := config.LoadOrDefault("config.json")
 	cfg.Account.PlayerTag = ""
 	cfg.Account.LegacyAPIKey = ""
-	_ = os.Remove(accountProfileCachePath())
-	bytes, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
+	// Keep the user's profile list for convenience, but disable rotation until
+	// a real current Clash account is linked again.
+	cfg.Account.MultiAccount.Enabled = false
+	cfg.Account.MultiAccount.ActiveAccountID = ""
+
+	oldTag, hadOldTag := a.loadMemberAccountTag()
+	accountPath := a.memberAccountPath()
+	if err := a.persistMemberAccountTag(""); err != nil {
 		return err
 	}
-	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0600)
+	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldTag {
+			_ = saveMemberAccountFile(accountPath, oldTag)
+		} else if accountPath != "" {
+			_ = os.Remove(accountPath)
+			_ = os.Remove(accountPath + ".bak")
+			_ = os.Remove(accountPath + ".tmp")
+		}
+		return err
+	}
+
+	// Remove cached public profile only after both member identity stores are
+	// durable. The explicit unlink also removes this member's private cache;
+	// deactivation alone keeps it so the same licence can recover offline.
+	_ = os.Remove(accountProfileCachePath())
+	if memberCache := a.memberPlayerProfilePath(); memberCache != "" {
+		_ = os.Remove(memberCache)
+		_ = os.Remove(memberCache + ".bak")
+		_ = os.Remove(memberCache + ".tmp")
+	}
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	return nil
 }
 
 // GetPlayerProfile asks the ClashGO account service for the linked player.
@@ -1043,7 +4920,7 @@ func (a *App) GetPlayerProfile() (*ClashPlayerProfile, error) {
 		return nil, fmt.Errorf("parse Clash player profile: %w", err)
 	}
 
-	persistPlayerProfile(&profile)
+	a.persistPlayerProfileForCurrentLicense(&profile)
 
 	// Simple mode turns the linked account into the source of truth for HDV.
 	// We only select a bundled profile when ClashGO actually has one for that
@@ -1052,14 +4929,19 @@ func (a *App) GetPlayerProfile() (*ClashPlayerProfile, error) {
 		if _, ok := cfg.Attack.Farm.Profiles[fmt.Sprintf("%d", profile.TownHallLevel)]; ok {
 			cfg.Attack.Farm.TownHall = profile.TownHallLevel
 			cfg.Attack.Farm.Enabled = true
-			if data, marshalErr := json.MarshalIndent(cfg, "", "  "); marshalErr == nil {
-				_ = os.WriteFile(paths.ResolveConfig("config.json"), data, 0600)
+
+			if writeErr := config.Save("config.json", cfg); writeErr != nil {
+				log.Warn().Err(writeErr).Msg("account sync: could not persist automatic farm profile")
+			} else {
+				if profileErr := a.persistMemberAutomation(cfg); profileErr != nil {
+					log.Warn().Err(profileErr).Msg("account sync: could not persist member automation profile")
+				}
+				a.mu.Lock()
+				if a.bot != nil {
+					a.bot.UpdateConfig(cfg)
+				}
+				a.mu.Unlock()
 			}
-			a.mu.Lock()
-			if a.bot != nil {
-				a.bot.UpdateConfig(cfg)
-			}
-			a.mu.Unlock()
 		}
 	}
 
@@ -1097,11 +4979,45 @@ func (a *App) SetBlueStacksInstance(instance string) error {
 
 	cfg := config.LoadOrDefault("config.json")
 	cfg.Device.BlueStacksInstance = instance
-	bytes, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
+	return config.Save("config.json", cfg)
+}
+
+// GetActivity returns a compact high-level feed for the dashboard. It is
+// intentionally capped and contains no screenshot/capture spam.
+func (a *App) GetActivity() []telemetry.Event {
+	a.mu.Lock()
+	b := a.bot
+	cached := append([]telemetry.Event(nil), a.lastActivity...)
+	a.mu.Unlock()
+	if b == nil {
+		if cached == nil {
+			return []telemetry.Event{}
+		}
+		return cached
 	}
-	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644)
+	return b.RecentActivity(24)
+}
+
+// GetSessionReport returns the live session summary while the bot is
+// running, or the most recently persisted report after Stop. This keeps the
+// dashboard useful even when no Bot instance is active.
+func (a *App) GetSessionReport() bot.SessionReport {
+	a.mu.Lock()
+	b := a.bot
+	a.mu.Unlock()
+	if b != nil {
+		return b.CurrentSessionReport()
+	}
+
+	var report bot.SessionReport
+	data, err := os.ReadFile(paths.ResolveConfig("output/session_reports/latest.json"))
+	if err != nil {
+		return report
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		return bot.SessionReport{}
+	}
+	return report
 }
 
 // GetStats returns the bot's live runtime statistics
@@ -1135,8 +5051,43 @@ type CurrentArmySnapshot struct {
 	Warnings       []string          `json:"warnings,omitempty"`
 }
 
+func (a *App) activeAccountSnapshotConfig() (*config.BotConfig, bool) {
+	cfg := config.LoadOrDefault("config.json")
+	if !cfg.Account.MultiAccount.Enabled {
+		return cfg, true
+	}
+
+	status := a.GetMultiAccountStatus()
+	if status.RecoveryRequired {
+		return cfg, false
+	}
+	activeID := strings.TrimSpace(status.ActiveAccountID)
+	if activeID == "" {
+		activeID = strings.TrimSpace(cfg.Account.MultiAccount.ActiveAccountID)
+	}
+	for _, account := range cfg.Account.MultiAccount.Accounts {
+		if !account.Enabled || account.ID != activeID {
+			continue
+		}
+		cfg.Account.PlayerTag = account.PlayerTag
+		cfg.Account.MultiAccount.ActiveAccountID = account.ID
+		return cfg, true
+	}
+	// In multi-account mode an unknown active profile is treated as unsafe.
+	// Returning no snapshot is better than showing another village's data.
+	return cfg, false
+}
+
 func (a *App) GetCurrentArmy() *CurrentArmySnapshot {
-	data, err := os.ReadFile(paths.ResolveConfig("current_army.json"))
+	cfg, safe := a.activeAccountSnapshotConfig()
+	if !safe {
+		return nil
+	}
+	path := paths.ResolveConfig("current_army.json")
+	if cfg.Account.MultiAccount.Enabled {
+		path = bot.AccountArmySnapshotPath(cfg)
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -1165,7 +5116,15 @@ type VillageResourceSnapshot struct {
 // balances. These values come from the BlueStacks HUD scanner, not from the
 // public Clash player API.
 func (a *App) GetVillageResources() *VillageResourceSnapshot {
-	data, err := os.ReadFile(paths.ResolveConfig("village_resources.json"))
+	cfg, safe := a.activeAccountSnapshotConfig()
+	if !safe {
+		return nil
+	}
+	path := paths.ResolveConfig("village_resources.json")
+	if cfg.Account.MultiAccount.Enabled {
+		path = bot.AccountVillageResourcesPath(cfg)
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -1194,7 +5153,15 @@ func (a *App) GetLatestAttackTrace() string {
 }
 
 func (a *App) GetVillageResourceHistory() []VillageResourceSnapshot {
-	data, err := os.ReadFile(paths.ResolveConfig("village_resource_history.json"))
+	cfg, safe := a.activeAccountSnapshotConfig()
+	if !safe {
+		return []VillageResourceSnapshot{}
+	}
+	path := paths.ResolveConfig("village_resource_history.json")
+	if cfg.Account.MultiAccount.Enabled {
+		path = bot.AccountVillageResourceHistoryPath(cfg)
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return []VillageResourceSnapshot{}
 	}
@@ -1209,9 +5176,9 @@ func (a *App) GetVillageResourceHistory() []VillageResourceSnapshot {
 }
 
 func (a *App) GetLogs() []string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	// Return a copy to avoid race conditions
+	a.logMu.RLock()
+	defer a.logMu.RUnlock()
+	// Return a copy to avoid race conditions.
 	res := make([]string, len(a.logBuffer))
 	copy(res, a.logBuffer)
 	return res
@@ -1306,8 +5273,25 @@ func (a *App) refreshHistory() {
 
 // SaveConfig updates config.json settings
 func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strategyFile string, searchEnabled bool, stall int, lootExitEnabled bool, lootExitPercent int) error {
+	if a.testSessionRestorePending() {
+		return fmt.Errorf("session test active: wait for it to finish before changing automation")
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	const maxLootThreshold = 10_000_000
+	if minGold < 0 || minGold > maxLootThreshold {
+		return fmt.Errorf("gold threshold must be between 0 and %d", maxLootThreshold)
+	}
+	if minElixir < 0 || minElixir > maxLootThreshold {
+		return fmt.Errorf("elixir threshold must be between 0 and %d", maxLootThreshold)
+	}
+	if minDE < 0 || minDE > maxLootThreshold {
+		return fmt.Errorf("dark elixir threshold must be between 0 and %d", maxLootThreshold)
+	}
+	if stall < 0 || stall > 600 {
+		return fmt.Errorf("stall timer must be between 0 and 600 seconds")
+	}
 
 	cfg := config.LoadOrDefault("config.json")
 	cfg.Search.MinLootGold = minGold
@@ -1317,8 +5301,12 @@ func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strat
 	cfg.Search.Enabled = searchEnabled
 	cfg.Attack.StallTimerSeconds = stall
 	cfg.Attack.LootExitEnabled = lootExitEnabled
-	if lootExitPercent < 0 { lootExitPercent = 0 }
-	if lootExitPercent > 100 { lootExitPercent = 100 }
+	if lootExitPercent < 0 {
+		lootExitPercent = 0
+	}
+	if lootExitPercent > 100 {
+		lootExitPercent = 100
+	}
 	cfg.Attack.LootExitPercent = lootExitPercent
 	if strategyFile != "" {
 		name := filepath.Base(filepath.Clean(strategyFile))
@@ -1334,22 +5322,139 @@ func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strat
 		cfg.Attack.StrategyFile = resolved
 	}
 
-	// Update running bot in real-time if it exists
+	automationPath := a.memberAutomationPath()
+	oldAutomation, hadOldAutomation := loadMemberAutomationFile(automationPath)
+	if err := a.persistMemberAutomation(cfg); err != nil {
+		return err
+	}
+	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldAutomation {
+			_ = saveMemberAutomationFile(automationPath, oldAutomation)
+		} else if automationPath != "" {
+			_ = os.Remove(automationPath)
+			_ = os.Remove(automationPath + ".bak")
+			_ = os.Remove(automationPath + ".tmp")
+		}
+		return err
+	}
+
+	// Apply live only after both durable copies succeeded.
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
 	}
+	return nil
+}
 
-	bytes, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
+// SaveClashCoreFeatures persists the optional ClashCore-inspired automation
+// features without changing the stable SaveConfig IPC signature.
+func (a *App) SaveClashCoreFeatures(autoCollectors bool, collectorMinutes int, privacyMaskUsername bool, saveAcceptedBases bool, endAtStars int) error {
+	if a.testSessionRestorePending() {
+		return fmt.Errorf("session test active: wait for it to finish before changing automation")
+	}
+	if collectorMinutes <= 0 || collectorMinutes > 1440 {
+		return fmt.Errorf("collector interval must be between 1 and 1440 minutes")
+	}
+	if endAtStars < 0 || endAtStars > 3 {
+		return fmt.Errorf("star target must be between 0 and 3")
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Automation.AutoCollectors = autoCollectors
+	cfg.Automation.CollectorInterval = config.Duration{Duration: time.Duration(collectorMinutes) * time.Minute}
+	cfg.Automation.PrivacyMaskUsername = privacyMaskUsername
+	cfg.Search.SaveAcceptedBaseScreenshots = saveAcceptedBases
+	cfg.Attack.EndAtStars = endAtStars
+
+	automationPath := a.memberAutomationPath()
+	oldAutomation, hadOldAutomation := loadMemberAutomationFile(automationPath)
+	if err := a.persistMemberAutomation(cfg); err != nil {
 		return err
 	}
-	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644)
+	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldAutomation {
+			_ = saveMemberAutomationFile(automationPath, oldAutomation)
+		} else if automationPath != "" {
+			_ = os.Remove(automationPath)
+			_ = os.Remove(automationPath + ".bak")
+			_ = os.Remove(automationPath + ".tmp")
+		}
+		return err
+	}
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	return nil
 }
 
 // SaveFarmComposition persists the selected HDV farm profile.
 // profileJSON is used instead of a large Wails struct signature so the UI can
 // edit a profile freely without regenerating a bespoke binding for every field.
+// SaveAdvancedSafetyFeatures persists the newer safety/forensics controls
+// separately so the long-lived SaveConfig and SaveClashCoreFeatures Wails
+// signatures remain backward compatible with existing beta clients.
+func (a *App) SaveAdvancedSafetyFeatures(dryRun bool, maxRunMinutes int, emergencyStopHotkey string, saveNearMissBases bool, nearMissSampleEvery int, nearMissWithinPercent int) error {
+	if a.testSessionRestorePending() {
+		return fmt.Errorf("session test active: wait for it to finish before changing automation")
+	}
+	if maxRunMinutes < 0 || maxRunMinutes > 7*24*60 {
+		return fmt.Errorf("maximum runtime must be between 0 and 10080 minutes")
+	}
+	hotkey := strings.ToLower(strings.TrimSpace(emergencyStopHotkey))
+	switch hotkey {
+	case "", "ctrl+shift+end":
+		hotkey = "ctrl+shift+end"
+	case "end":
+	case "off", "disabled", "none":
+		hotkey = "off"
+	default:
+		return fmt.Errorf("emergency stop hotkey must be ctrl+shift+end, end, or off")
+	}
+	if nearMissSampleEvery < 1 || nearMissSampleEvery > 1000 {
+		return fmt.Errorf("near-miss sampling interval must be between 1 and 1000")
+	}
+	if nearMissWithinPercent < 1 || nearMissWithinPercent > 50 {
+		return fmt.Errorf("near-miss window must be between 1 and 50 percent")
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Attack.DryRun = dryRun
+	cfg.Automation.MaxRunMinutes = maxRunMinutes
+	cfg.Automation.EmergencyStopHotkey = hotkey
+	cfg.Search.SaveNearMissBaseScreenshots = saveNearMissBases
+	cfg.Search.NearMissSampleEvery = nearMissSampleEvery
+	cfg.Search.NearMissWithinPercent = nearMissWithinPercent
+
+	automationPath := a.memberAutomationPath()
+	oldAutomation, hadOldAutomation := loadMemberAutomationFile(automationPath)
+	if err := a.persistMemberAutomation(cfg); err != nil {
+		return err
+	}
+	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldAutomation {
+			_ = saveMemberAutomationFile(automationPath, oldAutomation)
+		} else if automationPath != "" {
+			_ = os.Remove(automationPath)
+			_ = os.Remove(automationPath + ".bak")
+			_ = os.Remove(automationPath + ".tmp")
+		}
+		return err
+	}
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	return nil
+}
+
 func (a *App) SaveFarmComposition(enabled bool, townHall int, profileJSON string) error {
+	if a.testSessionRestorePending() {
+		return fmt.Errorf("session test active: wait for it to finish before changing farm composition")
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -1399,15 +5504,25 @@ func (a *App) SaveFarmComposition(enabled bool, townHall int, profileJSON string
 	cfg.Attack.Farm.TownHall = townHall
 	cfg.Attack.Farm.Profiles[fmt.Sprintf("%d", townHall)] = profile
 
+	automationPath := a.memberAutomationPath()
+	oldAutomation, hadOldAutomation := loadMemberAutomationFile(automationPath)
+	if err := a.persistMemberAutomation(cfg); err != nil {
+		return err
+	}
+	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldAutomation {
+			_ = saveMemberAutomationFile(automationPath, oldAutomation)
+		} else if automationPath != "" {
+			_ = os.Remove(automationPath)
+			_ = os.Remove(automationPath + ".bak")
+			_ = os.Remove(automationPath + ".tmp")
+		}
+		return err
+	}
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
 	}
-
-	bytes, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(paths.ResolveConfig("config.json"), bytes, 0644)
+	return nil
 }
 
 // GetStrategies lists available strategy files
@@ -1485,61 +5600,67 @@ func (a *App) ApplyUpdate() error {
 }
 
 // InstallAndRestart is the one-click auto-install path.
-// Sequence (intentional ordering):
-//  1. Stop the bot synchronously so ADB + stats flush cleanly.
-//  2. Save persisted stats via the existing path.
-//  3. Mark Status=StateRestarting so React covers the Wails ↔ helper
-//     transition with a non-dismissible splash.
-//  4. Spawn updater.ApplyAuto() which detaches install_update.sh.
-//  5. Schedule os.Exit(0) AFTER a short delay so the IPC reply has
-//     time to land at React before the process dies (about 1s is
-//     safe on the local socket). Using runtime.Quit is tempting but
-//     races with the helper script's `kill -0 $PPID` loop.
-//
-// Returns nil iff the helper was successfully started. If the helper
-// fails afterwards, it's the helper's responsibility to surface a
-// native macOS notification (see install_update.sh).
+// It downloads + SHA256-verifies an available update when necessary,
+// stops the bot only after the archive is ready, launches the platform
+// update helper, publishes the restarting state, then exits so the helper
+// can replace the running bundle and relaunch ClashGO.
 func (a *App) InstallAndRestart() error {
 	if a.updater == nil {
 		return fmt.Errorf("updater not initialized")
 	}
 
-	// Step 1: stop the bot synchronously if running.
-	if a.IsRunning() {
-		log.Info().Msg("InstallAndRestart: stopping bot to drain ADB before exit")
-		_ = a.StopBot()
+	// True one-click path: if the update is only "available", download and
+	// SHA256-verify it first. Previous builds jumped straight to ApplyAuto(),
+	// which correctly rejected the request with "download not ready".
+	st := a.updater.GetStatus()
+	if st.State != updater.StateReady {
+		if !st.Available {
+			return fmt.Errorf("no update is ready or available")
+		}
+		log.Info().
+			Str("version", st.LatestVersion).
+			Msg("InstallAndRestart: downloading update before installation")
+		if _, err := a.updater.Download(a.ctx); err != nil {
+			return fmt.Errorf("download update before install: %w", err)
+		}
 	}
 
-	// Step 2: flush persistent stats. saveStats is idempotent + safe
-	// even when no bot is running.
+	// Stop an active bot OR cancel an in-flight boot only after the archive
+	// has been fully downloaded and verified. Never let the update helper race
+	// BlueStacks/ADB startup or a still-running teardown.
+	if a.botSessionActiveOrStarting() {
+		log.Info().Msg("InstallAndRestart: stopping active/starting bot before update")
+		_ = a.StopBot()
+		if err := a.waitForBotTeardown(20 * time.Second); err != nil {
+			return fmt.Errorf("wait for bot shutdown before update: %w", err)
+		}
+	}
 	a.saveStats()
 
-	// Step 3: cover the Wails exit + helper wait window.
-	// We deliberately do NOT emit "updater_status" here — the 2s
-	// ticker in forwardUpdaterStatus emits within ~2s and we don't
-	// want React to receive two close-in-time events (the IPC emit
-	// + the ticker race). SetState alone is enough.
-	a.updater.SetState(updater.StateRestarting)
-
-	// Step 4: detach the helper script. Returns (started, error).
-	// If false, the helper is missing (e.g. dev build); fall back to
-	// Finder-open and don't exit.
+	// ApplyAuto requires StateReady and a SHA256-backed manifest.
 	started, err := a.updater.ApplyAuto()
 	if err != nil || !started {
-		log.Warn().Err(err).Msg("InstallAndRestart: helper unavailable, falling back to Finder")
-		_ = a.updater.Apply()
-		// Revert state so the UI comes back to "ready" instead of
-		// staying on the restart splash.
-		a.updater.SetState(updater.StateReady)
-		return err
+		log.Warn().Err(err).Msg("InstallAndRestart: auto helper unavailable, falling back to manual reveal")
+		if fallbackErr := a.updater.Apply(); fallbackErr != nil {
+			if err != nil {
+				return fmt.Errorf("automatic install failed: %v; manual fallback failed: %w", err, fallbackErr)
+			}
+			return fallbackErr
+		}
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("automatic install helper did not start")
 	}
 
-	// Step 5: exit cleanly so the helper script's PID wait resolves.
-	// 1s delay gives the Wails JS bridge time to flush our success
-	// response + the splash render before the process vanishes.
+	a.updater.SetState(updater.StateRestarting)
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "updater_status", a.updater.GetStatus())
+	}
+
 	go func() {
-		time.Sleep(1 * time.Second)
-		log.Info().Msg("InstallAndRestart: helper detached, exiting for bundle swap")
+		time.Sleep(1200 * time.Millisecond)
+		log.Info().Msg("InstallAndRestart: helper detached, exiting for Windows bundle swap")
 		os.Exit(0)
 	}()
 

@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/Ducky705/ClashGO/internal/bot"
 	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/paths"
+	"github.com/Ducky705/ClashGO/internal/telemetry"
 )
 
 func TestApp_GetConfig(t *testing.T) {
@@ -31,6 +34,24 @@ func TestApp_GetAttackHistory(t *testing.T) {
 	history := a.GetAttackHistory()
 	if history == nil {
 		t.Error("GetAttackHistory returned nil")
+	}
+}
+
+func TestApp_GetActivityUsesStoppedSessionCache(t *testing.T) {
+	a := &App{
+		lastActivity: []telemetry.Event{
+			{Type: telemetry.EventSessionComplete},
+		},
+	}
+
+	got := a.GetActivity()
+	if len(got) != 1 || got[0].Type != telemetry.EventSessionComplete {
+		t.Fatalf("cached stopped activity=%+v", got)
+	}
+
+	a.clearInMemoryMemberRuntimeState()
+	if got := a.GetActivity(); len(got) != 0 {
+		t.Fatalf("member switch should clear cached activity, got=%+v", got)
 	}
 }
 
@@ -118,5 +139,261 @@ func TestClashAccountServiceURLPrecedence(t *testing.T) {
 	accountServiceURL = ""
 	if got := clashAccountServiceURL(cfg); got != "https://config.example" {
 		t.Fatalf("config proxy URL fallback=%q", got)
+	}
+}
+
+func TestMergeStatsPreservesIntelligenceV2Metrics(t *testing.T) {
+	acc := bot.BotStats{
+		AttacksCompleted: 2,
+		TotalGold:        2_000_000,
+		TotalElixir:      1_000_000,
+		TotalDE:          10_000,
+		Stars3:           1,
+		Stars2:           1,
+		Uptime:           30 * time.Minute,
+		RecoveryAttempts: 1,
+		RecoverySuccesses: 1,
+	}
+	current := bot.BotStats{
+		AttacksCompleted:        2,
+		SessionAttacks:          2,
+		SessionAttackCap:        10,
+		TotalGold:               1_000_000,
+		TotalElixir:             1_000_000,
+		TotalDE:                 5_000,
+		Stars3:                  2,
+		Uptime:                  30 * time.Minute,
+		RecoveryAttempts:        1,
+		RecoverySuccesses:       0,
+		AverageCaptureMS:        321,
+		AverageTargetScanMS:     42,
+		AverageReturnHomeMS:     880,
+		AverageNextTransitionMS: 735,
+		HealthScore:             94,
+		SpeedProfile:            "Fast",
+		Anomalies:               2,
+		TargetsSeen:             12,
+		TargetsAccepted:         2,
+		TargetAcceptanceRate:    16.7,
+		AvgSkipsPerAttack:       5,
+		AvgAcceptedGE:           1_900_000,
+		AvgRejectedGE:           850_000,
+		AvgAcceptedDE:           4_500,
+		AvgRejectedDE:           1_200,
+		AvgAcceptedScore:        91,
+		AvgRejectedScore:        57,
+		PreferredScaleAttempts:  20,
+		PreferredScaleHits:      15,
+		PreferredScaleFallbacks: 5,
+		PreferredScaleHitRate:   75,
+		PreferredScaleEnabled:   true,
+		UIAnchorAttempts:        24,
+		UIAnchorHits:            20,
+		UIAnchorFallbacks:       4,
+		UIAnchorHitRate:         83.33,
+		UIAnchorEnabled:         true,
+		NearMissTargets:         7,
+		NearMiss5Targets:        2,
+		NearMiss10Targets:       5,
+		NearMiss15Targets:       7,
+	}
+
+	got := mergeStats(acc, current)
+
+	if got.AttacksCompleted != 4 || got.TotalGold != 3_000_000 || got.TotalElixir != 2_000_000 {
+		t.Fatalf("additive counters not merged: %+v", got)
+	}
+	if got.SessionAttacks != 2 || got.SessionAttackCap != 10 {
+		t.Fatalf("session progress must remain live-only, got attacks=%d cap=%d", got.SessionAttacks, got.SessionAttackCap)
+	}
+	if got.SpeedProfile != "Fast" || got.HealthScore != 94 || got.Anomalies != 2 {
+		t.Fatalf("runtime intelligence metrics lost: %+v", got)
+	}
+	if got.AverageCaptureMS != 321 || got.AverageTargetScanMS != 42 ||
+		got.AverageReturnHomeMS != 880 || got.AverageNextTransitionMS != 735 {
+		t.Fatalf("latency metrics lost: %+v", got)
+	}
+	if got.TargetsAccepted != 2 || got.AvgAcceptedGE != 1_900_000 || got.AvgRejectedGE != 850_000 ||
+		got.AvgAcceptedDE != 4_500 || got.AvgRejectedDE != 1_200 ||
+		got.AvgAcceptedScore != 91 || got.AvgRejectedScore != 57 {
+		t.Fatalf("search intelligence metrics lost: %+v", got)
+	}
+	if got.PreferredScaleAttempts != 20 || got.PreferredScaleHits != 15 ||
+		got.PreferredScaleFallbacks != 5 || got.PreferredScaleHitRate != 75 || !got.PreferredScaleEnabled {
+		t.Fatalf("preferred-scale metrics lost: %+v", got)
+	}
+	if got.UIAnchorAttempts != 24 || got.UIAnchorHits != 20 || got.UIAnchorFallbacks != 4 ||
+		got.UIAnchorHitRate != 83.33 || !got.UIAnchorEnabled {
+		t.Fatalf("UI-anchor metrics lost: %+v", got)
+	}
+	if got.NearMissTargets != 7 || got.NearMiss5Targets != 2 ||
+		got.NearMiss10Targets != 5 || got.NearMiss15Targets != 7 {
+		t.Fatalf("threshold-sensitivity metrics lost: %+v", got)
+	}
+	if got.GoldPerHour != 3_000_000 {
+		t.Fatalf("gold/hour=%v want 3000000", got.GoldPerHour)
+	}
+	if got.RecoverySuccessRate != 50 {
+		t.Fatalf("recovery success rate=%v want 50", got.RecoverySuccessRate)
+	}
+	if got.ThreeStarRate != 75 {
+		t.Fatalf("3-star rate=%v want 75", got.ThreeStarRate)
+	}
+	if got.AverageStars != 2.75 {
+		t.Fatalf("average stars=%v want 2.75", got.AverageStars)
+	}
+}
+
+
+func TestMergeStatsSeparatesLifetimeAndCurrentSessionAttacks(t *testing.T) {
+	acc := bot.BotStats{AttacksCompleted: 120}
+	current := bot.BotStats{
+		AttacksCompleted: 3,
+		SessionAttacks:   3,
+		SessionAttackCap: 10,
+	}
+
+	got := mergeStats(acc, current)
+	if got.AttacksCompleted != 123 {
+		t.Fatalf("lifetime attacks=%d want 123", got.AttacksCompleted)
+	}
+	if got.SessionAttacks != 3 {
+		t.Fatalf("session attacks=%d want 3", got.SessionAttacks)
+	}
+	if got.SessionAttackCap != 10 {
+		t.Fatalf("session cap=%d want 10", got.SessionAttackCap)
+	}
+}
+
+func TestStartupReadinessRequiresLicenseWhenEnforced(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	t.Setenv("CLASHGO_CONTROL_API_URL", "https://control.example.test")
+
+	a := &App{}
+	readiness := a.GetStartupReadiness()
+
+	found := false
+	for _, check := range readiness.Checks {
+		if check.ID != "license" {
+			continue
+		}
+		found = true
+		if check.OK {
+			t.Fatal("license readiness should fail when enforcement is enabled and no license is active")
+		}
+	}
+	if !found {
+		t.Fatal("startup readiness did not include license check")
+	}
+	if readiness.Ready {
+		t.Fatal("startup readiness should not be ready without required license")
+	}
+}
+
+
+func TestBotSessionActiveOrStartingDetectsBootPlaceholder(t *testing.T) {
+	a := &App{}
+	if a.botSessionActiveOrStarting() {
+		t.Fatal("empty app unexpectedly reports an active bot session")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.mu.Lock()
+	a.botCtx = ctx
+	a.cancel = cancel
+	a.mu.Unlock()
+
+	if !a.botSessionActiveOrStarting() {
+		t.Fatal("in-flight startup was not detected as an active bot session")
+	}
+}
+
+func TestWaitForBotTeardownWaitsForStartupCancellation(t *testing.T) {
+	a := &App{}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.mu.Lock()
+	a.botCtx = ctx
+	a.cancel = cancel
+	a.mu.Unlock()
+
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		cancel()
+		a.mu.Lock()
+		a.cancel = nil
+		a.botCtx = nil
+		a.mu.Unlock()
+	}()
+
+	start := time.Now()
+	if err := a.waitForBotTeardown(time.Second); err != nil {
+		t.Fatalf("waitForBotTeardown failed: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < 50*time.Millisecond {
+		t.Fatalf("waitForBotTeardown returned before startup placeholder cleared: %s", elapsed)
+	}
+}
+
+func TestWaitForBotTeardownTimesOutOnStuckStartup(t *testing.T) {
+	a := &App{}
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.mu.Lock()
+	a.cancel = cancel
+	a.mu.Unlock()
+
+	start := time.Now()
+	err := a.waitForBotTeardown(70 * time.Millisecond)
+	if err == nil {
+		t.Fatal("expected stuck startup wait to time out")
+	}
+	if elapsed := time.Since(start); elapsed < 60*time.Millisecond {
+		t.Fatalf("timeout returned too early: %s", elapsed)
+	}
+}
+
+
+func TestSetBlueStacksInstanceRejectsInFlightStartup(t *testing.T) {
+	t.Setenv("CLASHGO_CONFIG_DIR", t.TempDir())
+	a := &App{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a.mu.Lock()
+	a.botCtx = ctx
+	a.cancel = cancel
+	a.mu.Unlock()
+
+	if err := a.SetBlueStacksInstance(""); err == nil {
+		t.Fatal("expected BlueStacks instance change to be rejected during startup")
+	}
+}
+
+
+func TestAutonomousStopDetailsReportsAttackCap(t *testing.T) {
+	reason, message := autonomousStopDetails(bot.BotStats{
+		SessionAttacks:   50,
+		SessionAttackCap: 50,
+	})
+	if reason != "attack_cap" {
+		t.Fatalf("reason=%q want attack_cap", reason)
+	}
+	if message != "Session terminée · limite de 50 attaques atteinte." {
+		t.Fatalf("message=%q", message)
+	}
+}
+
+func TestAutonomousStopDetailsKeepsGenericRuntimeStop(t *testing.T) {
+	reason, message := autonomousStopDetails(bot.BotStats{
+		SessionAttacks:   12,
+		SessionAttackCap: 50,
+	})
+	if reason != "runtime_ended" {
+		t.Fatalf("reason=%q want runtime_ended", reason)
+	}
+	if message != "La session ClashGO est terminée." {
+		t.Fatalf("message=%q", message)
 	}
 }

@@ -89,6 +89,12 @@ func WithJitterFraction(v float64) Option {
 type Health struct {
 	LastCapture      time.Time `json:"last_capture"`
 	AvgCaptureMs     float64   `json:"avg_capture_ms"`
+	FastCaptureMs    float64   `json:"fast_capture_ms"`
+	AvgTapMs         float64   `json:"avg_tap_ms"`
+	FastTapMs        float64   `json:"fast_tap_ms"`
+	TapsTotal        uint64    `json:"taps_total"`
+	PipeTapsTotal    uint64    `json:"pipe_taps_total"`
+	LegacyTapsTotal  uint64    `json:"legacy_taps_total"`
 	ConsecutiveFails int       `json:"consecutive_fails"`
 	CapturesTotal    uint64    `json:"captures_total"`
 	ErrorsTotal      uint64    `json:"errors_total"`
@@ -104,8 +110,38 @@ func (h *Health) RecordSuccess(d time.Duration) {
 	} else {
 		h.AvgCaptureMs = h.AvgCaptureMs*0.9 + ms*0.1
 	}
+	// Faster EWMA used only by the adaptive pacing governor. Keep the
+	// long-horizon AvgCaptureMs untouched for stable reporting/analytics.
+	if h.FastCaptureMs == 0 {
+		h.FastCaptureMs = ms
+	} else {
+		h.FastCaptureMs = h.FastCaptureMs*0.65 + ms*0.35
+	}
 	h.ConsecutiveFails = 0
 	h.LastError = ""
+}
+
+func (h *Health) RecordTap(d time.Duration) {
+	h.TapsTotal++
+	ms := d.Seconds() * 1000
+	if h.AvgTapMs == 0 {
+		h.AvgTapMs = ms
+	} else {
+		h.AvgTapMs = h.AvgTapMs*0.9 + ms*0.1
+	}
+	if h.FastTapMs == 0 {
+		h.FastTapMs = ms
+	} else {
+		h.FastTapMs = h.FastTapMs*0.65 + ms*0.35
+	}
+}
+
+func (h *Health) RecordTapRoute(pipe bool) {
+	if pipe {
+		h.PipeTapsTotal++
+	} else {
+		h.LegacyTapsTotal++
+	}
 }
 
 func (h *Health) RecordFailure(err error) {

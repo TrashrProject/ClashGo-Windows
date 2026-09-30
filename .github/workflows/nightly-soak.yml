@@ -1,0 +1,94 @@
+name: Nightly Reliability Soak
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-reliability-soak
+  cancel-in-progress: true
+
+jobs:
+  decision-soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feature/intelligence-v2
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.x'
+          cache: true
+      - name: Repeat deterministic control-plane tests
+        run: |
+          go test -count=30 ./internal/config ./internal/automation ./internal/intelligence ./internal/multiaccount ./internal/licensing ./internal/support ./internal/updater ./internal/paths ./cmd/account_proxy
+
+  windows-runtime-soak:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      CGO_CXXFLAGS: --std=c++11 -DNDEBUG
+      CGO_CPPFLAGS: -IC:/opencv/build/install/include
+      CGO_LDFLAGS: -LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -lopencv_imgproc4130 -lopencv_imgcodecs4130
+      GOFLAGS: -tags=customenv,gocv_specific_modules
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feature/intelligence-v2
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Ensure MinGW and CMake
+        shell: powershell
+        run: |
+          $packages = @()
+          if (-not (Get-Command g++ -ErrorAction SilentlyContinue)) { $packages += "mingw" }
+          if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) { $packages += "cmake" }
+          if ($packages.Count -gt 0) { choco install $packages -y --no-progress }
+          if ($LASTEXITCODE -ne 0) { throw "toolchain installation failed" }
+
+      - name: Restore OpenCV cache
+        id: opencv-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: C:\opencv\build\install
+          key: opencv-4.13.0-mingw-gocv043-clashgo-minimal-v1
+
+      - name: Build OpenCV when cache is cold
+        if: steps.opencv-cache.outputs.cache-hit != 'true'
+        shell: powershell
+        run: |
+          git clone --depth 1 --branch v0.43.0 https://github.com/hybridgroup/gocv.git "$env:RUNNER_TEMP\gocv"
+          Push-Location "$env:RUNNER_TEMP\gocv"
+          cmd /c win_download_opencv.cmd
+          if ($LASTEXITCODE -ne 0) { throw "OpenCV download failed" }
+          (Get-Content .\win_build_opencv.cmd -Raw).Replace("-DBUILD_PERF_TESTS=ON", "-DBUILD_PERF_TESTS=OFF -DBUILD_LIST=core,imgproc,imgcodecs") | Set-Content .\win_build_opencv.cmd -Encoding ASCII
+          $env:CMAKE_BUILD_PARALLEL_LEVEL = [Environment]::ProcessorCount
+          cmd /c win_build_opencv.cmd
+          if ($LASTEXITCODE -ne 0) { throw "OpenCV build failed" }
+          Pop-Location
+
+      - name: Add OpenCV runtime
+        shell: powershell
+        run: '"C:\opencv\build\install\x64\mingw\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append'
+
+      - name: Repeated runtime/vision/attack contract soak
+        shell: powershell
+        run: |
+          go test -tags "customenv,gocv_specific_modules" -count=8 -timeout=55m ./internal/adb ./internal/game ./internal/attack ./internal/bot ./internal/vision
+          if ($LASTEXITCODE -ne 0) { throw "nightly runtime soak failed" }
+
+      - name: Stress the most failure-prone state machines
+        shell: powershell
+        run: |
+          go test -tags "customenv,gocv_specific_modules" -count=40 -timeout=35m ./internal/attack -run "Battle|Deploy|Slot|Spell|Hero|ReturnHome|Routing"
+          if ($LASTEXITCODE -ne 0) { throw "attack state-machine stress failed" }
+          go test -tags "customenv,gocv_specific_modules" -count=40 -timeout=35m ./internal/bot -run "Recovery|Runtime|Soak|MultiAccount|Wall|Collector"
+          if ($LASTEXITCODE -ne 0) { throw "bot runtime stress failed" }

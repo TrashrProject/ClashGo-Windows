@@ -6,11 +6,15 @@ on:
       version:
         description: Release version without leading v
         required: true
-        default: 0.6.0-windows-beta
+        default: 0.6.7-windows-beta
       notes:
         description: Release notes
         required: false
         default: Windows BlueStacks 5 port beta
+      source_ref:
+        description: Git ref to build and publish
+        required: true
+        default: feature/intelligence-v2
 
 permissions:
   contents: write
@@ -23,25 +27,26 @@ jobs:
       RELEASE_VERSION: ${{ inputs.version }}
       RELEASE_NOTES: ${{ inputs.notes }}
       CLASHGO_ACCOUNT_API_URL: ${{ vars.CLASHGO_ACCOUNT_API_URL }}
+      CLASHGO_CONTROL_API_URL: ${{ vars.CLASHGO_CONTROL_API_URL }}
       CGO_CXXFLAGS: --std=c++11 -DNDEBUG
       CGO_CPPFLAGS: -IC:/opencv/build/install/include
       CGO_LDFLAGS: -LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -lopencv_imgproc4130 -lopencv_imgcodecs4130
       GOFLAGS: -tags=customenv,gocv_specific_modules
     steps:
-      - name: Checkout Windows branch
-        uses: actions/checkout@v4
+      - name: Checkout release source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: windows/core-port
+          ref: ${{ inputs.source_ref }}
           fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: '1.25.x'
           cache: true
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '20'
           cache: npm
@@ -53,7 +58,7 @@ jobs:
 
       - name: Restore cached OpenCV
         id: opencv-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: C:\opencv\build\install
           key: opencv-4.13.0-mingw-gocv043-clashgo-minimal-v1
@@ -74,7 +79,7 @@ jobs:
 
       - name: Save OpenCV cache immediately
         if: steps.opencv-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: C:\opencv\build\install
           key: opencv-4.13.0-mingw-gocv043-clashgo-minimal-v1
@@ -116,11 +121,18 @@ jobs:
 
       - name: Build portable bundle
         shell: powershell
-        run: .\tools\build-windows.ps1 -Version "$env:RELEASE_VERSION" -AccountServiceURL "$env:CLASHGO_ACCOUNT_API_URL" -SkipSync -SkipTests
+        run: .\tools\build-windows.ps1 -Version "$env:RELEASE_VERSION" -AccountServiceURL "$env:CLASHGO_ACCOUNT_API_URL" -ControlServiceURL "$env:CLASHGO_CONTROL_API_URL" -SkipSync -SkipTests
 
       - name: Build NSIS installer
         shell: powershell
         run: .\tools\build-installer.ps1 -Version "$env:RELEASE_VERSION"
+
+      - name: Authenticode sign release artifacts when certificate is configured
+        shell: powershell
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: .\tools\sign-windows-artifacts.ps1 -Version "$env:RELEASE_VERSION"
 
       - name: Generate checksums and update manifest
         id: manifest
@@ -169,4 +181,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $version = $env:RELEASE_VERSION
-          gh release create "v$version" "${{ steps.manifest.outputs.zip }}" "${{ steps.manifest.outputs.setup }}" "dist\latest.json" "dist\SHA256SUMS.txt" --repo TrashrProject/ClashGo-Windows --title "ClashGO Windows v$version" --notes "$env:RELEASE_NOTES" --target windows/core-port
+          gh release create "v$version" "${{ steps.manifest.outputs.zip }}" "${{ steps.manifest.outputs.setup }}" "dist\latest.json" "dist\SHA256SUMS.txt" --repo TrashrProject/ClashGo-Windows --title "ClashGO Windows v$version" --notes "$env:RELEASE_NOTES" --target "${{ inputs.source_ref }}"

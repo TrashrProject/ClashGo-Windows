@@ -34,6 +34,22 @@ type PhasePlan struct {
 	Edge      string
 }
 
+
+// PreparedAttackPlan is the immutable execution plan built before the first
+// deployment tap. Once prepared, deployment does not re-run strategy routing
+// or slot resolution between units.
+type PreparedAttackPlan struct {
+	Phases        []PhasePlan
+	TargetEdge    string
+	ResolvedUnits int
+	MissingUnits  []string
+	BuiltIn       time.Duration
+}
+
+func (p PreparedAttackPlan) Ready() bool {
+	return len(p.Phases) > 0 && len(p.MissingUnits) == 0
+}
+
 // DeployPlanner resolves strategy YAML into concrete deployment plans.
 type DeployPlanner struct {
 	slotManager  *SlotManager
@@ -69,14 +85,43 @@ func NewDeployPlanner(
 
 // PlanDeployment resolves all phases into concrete deployment plans.
 func (dp *DeployPlanner) PlanDeployment(s *strategy.DynamicStrategy) []PhasePlan {
-	var plans []PhasePlan
+	return dp.Prepare(s).Phases
+}
+
+// Prepare resolves the complete attack once, before the first tap. This keeps
+// the hot deployment path deterministic and makes planning latency explicit.
+func (dp *DeployPlanner) Prepare(s *strategy.DynamicStrategy) PreparedAttackPlan {
+	started := time.Now()
+	prepared := PreparedAttackPlan{TargetEdge: dp.targetEdge}
+	if s == nil {
+		prepared.BuiltIn = time.Since(started)
+		return prepared
+	}
 
 	for _, phase := range s.Phases {
 		plan := dp.planPhase(phase)
-		plans = append(plans, plan)
-	}
+		prepared.Phases = append(prepared.Phases, plan)
+		prepared.ResolvedUnits += len(plan.UnitPlans)
 
-	return plans
+		resolved := make(map[string]int)
+		for _, up := range plan.UnitPlans {
+			resolved[strings.ToLower(strings.TrimSpace(up.Unit.Name))]++
+		}
+		for _, unit := range phase.Units {
+			if unit.Pattern == "Ability" || phase.Pattern == "Ability" {
+				// Abilities can reuse the hero slot and are validated at execution.
+				continue
+			}
+			name := strings.ToLower(strings.TrimSpace(unit.Name))
+			if resolved[name] > 0 {
+				resolved[name]--
+				continue
+			}
+			prepared.MissingUnits = append(prepared.MissingUnits, unit.Name)
+		}
+	}
+	prepared.BuiltIn = time.Since(started)
+	return prepared
 }
 
 // planPhase resolves a single phase into a PhasePlan.

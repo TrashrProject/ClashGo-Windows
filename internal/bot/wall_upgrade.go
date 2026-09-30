@@ -2,6 +2,7 @@ package bot
 
 import (
 	"encoding/json"
+	"fmt"
 	"image"
 	"math"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"gocv.io/x/gocv"
 
 	"github.com/Ducky705/ClashGO/internal/game"
+	"github.com/Ducky705/ClashGO/internal/intelligence"
 	"github.com/Ducky705/ClashGO/internal/paths"
 	"github.com/Ducky705/ClashGO/internal/vision"
 )
@@ -109,6 +111,12 @@ type WallUpgradeHooks struct {
 	Cal       *game.Calibration
 	Templates *game.TemplateStore
 
+	// Capture provides the next runtime frame. Production wires this to the
+	// FrameBroker-backed Bot.runtimeFrameFresh so wall automation never creates
+	// a second ADB screencap stream. Nil preserves direct capture for the manual
+	// diagnostic tool and pre-Start tests only.
+	Capture func(timeout time.Duration) (gocv.Mat, error)
+
 	// Classify is invoked with each capture during the MainVillage
 	// verify loop and to detect interruption dialogs. May be nil.
 	Classify func(gocv.Mat) (game.GameState, int)
@@ -124,8 +132,44 @@ type WallUpgradeHooks struct {
 	// interrupts an otherwise-unbounded wall-upgrade run.
 	StopCheck func() bool
 
+	// DeepSearch is used only by the single bounded recovery pass. The normal
+	// path is intentionally fast; a retry expands the wall-row scan so a
+	// transient menu animation cannot make the wall stage disappear entirely.
+	DeepSearch bool
+
+	// PreferredWallAttempt is only a diagnostic hint for where the Wall row
+	// was found previously. The list is dynamic, so navigation never skips
+	// directly to this position and always re-scans the current list.
+	PreferredWallAttempt int
+
+	// VerifyUpgradeProgress is called immediately after a claimed wall upgrade.
+	// Production uses a cheap batched resource-spend watchdog. Returning false
+	// aborts the current loop so a false-success UI path cannot repeat forever.
+	VerifyUpgradeProgress func() bool
+
+	// PreferredResource returns "gold" or "elixir" from the latest verified
+	// village snapshot. Rect-driven flows try the fuller storage first, then
+	// automatically fall back to the other currency when unaffordable.
+	PreferredResource func() string
+
 	// OnStep is the optional phase-boundary instrumentation hook.
 	OnStep func(step string, data map[string]any)
+}
+
+func captureWallFrame(h *WallUpgradeHooks, timeout time.Duration) (gocv.Mat, error) {
+	if h == nil {
+		return gocv.NewMat(), fmt.Errorf("nil wall-upgrade hooks")
+	}
+	if timeout <= 0 {
+		timeout = 2 * time.Second
+	}
+	if h.Capture != nil {
+		return h.Capture(timeout)
+	}
+	if h.Client == nil {
+		return gocv.NewMat(), fmt.Errorf("wall-upgrade client unavailable")
+	}
+	return h.Client.CaptureToMat()
 }
 
 // UpgradeWalls executes the wall-upgrade sequence repeatedly until no
@@ -133,18 +177,282 @@ type WallUpgradeHooks struct {
 // wrapper that delegates to runWallUpgradeLoop with the production
 // Bot's dependencies. The diagnostic tool at cmd/test_wall_upgrade
 // calls runWallUpgradeLoop directly with a hand-built hooks struct.
-func (b *Bot) UpgradeWalls(gc *game.GameContext) {
-	RunWallUpgradeLoop(&WallUpgradeHooks{
-		Logger:    b.logger,
-		Client:    b.client,
-		Cal:       b.cal,
-		Templates: b.templates,
-		Classify:  b.classify,
-		Dismiss:   b.dismissSelection,
-		// StopCheck lets a user Stop interrupt the otherwise-unbounded
-		// wall-upgrade loop at its next iteration boundary.
-		StopCheck: func() bool { return b.ctx.Err() != nil },
-	})
+func (b *Bot) UpgradeWalls(gc *game.GameContext) (completed bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			completed = false
+			b.logger.Error().
+				Interface("panic", r).
+				Msg("recovered panic in wall-upgrade stage; keeping wall work pending")
+		}
+	}()
+
+	const wallMemoryID = "builder_menu_wall_entry"
+	var (
+		lastSearchAttempt float64
+		lastWallConf      float64
+		upgradesLearned   int
+		verifiedUpgrades  int
+		retryableFailure  bool
+		terminalReason    string
+		persistedWallAttempt = -1
+	)
+
+	if b.villageMemory != nil {
+		if known, ok := b.villageMemory.KnownEntity(wallMemoryID, 24*time.Hour, 0.72); ok {
+			if known.Level > 0 {
+				persistedWallAttempt = known.Level - 1
+				if persistedWallAttempt > 12 {
+					persistedWallAttempt = 12
+				}
+			}
+			b.logger.Info().
+				Int("x", known.Position.X).
+				Int("y", known.Position.Y).
+				Int("scroll_attempt", persistedWallAttempt).
+				Float64("confidence", known.Confidence).
+				Msg("persistent village memory loaded Wall menu hint")
+		}
+	}
+
+	observe := func(step string, data map[string]any) {
+		switch step {
+		case "wall_text_found":
+			x, xOK := data["x"].(int)
+			y, yOK := data["y"].(int)
+			if attempt, ok := data["attempt"].(int); ok {
+				lastSearchAttempt = float64(attempt)
+			}
+			if conf, ok := data["conf"].(float64); ok {
+				lastWallConf = conf
+			}
+			if xOK && yOK && b.villageMemory != nil {
+				attemptLevel := 0
+				if attempt, ok := data["attempt"].(int); ok {
+					attemptLevel = attempt + 1 // Level=0 remains the "unknown" sentinel.
+					persistedWallAttempt = attempt
+				}
+				_ = b.villageMemory.UpsertEntity(intelligence.VillageEntity{
+					ID: wallMemoryID,
+					Kind: "wall_menu_entry",
+					Level: attemptLevel,
+					Position: intelligence.VillagePoint{X: x, Y: y},
+					Confidence: lastWallConf,
+					LastSeen: time.Now(),
+				})
+			}
+
+		case "upgrade_success":
+			// UI success is only a claim. Positive learning is recorded later,
+			// after the resource-spend watchdog proves that gold/elixir moved.
+			upgradesLearned++
+			retryableFailure = false
+
+		case "all_unaffordable":
+			terminalReason = step
+			retryableFailure = false
+		case "stopped":
+			terminalReason = step
+			retryableFailure = true
+
+		case "wall_text_not_found", "tap_builder_failed", "not_in_main_village",
+			"aborted_capture_defensive", "scroll_failed", "scroll_up_failed",
+			"upgrade_screen_capture_failed", "upgrade_not_found", "upgrade_progress_unverified":
+			terminalReason = step
+			retryableFailure = true
+			if b.villageMemory != nil {
+				_ = b.villageMemory.MarkEntityResult(wallMemoryID, false)
+			}
+			if b.adaptive != nil {
+				reward := -35.0
+				_, _ = b.adaptive.Observe(intelligence.LearningOutcome{
+					Domain: "wall_upgrade",
+					Parameters: map[string]float64{
+						"wall_search_attempt": lastSearchAttempt,
+						"builder_open_settle_ms": 850,
+					},
+					DeploySuccess: false,
+					RewardOverride: &reward,
+				})
+			}
+		}
+	}
+
+	readResources := func() game.VillageResourceSnapshot {
+		if b.resourceReader == nil {
+			return game.VillageResourceSnapshot{}
+		}
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
+		if err != nil {
+			return game.VillageResourceSnapshot{}
+		}
+		if screen.Empty() {
+			screen.Close()
+			return game.VillageResourceSnapshot{}
+		}
+		defer screen.Close()
+		return b.resourceReader.Read(screen)
+	}
+	resourcesSpent := func(before, after game.VillageResourceSnapshot) (bool, bool) {
+		if !before.Valid || !after.Valid {
+			return false, false
+		}
+		goldComparable := before.GoldValid && after.GoldValid
+		elixirComparable := before.ElixirValid && after.ElixirValid
+		if !goldComparable && !elixirComparable {
+			return false, false
+		}
+		spent := (goldComparable && after.Gold < before.Gold) ||
+			(elixirComparable && after.Elixir < before.Elixir)
+		return spent, true
+	}
+	recordVerifiedSuccess := func(count int) {
+		if count <= 0 {
+			return
+		}
+		verifiedUpgrades += count
+		if b.villageMemory != nil {
+			_ = b.villageMemory.MarkEntityResult(wallMemoryID, true)
+		}
+		if b.adaptive != nil {
+			reward := 75.0
+			_, _ = b.adaptive.Observe(intelligence.LearningOutcome{
+				Domain: "wall_upgrade",
+				Parameters: map[string]float64{
+					"wall_search_attempt": lastSearchAttempt,
+					"builder_open_settle_ms": 850,
+				},
+				Clean: true,
+				DeploySuccess: true,
+				ReturnHomeSuccess: true,
+				SafeDeployment: true,
+				ParsedResults: true,
+				RewardOverride: &reward,
+			})
+		}
+	}
+
+	stageStarted := time.Now()
+	attempts := 0
+	resourceVerified := false
+	verificationEvidenceAvailable := false
+	for attempts < 2 {
+		attempts++
+		retryableFailure = false
+		terminalReason = ""
+		runStartUpgrades := upgradesLearned
+		resourceBaseline := readResources()
+		claimsSinceCheck := 0
+
+		verifyProgress := func() bool {
+			claimsSinceCheck++
+			// Batch the watchdog: one resource OCR every two claimed upgrades.
+			// This is cheap enough to stop false-success loops quickly without
+			// adding an expensive capture after every single wall.
+			if claimsSinceCheck < 2 {
+				return true
+			}
+			now := readResources()
+			spent, comparable := resourcesSpent(resourceBaseline, now)
+			if comparable {
+				verificationEvidenceAvailable = true
+			}
+			if !comparable {
+				// Keep the claims pending. The next success/run-boundary probe gets
+				// another chance to verify them instead of teaching from uncertainty.
+				return true
+			}
+			if spent {
+				resourceVerified = true
+				recordVerifiedSuccess(claimsSinceCheck)
+				claimsSinceCheck = 0
+				resourceBaseline = now
+				return true
+			}
+			retryableFailure = true
+			terminalReason = "resource_progress_unverified"
+			b.logger.Warn().
+				Int("claimed_since_check", claimsSinceCheck).
+				Int("before_gold", resourceBaseline.Gold).
+				Int("after_gold", now.Gold).
+				Int("before_elixir", resourceBaseline.Elixir).
+				Int("after_elixir", now.Elixir).
+				Msg("wall upgrades were reported but no resource spend was observed; aborting fast loop")
+			return false
+		}
+
+		RunWallUpgradeLoop(&WallUpgradeHooks{
+			Logger:                b.logger,
+			Client:                b.client,
+			Cal:                   b.cal,
+			Templates:             b.templates,
+			Capture:               b.runtimeFrameFresh,
+			Classify:              b.classify,
+			Dismiss:               b.dismissSelection,
+			StopCheck:             func() bool { return b.ctx.Err() != nil },
+			DeepSearch:            attempts > 1,
+			PreferredWallAttempt: persistedWallAttempt,
+			VerifyUpgradeProgress: verifyProgress,
+			PreferredResource: func() string {
+				if resourceBaseline.GoldValid && resourceBaseline.ElixirValid && resourceBaseline.Elixir > resourceBaseline.Gold {
+					return "elixir"
+				}
+				return "gold"
+			},
+			OnStep:                observe,
+		})
+
+		// Catch a single claimed upgrade as well: the batched watchdog above
+		// fires every two, so compare once at the run boundary when needed.
+		claimedThisRun := upgradesLearned - runStartUpgrades
+		if claimedThisRun > 0 && !retryableFailure && claimsSinceCheck > 0 {
+			afterRun := readResources()
+			if spent, comparable := resourcesSpent(resourceBaseline, afterRun); comparable {
+				verificationEvidenceAvailable = true
+				if spent {
+					resourceVerified = true
+					recordVerifiedSuccess(claimsSinceCheck)
+					claimsSinceCheck = 0
+					resourceBaseline = afterRun
+				} else {
+					retryableFailure = true
+					terminalReason = "resource_spend_unverified"
+					b.logger.Warn().
+						Int("claimed_upgrades", claimedThisRun).
+						Int("unverified_claims", claimsSinceCheck).
+						Msg("wall upgrade was claimed but final resource spend could not be verified")
+				}
+			}
+		}
+
+		if b.ctx.Err() != nil || !retryableFailure {
+			break
+		}
+		b.logger.Warn().
+			Str("reason", terminalReason).
+			Int("attempt", attempts).
+			Msg("wall stage hit a transient/unverified result; running one bounded deep retry")
+		b.dismissSelection()
+		if !b.sleepResponsive(650 * time.Millisecond) {
+			break
+		}
+	}
+
+	completed = b.ctx.Err() == nil &&
+		!retryableFailure &&
+		terminalReason == "all_unaffordable" &&
+		(upgradesLearned == 0 || verifiedUpgrades > 0 || !verificationEvidenceAvailable)
+	b.logger.Info().
+		Int("claimed_wall_upgrades", upgradesLearned).
+		Int("verified_wall_upgrades", verifiedUpgrades).
+		Int("wall_stage_attempts", attempts).
+		Dur("wall_stage_duration", time.Since(stageStarted)).
+		Bool("resource_spend_verified", resourceVerified).
+		Bool("completed", completed).
+		Float64("last_wall_confidence", lastWallConf).
+		Str("terminal_reason", terminalReason).
+		Msg("wall-upgrade cycle complete")
+	return completed
 }
 
 // RunWallUpgradeLoop drives the wall-upgrade sequence with explicit deps
@@ -222,6 +530,15 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 		h.Logger.Info().Msg("Template-matching fallback: no rect assets loaded — using btn_upgrade_wall template + cost-color")
 	}
 
+	// Keep the historical location only as a hint for diagnostics. Builder
+	// menu ordering is dynamic: a wall can move when another upgrade vanishes,
+	// builders change state, or resources change. Every iteration therefore
+	// scans the live list from a deterministic bottom position.
+	preferredWallAttempt := h.PreferredWallAttempt
+	if preferredWallAttempt < 0 || preferredWallAttempt > 12 {
+		preferredWallAttempt = -1
+	}
+
 	for upgradeCount := 1; ; upgradeCount++ {
 		// Stop check: the loop is otherwise unbounded (it only exits
 		// when no affordable wall remains). Breaking at the iteration
@@ -259,7 +576,11 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 			break
 		}
 		h.step("builder_tapped", map[string]any{"x": bx, "y": by})
-		time.Sleep(1500 * time.Millisecond) // Wait for menu to appear
+		builderSettle := 850 * time.Millisecond
+		if h.DeepSearch {
+			builderSettle = 1100 * time.Millisecond
+		}
+		time.Sleep(builderSettle)
 
 		// ROI for the upgrades menu (default right side of the screen)
 		menuROI := image.Rect(
@@ -355,18 +676,32 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 		sy1 := menuROI.Max.Y - bottomMargin
 		sy2 := menuROI.Min.Y + topMargin
 
-		// 3. Scroll robustly to the dead bottom of the menu
-		h.Logger.Debug().Int("scrollX", scrollX).Int("sy1", sy1).Int("sy2", sy2).Msg("Scrolling upgrades menu to the bottom")
-		for i := 0; i < 6; i++ {
-			if err := h.Client.Swipe(scrollX, sy1, scrollX, sy2, 300); err != nil {
+		// 3. Reset to a deterministic menu bottom. Four full-height swipes are
+		// enough on the normal path; the bounded recovery pass keeps the older
+		// six-swipe depth for unusual/long menus. Shorter settles remove several
+		// seconds of dead time per wall without adding captures.
+		bottomSwipes := 4
+		if h.DeepSearch {
+			bottomSwipes = 6
+		}
+		h.Logger.Debug().
+			Int("scrollX", scrollX).
+			Int("swipes", bottomSwipes).
+			Msg("Resetting upgrades menu to bottom")
+		for i := 0; i < bottomSwipes; i++ {
+			if err := h.Client.Swipe(scrollX, sy1, scrollX, sy2, 260); err != nil {
 				h.Logger.Error().Err(err).Msg("Failed to swipe menu down")
 				h.step("scroll_failed", map[string]any{"err": err.Error(), "iter": i})
 				return
 			}
-			time.Sleep(450 * time.Millisecond)
+			time.Sleep(220 * time.Millisecond)
 		}
-		time.Sleep(1200 * time.Millisecond) // momentum settle
-		h.step("menu_scrolled_to_bottom", nil)
+		bottomSettle := 500 * time.Millisecond
+		if h.DeepSearch {
+			bottomSettle = 750 * time.Millisecond
+		}
+		time.Sleep(bottomSettle)
+		h.step("menu_scrolled_to_bottom", map[string]any{"swipes": bottomSwipes})
 
 		// 4. Slowly scroll back up and search for "Wall" text
 		wallTpl, ok := h.Templates.Get("text_wall")
@@ -378,104 +713,111 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 		}
 
 		wallClicked := false
-		for attempt := 0; attempt < 12; attempt++ {
-			screen, err := h.Client.CaptureToMat()
+		if preferredWallAttempt >= 0 {
+			h.step("wall_search_hint", map[string]any{"previous_attempt": preferredWallAttempt})
+		}
+
+		// Dynamic list scan. Normal mode samples every two 140px swipes; the
+		// ~680px-tall menu viewport still overlaps heavily between samples, so a
+		// Wall row cannot be skipped while we cut capture/matching work roughly
+		// in half. The deep retry samples every swipe for maximum certainty.
+		scanStride := 2
+		maxUpSwipes := 12
+		if h.DeepSearch {
+			scanStride = 1
+			maxUpSwipes = 16
+		}
+		upSwipes := 0
+		for {
+			attempt := upSwipes
+			screen, err := captureWallFrame(h, 2*time.Second)
 			if err != nil {
-				time.Sleep(500 * time.Millisecond)
-				continue
+				// Retry the same viewport once rather than scrolling past a row
+				// merely because ADB dropped one frame.
+				time.Sleep(300 * time.Millisecond)
+				screen, err = captureWallFrame(h, 2*time.Second)
 			}
-			// Robust 0.78 threshold, 60 scale steps.
-			matches, _ := vision.MatchMultiScaleROICached(screen, wallTpl, "text_wall", 0.3, 1.5, 20, 0.78, menuROI)
+			if err == nil && !screen.Empty() {
+				matches, _ := vision.MatchMultiScaleROICached(screen, wallTpl, "text_wall", 0.3, 1.5, 20, 0.78, menuROI)
 
-			h.step("wall_text_search", map[string]any{
-				"attempt": attempt,
-				"matches": len(matches),
-			})
+				h.step("wall_text_search", map[string]any{
+					"attempt":          attempt,
+					"previous_attempt": preferredWallAttempt,
+					"matches":          len(matches),
+				})
 
-			// Filter out false-positives that landed OUTSIDE the menu ROI
-			// even though the matcher was given the ROI as an argument
-			// (the ROI is advisory for MatchMultiScale — real returns can
-			// still be at y < menuROI.Min.Y, e.g. against the top-bar gold
-			// text "1/2" or username area on the village map). The user's
-			// freshly-captured text_wall.png will match on a real wall row
-			// within the menu bbox; matches below the bottom HUD or above
-			// the top bar are not the wall row we're looking for.
-			//
-			// Note: we deliberately do NOT filter by scale — the user's
-			// current 56x12 text_wall.png has padding around a real 22x5
-			// letter region, so its natural match lands at scale ~0.40.
-			// Filtering by scale >= 0.60 would block all real matches.
-			var best *vision.Match
-			for _, m := range matches {
-				if m.Point.Y < menuROI.Min.Y || m.Point.Y > menuROI.Max.Y ||
-					m.Point.X < menuROI.Min.X || m.Point.X > menuROI.Max.X {
-					continue
+				var best *vision.Match
+				for _, m := range matches {
+					if m.Point.Y < menuROI.Min.Y || m.Point.Y > menuROI.Max.Y ||
+						m.Point.X < menuROI.Min.X || m.Point.X > menuROI.Max.X {
+						continue
+					}
+					mCopy := m
+					best = &mCopy
+					break
 				}
-				mCopy := m
-				best = &mCopy
+
+				if best != nil {
+					h.Logger.Info().
+						Float64("conf", best.Confidence).
+						Float64("scale", best.Scale).
+						Int("x", best.Point.X).
+						Int("y", best.Point.Y).
+						Int("current_scroll", attempt).
+						Int("previous_scroll", preferredWallAttempt).
+						Msg("Wall text template found in dynamic builder-list scan")
+					hookScreen := screen.Clone()
+					payload := map[string]any{
+						"attempt":          attempt,
+						"previous_attempt": preferredWallAttempt,
+						"conf":             best.Confidence,
+						"scale":            best.Scale,
+						"x":                best.Point.X,
+						"y":                best.Point.Y,
+						"matches":          matches,
+					}
+					if !hookScreen.Empty() {
+						payload["screen"] = hookScreen
+					}
+					h.step("wall_text_found", payload)
+					if err := h.Client.Tap(best.Point.X, best.Point.Y); err == nil {
+						wallClicked = true
+						preferredWallAttempt = attempt
+					}
+				}
+				screen.Close()
+			} else if err == nil {
+				screen.Close()
+			}
+
+			if wallClicked || upSwipes >= maxUpSwipes {
 				break
 			}
 
-			if best != nil {
-				h.Logger.Info().
-					Float64("conf", best.Confidence).
-					Float64("scale", best.Scale).
-					Int("x", best.Point.X).
-					Int("y", best.Point.Y).
-					Msg("Wall text template found")
-				hookScreen := screen.Clone()
-				if hookScreen.Empty() {
-					h.step("wall_text_found", map[string]any{
-						"attempt": attempt,
-						"conf":    best.Confidence,
-						"scale":   best.Scale,
-						"x":       best.Point.X,
-						"y":       best.Point.Y,
-						"matches": matches,
-					})
-				} else {
-					h.step("wall_text_found", map[string]any{
-						"attempt": attempt,
-						"conf":    best.Confidence,
-						"scale":   best.Scale,
-						"x":       best.Point.X,
-						"y":       best.Point.Y,
-						"screen":  hookScreen,
-						"matches": matches,
-					})
-				}
-				if err := h.Client.Tap(best.Point.X, best.Point.Y); err == nil {
-					wallClicked = true
-				}
-			}
-			screen.Close()
-
-			if wallClicked {
-				break
-			}
-
-			// Aggressive multiple-traverse swipe up (100px × 12 attempts =
-			// 1200px ≈ 3.5x traverses of the 339px menu). Per the user's
-			// empirical observation, over-scrolling is harmless (CoC's
-			// menu momentum-curve absorbs it) while under-scrolling has
-			// repeatedly hidden the wall row inside the matcher's blind
-			// spot between animation settle windows. The 12 attempts give
-			// the matcher ~36s of wall time to find any row in the scroll
-			// envelope; the loop's wallClicked early-break short-circuits
-			// on the first hit so a well-populated menu costs no extra
-			// time over the prior 6×90 = 540px / 7×90 = 630px runs.
-			h.Logger.Debug().Int("scrollX", scrollX).Msg("Wall text not visible, scrolling up...")
 			startY := menuROI.Min.Y + menuROI.Dx()/2
-			endY := startY + int(100*h.Cal.ScaleY)
-			if err := h.Client.Swipe(scrollX, startY, scrollX, endY, 400); err != nil {
-				h.Logger.Error().Err(err).Msg("Failed to swipe up")
-				h.step("scroll_up_failed", map[string]any{"err": err.Error()})
+			endY := startY + int(140*h.Cal.ScaleY)
+			steps := scanStride
+			if remaining := maxUpSwipes - upSwipes; steps > remaining {
+				steps = remaining
+			}
+			for i := 0; i < steps; i++ {
+				if err := h.Client.Swipe(scrollX, startY, scrollX, endY, 260); err != nil {
+					h.Logger.Error().Err(err).Msg("Failed to swipe up")
+					h.step("scroll_up_failed", map[string]any{"err": err.Error()})
+					steps = i
+					break
+				}
+				upSwipes++
+				time.Sleep(160 * time.Millisecond)
+			}
+			if steps == 0 {
 				break
 			}
-			time.Sleep(1000 * time.Millisecond)
+			time.Sleep(220 * time.Millisecond)
 		}
 
 		if !wallClicked {
+			preferredWallAttempt = -1
 			h.Logger.Warn().Msg("Failed to locate Wall text in builder menu, ending sequence")
 			h.step("wall_text_not_found", nil)
 			// Do NOT call Client.Back() here. The outer loop's runDismiss
@@ -488,19 +830,18 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 		}
 		h.step("wall_clicked", nil)
 
-		// 5. Wait for map camera to focus on the selected wall and the
-		// upgrade menu to appear.
-		//
-		// CoC's wall-tap animation pipeline:
-		//   - camera pan to selected wall: ~1s (varies with distance)
-		//   - zoom-in on the wall: ~0.5s
-		//   - bottom upgrade-tray slide-in: ~0.5-1s
-		// On BlueStacks + a fresh wall selection, total is 2-4s depending
-		// on lag. The 2.5s baseline below covers the typical case; the
-		// retry loop after captures+re-matches adds up to 3 more seconds
-		// of headroom for slow pans without permanently slowing down the
-		// fast path on a quick UI response.
-		time.Sleep(2500 * time.Millisecond)
+		// 5. Wait for the selected-wall tray using visual evidence instead of
+		// burning a fixed 2.5 seconds on every wall. A fast render can proceed
+		// after the first successful probe; a slow render keeps a bounded
+		// fallback window and then continues through the existing resilient flow.
+		trayTimeout := 2200 * time.Millisecond
+		if h.DeepSearch {
+			trayTimeout = 3200 * time.Millisecond
+		}
+		if !waitForWallUpgradeTray(h, trayTimeout) {
+			h.Logger.Warn().Dur("timeout", trayTimeout).Msg("wall upgrade tray readiness not confirmed; continuing with fallback flow")
+			h.step("wall_tray_readiness_timeout", map[string]any{"timeout_ms": trayTimeout.Milliseconds()})
+		}
 
 		// 6. Choose flow: asset-driven (preferred), probe-and-discard,
 		// or template-matching fallback.
@@ -534,6 +875,10 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 				{rect: goldBtn, name: "gold"},
 				{rect: elixirBtn, name: "elixir"},
 			}
+			if h.PreferredResource != nil && h.PreferredResource() == "elixir" {
+				buttons[0], buttons[1] = buttons[1], buttons[0]
+			}
+			h.step("wall_resource_preference", map[string]any{"first": buttons[0].name})
 			for _, btn := range buttons {
 				bcx, bcy := btn.rect.Center()
 				h.step("asset_driven_tap_upgrade", map[string]any{
@@ -546,7 +891,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 					})
 					continue
 				}
-				time.Sleep(1200 * time.Millisecond)
+				time.Sleep(750 * time.Millisecond)
 
 				// Blind-confirm tap. No template matching, no
 				// cost-color check. The post-tap capture below
@@ -561,9 +906,9 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 					})
 					continue
 				}
-				time.Sleep(1200 * time.Millisecond)
+				time.Sleep(650 * time.Millisecond)
 
-				modalScreen, modalErr := h.Client.CaptureToMat()
+				modalScreen, modalErr := captureWallFrame(h, 2*time.Second)
 				if modalErr != nil {
 					h.Logger.Error().Err(modalErr).Msg("asset-driven modal capture failed; defensively tapping x_popup_centers then aborting iteration (single-tap flow has no retry chain to absorb an undismissed popup)")
 					// See defensiveDualTapAndLogClose for the rationale on
@@ -611,9 +956,9 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 					// The two X's are dismissed in sequence (primary
 					// always first because the gem-buy modal reveals the
 					// confirm/secondary menu; then alt if configured).
-					// Each tap is followed by a 1s settle so CoC's modal
-					// close-fade has time to complete on slow BlueStacks
-					// 5.21 macOS frames. After both taps we re-capture
+					// Each tap gets a short settle; the following ADB capture already
+					// contributes its own paced wait, so a full extra second here was
+					// redundant. After both taps we re-capture
 					// once and verify both rects are down; if either is
 					// still up the iteration exits with explicit
 					// primary_still_up / alt_still_up flags so the user
@@ -625,7 +970,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 						if err := h.Client.Tap(xcx, xcy); err != nil {
 							h.Logger.Error().Err(err).Msg("primary X tap failed")
 						}
-						time.Sleep(1000 * time.Millisecond)
+						time.Sleep(450 * time.Millisecond)
 					}
 					if xPopupAlt != nil {
 						acx, acy := xPopupAlt.Center()
@@ -635,11 +980,11 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 						if err := h.Client.Tap(acx, acy); err != nil {
 							h.Logger.Error().Err(err).Msg("alt X tap failed")
 						}
-						time.Sleep(1000 * time.Millisecond)
+						time.Sleep(450 * time.Millisecond)
 					}
 
 					// Final verify: did both popups dismiss?
-					verCap, verErr := h.Client.CaptureToMat()
+					verCap, verErr := captureWallFrame(h, 2*time.Second)
 					if verErr != nil {
 						h.Logger.Warn().Err(verErr).Msg("verify-capture failed; defensively tapping both X centers then aborting iteration")
 						defensiveDualTapAndLogClose(h, xcx, xcy, xPopupAlt, btn.name, "capture_failed")
@@ -729,6 +1074,10 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 			if success {
 				h.Logger.Info().Msg("Wall upgrade completed (asset-driven flow). Continuing to next wall...")
 				h.step("upgrade_success", nil)
+				if h.VerifyUpgradeProgress != nil && !h.VerifyUpgradeProgress() {
+					h.step("upgrade_progress_unverified", nil)
+					break
+				}
 				continue
 			}
 			h.Logger.Warn().Msg("Wall upgrade failed (asset-driven flow): both gold and elixir options unaffordable. Ending loop.")
@@ -793,6 +1142,10 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 				{rect: goldBtn.ImageRect(), name: "gold"},
 				{rect: elixirBtn.ImageRect(), name: "elixir"},
 			}
+			if h.PreferredResource != nil && h.PreferredResource() == "elixir" {
+				buttons[0], buttons[1] = buttons[1], buttons[0]
+			}
+			h.step("wall_resource_preference", map[string]any{"first": buttons[0].name})
 			for _, btn := range buttons {
 				cx := btn.rect.Min.X + btn.rect.Dx()/2
 				cy := btn.rect.Min.Y + btn.rect.Dy()/2
@@ -805,7 +1158,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 				}
 				time.Sleep(1200 * time.Millisecond)
 
-				modalScreen, modalErr := h.Client.CaptureToMat()
+				modalScreen, modalErr := captureWallFrame(h, 2*time.Second)
 				if modalErr != nil {
 					h.Logger.Error().Err(modalErr).Msg("hardcoded modal capture failed; dismissing modal defensively before trying next button")
 					// Defensive: if a capture failed mid-modal, a previous
@@ -870,6 +1223,10 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 			if successHardcoded {
 				h.Logger.Info().Msg("Wall upgrade completed (hardcoded flow). Continuing to next wall...")
 				h.step("upgrade_success", nil)
+				if h.VerifyUpgradeProgress != nil && !h.VerifyUpgradeProgress() {
+					h.step("upgrade_progress_unverified", nil)
+					break
+				}
 				continue
 			}
 			h.Logger.Warn().Msg("Wall upgrade failed (hardcoded flow): both gold and elixir options unaffordable. Ending loop.")
@@ -926,7 +1283,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 				hasCapture = false
 			}
 			var err error
-			captureScreen, err = h.Client.CaptureToMat()
+			captureScreen, err = captureWallFrame(h, 2*time.Second)
 			if err != nil {
 				lastErr = err
 				h.Logger.Warn().Err(err).Int("retry", retry).Msg("capture during upgrade-button retry failed")
@@ -1049,7 +1406,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 			// while we look, which would invalidate the post-match
 			// capture. Per-candidate capture cost is ~150ms — tight
 			// enough that we don't amortize across candidates.
-			costScreen, costErr := h.Client.CaptureToMat()
+			costScreen, costErr := captureWallFrame(h, 2*time.Second)
 			if costErr == nil {
 				scale := match.Scale
 				if scale < 0.5 {
@@ -1147,7 +1504,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 			}
 			time.Sleep(1200 * time.Millisecond) // Wait for confirm dialog or gem popup
 
-			confirmScreen, err := h.Client.CaptureToMat()
+			confirmScreen, err := captureWallFrame(h, 2*time.Second)
 			if err != nil {
 				h.Logger.Error().Err(err).Msg("Failed to capture screen for confirm check")
 				_ = h.Client.Back()
@@ -1255,6 +1612,10 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 		if success {
 			h.Logger.Info().Msg("Wall upgrade completed successfully! Continuing to next wall...")
 			h.step("upgrade_success", nil)
+			if h.VerifyUpgradeProgress != nil && !h.VerifyUpgradeProgress() {
+				h.step("upgrade_progress_unverified", nil)
+				break
+			}
 		} else {
 			h.Logger.Warn().Msg("Failed to upgrade wall: all options checked, none were affordable. Ending loop.")
 			h.step("all_unaffordable", nil)
@@ -1266,6 +1627,53 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 	h.step("sequence_end", nil)
 }
 
+func waitForWallUpgradeTray(h *WallUpgradeHooks, timeout time.Duration) bool {
+	if h == nil || h.Client == nil || h.Cal == nil || h.Templates == nil {
+		return false
+	}
+	tpl, ok := h.Templates.Get("btn_upgrade_wall")
+	if !ok || tpl.Empty() {
+		// The asset-driven path can still work without this template. Keep a
+		// short conservative settle rather than turning a missing diagnostic
+		// template into a hard failure.
+		time.Sleep(1200 * time.Millisecond)
+		return false
+	}
+
+	if timeout <= 0 {
+		timeout = 2200 * time.Millisecond
+	}
+	deadline := time.Now().Add(timeout)
+	time.Sleep(350 * time.Millisecond)
+	attempt := 0
+	for {
+		attempt++
+		screen, err := captureWallFrame(h, 2*time.Second)
+		if err == nil && !screen.Empty() {
+			bottomROI := image.Rect(0, int(390*h.Cal.ScaleY), screen.Cols(), screen.Rows())
+			matches, _ := vision.MatchMultiScaleROICached(
+				screen, tpl, "btn_upgrade_wall",
+				0.3, 1.5, 20, 0.52, bottomROI,
+			)
+			screen.Close()
+			if len(matches) > 0 {
+				h.step("wall_tray_ready", map[string]any{
+					"attempt": attempt,
+					"conf":    matches[0].Confidence,
+				})
+				return true
+			}
+		} else if err == nil {
+			screen.Close()
+		}
+
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(180 * time.Millisecond)
+	}
+}
+
 // waitForMainVillage polls the classifier (if provided) until the screen
 // shows StateMainVillage or the deadline expires. Mirrors the prior
 // 30s-window logic. When Classify is nil (manual mode), returns true
@@ -1274,7 +1682,7 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 func waitForMainVillage(h *WallUpgradeHooks, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		screen, err := h.Client.CaptureToMat()
+		screen, err := captureWallFrame(h, 2*time.Second)
 		if err != nil {
 			time.Sleep(500 * time.Millisecond)
 			continue
@@ -1307,7 +1715,7 @@ func dismissInterruptionsFor(h *WallUpgradeHooks) {
 	if h.Classify == nil {
 		return
 	}
-	screen, err := h.Client.CaptureToMat()
+	screen, err := captureWallFrame(h, 2*time.Second)
 	if err != nil {
 		return
 	}
@@ -1367,7 +1775,7 @@ func defensiveDualTapAndLogClose(h *WallUpgradeHooks, xcx, xcy int, xPopupAlt *R
 		acx, acy := xPopupAlt.Center()
 		_ = h.Client.Tap(acx, acy)
 	}
-	time.Sleep(1000 * time.Millisecond)
+	time.Sleep(600 * time.Millisecond)
 	h.step("asset_driven_modal_close_failed", map[string]any{
 		"name":             btnName,
 		"reason":           reason,

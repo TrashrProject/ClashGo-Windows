@@ -41,10 +41,10 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// PollInterval is the cadence between background checks. 6h respects
-// GitHub's 60/hr unauth rate limit (10 polls per hour worst-case under
-// ETag-304 hits which don't count against the limit).
+// PollInterval is the stable-channel cadence. Beta builds poll more often so
+// freshly published rolling betas appear quickly while testers are active.
 const PollInterval = 6 * time.Hour
+const BetaPollInterval = 2 * time.Minute
 
 // minCheckDelay guards against rapid-fire manual "Check now" clicks from
 // the UI (or a future scheduler bug).
@@ -111,6 +111,7 @@ type serviceConfig struct {
 	RepoOwner      string
 	RepoName       string
 	CurrentVersion string
+	Channel        string
 	HTTPClient     *http.Client
 	Now            func() time.Time
 }
@@ -124,10 +125,19 @@ type serviceConfig struct {
 // future release gets much larger, bump downloadTimeout in
 // streamToFile specifically rather than this global knob.
 func DefaultConfig(currentVersion string) serviceConfig {
+	return DefaultConfigWithChannel(currentVersion, "stable")
+}
+
+func DefaultConfigWithChannel(currentVersion, channel string) serviceConfig {
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	if channel != "beta" {
+		channel = "stable"
+	}
 	return serviceConfig{
 		RepoOwner:      "TrashrProject",
 		RepoName:       "ClashGo-Windows",
 		CurrentVersion: currentVersion,
+		Channel:        channel,
 		HTTPClient:     &http.Client{Timeout: 5 * time.Minute},
 		Now:            time.Now,
 	}
@@ -286,7 +296,11 @@ func (s *Service) StartBackgroundPoller(ctx context.Context) {
 		if _, err := s.Check(ctx); err != nil {
 			log.Warn().Err(err).Msg("initial update check failed")
 		}
-		t := time.NewTicker(PollInterval)
+		interval := PollInterval
+		if s.cfg.Channel == "beta" {
+			interval = BetaPollInterval
+		}
+		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
 			select {
@@ -361,6 +375,12 @@ func (s *Service) Check(ctx context.Context) (Status, error) {
 // semver-published release; /latest/download/<asset> then serves the
 // file with a 302 to the actual CDN URL.
 func (s *Service) manifestURL() string {
+	if s.cfg.Channel == "beta" {
+		return fmt.Sprintf(
+			"https://github.com/%s/%s/releases/download/beta-latest/latest-beta.json",
+			s.cfg.RepoOwner, s.cfg.RepoName,
+		)
+	}
 	return fmt.Sprintf(
 		"https://github.com/%s/%s/releases/latest/download/latest.json",
 		s.cfg.RepoOwner, s.cfg.RepoName,
@@ -379,7 +399,7 @@ func (s *Service) fetchManifest(ctx context.Context, url string) (*Manifest, err
 	s.etagMu.RLock()
 	etag := s.etag
 	s.etagMu.RUnlock()
-	if etag != "" {
+	if etag != "" && s.cfg.Channel != "beta" {
 		req.Header.Set("If-None-Match", etag)
 	}
 
@@ -424,6 +444,12 @@ func (s *Service) fetchLatestRelease(ctx context.Context) (githubRelease, error)
 		"https://api.github.com/repos/%s/%s/releases/latest",
 		s.cfg.RepoOwner, s.cfg.RepoName,
 	)
+	if s.cfg.Channel == "beta" {
+		url = fmt.Sprintf(
+			"https://api.github.com/repos/%s/%s/releases/tags/beta-latest",
+			s.cfg.RepoOwner, s.cfg.RepoName,
+		)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return githubRelease{}, err
@@ -568,9 +594,13 @@ func computeAvailable(latest, current, skip, minSupported string) bool {
 
 // releasePageURL is the human-facing link embedded in the UI.
 func (s *Service) releasePageURL(version string) string {
+	tag := "v" + version
+	if s.cfg.Channel == "beta" {
+		tag = "beta-latest"
+	}
 	return fmt.Sprintf(
-		"https://github.com/%s/%s/releases/tag/v%s",
-		s.cfg.RepoOwner, s.cfg.RepoName, version,
+		"https://github.com/%s/%s/releases/tag/%s",
+		s.cfg.RepoOwner, s.cfg.RepoName, tag,
 	)
 }
 
@@ -631,6 +661,13 @@ func (s *Service) Download(ctx context.Context) (string, error) {
 		}
 	}
 
+	// Windows does not reliably replace an existing destination with
+	// os.Rename. A retry/re-download of the same beta may already have a
+	// verified file at finalPath, so remove it immediately before the swap.
+	if err := os.Remove(finalPath); err != nil && !os.IsNotExist(err) {
+		s.recordDownloadError(fmt.Errorf("replace previous download: %w", err))
+		return "", err
+	}
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		s.recordDownloadError(err)
 		return "", err
@@ -854,18 +891,14 @@ func (s *Service) ApplyAuto() (bool, error) {
 			}
 		}
 		if helper == "" {
-			return false, errors.New("Windows update helper is missing from the installation")
-		}
-		if err := checkInstallDirWritable(installDir); err != nil {
-			return false, err
+			return false, errors.New("windows update helper is missing from the installation")
 		}
 		tempHelperPath, err := prepareWindowsUpdateHelper(helper)
 		if err != nil {
 			return false, err
 		}
 
-		cmd := exec.Command(
-			"powershell.exe",
+		args := []string{
 			"-NoProfile",
 			"-ExecutionPolicy", "Bypass",
 			"-File", tempHelperPath,
@@ -873,14 +906,36 @@ func (s *Service) ApplyAuto() (bool, error) {
 			"-InstallDir", installDir,
 			"-ExePath", exe,
 			"-ParentPID", fmt.Sprintf("%d", os.Getpid()),
-		)
+		}
+
+		// Portable installs can usually update in place without elevation. An
+		// NSIS install under Program Files cannot, so transparently request UAC
+		// instead of failing before the helper even starts.
+		if err := checkInstallDirWritable(installDir); err == nil {
+			cmd := exec.Command("powershell.exe", args...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Start(); err != nil {
+				_ = os.Remove(tempHelperPath)
+				return false, fmt.Errorf("start Windows update helper: %w", err)
+			}
+			go func() { _ = cmd.Wait() }()
+			return true, nil
+		}
+
+		quotePS := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
+		psArgs := make([]string, 0, len(args))
+		for _, arg := range args {
+			psArgs = append(psArgs, quotePS(arg))
+		}
+		launch := "$p = Start-Process -FilePath 'powershell.exe' -ArgumentList @(" + strings.Join(psArgs, ",") + ") -Verb RunAs -PassThru; if (-not $p) { exit 1 }"
+		cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", launch)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		if err := cmd.Start(); err != nil {
+		if err := cmd.Run(); err != nil {
 			_ = os.Remove(tempHelperPath)
-			return false, fmt.Errorf("start Windows update helper: %w", err)
+			return false, fmt.Errorf("start elevated Windows update helper: %w", err)
 		}
-		go func() { _ = cmd.Wait() }()
 		return true, nil
 	}
 

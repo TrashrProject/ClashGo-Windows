@@ -1,9 +1,10 @@
 import React from 'react';
-import { TabType } from '../types';
+import { InterfaceLevel, TabType } from '../types';
 import logo from '../assets/images/clashgo-logo.png';
 
 interface SidebarProps {
   tab: TabType;
+  interfaceLevel: InterfaceLevel;
   setTab: (tab: TabType) => void;
   expanded: boolean;
   setExpanded: (expanded: boolean) => void;
@@ -11,6 +12,18 @@ interface SidebarProps {
   starting: boolean;
   onStart: () => void;
   onStop: () => void;
+  licenseActivated: boolean;
+  licenseRole: 'member' | 'developer' | 'admin' | '';
+  memberName?: string;
+  licensePlan?: string;
+  licenseExpiresAt?: string;
+  speedProfile?: string;
+  paused: boolean;
+  sessionAttacks: number;
+  sessionCap: number;
+  scheduledStopAt?: string;
+  startReady: boolean;
+  startBlockedReason?: string;
 }
 
 const Sidebar: React.FC<SidebarProps> = React.memo(({
@@ -21,15 +34,72 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
   running,
   starting,
   onStart,
-  onStop
+  onStop,
+  interfaceLevel,
+  licenseActivated,
+  licenseRole,
+  memberName,
+  licensePlan,
+  licenseExpiresAt,
+  speedProfile,
+  paused,
+  sessionAttacks,
+  sessionCap,
+  scheduledStopAt,
+  startReady,
+  startBlockedReason,
 }) => {
-  const menuItems: { id: TabType; label: string; icon: string }[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
-    { id: 'account', label: 'Account', icon: 'person' },
-    { id: 'analytics', label: 'Analytics', icon: 'monitoring' },
-    { id: 'config', label: 'Automation', icon: 'auto_awesome' },
-    { id: 'settings', label: 'Settings', icon: 'settings' },
+  const menuItems: { id: TabType; label: string; icon: string; minLevel: InterfaceLevel }[] = [
+    { id: 'dashboard', label: 'Accueil', icon: 'home', minLevel: 'simple' },
+    { id: 'config', label: 'Automatisation', icon: 'auto_awesome', minLevel: 'simple' },
+    { id: 'account', label: 'Mon ClashGO', icon: 'account_circle', minLevel: 'simple' },
+    { id: 'activity', label: 'Activité', icon: 'timeline', minLevel: 'advanced' },
+    { id: 'analytics', label: 'Statistiques', icon: 'monitoring', minLevel: 'advanced' },
+    { id: 'settings', label: 'Paramètres', icon: 'settings', minLevel: 'advanced' },
+    {
+      id: 'developer',
+      label: licenseRole === 'admin' ? 'Administration' : 'Support',
+      icon: licenseRole === 'admin' ? 'admin_panel_settings' : 'support_agent',
+      minLevel: 'developer',
+    },
   ];
+
+  const levelRank: Record<InterfaceLevel, number> = {
+    simple: 0,
+    advanced: 1,
+    developer: 2,
+  };
+  const visibleItems = menuItems.filter((item) => levelRank[interfaceLevel] >= levelRank[item.minLevel]);
+
+  const licenseRemaining = React.useMemo(() => {
+    if (!licenseActivated) return '';
+    if (!licenseExpiresAt) return 'À vie';
+    const expiry = new Date(licenseExpiresAt).getTime();
+    if (!Number.isFinite(expiry)) return '';
+    const remaining = expiry - Date.now();
+    if (remaining <= 0) return 'Expirée';
+    const days = Math.ceil(remaining / 86_400_000);
+    if (days <= 1) return 'Expire aujourd’hui';
+    return days + ' j';
+  }, [licenseActivated, licenseExpiresAt]);
+
+  const speedLabel = React.useMemo(() => {
+    const raw = String(speedProfile || '').trim().toLowerCase();
+    if (raw === 'fast') return 'Rapide';
+    if (raw === 'safe' || raw === 'cautious') return 'Prudente';
+    return 'Normale';
+  }, [speedProfile]);
+
+  const sessionProgress = sessionCap > 0
+    ? Math.max(0, Math.min(100, Math.round((sessionAttacks / sessionCap) * 100)))
+    : 0;
+
+  const scheduledStopLabel = React.useMemo(() => {
+    if (!scheduledStopAt) return '';
+    const at = new Date(scheduledStopAt);
+    if (!Number.isFinite(at.getTime())) return '';
+    return at.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }, [scheduledStopAt]);
 
   return (
     <aside
@@ -62,7 +132,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
         </div>
 
         <nav className="space-y-1.5 flex-grow">
-          {menuItems.map((item) => (
+          {visibleItems.map((item) => (
             <button
               key={item.id}
               onClick={() => setTab(item.id)}
@@ -87,16 +157,116 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
         </nav>
 
         <div className="mt-auto space-y-3">
+          {(running || starting) && (
+            <button
+              type="button"
+              onClick={() => setTab('dashboard')}
+              title={expanded ? undefined : (paused ? 'Session en pause' : 'Session en cours')}
+              className={
+                'w-full overflow-hidden rounded-2xl border text-left transition ' +
+                (paused
+                  ? 'border-amber-200 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/10'
+                  : 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/40 dark:bg-emerald-950/10')
+              }
+            >
+              <div className="flex min-h-14 items-center">
+                <div className="w-12 h-12 flex-shrink-0 grid place-items-center">
+                  <span className={
+                    'material-symbols-outlined text-[20px] ' +
+                    (paused ? 'text-amber-500' : starting ? 'text-amber-500 animate-pulse' : 'text-emerald-500')
+                  }>
+                    {paused ? 'pause_circle' : starting ? 'hourglass_top' : 'smart_toy'}
+                  </span>
+                </div>
+                <div className={
+                  'min-w-0 flex-1 pr-3 transition-[opacity,transform] duration-200 ' +
+                  (expanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 w-0 overflow-hidden')
+                }>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="truncate text-[10px] font-black text-zinc-950 dark:text-white">
+                      {starting ? 'Démarrage…' : paused ? 'Session en pause' : 'Session en cours'}
+                    </div>
+                    {sessionCap > 0 && (
+                      <div className="text-[8px] font-black tabular-nums text-zinc-400">{sessionAttacks}/{sessionCap}</div>
+                    )}
+                  </div>
+                  {sessionCap > 0 && (
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
+                      <div
+                        className={'h-full rounded-full transition-all ' + (paused ? 'bg-amber-500' : 'bg-emerald-500')}
+                        style={{ width: sessionProgress + '%' }}
+                      />
+                    </div>
+                  )}
+                  <div className="mt-1.5 truncate text-[8px] font-bold text-zinc-500">
+                    {speedLabel}{scheduledStopLabel ? ' · arrêt ' + scheduledStopLabel : ''}
+                  </div>
+                </div>
+              </div>
+            </button>
+          )}
+
           <button
-            onClick={starting ? undefined : (running ? onStop : onStart)}
-            disabled={starting}
-            title={expanded ? undefined : (starting ? 'Bot starting' : (running ? 'Stop bot' : 'Start bot'))}
+            type="button"
+            onClick={() => setTab('account')}
+            title={expanded ? undefined : 'Mon ClashGO'}
+            className="w-full rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/30 overflow-hidden text-left hover:border-zinc-300 dark:hover:border-zinc-700 transition"
+          >
+            <div className="flex items-center min-h-14">
+              <div className="w-12 h-12 flex-shrink-0 grid place-items-center">
+                <div className={
+                  'w-8 h-8 rounded-xl grid place-items-center ' +
+                  (licenseActivated
+                    ? 'bg-emerald-500/10 text-emerald-500'
+                    : 'bg-zinc-200 text-zinc-500 dark:bg-zinc-800')
+                }>
+                  <span className="material-symbols-outlined text-[18px]">
+                    {licenseActivated ? 'verified_user' : 'person'}
+                  </span>
+                </div>
+              </div>
+              <div className={
+                'min-w-0 pr-3 transition-[opacity,transform] duration-200 ' +
+                (expanded ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 w-0 overflow-hidden')
+              }>
+                <div className="truncate text-[11px] font-black text-zinc-950 dark:text-white">
+                  {memberName || (licenseActivated ? 'Membre ClashGO' : 'ClashGO')}
+                </div>
+                <div className="mt-0.5 flex items-center gap-1.5 text-[8px] font-black uppercase tracking-wider text-zinc-400">
+                  <span>{licenseActivated ? (licenseRole || 'member') : 'Non activé'}</span>
+                  {licenseActivated && licensePlan && <span>· {licensePlan === 'free_2d' ? 'Free 2J' : licensePlan === 'week_1' ? '1 sem.' : licensePlan === 'month_1' ? '1 mois' : 'À vie'}</span>}
+                </div>
+                {licenseActivated && (
+                  <div className="mt-1 truncate text-[8px] font-bold text-zinc-500">
+                    {licenseRemaining ? licenseRemaining + ' · ' : ''}Cadence {speedLabel}
+                  </div>
+                )}
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={starting ? undefined : (running ? onStop : (startReady ? onStart : undefined))}
+            disabled={starting || (!running && !startReady)}
+            title={
+              expanded
+                ? (!running && !startReady ? startBlockedReason : undefined)
+                : (starting
+                    ? 'Démarrage du bot'
+                    : running
+                      ? 'Arrêter le bot'
+                      : startReady
+                        ? 'Démarrer le bot'
+                        : (startBlockedReason || 'Configuration incomplète'))
+            }
             className={`w-full h-12 rounded-2xl font-black text-[10px] tracking-[0.2em] transition-all duration-200 flex items-center relative overflow-hidden group/start ${
               starting
                 ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30 cursor-wait'
                 : running
                   ? 'bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950/50 border border-rose-100 dark:border-rose-900/30'
-                  : 'bg-zinc-950 dark:bg-zinc-800 text-white dark:text-zinc-300 hover:bg-zinc-800 dark:hover:bg-zinc-700 shadow-premium dark:shadow-none border border-transparent dark:border-zinc-700/50'
+                  : !startReady
+                    ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-600 border border-zinc-200 dark:border-zinc-800 cursor-not-allowed'
+                    : 'bg-zinc-950 dark:bg-zinc-800 text-white dark:text-zinc-300 hover:bg-zinc-800 dark:hover:bg-zinc-700 shadow-premium dark:shadow-none border border-transparent dark:border-zinc-700/50'
             }`}
           >
             <div className="w-12 h-12 flex-shrink-0 flex items-center justify-center z-10 transition-transform duration-200 group-hover/start:scale-110">
@@ -105,7 +275,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({
               </span>
             </div>
             <span className={`transition-[opacity,transform] duration-200 ease-out whitespace-nowrap z-10 ${expanded ? 'opacity-100 translate-x-0' : 'opacity-0 w-0 -translate-x-2 overflow-hidden'}`}>
-              {starting ? 'STARTING...' : (running ? 'STOP BOT' : 'START BOT')}
+              {starting ? 'DÉMARRAGE...' : (running ? 'ARRÊTER' : startReady ? 'DÉMARRER' : 'À CONFIGURER')}
             </span>
           </button>
         </div>

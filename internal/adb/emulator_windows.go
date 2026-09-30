@@ -73,6 +73,20 @@ func (c *Client) ensureBlueStacksWindows(ctx context.Context, width, height, dpi
 			c.log.Info(fmt.Sprintf("BlueStacks already reachable on %s — keeping existing instance", addr))
 			return c.ensureWindowsAndroidDisplay(width, height, dpi)
 		}
+
+		// Crash-prevention rule: if HD-Player is still alive, NEVER launch the
+		// same instance again on top of it. ADB can disappear temporarily while
+		// BlueStacks is busy or recovering internally; a duplicate launch adds
+		// pressure to an already unhealthy VM and has been a source of instability.
+		// Give ADB one conservative recovery window, then surface the failure and
+		// let the next supervisor cycle retry non-destructively.
+		if sig := c.firstVMSignal(); sig != "" {
+			c.log.Warn(fmt.Sprintf("BlueStacks process %q is alive but ADB is temporarily unreachable; refusing duplicate player launch", sig))
+			if err := c.waitForBlueStacksADBWithPorts(ctx, 30*time.Second, ports); err == nil {
+				return c.ensureWindowsAndroidDisplay(width, height, dpi)
+			}
+			return errors.New("BlueStacks HD-Player.exe is still running but ADB is unavailable; refusing destructive/duplicate relaunch")
+		}
 	} else {
 		// BlueStacks reads this global setting at player startup. Restarting
 		// HD-Player after changing it is more reliable than waiting for a live
@@ -324,15 +338,23 @@ func (c *Client) findReachableBlueStacks(ctx context.Context, ports []int) strin
 // launchBlueStacks preserves the upstream recovery API. The first Windows
 // implementation restarts HD-Player and relaunches only the selected instance.
 func (c *Client) launchBlueStacks(_ bool, width, height, dpi int) error {
-	_ = hiddenCommand("taskkill", "/F", "/IM", "HD-Player.exe").Run()
-	time.Sleep(800 * time.Millisecond)
+	// Legacy recovery entry point. Do not force-kill a still-running player:
+	// an ADB outage is not proof the VM process is dead, and killing a busy
+	// HD-Player can corrupt the session or turn a transient stall into a crash.
+	instances := discoverBlueStacksWindowsInstances()
+	instance := chooseBlueStacksWindowsInstance(instances, c.blueStacksInstance)
+	if c.firstVMSignal() != "" {
+		ports := windowsCandidateADBPortsPreferred(instances, instance)
+		if err := c.waitForBlueStacksADBWithPorts(context.Background(), 30*time.Second, ports); err == nil {
+			return c.ensureWindowsAndroidDisplay(width, height, dpi)
+		}
+		return errors.New("BlueStacks is still running but ADB is unavailable; refusing forced HD-Player restart")
+	}
 
 	player, err := findBlueStacksWindowsPlayer()
 	if err != nil {
 		return err
 	}
-	instances := discoverBlueStacksWindowsInstances()
-	instance := chooseBlueStacksWindowsInstance(instances, c.blueStacksInstance)
 	if instance == "" {
 		return errors.New("no BlueStacks instance found in bluestacks.conf")
 	}

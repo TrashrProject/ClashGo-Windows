@@ -23,6 +23,10 @@ type BotConfig struct {
 }
 
 type AutomationConfig struct {
+	// SpeedProfile controls the real bot pacing exposed in the member area.
+	// Supported values: cautious, normal, fast.
+	SpeedProfile string `json:"speed_profile"`
+
 	// SimpleMode is the default user experience: ClashGO derives sane values
 	// from the linked account and only exposes a few meaningful controls.
 	SimpleMode bool `json:"simple_mode"`
@@ -44,13 +48,65 @@ type AutomationConfig struct {
 	// MaxRunMinutes stops an unattended session cleanly after the requested
 	// amount of wall-clock time. 0 keeps the historical unlimited behavior.
 	MaxRunMinutes int `json:"max_run_minutes"`
+
+	// EmergencyStopHotkey supports "ctrl+shift+end" (default), "end", or "off".
+	// The safer chord avoids accidental stops when End is used in another app.
+	EmergencyStopHotkey string `json:"emergency_stop_hotkey"`
+
+	// AutoCollectors periodically taps verified resource bubbles while the bot
+	// is idle on the main village. It never runs during search/deploy/battle.
+	AutoCollectors bool `json:"auto_collectors"`
+	CollectorInterval Duration `json:"collector_interval"`
+
+	// PrivacyMaskUsername masks the top-left player identity region in every
+	// screenshot ClashGO writes to disk (diagnostics + accepted targets).
+	PrivacyMaskUsername bool `json:"privacy_mask_username"`
+
+	// MaxAttacksPerHour bounds the rolling one-hour farming rate. 0 disables it.
+	MaxAttacksPerHour int `json:"max_attacks_per_hour"`
+
+	// BreakEveryAttacks inserts a longer human-scale pause after every N
+	// completed attacks. 0 disables scheduled breaks.
+	BreakEveryAttacks int `json:"break_every_attacks"`
+	BreakDuration Duration `json:"break_duration"`
+
+	// RecoveryPauseThreshold trips a circuit breaker after N emulator/device
+	// recovery incidents. The pause is consumed once per incident batch.
+	RecoveryPauseThreshold int `json:"recovery_pause_threshold"`
+	RecoveryPause Duration `json:"recovery_pause"`
+}
+
+type ManagedAccount struct {
+	ID                string `json:"id"`
+	Label             string `json:"label,omitempty"`
+	PlayerTag         string `json:"player_tag"`
+	Enabled           bool   `json:"enabled"`
+	SwitchSlot        int    `json:"switch_slot,omitempty"`
+	MaxAttacksPerTurn int    `json:"max_attacks_per_turn,omitempty"`
+	TownHall          int    `json:"town_hall,omitempty"`
+	StrategyFile      string `json:"strategy_file,omitempty"`
+}
+
+type MultiAccountConfig struct {
+	Enabled            bool             `json:"enabled"`
+	ActiveAccountID    string           `json:"active_account_id,omitempty"`
+	DefaultAttacksTurn int              `json:"default_attacks_per_turn,omitempty"`
+	Accounts           []ManagedAccount `json:"accounts,omitempty"`
 }
 
 type AccountConfig struct {
 	PlayerTag string `json:"player_tag"`
+	// MultiAccount keeps the active account compatible with the legacy
+	// PlayerTag while allowing ClashGO to rotate across several profiles.
+	// No Supercell credentials are stored: switching is UI-only.
+	MultiAccount MultiAccountConfig `json:"multi_account"`
 	// ProxyURL points to the ClashGO account service. End users never need
 	// a Clash developer key; the server owns that credential.
 	ProxyURL string `json:"proxy_url,omitempty"`
+	// ControlURL is a beta/development override for the license/support
+	// control service. Production builds should embed controlServiceURL;
+	// the embedded value always takes precedence over this local override.
+	ControlURL string `json:"control_url,omitempty"`
 	// LegacyAPIKey is kept only so older config.json files still unmarshal.
 	// The desktop app no longer uses or exposes it.
 	LegacyAPIKey string `json:"api_key,omitempty"`
@@ -96,6 +152,13 @@ type AttackConfig struct {
 	StallTimerSeconds   int      `json:"stall_timer_seconds"`
 	LootExitEnabled     bool     `json:"loot_exit_enabled"`
 	LootExitPercent     int      `json:"loot_exit_percent"`
+	// DryRun analyzes accepted targets and writes a visual deployment preview,
+	// but never deploys troops. The search loop continues with Next.
+	DryRun              bool     `json:"dry_run"`
+	// EndAtStars ends a completed deployment once the live battle outcome has
+	// reached N stars (1..3) and the Surrender/End Battle button is verified.
+	// 0 disables the rule. Destruction-based exit remains strategy-controlled.
+	EndAtStars          int      `json:"end_at_stars"`
 	// MinSecondsBetweenAttacks is the minimum pause between the end of one
 	// battle (Return Home) and the start of the next attack sequence.
 	// Armies take real time to retrain; without this gate the bot attacked
@@ -202,10 +265,21 @@ type SearchConfig struct {
 	MinLootGold          int  `json:"min_loot_gold"`
 	MinLootElixir        int  `json:"min_loot_elixir"`
 	MinLootDarkElixir    int  `json:"min_loot_de"`
-
-	// SaveAcceptedBaseScreenshots stores the exact opponent frame that passed
-	// the configured loot thresholds, before any troop is deployed.
 	SaveAcceptedBaseScreenshots bool `json:"save_accepted_base_screenshots"`
+
+	// Near-miss sampling keeps a small forensic set of rejected villages that
+	// were close to configured loot thresholds, without writing every skip.
+	SaveNearMissBaseScreenshots bool `json:"save_near_miss_base_screenshots"`
+	NearMissSampleEvery        int  `json:"near_miss_sample_every"`
+	NearMissWithinPercent      int  `json:"near_miss_within_percent"`
+
+	// AdaptiveSearch progressively relaxes loot thresholds after a long skip
+	// streak, but never below AdaptiveFloorPercent of the configured values.
+	AdaptiveSearch          bool `json:"adaptive_search"`
+	AdaptiveStartAfterSkips int  `json:"adaptive_start_after_skips"`
+	AdaptiveStepEverySkips  int  `json:"adaptive_step_every_skips"`
+	AdaptiveStepPercent     int  `json:"adaptive_step_percent"`
+	AdaptiveFloorPercent    int  `json:"adaptive_floor_percent"`
 }
 
 type DebugConfig struct {
@@ -246,12 +320,16 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 }
 
 func (d *Duration) UnmarshalJSON(b []byte) error {
-	s := string(b)
-	s = s[1 : len(s)-1]
-
-	dur, err := time.ParseDuration(s)
+	if d == nil {
+		return fmt.Errorf("parse duration: nil destination")
+	}
+	var raw string
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return fmt.Errorf("parse duration: expected JSON string: %w", err)
+	}
+	dur, err := time.ParseDuration(raw)
 	if err != nil {
-		return fmt.Errorf("parse duration %q: %w", s, err)
+		return fmt.Errorf("parse duration %q: %w", raw, err)
 	}
 	d.Duration = dur
 	return nil
@@ -290,6 +368,8 @@ func DefaultConfig() *BotConfig {
 			StallTimerSeconds:        10,
 			LootExitEnabled:          false,
 			LootExitPercent:          100,
+			DryRun:                   false,
+			EndAtStars:               0,
 			MinSecondsBetweenAttacks: 30,
 			Farm: FarmConfig{
 				Enabled:  false,
@@ -298,17 +378,25 @@ func DefaultConfig() *BotConfig {
 			},
 		},
 		Search: SearchConfig{
-			Enabled:                     true,
-			MinTrophies:                 0,
-			MaxTrophies:                 3000,
-			MinTownHall:                 7,
-			MaxTownHall:                 13,
-			SkipMaxTH:                   false,
-			AttackIfDarkElixirGT:        0,
-			MinLootGold:                 750000,
-			MinLootElixir:               750000,
-			MinLootDarkElixir:           2000,
+			Enabled:              true,
+			MinTrophies:          0,
+			MaxTrophies:          3000,
+			MinTownHall:          7,
+			MaxTownHall:          13,
+			SkipMaxTH:            false,
+			AttackIfDarkElixirGT: 0,
+			MinLootGold:          750000,
+			MinLootElixir:        750000,
+			MinLootDarkElixir:    2000,
 			SaveAcceptedBaseScreenshots: true,
+			SaveNearMissBaseScreenshots: true,
+			NearMissSampleEvery:          20,
+			NearMissWithinPercent:        10,
+			AdaptiveSearch:          true,
+			AdaptiveStartAfterSkips: 8,
+			AdaptiveStepEverySkips:  4,
+			AdaptiveStepPercent:     5,
+			AdaptiveFloorPercent:    70,
 		},
 		Upgrade: UpgradeConfig{
 			UpgradeWalls: false,
@@ -325,14 +413,29 @@ func DefaultConfig() *BotConfig {
 			MaxJitterPixels:    2.0,
 			JitterFraction:     0.15,
 		},
-		Account: AccountConfig{},
+		Account: AccountConfig{
+			MultiAccount: MultiAccountConfig{
+				Enabled: false,
+				DefaultAttacksTurn: 10,
+			},
+		},
 		Automation: AutomationConfig{
-			SimpleMode:            true,
-			AutoFarmProfile:       true,
-			AutoArmyGuard:         true,
-			AutoResourceTracking:  true,
-			AutoProfileSync:       true,
-			MaxRunMinutes:         0,
+			SpeedProfile:           "normal",
+			SimpleMode:             true,
+			AutoFarmProfile:        true,
+			AutoArmyGuard:          true,
+			AutoResourceTracking:   true,
+			AutoProfileSync:        true,
+			MaxRunMinutes:          0,
+			EmergencyStopHotkey:    "ctrl+shift+end",
+			AutoCollectors:         false,
+			CollectorInterval:      Duration{10 * time.Minute},
+			PrivacyMaskUsername:    true,
+			MaxAttacksPerHour:      12,
+			BreakEveryAttacks:      5,
+			BreakDuration:          Duration{3 * time.Minute},
+			RecoveryPauseThreshold: 3,
+			RecoveryPause:          Duration{5 * time.Minute},
 		},
 	}
 }
@@ -365,24 +468,138 @@ func normalizeStrategyFile(cfg *BotConfig) {
 	}
 }
 
-func Load(path string) (*BotConfig, error) {
+func resolveConfigPath(path string) string {
 	if path == "config.json" {
-		path = paths.ResolveConfig("config.json")
+		return paths.ResolveConfig("config.json")
 	}
+	return path
+}
+
+func decodeConfig(data []byte) (*BotConfig, error) {
+	cfg := *DefaultConfig()
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	normalizeStrategyFile(&cfg)
+	return &cfg, nil
+}
+
+func archiveCorruptConfig(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	ext := filepath.Ext(path)
+	base := strings.TrimSuffix(path, ext)
+	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
+	target := fmt.Sprintf("%s.corrupt.%s%s", base, stamp, ext)
+	if err := os.Rename(path, target); err != nil {
+		return ""
+	}
+	return target
+}
+
+func Load(path string) (*BotConfig, error) {
+	path = resolveConfigPath(path)
 
 	data, err := os.ReadFile(path)
+	primaryInvalid := false
+	if err == nil {
+		if cfg, parseErr := decodeConfig(data); parseErr == nil {
+			return cfg, nil
+		}
+		primaryInvalid = true
+	}
+
+	// A transactional save keeps the previous valid file as .bak until the
+	// replacement is complete. If Windows or the process stopped mid-swap,
+	// recover that last known-good configuration automatically.
+	backupPath := path + ".bak"
+	if backup, backupErr := os.ReadFile(backupPath); backupErr == nil {
+		if cfg, parseErr := decodeConfig(backup); parseErr == nil {
+			if primaryInvalid {
+				_ = archiveCorruptConfig(path)
+			}
+			return cfg, nil
+		}
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
-
-	cfg := *DefaultConfig()
-
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+	archived := ""
+	if primaryInvalid {
+		archived = archiveCorruptConfig(path)
 	}
-	normalizeStrategyFile(&cfg)
+	if archived != "" {
+		return nil, fmt.Errorf("parse config: invalid JSON and no valid backup; corrupt file preserved at %s", archived)
+	}
+	return nil, fmt.Errorf("parse config: invalid JSON and no valid backup")
+}
 
-	return &cfg, nil
+// Save writes a complete configuration transactionally. The existing file is
+// first moved to .bak, then the fully-written temp file is swapped into place.
+// This avoids a truncated config.json if Windows or ClashGO stops mid-write.
+func Save(path string, cfg *BotConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("save config: nil config")
+	}
+	path = resolveConfigPath(path)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("save config mkdir: %w", err)
+	}
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("save config encode: %w", err)
+	}
+
+	tmpPath := path + ".tmp"
+	backupPath := path + ".bak"
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("save config temp: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("save config write: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("save config sync: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("save config close: %w", err)
+	}
+
+	_ = os.Remove(backupPath)
+	hadOriginal := false
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Rename(path, backupPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return fmt.Errorf("save config backup: %w", err)
+		}
+		hadOriginal = true
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		if hadOriginal {
+			_ = os.Rename(backupPath, path)
+		}
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("save config replace: %w", err)
+	}
+
+	// The replacement is now durable enough for application state. Keep no
+	// stale backup during normal operation; a backup exists only across the
+	// small transactional replacement window.
+	_ = os.Remove(backupPath)
+	return nil
 }
 
 func LoadOrDefault(path string) *BotConfig {

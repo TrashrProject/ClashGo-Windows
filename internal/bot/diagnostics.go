@@ -7,15 +7,21 @@ import (
 	"time"
 
 	"github.com/Ducky705/ClashGO/internal/paths"
+	"github.com/Ducky705/ClashGO/internal/telemetry"
 	"gocv.io/x/gocv"
 )
 
 // DiagnosticData holds the state of the bot at the time of failure.
 type DiagnosticData struct {
-	Timestamp time.Time              `json:"timestamp"`
-	Reason    string                 `json:"reason"`
-	State     string                 `json:"state"`
-	Context   map[string]interface{} `json:"context,omitempty"`
+	Timestamp       time.Time              `json:"timestamp"`
+	Reason          string                 `json:"reason"`
+	State           string                 `json:"state"`
+	Context         map[string]interface{} `json:"context,omitempty"`
+	RuntimeStats    BotStats               `json:"runtime_stats"`
+	RecentActivity  []telemetry.Event      `json:"recent_activity,omitempty"`
+	LastAction      time.Time              `json:"last_action,omitempty"`
+	LastCapture     time.Time              `json:"last_capture,omitempty"`
+	SequenceRunning bool                   `json:"sequence_running"`
 }
 
 // DumpDiagnostics saves a screenshot and a JSON file containing the bot's state.
@@ -23,22 +29,32 @@ func (b *Bot) DumpDiagnostics(reason string, screen gocv.Mat, context map[string
 	timestamp := time.Now().Format("20060102_150405")
 	baseName := fmt.Sprintf("diag_%s", timestamp)
 
-	// Save screenshot
+	// Save screenshot from a detached privacy-safe clone. Vision keeps using the
+	// original frame and is therefore never affected by the username mask.
 	imgName := paths.ResolveConfig(baseName + ".png")
+	var persisted gocv.Mat
 	if !screen.Empty() {
-		if ok := gocv.IMWrite(imgName, screen); !ok {
-			b.logger.Error().Str("file", imgName).Msg("failed to save diagnostic screenshot")
-		} else {
-			b.logger.Info().Str("file", imgName).Msg("saved diagnostic screenshot")
+		persisted = b.screenshotForPersistence(screen)
+		if !persisted.Empty() {
+			if ok := gocv.IMWrite(imgName, persisted); !ok {
+				b.logger.Error().Str("file", imgName).Msg("failed to save diagnostic screenshot")
+			} else {
+				b.logger.Info().Str("file", imgName).Msg("saved diagnostic screenshot")
+			}
 		}
 	}
 
 	// Save JSON data
 	data := DiagnosticData{
-		Timestamp: time.Now(),
-		Reason:    reason,
-		State:     "failed", // Could be more dynamic if Bot had a State field
-		Context:   context,
+		Timestamp:       time.Now(),
+		Reason:          reason,
+		State:           "failed",
+		Context:         context,
+		RuntimeStats:    b.Stats(),
+		RecentActivity:  b.RecentActivity(20),
+		LastAction:      b.lastAction,
+		LastCapture:     b.lastCapture,
+		SequenceRunning: b.seqRunning.Load(),
 	}
 
 	jsonData, err := json.MarshalIndent(data, "", "  ")
@@ -59,8 +75,9 @@ func (b *Bot) DumpDiagnostics(reason string, screen gocv.Mat, context map[string
 	_ = os.Remove(paths.ResolveConfig("last_failure.json"))
 
 	// Copy files to last_failure (safer than symlinks on some systems/setups)
-	if !screen.Empty() {
-		_ = gocv.IMWrite(paths.ResolveConfig("last_failure.png"), screen)
+	if !persisted.Closed() && !persisted.Empty() {
+		_ = gocv.IMWrite(paths.ResolveConfig("last_failure.png"), persisted)
+		persisted.Close()
 	}
 	_ = os.WriteFile(paths.ResolveConfig("last_failure.json"), jsonData, 0644)
 

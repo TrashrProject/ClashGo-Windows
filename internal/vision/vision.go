@@ -5,6 +5,8 @@ import (
 	"gocv.io/x/gocv"
 	"image"
 	"image/color"
+	"sync"
+	"sync/atomic"
 )
 
 type Match struct {
@@ -60,6 +62,102 @@ func MatchMultiScale(screen, template gocv.Mat, minScale, maxScale float64, step
 
 func MatchMultiScaleROI(screen, template gocv.Mat, minScale, maxScale float64, steps int, threshold float32, roi image.Rectangle) ([]Match, error) {
 	return MatchMultiScaleROICached(screen, template, "", minScale, maxScale, steps, threshold, roi)
+}
+
+var preferredTemplateScales sync.Map
+
+type PreferredScaleStats struct {
+	Attempts  int64 `json:"attempts"`
+	Hits      int64 `json:"hits"`
+	Fallbacks int64 `json:"fallbacks"`
+	Enabled   bool  `json:"enabled"`
+}
+
+var preferredScaleAttempts atomic.Int64
+var preferredScaleHits atomic.Int64
+var preferredScaleFallbacks atomic.Int64
+var preferredScaleEnabled atomic.Bool
+
+func ResetPreferredScaleStats() {
+	// A new Bot session may use a different emulator resolution/DPI. Learned
+	// scales from the previous session are hints only, so discard them together
+	// with their counters and relearn from the first exact classification.
+	preferredTemplateScales = sync.Map{}
+	preferredScaleAttempts.Store(0)
+	preferredScaleHits.Store(0)
+	preferredScaleFallbacks.Store(0)
+	preferredScaleEnabled.Store(true)
+}
+
+func evaluatePreferredScaleCircuitBreaker() {
+	attempts := preferredScaleAttempts.Load()
+	if attempts < 20 {
+		return
+	}
+	hits := preferredScaleHits.Load()
+	if float64(hits)*100/float64(attempts) < 15 {
+		// The optimization is not earning its extra probe. Disable it for the
+		// remainder of this bot session; the full multi-scale path remains
+		// authoritative, so accuracy is unchanged.
+		preferredScaleEnabled.Store(false)
+	}
+}
+
+func PreferredScaleRuntimeStats() PreferredScaleStats {
+	return PreferredScaleStats{
+		Attempts: preferredScaleAttempts.Load(),
+		Hits: preferredScaleHits.Load(),
+		Fallbacks: preferredScaleFallbacks.Load(),
+		Enabled: preferredScaleEnabled.Load(),
+	}
+}
+
+func RememberPreferredTemplateScale(templateName string, minScale, maxScale float64, steps int, scale float64) {
+	if templateName == "" || scale <= 0 {
+		return
+	}
+	preferredTemplateScales.Store(scaleKey(templateName, minScale, maxScale, steps), scale)
+}
+
+func preferredTemplateScale(templateName string, minScale, maxScale float64, steps int) (float64, bool) {
+	if templateName == "" {
+		return 0, false
+	}
+	v, ok := preferredTemplateScales.Load(scaleKey(templateName, minScale, maxScale, steps))
+	if !ok {
+		return 0, false
+	}
+	scale, ok := v.(float64)
+	return scale, ok && scale > 0
+}
+
+// MatchMultiScaleROICachedPreferred tries a previously successful scale first.
+// It only short-circuits on a deliberately stronger confidence threshold; any
+// doubtful or missing preferred-scale result falls back to the exact full
+// multi-scale matcher used before this optimization.
+func MatchMultiScaleROICachedPreferred(screen, template gocv.Mat, templateName string, minScale, maxScale float64, steps int, threshold float32, roi image.Rectangle) ([]Match, error) {
+	if preferredScaleEnabled.Load() {
+	if scale, ok := preferredTemplateScale(templateName, minScale, maxScale, steps); ok {
+		preferredScaleAttempts.Add(1)
+		fastThreshold := threshold + 0.12
+		if fastThreshold > 0.92 {
+			fastThreshold = 0.92
+		}
+		matches, err := MatchMultiScaleROICached(screen, template, templateName, scale, scale, 1, fastThreshold, roi)
+		if err == nil && len(matches) > 0 {
+			preferredScaleHits.Add(1)
+			return matches, nil
+		}
+		preferredScaleFallbacks.Add(1)
+		evaluatePreferredScaleCircuitBreaker()
+	}
+	}
+
+	matches, err := MatchMultiScaleROICached(screen, template, templateName, minScale, maxScale, steps, threshold, roi)
+	if err == nil && len(matches) > 0 {
+		RememberPreferredTemplateScale(templateName, minScale, maxScale, steps, matches[0].Scale)
+	}
+	return matches, err
 }
 
 func MatchMultiScaleROICached(screen, template gocv.Mat, templateName string, minScale, maxScale float64, steps int, threshold float32, roi image.Rectangle) ([]Match, error) {

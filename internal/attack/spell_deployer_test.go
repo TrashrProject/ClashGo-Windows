@@ -338,9 +338,13 @@ func TestDeployPointSpell_RingAroundTarget(t *testing.T) {
 	if len(taps) != 5 {
 		t.Fatalf("got %d taps, want 5", len(taps))
 	}
+	// addJitter applies the jitter independently on X and Y. With a 6px
+	// per-axis bound, the maximum Euclidean contribution is 6*sqrt(2), not 6.
+	// Keep one pixel of rounding slack for the integer ring coordinates.
+	maxDist := 18.0 + 6.0*math.Sqrt2 + 1.0
 	for i, pt := range taps {
-		if d := math.Hypot(float64(pt.X-500), float64(pt.Y-400)); d > 18+6+1 {
-			t.Errorf("tap %d at %v is %.1fpx from target (ring radius 18 + jitter 6)", i, pt, d)
+		if d := math.Hypot(float64(pt.X-500), float64(pt.Y-400)); d > maxDist {
+			t.Errorf("tap %d at %v is %.1fpx from target (max %.1fpx: ring 18 + per-axis jitter 6)", i, pt, d, maxDist)
 		}
 	}
 	// Ring taps must not all stack on the center point.

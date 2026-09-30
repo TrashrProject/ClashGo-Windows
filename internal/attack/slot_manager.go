@@ -64,10 +64,17 @@ type SlotManager struct {
 	h         int
 	slotY     int
 	barY      int
+
+	detectDuration time.Duration
+	classifyDuration time.Duration
+	templatesTried int
+	templatesMatched int
+
 	logger    zerolog.Logger
 }
 
-// NewSlotManager detects active slots, resolves identities via template matching + manual labels.
+// NewSlotManager performs the full identity pass. It is used for the first
+// battle-bar scan where troop names are useful for army/profile diagnostics.
 func NewSlotManager(
 	screen gocv.Mat,
 	pCfg PrecisionConfig,
@@ -75,6 +82,34 @@ func NewSlotManager(
 	templates map[string]gocv.Mat,
 	classify func(gocv.Mat) (game.GameState, int),
 	logger zerolog.Logger,
+) *SlotManager {
+	return newSlotManager(screen, pCfg, w, h, mBarY, templates, classify, logger, false)
+}
+
+// NewSlotManagerLiveRescan preserves full live slot-position detection but on
+// Windows limits expensive portrait matching to categories that affect deploy
+// ordering/semantics: heroes, siege, spells and CC. Normal troops can remain
+// generic Troop cards because the live deployer uses their current OCR count
+// and safe-edge geometry, not their portrait name.
+func NewSlotManagerLiveRescan(
+	screen gocv.Mat,
+	pCfg PrecisionConfig,
+	w, h, mBarY int,
+	templates map[string]gocv.Mat,
+	classify func(gocv.Mat) (game.GameState, int),
+	logger zerolog.Logger,
+) *SlotManager {
+	return newSlotManager(screen, pCfg, w, h, mBarY, templates, classify, logger, runtime.GOOS == "windows")
+}
+
+func newSlotManager(
+	screen gocv.Mat,
+	pCfg PrecisionConfig,
+	w, h, mBarY int,
+	templates map[string]gocv.Mat,
+	classify func(gocv.Mat) (game.GameState, int),
+	logger zerolog.Logger,
+	specialsOnly bool,
 ) *SlotManager {
 	sm := &SlotManager{
 		unitIndex: make(map[string]*TrackedSlot),
@@ -111,14 +146,18 @@ func NewSlotManager(
 		}
 	}
 
+	detectStarted := time.Now()
 	activeXs := sm.detectActiveSlots(screen)
+	sm.detectDuration = time.Since(detectStarted)
 	if len(activeXs) == 0 {
 		sm.logger.Warn().Msg("no active slots detected")
 		return sm
 	}
 
 	barROI := image.Rect(0, sm.barY, w, h)
-	sm.classifySlots(screen, activeXs, templates, barROI)
+	classifyStarted := time.Now()
+	sm.classifySlots(screen, activeXs, templates, barROI, specialsOnly)
+	sm.classifyDuration = time.Since(classifyStarted)
 
 	// Windows must not inherit stale positional/manual classifications.
 	// A wrong "Spell" guess sends a perfectly valid troop into the middle
@@ -140,6 +179,125 @@ func NewSlotManager(
 
 	sm.logger.Debug().Int("total", len(sm.slots)).Msg("slot manager initialized")
 	return sm
+}
+
+type windowsSlotActivityProfile struct {
+	prefix []int
+	rows   int
+	cols   int
+	y1     int
+	y2     int
+	size   int
+}
+
+func newWindowsSlotActivityProfile(screen gocv.Mat, slotY, screenW int) *windowsSlotActivityProfile {
+	if screen.Empty() || screenW <= 0 {
+		return nil
+	}
+	scaleX := float64(screenW) / 860.0
+	size := int(25.0 * scaleX)
+	if size <= 0 {
+		size = 1
+	}
+	y1 := slotY - size
+	y2 := slotY + size
+	if y1 < 0 { y1 = 0 }
+	if y2 > screen.Rows() { y2 = screen.Rows() }
+	if y2 <= y1 {
+		return nil
+	}
+
+	sub := screen.Region(image.Rect(0, y1, screen.Cols(), y2))
+	defer sub.Close()
+
+	hsv := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC3)
+	defer vision.PutMat(hsv)
+	gocv.CvtColor(sub, &hsv, gocv.ColorBGRToHSV)
+
+	maskMap1 := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(maskMap1)
+	gocv.InRangeWithScalar(hsv, gocv.NewScalar(35, 31, 0, 0), gocv.NewScalar(90, 255, 255, 0), &maskMap1)
+
+	maskMap2 := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(maskMap2)
+	gocv.InRangeWithScalar(hsv, gocv.NewScalar(0, 0, 0, 0), gocv.NewScalar(29, 49, 79, 0), &maskMap2)
+
+	isMapMask := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(isMapMask)
+	gocv.BitwiseOr(maskMap1, maskMap2, &isMapMask)
+
+	notMapMask := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(notMapMask)
+	gocv.BitwiseNot(isMapMask, &notMapMask)
+
+	maskActA := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(maskActA)
+	gocv.InRangeWithScalar(hsv, gocv.NewScalar(0, 56, 91, 0), gocv.NewScalar(180, 255, 255, 0), &maskActA)
+
+	maskActB := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(maskActB)
+	gocv.InRangeWithScalar(hsv, gocv.NewScalar(0, 0, 221, 0), gocv.NewScalar(180, 29, 255, 0), &maskActB)
+
+	activeContentMask := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(activeContentMask)
+	gocv.BitwiseOr(maskActA, maskActB, &activeContentMask)
+
+	finalMask := vision.GetMat(sub.Rows(), sub.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(finalMask)
+	gocv.BitwiseAnd(activeContentMask, notMapMask, &finalMask)
+
+	// Build a per-column prefix sum once. The previous ActivityAt created a
+	// Mat Region and CountNonZero call for every 4px X probe (~200 native
+	// operations per live rescan). This produces the exact same non-zero
+	// ratio with O(1) work per probe.
+	rows, cols := finalMask.Rows(), finalMask.Cols()
+	data := finalMask.ToBytes()
+	if rows <= 0 || cols <= 0 || len(data) < rows*cols {
+		return nil
+	}
+	prefix := make([]int, cols+1)
+	for x := 0; x < cols; x++ {
+		colCount := 0
+		for y := 0; y < rows; y++ {
+			if data[y*cols+x] != 0 {
+				colCount++
+			}
+		}
+		prefix[x+1] = prefix[x] + colCount
+	}
+
+	return &windowsSlotActivityProfile{
+		prefix: prefix,
+		rows: rows,
+		cols: cols,
+		y1: y1,
+		y2: y2,
+		size: size,
+	}
+}
+
+func (p *windowsSlotActivityProfile) Close() {
+	// Kept for call-site symmetry. The optimized profile owns only Go memory;
+	// the temporary OpenCV mask is released inside the constructor.
+}
+
+func (p *windowsSlotActivityProfile) ActivityAt(x int) float64 {
+	if p == nil || p.rows <= 0 || p.cols <= 0 || len(p.prefix) != p.cols+1 {
+		return 0
+	}
+	x1 := x - p.size
+	x2 := x + p.size
+	if x1 < 0 { x1 = 0 }
+	if x2 > p.cols { x2 = p.cols }
+	if x2 <= x1 {
+		return 0
+	}
+	nonZero := p.prefix[x2] - p.prefix[x1]
+	total := p.rows * (x2 - x1)
+	if total <= 0 {
+		return 0
+	}
+	return float64(nonZero) / float64(total)
 }
 
 // detectActiveSlots finds all non-empty X positions on the troop bar.
@@ -181,9 +339,15 @@ func (sm *SlotManager) detectActiveSlots(screen gocv.Mat) []int {
 		minSep := int(48.0 * scaleX)
 		if minSep < 36 { minSep = 36 }
 
+		profile := newWindowsSlotActivityProfile(screen, sm.slotY, sm.w)
+		if profile == nil {
+			return []int{}
+		}
+		defer profile.Close()
+
 		var candidates []candidate
 		for x := int(24.0*scaleX); x < sm.w-int(24.0*scaleX); x += 4 {
-			a := GetSlotActivityRatioStatic(screen, x, sm.slotY, sm.w)
+			a := profile.ActivityAt(x)
 			if a >= 0.085 {
 				candidates = append(candidates, candidate{x: x, a: a})
 			}
@@ -237,8 +401,17 @@ func (sm *SlotManager) detectActiveSlots(screen gocv.Mat) []int {
 	return activeXs
 }
 
+func windowsLiveRescanTemplate(templateName string) bool {
+	cleanName := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(templateName)), "_", " ")
+	return isHeroStatic(cleanName) ||
+		isSiegeStatic(cleanName) ||
+		isSpellStatic(cleanName) ||
+		strings.Contains(cleanName, "cc") ||
+		strings.Contains(cleanName, "castle")
+}
+
 // classifySlots runs template matching to identify units and assign categories.
-func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates map[string]gocv.Mat, barROI image.Rectangle) {
+func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates map[string]gocv.Mat, barROI image.Rectangle, specialsOnly bool) {
 
 	for _, x := range activeXs {
 		sm.slots = append(sm.slots, &TrackedSlot{
@@ -257,8 +430,25 @@ func (sm *SlotManager) classifySlots(screen gocv.Mat, activeXs []int, templates 
 		if tpl.Empty() {
 			continue
 		}
-		matches, _ := vision.MatchMultiScaleROICached(screen, tpl, tplName, 0.2, 1.2, 20, 0.55, barROI)
+		if specialsOnly && !windowsLiveRescanTemplate(tplName) {
+			continue
+		}
+		sm.templatesTried++
+		var matches []vision.Match
+		if specialsOnly || runtime.GOOS == "windows" {
+			// On Windows, reuse the scale learned by previous attacks. The
+			// preferred matcher automatically falls back to the exact 20-scale
+			// scan whenever the one-scale result is missing or doubtful, so this
+			// keeps first-run correctness while making repeated attacks much faster.
+			matches, _ = vision.MatchMultiScaleROICachedPreferred(screen, tpl, tplName, 0.2, 1.2, 20, 0.55, barROI)
+		} else {
+			matches, _ = vision.MatchMultiScaleROICached(screen, tpl, tplName, 0.2, 1.2, 20, 0.55, barROI)
+			if len(matches) > 0 {
+				vision.RememberPreferredTemplateScale(tplName, 0.2, 1.2, 20, matches[0].Scale)
+			}
+		}
 		if len(matches) > 0 {
+			sm.templatesMatched++
 			sort.Slice(matches, func(i, j int) bool { return matches[i].Confidence > matches[j].Confidence })
 			results = append(results, templateResult{name: tplName, match: matches[0]})
 		}
@@ -597,6 +787,21 @@ func (sm *SlotManager) GetAllSlots() []*TrackedSlot {
 	return sm.slots
 }
 
+func (sm *SlotManager) Timing() (detectMS, classifyMS float64) {
+	if sm == nil {
+		return 0, 0
+	}
+	return float64(sm.detectDuration.Microseconds()) / 1000.0,
+		float64(sm.classifyDuration.Microseconds()) / 1000.0
+}
+
+func (sm *SlotManager) TemplateWork() (tried, matched int) {
+	if sm == nil {
+		return 0, 0
+	}
+	return sm.templatesTried, sm.templatesMatched
+}
+
 // GetSlotY returns the Y coordinate used for slot detection.
 func (sm *SlotManager) GetSlotY() int {
 	return sm.slotY
@@ -667,6 +872,109 @@ func (sm *SlotManager) GetEventTroops(strategyUnitNames []string) []*TrackedSlot
 		result = append(result, slot)
 	}
 	return result
+}
+
+// RefreshAfterSlotConsumed verifies a disappearing card by structure rather
+// than OCR at its OLD X coordinate. Once CoC compacts the troop bar, that old
+// coordinate may already belong to the next card, so an OCR read there can
+// falsely look like "troops remain".
+//
+// Success means the live card count matches exactly what it should be after
+// removing consumed. Remaining identities are preserved left-to-right and
+// only their X coordinates are updated.
+func (sm *SlotManager) RefreshAfterSlotConsumed(screen gocv.Mat, consumed *TrackedSlot) bool {
+	if sm == nil || consumed == nil || screen.Empty() {
+		return false
+	}
+	activeXs := sm.detectActiveSlots(screen)
+
+	remaining := make([]*TrackedSlot, 0, len(sm.slots))
+	for _, slot := range sm.slots {
+		if slot == consumed || slot.State == SlotDeployed || slot.State == SlotFailed || slot.IsEmpty {
+			continue
+		}
+		remaining = append(remaining, slot)
+	}
+	if len(activeXs) != len(remaining) {
+		return false
+	}
+
+	sort.Slice(remaining, func(i, j int) bool { return remaining[i].X < remaining[j].X })
+	sort.Ints(activeXs)
+	for i, slot := range remaining {
+		slot.X = activeXs[i]
+		slot.Y = sm.slotY
+	}
+	sm.xIndex = make(map[int]*TrackedSlot, len(remaining))
+	for _, slot := range remaining {
+		sm.xIndex[slot.X] = slot
+	}
+
+	sm.logger.Debug().
+		Str("consumed", consumed.UnitName).
+		Ints("remaining_xs", activeXs).
+		Msg("troop card consumption confirmed from bar compaction")
+	return true
+}
+
+// RefreshActivePositions remaps only undeployed cards to the currently
+// visible troop-bar centers. It is deliberately conservative: the update is
+// applied only when the number of detected live cards exactly matches the
+// number of tracked undeployed cards. That prevents a transient animation or
+// partially-hidden card from corrupting identities.
+//
+// This is called from the single post-deploy checkpoint, so bar compaction is
+// corrected without adding a second screenshot/OCR pass.
+func (sm *SlotManager) RefreshActivePositions(screen gocv.Mat) bool {
+	if sm == nil || screen.Empty() {
+		return false
+	}
+
+	activeXs := sm.detectActiveSlots(screen)
+	if len(activeXs) == 0 {
+		return false
+	}
+
+	remaining := make([]*TrackedSlot, 0, len(sm.slots))
+	for _, slot := range sm.slots {
+		if slot.State == SlotDeployed || slot.State == SlotFailed || slot.IsEmpty {
+			continue
+		}
+		remaining = append(remaining, slot)
+	}
+	if len(activeXs) != len(remaining) {
+		sm.logger.Debug().
+			Int("detected", len(activeXs)).
+			Int("tracked_remaining", len(remaining)).
+			Msg("troop-bar compaction refresh skipped; card counts differ")
+		return false
+	}
+
+	sort.Slice(remaining, func(i, j int) bool { return remaining[i].X < remaining[j].X })
+	sort.Ints(activeXs)
+
+	changed := false
+	for i, slot := range remaining {
+		if slot.X != activeXs[i] {
+			slot.X = activeXs[i]
+			slot.Y = sm.slotY
+			changed = true
+		}
+	}
+	if !changed {
+		return false
+	}
+
+	sm.xIndex = make(map[int]*TrackedSlot, len(remaining))
+	for _, slot := range remaining {
+		sm.xIndex[slot.X] = slot
+	}
+
+	sm.logger.Debug().
+		Ints("active_xs", activeXs).
+		Int("remaining", len(remaining)).
+		Msg("troop-bar card positions refreshed after compaction")
+	return true
 }
 
 // RecordAttempt records a deployment attempt for a slot.

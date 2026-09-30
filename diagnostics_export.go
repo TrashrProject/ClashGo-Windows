@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/Ducky705/ClashGO/internal/paths"
@@ -59,7 +60,6 @@ func (a *App) ExportDiagnostics() (string, error) {
 	}
 
 	for _, rel := range []string{
-		"logs/app.log",
 		"logs/last_boot_report.json",
 		"stats.json",
 		"attack_history.json",
@@ -68,6 +68,10 @@ func (a *App) ExportDiagnostics() (string, error) {
 		if err := writeDiagnosticFile(zw, src, rel); err != nil && !os.IsNotExist(err) {
 			return "", err
 		}
+	}
+
+	if err := writeRedactedDiagnosticLog(zw, paths.ResolveConfig("logs/app.log"), "logs/app.log"); err != nil && !os.IsNotExist(err) {
+		return "", err
 	}
 
 	if err := zw.Close(); err != nil {
@@ -102,4 +106,19 @@ func writeDiagnosticFile(zw *zip.Writer, src, name string) error {
 	}
 	_, err = io.Copy(w, in)
 	return err
+}
+
+
+var diagnosticLicensePattern = regexp.MustCompile(`(?i)\bCGO-[A-Z0-9-]{8,}\b`)
+
+func redactDiagnosticLog(data []byte) []byte {
+	return diagnosticLicensePattern.ReplaceAll(data, []byte("CGO-[REDACTED]"))
+}
+
+func writeRedactedDiagnosticLog(zw *zip.Writer, src, name string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return writeDiagnosticBytes(zw, name, redactDiagnosticLog(data))
 }

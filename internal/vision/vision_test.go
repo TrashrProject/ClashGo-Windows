@@ -69,3 +69,76 @@ func TestMatPoolLifecycleBalance(t *testing.T) {
 		p.Put(m)
 	}
 }
+
+func TestPreferredTemplateScaleIsScopedByTemplateAndScaleGrid(t *testing.T) {
+	RememberPreferredTemplateScale("queen", 0.2, 1.2, 20, 0.73)
+	if got, ok := preferredTemplateScale("queen", 0.2, 1.2, 20); !ok || got != 0.73 {
+		t.Fatalf("preferred scale=%v ok=%v want 0.73/true", got, ok)
+	}
+	if _, ok := preferredTemplateScale("warden", 0.2, 1.2, 20); ok {
+		t.Fatal("preferred scale leaked across template names")
+	}
+	if _, ok := preferredTemplateScale("queen", 0.2, 1.2, 12); ok {
+		t.Fatal("preferred scale leaked across step-count grids")
+	}
+	if _, ok := preferredTemplateScale("queen", 0.3, 1.1, 20); ok {
+		t.Fatal("preferred scale leaked across scale ranges")
+	}
+}
+
+func TestRememberPreferredTemplateScaleRejectsInvalidHints(t *testing.T) {
+	RememberPreferredTemplateScale("", 0.2, 1.2, 20, 0.8)
+	if _, ok := preferredTemplateScale("", 0.2, 1.2, 20); ok {
+		t.Fatal("empty template name must not create preferred-scale hint")
+	}
+
+	RememberPreferredTemplateScale("invalid-scale", 0.2, 1.2, 20, 0)
+	if _, ok := preferredTemplateScale("invalid-scale", 0.2, 1.2, 20); ok {
+		t.Fatal("non-positive preferred scale must be ignored")
+	}
+}
+
+func TestPreferredScaleStatsReset(t *testing.T) {
+	ResetPreferredScaleStats()
+	stats := PreferredScaleRuntimeStats()
+	if stats.Attempts != 0 || stats.Hits != 0 || stats.Fallbacks != 0 {
+		t.Fatalf("reset stats=%+v want all zero", stats)
+	}
+}
+
+func TestPreferredScaleCircuitBreakerDisablesLowHitRate(t *testing.T) {
+	ResetPreferredScaleStats()
+	preferredScaleAttempts.Store(20)
+	preferredScaleHits.Store(2) // 10%
+	preferredScaleFallbacks.Store(18)
+	evaluatePreferredScaleCircuitBreaker()
+
+	stats := PreferredScaleRuntimeStats()
+	if stats.Enabled {
+		t.Fatalf("expected preferred-scale fast path disabled, stats=%+v", stats)
+	}
+}
+
+func TestPreferredScaleCircuitBreakerKeepsUsefulFastPath(t *testing.T) {
+	ResetPreferredScaleStats()
+	preferredScaleAttempts.Store(20)
+	preferredScaleHits.Store(8) // 40%
+	preferredScaleFallbacks.Store(12)
+	evaluatePreferredScaleCircuitBreaker()
+
+	stats := PreferredScaleRuntimeStats()
+	if !stats.Enabled {
+		t.Fatalf("useful preferred-scale fast path disabled unexpectedly, stats=%+v", stats)
+	}
+}
+
+func TestPreferredScaleResetClearsLearnedHints(t *testing.T) {
+	RememberPreferredTemplateScale("session-reset", 0.2, 1.2, 20, 0.73)
+	if _, ok := preferredTemplateScale("session-reset", 0.2, 1.2, 20); !ok {
+		t.Fatal("expected learned hint before reset")
+	}
+	ResetPreferredScaleStats()
+	if _, ok := preferredTemplateScale("session-reset", 0.2, 1.2, 20); ok {
+		t.Fatal("preferred scale hint leaked across bot-session reset")
+	}
+}

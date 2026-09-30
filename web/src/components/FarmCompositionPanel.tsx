@@ -119,7 +119,7 @@ const FarmCompositionPanel: React.FC = React.memo(() => {
   if (!farm || !draft) {
     return (
       <div className="bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
-        <div className="text-sm font-bold text-zinc-500">Loading farm compositions…</div>
+        <div className="text-sm font-bold text-zinc-500">Chargement des compositions de farm…</div>
       </div>
     );
   }
@@ -137,8 +137,8 @@ const FarmCompositionPanel: React.FC = React.memo(() => {
               <span className="material-symbols-outlined">shield</span>
             </div>
             <div>
-              <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Farm Composition by TH</h3>
-              <p className="text-sm text-zinc-500 font-medium">The bot uses this profile as the target amount for troops, spells, heroes and siege.</p>
+              <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Composition de farm par HDV</h3>
+              <p className="text-sm text-zinc-500 font-medium">Le bot utilise ce profil comme composition cible pour les troupes, sorts, héros et machine de siège.</p>
             </div>
           </div>
         </div>
@@ -159,11 +159,11 @@ const FarmCompositionPanel: React.FC = React.memo(() => {
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {[
-          ['Army', `${troopUsed}/${draft.troop_capacity}`],
-          ['Spells', `${spellUsed}/${draft.spell_capacity}`],
-          ['CC Troops', String(draft.clan_castle_troop_capacity)],
-          ['CC Spells', String(draft.clan_castle_spell_capacity)],
-          ['CC Siege', String(draft.clan_castle_siege_capacity)],
+          ['Armée', `${troopUsed}/${draft.troop_capacity}`],
+          ['Sorts', `${spellUsed}/${draft.spell_capacity}`],
+          ['Troupes CDC', String(draft.clan_castle_troop_capacity)],
+          ['Sorts CDC', String(draft.clan_castle_spell_capacity)],
+          ['Siège CDC', String(draft.clan_castle_siege_capacity)],
         ].map(([label, value]) => (
           <div key={label} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/30 p-4">
             <div className="text-[10px] uppercase tracking-[0.18em] font-black text-zinc-400">{label}</div>
@@ -175,7 +175,7 @@ const FarmCompositionPanel: React.FC = React.memo(() => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h4 className="font-black text-zinc-950 dark:text-white">Troops</h4>
+            <h4 className="font-black text-zinc-950 dark:text-white">Troupes</h4>
             <span className={`text-xs font-black ${troopOverflow ? 'text-rose-500' : 'text-emerald-500'}`}>{troopUsed}/{draft.troop_capacity}</span>
           </div>
           {draft.troops.map((unit, idx) => (
@@ -187,12 +187,12 @@ const FarmCompositionPanel: React.FC = React.memo(() => {
               <div className="rounded-xl bg-zinc-50 dark:bg-zinc-950/50 border border-zinc-100 dark:border-zinc-800 px-2 py-2.5 text-xs font-black text-center text-zinc-500">×{unit.housing}</div>
             </div>
           ))}
-          <p className="text-[11px] text-zinc-400 font-medium">Count is the exact target the deployer will try to place when the card is identified.</p>
+          <p className="text-[11px] text-zinc-400 font-medium">La quantité correspond exactement au nombre que le déployeur cherchera à placer lorsque la carte est identifiée.</p>
         </div>
 
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h4 className="font-black text-zinc-950 dark:text-white">Spells</h4>
+            <h4 className="font-black text-zinc-950 dark:text-white">Sorts</h4>
             <span className={`text-xs font-black ${spellOverflow ? 'text-rose-500' : 'text-emerald-500'}`}>{spellUsed}/{draft.spell_capacity}</span>
           </div>
           {draft.spells.map((unit, idx) => (
@@ -206,7 +206,7 @@ const FarmCompositionPanel: React.FC = React.memo(() => {
           ))}
 
           <div className="pt-3">
-            <h4 className="font-black text-zinc-950 dark:text-white mb-3">Heroes <span className="text-xs text-zinc-400">({draft.heroes.length}/4 active)</span></h4>
+            <h4 className="font-black text-zinc-950 dark:text-white mb-3">Heroes <span className="text-xs text-zinc-400">({draft.heroes.length}/4 actifs)</span></h4>
             <div className="flex flex-wrap gap-2">
               {availableHeroes.map(hero => {
                 const on = draft.heroes.includes(hero.name);
@@ -221,10 +221,10 @@ const FarmCompositionPanel: React.FC = React.memo(() => {
           </div>
 
           <div className="pt-3">
-            <label className="text-[10px] uppercase tracking-[0.18em] font-black text-zinc-400">Siege machine</label>
+            <label className="text-[10px] uppercase tracking-[0.18em] font-black text-zinc-400">Machine de siège</label>
             <input value={draft.siege} disabled={draft.clan_castle_siege_capacity === 0}
               onChange={e => setDraft({ ...draft, siege: e.target.value })}
-              placeholder={draft.clan_castle_siege_capacity === 0 ? 'Not available at this TH' : 'Stone Slammer'}
+              placeholder={draft.clan_castle_siege_capacity === 0 ? 'Indisponible à cet HDV' : 'Stone Slammer'}
               className="mt-2 w-full bg-zinc-50 dark:bg-zinc-950/50 border border-zinc-100 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-sm font-bold disabled:opacity-40" />
           </div>
         </div>
@@ -232,15 +232,15 @@ const FarmCompositionPanel: React.FC = React.memo(() => {
 
       {(troopOverflow || spellOverflow || error) && (
         <div className="rounded-2xl bg-rose-500/10 border border-rose-500/20 px-4 py-3 text-sm font-bold text-rose-500">
-          {error || (troopOverflow ? 'Troop housing exceeds the TH capacity.' : 'Spell housing exceeds the TH capacity.')}
+          {error || (troopOverflow ? 'La capacité de troupes dépasse la limite de cet HDV.' : 'La capacité de sorts dépasse la limite de cet HDV.')}
         </div>
       )}
 
       <div className="flex items-center justify-between gap-4 pt-2">
-        <p className="text-xs text-zinc-400 font-medium">Selected profile: HDV {selectedTH}. Changes are persisted in config.json and hot-applied to the running bot.</p>
+        <p className="text-xs text-zinc-400 font-medium">Profil sélectionné : HDV {selectedTH}. Les changements sont sauvegardés puis appliqués au bot en cours.</p>
         <button type="button" onClick={save} disabled={status === 'saving' || troopOverflow || spellOverflow}
           className={`px-6 py-3 rounded-2xl text-sm font-black transition-all disabled:opacity-40 ${status === 'saved' ? 'bg-emerald-500 text-white' : status === 'error' ? 'bg-rose-500 text-white' : 'bg-zinc-950 dark:bg-white text-white dark:text-zinc-950'}`}>
-          {status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved ✓' : status === 'error' ? 'Failed' : 'Save Composition'}
+          {status === 'saving' ? 'Enregistrement…' : status === 'saved' ? 'Enregistré ✓' : status === 'error' ? 'Échec' : 'Enregistrer la composition'}
         </button>
       </div>
     </div>

@@ -1,6 +1,7 @@
 package attack
 
 import (
+	"github.com/Ducky705/ClashGO/internal/adb"
 	"context"
 	"image"
 	"os"
@@ -382,5 +383,58 @@ func TestBattleEndContextCancellationWithZeroStrategy(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("cancelled wait did not return promptly")
+	}
+}
+
+func TestBattleExitMetricsResetWithOutcome(t *testing.T) {
+	e := &Executor{
+		lastBattleWaitMS:   12_345,
+		lastLootExitPercent: 87,
+		logger:              zerolog.Nop(),
+	}
+	e.ResetBattleOutcome()
+	waitMS, lootPct := e.BattleExitMetrics()
+	if waitMS != 0 || lootPct != 0 {
+		t.Fatalf("battle exit metrics survived reset: wait=%d loot=%d", waitMS, lootPct)
+	}
+}
+
+func TestBattleExitMetricsExposeLatchedValues(t *testing.T) {
+	e := &Executor{
+		lastBattleWaitMS:    4_200,
+		lastLootExitPercent: 92,
+		logger:              zerolog.Nop(),
+	}
+	waitMS, lootPct := e.BattleExitMetrics()
+	if waitMS != 4_200 || lootPct != 92 {
+		t.Fatalf("battle exit metrics = %d/%d want 4200/92", waitMS, lootPct)
+	}
+}
+
+func TestChooseBattleEndPollHealthy(t *testing.T) {
+	h := adb.Health{FastCaptureMs: 350}
+	if got := chooseBattleEndPoll(h, false); got != 800*time.Millisecond {
+		t.Fatalf("healthy natural poll=%v want 800ms", got)
+	}
+	if got := chooseBattleEndPoll(h, true); got != 900*time.Millisecond {
+		t.Fatalf("healthy loot-exit poll=%v want 900ms", got)
+	}
+}
+
+func TestChooseBattleEndPollBalanced(t *testing.T) {
+	h := adb.Health{FastCaptureMs: 650}
+	if got := chooseBattleEndPoll(h, false); got != time.Second {
+		t.Fatalf("balanced poll=%v want 1s", got)
+	}
+}
+
+func TestChooseBattleEndPollDegraded(t *testing.T) {
+	for _, h := range []adb.Health{
+		{FastCaptureMs: 1100},
+		{FastCaptureMs: 300, ConsecutiveFails: 1},
+	} {
+		if got := chooseBattleEndPoll(h, false); got != 1200*time.Millisecond {
+			t.Fatalf("degraded poll=%v want 1.2s for %+v", got, h)
+		}
 	}
 }

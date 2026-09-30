@@ -140,3 +140,126 @@ func TestLooksLikeHeroCardStaticGreenHealthBar(t *testing.T) {
 		t.Fatal("empty generic card region should not classify as hero")
 	}
 }
+
+func TestWindowsSlotActivityProfileMatchesLegacyWindowMath(t *testing.T) {
+	const (
+		w = 240
+		h = 140
+		slotY = 95
+	)
+	screen := gocv.NewMatWithSize(h, w, gocv.MatTypeCV8UC3)
+	defer screen.Close()
+
+	// Dark/map-like background.
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			screen.SetUCharAt(y, x*3+0, 20)
+			screen.SetUCharAt(y, x*3+1, 45)
+			screen.SetUCharAt(y, x*3+2, 20)
+		}
+	}
+	// Add a vivid card-like patch around x=120.
+	for y := 72; y < 118; y++ {
+		for x := 98; x < 142; x++ {
+			screen.SetUCharAt(y, x*3+0, 40)
+			screen.SetUCharAt(y, x*3+1, 70)
+			screen.SetUCharAt(y, x*3+2, 220)
+		}
+	}
+
+	profile := newWindowsSlotActivityProfile(screen, slotY, w)
+	if profile == nil {
+		t.Fatal("expected activity profile")
+	}
+	defer profile.Close()
+
+	for _, x := range []int{40, 92, 120, 148, 200} {
+		legacy := GetSlotActivityRatioStatic(screen, x, slotY, w)
+		fast := profile.ActivityAt(x)
+		diff := legacy - fast
+		if diff < 0 { diff = -diff }
+		if diff > 0.000001 {
+			t.Fatalf("x=%d legacy=%f fast=%f diff=%f", x, legacy, fast, diff)
+		}
+	}
+}
+
+func TestWindowsSlotActivityProfilePreservesActiveThreshold(t *testing.T) {
+	screen := gocv.NewMatWithSize(140, 240, gocv.MatTypeCV8UC3)
+	defer screen.Close()
+
+	for y := 0; y < 140; y++ {
+		for x := 0; x < 240; x++ {
+			screen.SetUCharAt(y, x*3+0, 20)
+			screen.SetUCharAt(y, x*3+1, 45)
+			screen.SetUCharAt(y, x*3+2, 20)
+		}
+	}
+	for y := 76; y < 114; y++ {
+		for x := 104; x < 136; x++ {
+			screen.SetUCharAt(y, x*3+0, 30)
+			screen.SetUCharAt(y, x*3+1, 50)
+			screen.SetUCharAt(y, x*3+2, 230)
+		}
+	}
+
+	profile := newWindowsSlotActivityProfile(screen, 95, 240)
+	if profile == nil {
+		t.Fatal("expected activity profile")
+	}
+	defer profile.Close()
+
+	if legacy, fast := GetSlotActivityRatioStatic(screen, 120, 95, 240), profile.ActivityAt(120); (legacy >= 0.085) != (fast >= 0.085) {
+		t.Fatalf("active threshold changed: legacy=%f fast=%f", legacy, fast)
+	}
+}
+
+func TestWindowsLiveRescanTemplateFiltersNormalTroops(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"electro_dragon", false},
+		{"balloon", false},
+		{"barbarian_king", true},
+		{"archer_queen", true},
+		{"rage_spell", true},
+		{"stone_slammer", true},
+		{"clan_castle", true},
+		{"cc", true},
+	}
+	for _, tc := range cases {
+		if got := windowsLiveRescanTemplate(tc.name); got != tc.want {
+			t.Fatalf("windowsLiveRescanTemplate(%q)=%v want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestWindowsSlotActivityProfilePrefixMatchesWindowRatio(t *testing.T) {
+	// Five columns over four rows with non-zero counts:
+	// [0, 2, 4, 2, 0]. Prefix = [0, 0, 2, 6, 8, 8].
+	p := &windowsSlotActivityProfile{
+		prefix: []int{0, 0, 2, 6, 8, 8},
+		rows:   4,
+		cols:   5,
+		size:   1,
+	}
+	if got := p.ActivityAt(2); got != 0.75 {
+		t.Fatalf("ActivityAt(2)=%.3f want 0.750", got)
+	}
+	// Edge clamp: x=0 -> columns [0,1), all zero.
+	if got := p.ActivityAt(0); got != 0 {
+		t.Fatalf("ActivityAt(0)=%.3f want 0", got)
+	}
+	// x=4 -> columns [3,5): 2 / 8 = 0.25.
+	if got := p.ActivityAt(4); got != 0.25 {
+		t.Fatalf("ActivityAt(4)=%.3f want 0.250", got)
+	}
+}
+
+func TestWindowsSlotActivityProfileInvalidIsZero(t *testing.T) {
+	var p *windowsSlotActivityProfile
+	if got := p.ActivityAt(100); got != 0 {
+		t.Fatalf("nil profile activity=%.3f want 0", got)
+	}
+}

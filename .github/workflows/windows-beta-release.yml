@@ -1,0 +1,359 @@
+name: Windows Beta Release
+
+on:
+  push:
+    branches:
+      - feature/intelligence-v2
+    paths-ignore:
+      - '**/*_test.go'
+      - 'docs/**'
+      - 'site/**'
+      - '**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-beta-latest
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - name: Checkout candidate beta commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Capture tested SHA
+        id: sha
+        shell: bash
+        run: echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Run fast backend gate
+        shell: bash
+        run: |
+          go test ./internal/config
+          go test ./internal/telemetry
+          go test ./internal/intelligence
+          go test ./internal/licensing
+          go test ./internal/support
+          go test ./internal/updater
+          go test ./internal/paths
+          go test ./cmd/account_proxy
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Validate PowerShell syntax
+        shell: pwsh
+        run: |
+          $files = @(
+            "build/windows/install_update.ps1",
+            "tools/run-control-local.ps1",
+            "tools/create-local-admin-license.ps1",
+            "tools/start-local-license-test.ps1"
+          )
+          foreach ($file in $files) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$null,
+              [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              Write-Host "PowerShell syntax errors in $file" -ForegroundColor Red
+              $errors | ForEach-Object { Write-Error $_.Message }
+              exit 1
+            }
+            Write-Host "PowerShell syntax OK: $file"
+          }
+
+      - name: Validate control API and frontend
+        shell: bash
+        run: |
+          node --check cloudflare/worker/src/index.js
+          node tools/check-control-api-parity.mjs
+          node tools/check-ui-localization-safety.mjs
+          cd web
+          npm ci
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import ts from 'typescript';
+
+          const files = [];
+          const walk = (dir) => {
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) walk(full);
+              else if (entry.isFile() && /\.tsx?$/.test(entry.name) && !entry.name.endsWith('.d.ts')) files.push(full);
+            }
+          };
+          walk('src');
+
+          let failed = false;
+          for (const file of files) {
+            const source = fs.readFileSync(file, 'utf8');
+            const result = ts.transpileModule(source, {
+              fileName: file,
+              reportDiagnostics: true,
+              compilerOptions: {
+                jsx: ts.JsxEmit.ReactJSX,
+                target: ts.ScriptTarget.ES2020,
+                module: ts.ModuleKind.ESNext,
+              },
+            });
+            for (const diagnostic of result.diagnostics || []) {
+              if (diagnostic.category !== ts.DiagnosticCategory.Error) continue;
+              failed = true;
+              const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n');
+              if (diagnostic.file && typeof diagnostic.start === 'number') {
+                const pos = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
+                console.error(`${file}:${pos.line + 1}:${pos.character + 1} ${message}`);
+              } else {
+                console.error(`${file}: ${message}`);
+              }
+            }
+          }
+          if (failed) process.exit(1);
+          console.log(`TS/TSX syntax OK: ${files.length} files`);
+          NODE
+          cd ..
+          node tools/generate-wails-ci-stub.mjs
+          cd web
+          npm run build
+
+      - name: Let rapid commits settle before Windows build
+        shell: bash
+        run: |
+          echo "Fast checks passed. Waiting briefly so rapid follow-up commits can replace this run before the expensive Windows build."
+          sleep 45
+
+  beta:
+    needs: gate
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      BETA_VERSION: 0.6.8-beta.${{ github.run_number }}
+      BETA_SHA: ${{ needs.gate.outputs.sha }}
+      CGO_CXXFLAGS: --std=c++11 -DNDEBUG
+      CGO_CPPFLAGS: -IC:/opencv/build/install/include
+      CGO_LDFLAGS: -LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -lopencv_imgproc4130 -lopencv_imgcodecs4130
+      GOFLAGS: -tags=customenv,gocv_specific_modules
+      CLASHGO_ACCOUNT_API_URL: ${{ vars.CLASHGO_ACCOUNT_API_URL }}
+      CLASHGO_CONTROL_API_URL: ${{ vars.CLASHGO_CONTROL_API_URL }}
+
+    steps:
+      - name: Checkout active beta branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.BETA_SHA }}
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Ensure MinGW CMake and NSIS
+        shell: powershell
+        run: |
+          $packages = @()
+          if (-not (Get-Command g++ -ErrorAction SilentlyContinue)) { $packages += "mingw" }
+          if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) { $packages += "cmake" }
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) { $packages += "nsis" }
+
+          if ($packages.Count -gt 0) {
+            Write-Host "Installing missing tools: $($packages -join ', ')"
+            choco install $packages -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "Chocolatey tool installation failed" }
+          } else {
+            Write-Host "MinGW, CMake and NSIS already available; skipping Chocolatey install."
+          }
+
+          # Chocolatey updates the machine PATH, but the current PowerShell
+          # process does not automatically pick it up.
+          $nsisDir = "${env:ProgramFiles(x86)}\NSIS"
+          if ((Test-Path "$nsisDir\makensis.exe") -and -not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            $env:PATH = "$nsisDir;$env:PATH"
+            $nsisDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          g++ --version
+          if ($LASTEXITCODE -ne 0) { throw "g++ is unavailable" }
+          cmake --version
+          if ($LASTEXITCODE -ne 0) { throw "cmake is unavailable" }
+          & "$nsisDir\makensis.exe" /VERSION
+          if ($LASTEXITCODE -ne 0) { throw "makensis is unavailable" }
+
+      - name: Restore cached OpenCV
+        id: opencv-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: C:\opencv\build\install
+          key: opencv-4.13.0-mingw-gocv043-clashgo-minimal-v1
+
+      - name: Build OpenCV 4.13 for GoCV
+        if: steps.opencv-cache.outputs.cache-hit != 'true'
+        shell: powershell
+        run: |
+          git clone --depth 1 --branch v0.43.0 https://github.com/hybridgroup/gocv.git "$env:RUNNER_TEMP\gocv"
+          Push-Location "$env:RUNNER_TEMP\gocv"
+          cmd /c win_download_opencv.cmd
+          if ($LASTEXITCODE -ne 0) { throw "OpenCV download failed" }
+          (Get-Content .\win_build_opencv.cmd -Raw).Replace("-DBUILD_PERF_TESTS=ON", "-DBUILD_PERF_TESTS=OFF -DBUILD_LIST=core,imgproc,imgcodecs") | Set-Content .\win_build_opencv.cmd -Encoding ASCII
+          $env:CMAKE_BUILD_PARALLEL_LEVEL = [Environment]::ProcessorCount
+          cmd /c win_build_opencv.cmd
+          if ($LASTEXITCODE -ne 0) { throw "OpenCV build failed" }
+          Pop-Location
+
+      - name: Save OpenCV cache
+        if: steps.opencv-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: C:\opencv\build\install
+          key: opencv-4.13.0-mingw-gocv043-clashgo-minimal-v1
+
+      - name: Add OpenCV to PATH
+        shell: powershell
+        run: '"C:\opencv\build\install\x64\mingw\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append'
+
+      - name: Restore cached Wails
+        id: wails-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~\go\bin\wails.exe
+          key: wails-v2.12.0-windows-amd64
+
+      - name: Install Wails
+        if: steps.wails-cache.outputs.cache-hit != 'true'
+        shell: powershell
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Save Wails cache
+        if: steps.wails-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~\go\bin\wails.exe
+          key: wails-v2.12.0-windows-amd64
+
+      - name: Verify Wails
+        shell: powershell
+        run: wails version
+
+      - name: Synchronize runtime assets
+        shell: powershell
+        run: .\tools\sync-upstream-runtime.ps1
+
+      - name: Validate frontend and backend
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path web\dist | Out-Null
+          if (-not (Test-Path web\dist\index.html)) {
+            Set-Content web\dist\index.html "<!doctype html><html><body></body></html>" -Encoding UTF8
+          }
+          wails generate module -tags "customenv,gocv_specific_modules"
+          if ($LASTEXITCODE -ne 0) { throw "Wails binding generation failed" }
+          Push-Location web
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
+          Pop-Location
+          go test -tags "customenv,gocv_specific_modules" . ./internal/... ./pkg/...
+          if ($LASTEXITCODE -ne 0) { throw "backend tests failed" }
+
+      - name: Build beta portable bundle
+        shell: powershell
+        run: .\tools\build-windows.ps1 -Version "$env:BETA_VERSION" -Channel beta -SkipSync -SkipTests
+
+      - name: Build beta installer
+        shell: powershell
+        run: .\tools\build-installer.ps1 -Version "$env:BETA_VERSION"
+
+      - name: Authenticode sign beta artifacts when certificate is configured
+        shell: powershell
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: .\tools\sign-windows-artifacts.ps1 -Version "$env:BETA_VERSION"
+
+      - name: Generate beta manifest and checksums
+        id: manifest
+        shell: powershell
+        run: |
+          $version = $env:BETA_VERSION
+          $zip = Get-ChildItem dist -Filter "ClashGO-v$version-windows.zip" | Select-Object -First 1
+          $setup = Get-ChildItem dist -Filter "ClashGO-v$version-windows-setup.exe" | Select-Object -First 1
+          if (-not $zip) { throw "Beta ZIP not found" }
+          if (-not $setup) { throw "Beta installer not found" }
+
+          @($zip, $setup) | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          } | Set-Content dist\SHA256SUMS-beta.txt -Encoding ASCII
+
+          $zipSha = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLower()
+          $assetUrl = "https://github.com/TrashrProject/ClashGo-Windows/releases/download/beta-latest/$($zip.Name)"
+          $manifest = [ordered]@{
+            version = $version
+            release_date = (Get-Date).ToUniversalTime().ToString("o")
+            notes = "Automatic beta build from feature/intelligence-v2 at $env:BETA_SHA"
+            min_supported = "0.6.7-windows-beta"
+            platforms = [ordered]@{
+              windows = [ordered]@{
+                asset_name = $zip.Name
+                asset_url = $assetUrl
+                size = $zip.Length
+                sha256 = $zipSha
+              }
+            }
+          }
+          $json = $manifest | ConvertTo-Json -Depth 6
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText((Join-Path $PWD "dist\latest-beta.json"), $json, $utf8NoBom)
+          node -e "JSON.parse(require('fs').readFileSync('dist/latest-beta.json','utf8')); console.log('latest-beta.json valid')"
+          if ($LASTEXITCODE -ne 0) { throw "latest-beta.json validation failed" }
+          "zip=$($zip.FullName)" >> $env:GITHUB_OUTPUT
+          "setup=$($setup.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Replace rolling beta-latest release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Continue"
+          gh release view beta-latest --repo TrashrProject/ClashGo-Windows *> $null
+          $exists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = "Stop"
+
+          if ($exists) {
+            gh release delete beta-latest --repo TrashrProject/ClashGo-Windows --cleanup-tag -y
+            if ($LASTEXITCODE -ne 0) { throw "Could not replace previous beta-latest release" }
+          }
+
+          gh release create beta-latest "${{ steps.manifest.outputs.zip }}" "${{ steps.manifest.outputs.setup }}" "dist\latest-beta.json" "dist\SHA256SUMS-beta.txt" --repo TrashrProject/ClashGo-Windows --title "ClashGO Windows Beta $env:BETA_VERSION" --notes "Automatic beta from feature/intelligence-v2 ($env:BETA_SHA)" --target "$env:BETA_SHA" --prerelease
+          if ($LASTEXITCODE -ne 0) { throw "Could not publish beta-latest release" }

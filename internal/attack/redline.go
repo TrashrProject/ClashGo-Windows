@@ -15,6 +15,80 @@ type RedZone struct {
 	BBox     image.Rectangle
 	Valid    bool
 	Contours int
+
+	// Boundary is retained as a detached compatibility copy of the accepted
+	// OpenCV contour. New deployment geometry uses the side-specific profiles
+	// below because they are already ordered for fast resampling.
+	Boundary []image.Point
+
+	LeftBoundary   []image.Point
+	RightBoundary  []image.Point
+	TopBoundary    []image.Point
+	BottomBoundary []image.Point
+}
+
+
+// boundarySamples extracts sparse boundary points from the accepted red-zone
+// rectangle. Scanning only inside that rectangle avoids unrelated red UI
+// elements while preserving irregular village geometry.
+func boundarySamples(mask gocv.Mat, rect image.Rectangle) (left, right, top, bottom []image.Point) {
+	if mask.Empty() || rect.Empty() {
+		return nil, nil, nil, nil
+	}
+	w, h := mask.Cols(), mask.Rows()
+	x0, x1 := rect.Min.X, rect.Max.X
+	y0, y1 := rect.Min.Y, rect.Max.Y
+	if x0 < 0 { x0 = 0 }
+	if y0 < 0 { y0 = 0 }
+	if x1 > w { x1 = w }
+	if y1 > h { y1 = h }
+	if x1 <= x0 || y1 <= y0 {
+		return nil, nil, nil, nil
+	}
+
+	const sampleStep = 8
+	for y := y0; y < y1; y += sampleStep {
+		lx, rx := -1, -1
+		for x := x0; x < x1; x++ {
+			if mask.GetUCharAt(y, x) == 0 {
+				continue
+			}
+			if lx < 0 { lx = x }
+			rx = x
+		}
+		if lx >= 0 {
+			left = append(left, image.Pt(lx, y))
+			right = append(right, image.Pt(rx, y))
+		}
+	}
+	for x := x0; x < x1; x += sampleStep {
+		ty, by := -1, -1
+		for y := y0; y < y1; y++ {
+			if mask.GetUCharAt(y, x) == 0 {
+				continue
+			}
+			if ty < 0 { ty = y }
+			by = y
+		}
+		if ty >= 0 {
+			top = append(top, image.Pt(x, ty))
+			bottom = append(bottom, image.Pt(x, by))
+		}
+	}
+	return left, right, top, bottom
+}
+
+func redZoneFromRect(mask gocv.Mat, rect image.Rectangle, contours int) RedZone {
+	left, right, top, bottom := boundarySamples(mask, rect)
+	return RedZone{
+		BBox:           rect,
+		Valid:          true,
+		Contours:       contours,
+		LeftBoundary:   left,
+		RightBoundary:  right,
+		TopBoundary:    top,
+		BottomBoundary: bottom,
+	}
 }
 
 // RedLineDetector finds the red deployment boundary on screen.
@@ -49,8 +123,9 @@ func (r *RedLineDetector) Detect(screen gocv.Mat, uiCutoff int) RedZone {
 	}
 
 	type bbox struct {
-		rect image.Rectangle
-		area float64
+		rect   image.Rectangle
+		area   float64
+		points []image.Point
 	}
 	var boxes []bbox
 
@@ -61,7 +136,11 @@ func (r *RedLineDetector) Detect(screen gocv.Mat, uiCutoff int) RedZone {
 			continue
 		}
 		rect := gocv.BoundingRect(cnt)
-		boxes = append(boxes, bbox{rect: rect, area: area})
+		pts := make([]image.Point, 0, cnt.Size())
+		for j := 0; j < cnt.Size(); j++ {
+			pts = append(pts, cnt.At(j))
+		}
+		boxes = append(boxes, bbox{rect: rect, area: area, points: pts})
 	}
 
 	if len(boxes) == 0 {
@@ -87,7 +166,7 @@ func (r *RedLineDetector) Detect(screen gocv.Mat, uiCutoff int) RedZone {
 			continue
 		}
 
-		r.logger.Info().
+		r.logger.Debug().
 			Int("x", rect.Min.X).
 			Int("y", rect.Min.Y).
 			Int("w", rect.Dx()).
@@ -95,11 +174,9 @@ func (r *RedLineDetector) Detect(screen gocv.Mat, uiCutoff int) RedZone {
 			Float64("area", b.area).
 			Msg("red zone detected")
 
-		return RedZone{
-			BBox:     rect,
-			Valid:    true,
-			Contours: contours.Size(),
-		}
+		zone := redZoneFromRect(mask, rect, contours.Size())
+		zone.Boundary = append([]image.Point(nil), b.points...)
+		return zone
 	}
 
 	xMin, yMin := w, uiCutoff
@@ -121,16 +198,18 @@ func (r *RedLineDetector) Detect(screen gocv.Mat, uiCutoff int) RedZone {
 
 	combined := image.Rect(xMin, yMin, xMax, yMax)
 	if combined.Dx() >= minW && combined.Dy() >= minH {
-		r.logger.Info().
+		r.logger.Debug().
 			Int("x", xMin).Int("y", yMin).
 			Int("w", combined.Dx()).Int("h", combined.Dy()).
 			Msg("red zone detected (combined contours)")
 
-		return RedZone{
-			BBox:     combined,
-			Valid:    true,
-			Contours: contours.Size(),
+		boundary := make([]image.Point, 0)
+		for _, b := range boxes {
+			boundary = append(boundary, b.points...)
 		}
+		zone := redZoneFromRect(mask, combined, contours.Size())
+		zone.Boundary = boundary
+		return zone
 	}
 
 	r.logger.Warn().Msg("red zone detection failed: no contour spans 55% of playfield")

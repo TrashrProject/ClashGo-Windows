@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -117,6 +118,15 @@ func (c *Client) currentPipe() *ShellPipe {
 }
 
 func NewClient(opts ...Option) *Client {
+	minCaptureGap := 250 * time.Millisecond
+	if runtime.GOOS == "windows" {
+		// BlueStacks HD-Player can crash natively when ADB framebuffer requests
+		// arrive in sustained bursts during matchmaking. Keep Windows on a
+		// deliberately conservative global screencap budget. The search/deploy
+		// code already reuses live frames where possible, so stability is worth
+		// more here than sub-second observer refreshes.
+		minCaptureGap = 750 * time.Millisecond
+	}
 	c := &Client{
 		DeviceID:        "",
 		host:            DefaultHost,
@@ -127,10 +137,7 @@ func NewClient(opts ...Option) *Client {
 		jitterDelays:    true,
 		maxJitterPixels: 2.0,
 		jitterFraction:  0.15,
-		// 180 ms keeps normal vision responsive while avoiding the sustained
-		// 8+ FPS ADB screencap pressure that can destabilize BlueStacks 5.
-		// Failed captures back off further in captureGapForFailures.
-		minCaptureGap:   180 * time.Millisecond,
+		minCaptureGap:   minCaptureGap,
 	}
 	for _, o := range opts {
 		o(c)
@@ -343,16 +350,17 @@ func captureGapForFailures(base time.Duration, consecutiveFails int) time.Durati
 	if consecutiveFails < 0 {
 		consecutiveFails = 0
 	}
-	// Exponential backoff after failed screencaps prevents a sick BlueStacks
-	// instance from being hammered by reconnect -> screencap -> reconnect loops.
-	// Cap at 1.5 s so recovery remains responsive.
+
+	// BlueStacks is most fragile when a failing capture loop immediately
+	// retries heavy screencap work. Back off exponentially after consecutive
+	// failures, but keep the normal healthy cadence unchanged.
 	shift := consecutiveFails
 	if shift > 3 {
 		shift = 3
 	}
 	gap := base * time.Duration(1<<shift)
-	if gap > 1500*time.Millisecond {
-		gap = 1500 * time.Millisecond
+	if gap > 6*time.Second {
+		gap = 6 * time.Second
 	}
 	return gap
 }
@@ -372,6 +380,58 @@ func (c *Client) waitForCaptureBudget() {
 	c.lastCaptureStart = time.Now()
 }
 
+
+func (c *Client) captureBlueStacksPNGToMat() (gocv.Mat, error) {
+	emptyMat := func() gocv.Mat { return gocv.NewMat() }
+
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return emptyMat(), errors.New("client closed")
+	}
+	if c.transport == nil {
+		if err := c.connectTransport(); err != nil {
+			c.mu.Unlock()
+			return emptyMat(), err
+		}
+	}
+	transport := c.transport
+	c.mu.Unlock()
+
+	// File-backed capture deliberately separates Android framebuffer capture
+	// from the transport read. On BlueStacks/Windows this avoids streaming
+	// screencap pixels directly through the same ADB service while Clash is
+	// switching into matchmaking, which has been correlated with native
+	// HD-Player.exe crashes.
+	const remote = "/sdcard/clashgo-frame.png"
+	if _, err := transport.Exec("shell:screencap -p " + remote); err != nil {
+		return emptyMat(), fmt.Errorf("png screencap: %w", err)
+	}
+
+	// Let BlueStacks finish flushing the PNG before starting the readback.
+	// Without this tiny quiet period the capture and cat services can overlap
+	// inside adbd under load, which is exactly when HD-Player instability has
+	// been observed on Windows.
+	time.Sleep(35 * time.Millisecond)
+
+	raw, err := transport.Exec("exec:cat " + remote)
+	if err != nil {
+		return emptyMat(), fmt.Errorf("png readback: %w", err)
+	}
+	if len(raw) < 8 {
+		return emptyMat(), fmt.Errorf("png screencap too short: %d bytes", len(raw))
+	}
+	mat, err := gocv.IMDecode(raw, gocv.IMReadColor)
+	if err != nil {
+		return emptyMat(), fmt.Errorf("decode png screencap: %w", err)
+	}
+	if mat.Empty() {
+		mat.Close()
+		return emptyMat(), errors.New("decoded png screencap is empty")
+	}
+	return mat, nil
+}
+
 func (c *Client) CaptureToMat() (gocv.Mat, error) {
 	// ADB screencap is a single shared device resource. Serialize the whole
 	// operation so the background observer, search loop and attack verifier
@@ -388,6 +448,16 @@ func (c *Client) CaptureToMat() (gocv.Mat, error) {
 	emptyMat := func() gocv.Mat { return gocv.NewMat() }
 
 	start := time.Now()
+
+	if runtime.GOOS == "windows" && preferBlueStacksShellCapture(c.DeviceID) {
+		img, err := c.captureBlueStacksPNGToMat()
+		if err != nil {
+			c.recordHealthFailure(err)
+			return emptyMat(), err
+		}
+		c.recordHealthSuccess(time.Since(start))
+		return img, nil
+	}
 
 	c.mu.Lock()
 	if c.closed {
@@ -411,10 +481,7 @@ func (c *Client) CaptureToMat() (gocv.Mat, error) {
 
 	bufPtr, n, err := transport.CaptureScreenPooled()
 	if err != nil {
-		// Give BlueStacks/adbd a short settle window after reconnecting instead
-		// of immediately issuing another heavy raw screencap on the new socket.
 		if reconnErr := transport.Reconnect(); reconnErr == nil {
-			time.Sleep(200 * time.Millisecond)
 			bufPtr, n, err = transport.CaptureScreenPooled()
 		}
 	}
@@ -514,11 +581,21 @@ func (c *Client) TapAsync(x, y int) error {
 
 // routeTap is the shared router for Tap/TapAsync/TapFast through either
 // the persistent pipe (when alive) or the legacy transport.Exec fallback.
-func (c *Client) routeTap(cmd string, x, y int, async bool) error {
+func (c *Client) routeTap(cmd string, x, y int, async bool) (err error) {
+	started := time.Now()
+	usedPipe := false
+	defer func() {
+		c.healthMu.Lock()
+		c.health.RecordTap(time.Since(started))
+		c.health.RecordTapRoute(usedPipe)
+		c.healthMu.Unlock()
+	}()
+
 	if p := c.currentPipe(); p != nil {
 		full := fmt.Sprintf("%s %d %d", cmd, x, y)
 		if async {
 			if err := p.SendAsync(full); err == nil {
+				usedPipe = true
 				return nil
 			} else if err != ErrShellPipeBusy {
 				// Broken: drop pipe so subsequent calls take legacy path
@@ -528,6 +605,7 @@ func (c *Client) routeTap(cmd string, x, y int, async bool) error {
 			// Busy: fall through to legacy
 		} else {
 			if err := p.Send(full); err == nil {
+				usedPipe = true
 				return nil
 			}
 			// Broken: fall back

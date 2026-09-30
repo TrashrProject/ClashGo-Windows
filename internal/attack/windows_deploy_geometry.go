@@ -1,0 +1,131 @@
+package attack
+
+import "image"
+
+// windowsDeployCorridor converts the live red-zone bounding box into the
+// single deployment line used by the Windows live-bar path. Keep this logic
+// pure and regression-tested: it is the safety boundary that prevents troop
+// taps from drifting into the red no-deploy polygon or the lower battle HUD.
+//
+// Bottom is deliberately excluded even when it has the most geometric free
+// space because Surrender/End Battle, damage UI and the troop bar live there.
+func windowsDeployCorridor(zone RedZone, w, h, uiCutoff int) (side string, p1, p2 image.Point, freeSpace int, ok bool) {
+	if !zone.Valid || w <= 0 || h <= 0 || uiCutoff <= 0 {
+		return "", image.Point{}, image.Point{}, 0, false
+	}
+
+	const (
+		edgeMargin = 24
+		outsidePad = 34
+	)
+
+	free := map[string]int{
+		"left":  zone.BBox.Min.X,
+		"right": w - zone.BBox.Max.X,
+		"top":   zone.BBox.Min.Y,
+	}
+
+	// Preserve the existing Windows behavior exactly: widest legal side among
+	// left/right/top; ties keep the earlier side (left -> right -> top).
+	side = "left"
+	freeSpace = free["left"]
+	for _, candidate := range []string{"right", "top"} {
+		if free[candidate] > freeSpace {
+			side = candidate
+			freeSpace = free[candidate]
+		}
+	}
+
+	switch side {
+	case "right":
+		x := zone.BBox.Max.X + outsidePad
+		if x > w-edgeMargin {
+			x = w - edgeMargin
+		}
+		fieldTop := int(float64(h) * 0.22)
+		fieldBottom := int(float64(h) * 0.58)
+		y1 := clamp(zone.BBox.Min.Y+45, fieldTop, fieldBottom)
+		y2 := clamp(zone.BBox.Max.Y-45, fieldTop, fieldBottom)
+		if y2-y1 < int(float64(h)*0.12) {
+			mid := (fieldTop + fieldBottom) / 2
+			half := int(float64(h) * 0.10)
+			y1, y2 = mid-half, mid+half
+		}
+		p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
+
+	case "top":
+		y := zone.BBox.Min.Y - outsidePad
+		if y < edgeMargin {
+			y = edgeMargin
+		}
+		x1 := clamp(zone.BBox.Min.X+35, edgeMargin, w-edgeMargin)
+		x2 := clamp(zone.BBox.Max.X-35, edgeMargin, w-edgeMargin)
+		p1, p2 = image.Pt(x1, y), image.Pt(x2, y)
+
+	default: // left
+		x := zone.BBox.Min.X - outsidePad
+		if x < edgeMargin {
+			x = edgeMargin
+		}
+		fieldTop := int(float64(h) * 0.22)
+		fieldBottom := int(float64(h) * 0.58)
+		y1 := clamp(zone.BBox.Min.Y+45, fieldTop, fieldBottom)
+		y2 := clamp(zone.BBox.Max.Y-45, fieldTop, fieldBottom)
+		if y2-y1 < int(float64(h)*0.12) {
+			mid := (fieldTop + fieldBottom) / 2
+			half := int(float64(h) * 0.10)
+			y1, y2 = mid-half, mid+half
+		}
+		p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
+	}
+
+	if !windowsDeployLineSafe(zone, w, h, uiCutoff, side, p1, p2) {
+		return "", image.Point{}, image.Point{}, 0, false
+	}
+	return side, p1, p2, freeSpace, true
+}
+
+// windowsDeployLineSafe is the final runtime guard before a Windows line may
+// be used for troop/hero/siege deployment. It rejects points outside the
+// capture, points inside the lower HUD, and any line that is not strictly on
+// the advertised outside side of the live red-zone bounding box.
+func windowsDeployLineSafe(zone RedZone, w, h, uiCutoff int, side string, p1, p2 image.Point) bool {
+	if !zone.Valid || w <= 0 || h <= 0 || uiCutoff <= 0 {
+		return false
+	}
+	for _, p := range []image.Point{p1, p2} {
+		if p.X < 0 || p.X >= w || p.Y < 0 || p.Y >= h || p.Y >= uiCutoff {
+			return false
+		}
+	}
+	switch side {
+	case "left":
+		return p1.X < zone.BBox.Min.X && p2.X < zone.BBox.Min.X
+	case "right":
+		return p1.X > zone.BBox.Max.X && p2.X > zone.BBox.Max.X
+	case "top":
+		return p1.Y < zone.BBox.Min.Y && p2.Y < zone.BBox.Min.Y
+	default:
+		return false
+	}
+}
+
+func windowsAnonymousOneShotCategory(category string) bool {
+	return category == "Siege" || category == "CC"
+}
+
+func windowsCategoryPriority(category string) int {
+	switch category {
+	case "Troop":
+		return 0
+	case "Hero":
+		return 1
+	case "Siege", "CC":
+		return 2
+	case "Spell":
+		return 3
+	default:
+		// Seasonal/event troop-like cards keep troop priority.
+		return 0
+	}
+}

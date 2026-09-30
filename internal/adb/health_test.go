@@ -28,6 +28,9 @@ func TestHealthCounters(t *testing.T) {
 	if h.AvgCaptureMs <= 0 {
 		t.Fatalf("avg_capture_ms=%f want >0", h.AvgCaptureMs)
 	}
+	if h.FastCaptureMs <= 0 {
+		t.Fatalf("fast_capture_ms=%f want >0", h.FastCaptureMs)
+	}
 }
 
 func TestClientHealthConcurrentSnapshots(t *testing.T) {
@@ -53,20 +56,85 @@ func TestClientHealthConcurrentSnapshots(t *testing.T) {
 	}
 }
 
+func TestHealthFastCaptureReactsFasterThanStableAverage(t *testing.T) {
+	var h Health
+	for i := 0; i < 10; i++ {
+		h.RecordSuccess(300 * time.Millisecond)
+	}
+	beforeAvg := h.AvgCaptureMs
+	beforeFast := h.FastCaptureMs
+
+	h.RecordSuccess(1500 * time.Millisecond)
+
+	if h.FastCaptureMs <= h.AvgCaptureMs {
+		t.Fatalf("fast EWMA=%f should react above stable average=%f", h.FastCaptureMs, h.AvgCaptureMs)
+	}
+	if h.FastCaptureMs-beforeFast <= h.AvgCaptureMs-beforeAvg {
+		t.Fatalf("fast EWMA did not react more strongly: fast delta=%f avg delta=%f",
+			h.FastCaptureMs-beforeFast, h.AvgCaptureMs-beforeAvg)
+	}
+}
+
+func TestHealthTapLatencyEWMA(t *testing.T) {
+	var h Health
+	h.RecordTap(200 * time.Millisecond)
+	h.RecordTap(100 * time.Millisecond)
+
+	if h.TapsTotal != 2 {
+		t.Fatalf("taps_total=%d want 2", h.TapsTotal)
+	}
+	if h.AvgTapMs <= 0 || h.FastTapMs <= 0 {
+		t.Fatalf("tap latency metrics must be >0: avg=%f fast=%f", h.AvgTapMs, h.FastTapMs)
+	}
+}
+
+func TestHealthFastTapReactsFasterThanStableAverage(t *testing.T) {
+	var h Health
+	for i := 0; i < 10; i++ {
+		h.RecordTap(80 * time.Millisecond)
+	}
+	beforeAvg := h.AvgTapMs
+	beforeFast := h.FastTapMs
+
+	h.RecordTap(400 * time.Millisecond)
+
+	if h.FastTapMs <= h.AvgTapMs {
+		t.Fatalf("fast tap EWMA=%f should react above stable avg=%f", h.FastTapMs, h.AvgTapMs)
+	}
+	if h.FastTapMs-beforeFast <= h.AvgTapMs-beforeAvg {
+		t.Fatalf("fast tap EWMA did not react more strongly: fast delta=%f avg delta=%f",
+			h.FastTapMs-beforeFast, h.AvgTapMs-beforeAvg)
+	}
+}
+
+func TestHealthTapRouteCounters(t *testing.T) {
+	var h Health
+	h.RecordTapRoute(true)
+	h.RecordTapRoute(false)
+	h.RecordTapRoute(false)
+
+	if h.PipeTapsTotal != 1 {
+		t.Fatalf("pipe_taps_total=%d want 1", h.PipeTapsTotal)
+	}
+	if h.LegacyTapsTotal != 2 {
+		t.Fatalf("legacy_taps_total=%d want 2", h.LegacyTapsTotal)
+	}
+}
+
 
 func TestCaptureGapForFailures(t *testing.T) {
-	base := 180 * time.Millisecond
+	base := 750 * time.Millisecond
 	cases := []struct {
 		fails int
 		want  time.Duration
 	}{
-		{fails: 0, want: 180 * time.Millisecond},
-		{fails: 1, want: 360 * time.Millisecond},
-		{fails: 2, want: 720 * time.Millisecond},
-		{fails: 3, want: 1440 * time.Millisecond},
-		{fails: 4, want: 1440 * time.Millisecond},
-		{fails: 20, want: 1440 * time.Millisecond},
-		{fails: -1, want: 180 * time.Millisecond},
+		{fails: 0, want: 750 * time.Millisecond},
+		{fails: 1, want: 1500 * time.Millisecond},
+		{fails: 2, want: 3 * time.Second},
+		{fails: 3, want: 6 * time.Second},
+		{fails: 4, want: 6 * time.Second},
+		{fails: 20, want: 6 * time.Second},
+		{fails: -1, want: 750 * time.Millisecond},
 	}
 	for _, tc := range cases {
 		if got := captureGapForFailures(base, tc.fails); got != tc.want {

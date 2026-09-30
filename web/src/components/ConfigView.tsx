@@ -21,16 +21,49 @@ interface ConfigViewProps {
   setLootExitEnabled: (v: boolean) => void;
   lootExitPercent: number;
   setLootExitPercent: (v: number) => void;
+  endAtStars: number;
+  setEndAtStars: (v: number) => void;
+  autoCollectors: boolean;
+  setAutoCollectors: (v: boolean) => void;
+  collectorMinutes: number;
+  setCollectorMinutes: (v: number) => void;
+  privacyMaskUsername: boolean;
+  setPrivacyMaskUsername: (v: boolean) => void;
+  saveAcceptedBases: boolean;
+  setSaveAcceptedBases: (v: boolean) => void;
+  dryRun: boolean;
+  setDryRun: (v: boolean) => void;
+  maxRunMinutes: number;
+  setMaxRunMinutes: (v: number) => void;
+  emergencyStopHotkey: string;
+  setEmergencyStopHotkey: (v: string) => void;
+  saveNearMissBases: boolean;
+  setSaveNearMissBases: (v: boolean) => void;
+  nearMissSampleEvery: number;
+  setNearMissSampleEvery: (v: number) => void;
+  nearMissWithinPercent: number;
+  setNearMissWithinPercent: (v: number) => void;
   simpleMode: boolean;
+  testSessionActive?: boolean;
+  automationActive?: boolean;
   onSetSimpleMode: (enabled: boolean) => Promise<void>;
   // Returns the underlying SaveConfig promise so ConfigView can own
   // the save-status indicator (green flash / red flash + inline
-  // "Saved!" / "Save failed" pill) and surface success or failure to
+  // "Enregistré!" / "Save failed" pill) and surface success or failure to
   // the user. Errors thrown by Wails are intentionally surfaced.
   onSave: () => Promise<void>;
 }
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
+const friendlyAutomationError = (value: unknown): string => {
+  const raw = value instanceof Error ? value.message : String(value || '');
+  const text = raw.toLowerCase();
+  if (text.includes('session test active')) {
+    return 'Une session test est en cours. Attends sa fin ou arrête-la avant de modifier l’automatisation.';
+  }
+  return raw || 'Impossible d’enregistrer les réglages.';
+};
 
 // Range bounds for the numeric fields. Out-of-range values get a red
 // ring + aria-invalid so the user sees the problem before saving.
@@ -50,13 +83,38 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   stallTimer, setStallTimer,
   lootExitEnabled, setLootExitEnabled,
   lootExitPercent, setLootExitPercent,
+  endAtStars, setEndAtStars,
+  autoCollectors, setAutoCollectors,
+  collectorMinutes, setCollectorMinutes,
+  privacyMaskUsername, setPrivacyMaskUsername,
+  saveAcceptedBases, setSaveAcceptedBases,
+  dryRun, setDryRun,
+  maxRunMinutes, setMaxRunMinutes,
+  emergencyStopHotkey, setEmergencyStopHotkey,
+  saveNearMissBases, setSaveNearMissBases,
+  nearMissSampleEvery, setNearMissSampleEvery,
+  nearMissWithinPercent, setNearMissWithinPercent,
   simpleMode,
+  testSessionActive = false,
+  automationActive = false,
   onSetSimpleMode,
   onSave
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
   const [saveStatus, setSaveStatus] = React.useState<SaveStatus>('idle');
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
+  const [advancedPage, setAdvancedPage] = React.useState<'search' | 'army' | 'behavior'>(() => {
+    try {
+      const saved = localStorage.getItem('clashgo_automation_page');
+      return saved === 'army' || saved === 'behavior' ? saved : 'search';
+    } catch {
+      return 'search';
+    }
+  });
+
+  React.useEffect(() => {
+    try { localStorage.setItem('clashgo_automation_page', advancedPage); } catch {}
+  }, [advancedPage]);
   const [simpleModeBusy, setSimpleModeBusy] = React.useState(false);
   const [lastSaveError, setLastSaveError] = React.useState<string | null>(null);
   const dropdownRef = React.useRef<HTMLDivElement>(null);
@@ -84,7 +142,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   // swallowed by App.tsx.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (saveStatus === 'saving') return;
+    if (saveStatus === 'saving' || testSessionActive || automationActive) return;
     if (savedTimerRef.current) { window.clearTimeout(savedTimerRef.current); savedTimerRef.current = null; }
     if (errorTimerRef.current) { window.clearTimeout(errorTimerRef.current); errorTimerRef.current = null; }
     setSaveStatus('saving');
@@ -98,7 +156,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
       }, 1800);
     } catch (err) {
       setSaveStatus('error');
-      setLastSaveError(err instanceof Error ? err.message : String(err));
+      setLastSaveError(friendlyAutomationError(err));
       errorTimerRef.current = window.setTimeout(() => {
         setSaveStatus('idle');
         setLastSaveError(null);
@@ -128,27 +186,69 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
 
   const saveButtonLabel =
     saveStatus === 'saving'
-      ? 'Saving…'
+      ? 'Enregistrement…'
       : saveStatus === 'saved'
-        ? 'Saved'
+        ? 'Enregistré'
         : saveStatus === 'error'
-          ? 'Failed'
-          : 'Save Settings';
+          ? 'Échec'
+          : 'Enregistrer';
 
   const thresholdItems = [
-    { label: 'Min Gold', value: goldThreshold, setter: setGoldThreshold, icon: 'monetization_on', color: 'text-amber-500', bg: 'bg-amber-500/10' },
-    { label: 'Min Elixir', value: elixirThreshold, setter: setElixirThreshold, icon: 'water_drop', color: 'text-fuchsia-500', bg: 'bg-fuchsia-500/10' },
-    { label: 'Min Dark Elixir', value: deThreshold, setter: setDeThreshold, icon: 'water_drop', color: 'text-zinc-950 dark:text-zinc-100', bg: 'bg-zinc-100 dark:bg-zinc-800' },
+    { label: 'Or minimum', value: goldThreshold, setter: setGoldThreshold, icon: 'monetization_on', color: 'text-amber-500', bg: 'bg-amber-500/10' },
+    { label: 'Élixir minimum', value: elixirThreshold, setter: setElixirThreshold, icon: 'water_drop', color: 'text-fuchsia-500', bg: 'bg-fuchsia-500/10' },
+    { label: 'Élixir noir minimum', value: deThreshold, setter: setDeThreshold, icon: 'water_drop', color: 'text-zinc-950 dark:text-zinc-100', bg: 'bg-zinc-100 dark:bg-zinc-800' },
   ];
 
   const stallInvalid = invalid(stallTimer, STALL_MAX);
   const lootExitInvalid = invalid(lootExitPercent, 100);
-  const anyInvalid = stallInvalid || lootExitInvalid || thresholdItems.some((t) => invalid(t.value, THRESHOLD_MAX));
+  const starExitInvalid = !Number.isFinite(endAtStars) || endAtStars < 0 || endAtStars > 3;
+  const collectorInvalid = !Number.isFinite(collectorMinutes) || collectorMinutes < 1 || collectorMinutes > 1440;
+  const maxRunInvalid = !Number.isFinite(maxRunMinutes) || maxRunMinutes < 0 || maxRunMinutes > 10080;
+  const nearMissEveryInvalid = !Number.isFinite(nearMissSampleEvery) || nearMissSampleEvery < 1 || nearMissSampleEvery > 1000;
+  const nearMissWindowInvalid = !Number.isFinite(nearMissWithinPercent) || nearMissWithinPercent < 1 || nearMissWithinPercent > 50;
+  const hotkeyInvalid = !['ctrl+shift+end', 'end', 'off'].includes(String(emergencyStopHotkey || '').toLowerCase());
+  const anyInvalid = stallInvalid || lootExitInvalid || starExitInvalid || collectorInvalid || maxRunInvalid ||
+    nearMissEveryInvalid || nearMissWindowInvalid || hotkeyInvalid ||
+    thresholdItems.some((t) => invalid(t.value, THRESHOLD_MAX));
+
+  const settingsLocked = testSessionActive || automationActive;
 
   return (
     <div className="max-w-4xl mx-auto">
 
-      <form onSubmit={handleSubmit} className="space-y-8">
+      {automationActive && !testSessionActive && (
+        <div className="mb-5 rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 px-4 py-3">
+          <div className="flex items-start gap-3">
+            <span className="material-symbols-outlined text-amber-500">lock</span>
+            <div>
+              <div className="text-xs font-black text-amber-700 dark:text-amber-300">Session active · réglages critiques verrouillés</div>
+              <div className="mt-1 text-[11px] font-semibold leading-5 text-amber-700/80 dark:text-amber-300/80">
+                Arrête la session avant de modifier stratégie, seuils, armée ou comportement. Vitesse, pause, durée et objectif de butin restent réglables depuis Accueil.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {testSessionActive && (
+        <div className="mb-5 rounded-2xl border border-sky-200 dark:border-sky-900/50 bg-sky-50 dark:bg-sky-950/20 px-4 py-3">
+          <div className="flex items-start gap-3">
+            <span className="material-symbols-outlined text-sky-500">science</span>
+            <div>
+              <div className="text-xs font-black text-sky-700 dark:text-sky-300">Session test en cours</div>
+              <div className="mt-1 text-[11px] font-semibold leading-5 text-sky-700/80 dark:text-sky-300/80">
+                Les réglages d’automatisation sont temporairement verrouillés. ClashGO restaurera tes paramètres à la fin du test.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <form
+        onSubmit={handleSubmit}
+        className={'space-y-8 transition-opacity ' + (settingsLocked ? 'opacity-55 pointer-events-none select-none' : '')}
+        aria-disabled={settingsLocked}
+      >
         <section className="bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
             <div className="max-w-2xl">
@@ -157,14 +257,14 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                   <span className="material-symbols-outlined">auto_awesome</span>
                 </div>
                 <div>
-                  <h3 className="text-2xl font-black text-zinc-950 dark:text-white tracking-tight">Automatic Setup</h3>
+                  <h3 className="text-2xl font-black text-zinc-950 dark:text-white tracking-tight">Configuration automatique</h3>
                   <p className="text-sm text-zinc-500 font-medium mt-1">
-                    Recommended. ClashGO uses your linked account, HDV and live game state to choose the farm profile and keep resource tracking active automatically.
+                    Recommandé. ClashGO utilise ton compte lié, ton HDV et l’état du jeu pour choisir automatiquement le profil de farm et suivre les ressources.
                   </p>
                 </div>
               </div>
               <div className="mt-5 flex flex-wrap gap-2">
-                {['Account → HDV', 'Auto farm profile', 'Army guard', 'Resource tracking', 'Auto profile sync'].map((label) => (
+                {['Compte → HDV', 'Profil farm auto', 'Contrôle armée', 'Suivi ressources', 'Synchro profil'].map((label) => (
                   <span key={label} className="px-3 py-2 rounded-xl bg-zinc-50 dark:bg-zinc-800 text-[10px] font-black uppercase tracking-wider text-zinc-500">
                     {label}
                   </span>
@@ -174,7 +274,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
 
             <button
               type="button"
-              disabled={simpleModeBusy}
+              disabled={simpleModeBusy || settingsLocked}
               onClick={async () => {
                 if (simpleModeBusy) return;
                 setSimpleModeBusy(true);
@@ -190,37 +290,61 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                   : 'bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 border-transparent'
               }`}
             >
-              {simpleModeBusy ? 'Updating…' : simpleMode ? 'Automatic ✓' : 'Enable Automatic'}
+              {simpleModeBusy ? 'Mise à jour…' : simpleMode ? 'Automatique ✓' : 'Activer l’automatique'}
             </button>
           </div>
 
           <div className="mt-6 pt-5 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-4">
             <div>
-              <div className="text-sm font-black text-zinc-900 dark:text-white">Advanced controls</div>
-              <div className="text-xs text-zinc-500 mt-1">Only open these if you want to override the automatic behavior.</div>
+              <div className="text-sm font-black text-zinc-900 dark:text-white">Réglages avancés</div>
+              <div className="text-xs text-zinc-500 mt-1">Ouvre-les uniquement si tu veux personnaliser le comportement automatique.</div>
             </div>
             <button
               type="button"
               onClick={() => setAdvancedOpen(v => !v)}
               className="px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 text-xs font-black text-zinc-600 dark:text-zinc-300"
             >
-              {advancedOpen ? 'Hide advanced' : 'Show advanced'}
+              {advancedOpen ? 'Masquer' : 'Afficher'}
             </button>
           </div>
         </section>
 
         {(!simpleMode || advancedOpen) && (
           <>
+            <div className="flex flex-wrap gap-2 rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-2 shadow-premium dark:shadow-none">
+              {([
+                ['search', 'Recherche', 'travel_explore'],
+                ['army', 'Armée', 'groups'],
+                ['behavior', 'Comportement', 'tune'],
+              ] as const).map(([id, label, icon]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setAdvancedPage(id)}
+                  className={
+                    'flex items-center gap-2 rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] transition ' +
+                    (advancedPage === id
+                      ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950'
+                      : 'text-zinc-500 hover:bg-zinc-50 hover:text-zinc-950 dark:hover:bg-zinc-800 dark:hover:text-white')
+                  }
+                >
+                  <span className="material-symbols-outlined text-base">{icon}</span>
+                  {label}
+                </button>
+              ))}
+            </div>
+
         {/* Resource Thresholds */}
+        {advancedPage === 'search' && (
         <div className="bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none space-y-10 transition-all duration-500">
           <div className="flex justify-between items-start">
             <div>
-              <h3 className="text-2xl font-bold text-zinc-950 dark:text-white mb-2 tracking-tight">Search Settings</h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-500 font-medium">Minimum loot requirements for engagement.</p>
+              <h3 className="text-2xl font-bold text-zinc-950 dark:text-white mb-2 tracking-tight">Recherche de villages</h3>
+              <p className="text-sm text-zinc-500 dark:text-zinc-500 font-medium">Seuils minimums de butin pour accepter un village.</p>
             </div>
             {!searchEnabled && (
               <div className="px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-[0.2em] whitespace-nowrap">
-                Disabled
+                Désactivé
               </div>
             )}
           </div>
@@ -272,10 +396,10 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                   <div className="w-8 h-8 rounded-xl bg-zinc-50 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 dark:text-zinc-500 border border-zinc-100/10">
                     <span className="material-symbols-outlined text-base">precision_manufacturing</span>
                   </div>
-                  Attack Strategy
+                  Stratégie d’attaque
                 </label>
                 <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-600 uppercase tracking-widest tabular-nums">
-                  {(strategies ?? []).length} available
+                  {(strategies ?? []).length} disponible(s)
                 </span>
               </div>
               <div className="relative" ref={dropdownRef}>
@@ -298,7 +422,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                   className={`w-full bg-zinc-50/50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 rounded-2xl py-4 px-6 text-base font-bold text-zinc-900 dark:text-white cursor-pointer flex justify-between items-center transition-all ${isOpen ? 'ring-4 ring-zinc-950/5 dark:ring-white/5 border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900' : 'hover:bg-white dark:hover:bg-zinc-900'} ${!searchEnabled ? 'opacity-30 cursor-not-allowed' : ''}`}
                 >
                   <span className="truncate">
-                    {selectedStrategy ? selectedStrategy.split('/').pop()?.replace('.yaml', '').replace('.csv', '') : 'Standard Protocol'}
+                    {selectedStrategy ? selectedStrategy.split('/').pop()?.replace('.yaml', '').replace('.csv', '') : 'Stratégie standard'}
                   </span>
                   <span className={`material-symbols-outlined text-zinc-500 transition-transform duration-500 ${isOpen ? 'rotate-180 text-zinc-950 dark:text-white' : ''}`}>
                     expand_more
@@ -331,7 +455,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                 <div className="w-8 h-8 rounded-xl bg-zinc-50 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 dark:text-zinc-500 border border-zinc-100/10">
                   <span className="material-symbols-outlined text-base">timer</span>
                 </div>
-                Stall Timer (Seconds)
+                Temps anti-blocage (secondes)
               </label>
               <div className="relative group">
                 <input
@@ -342,7 +466,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                   value={stallTimer}
                   onChange={e => setStallTimer(parseInt(e.target.value) || 0)}
                   aria-invalid={stallInvalid}
-                  placeholder="0 to disable"
+                  placeholder="0 pour désactiver"
                   className={`w-full bg-zinc-50/50 dark:bg-zinc-950/40 border rounded-2xl py-4 px-6 text-base font-bold text-zinc-900 dark:text-white focus:outline-none focus:ring-4 transition-all tabular-nums ${
                     stallInvalid
                       ? 'border-rose-400/60 focus:border-rose-500 focus:ring-rose-500/10'
@@ -358,10 +482,14 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
             </div>
           </div>
         </div>
+        )}
 
-        <FarmCompositionPanel />
+        {advancedPage === 'army' && (
+          <FarmCompositionPanel />
+        )}
 
         {/* Operational Toggles */}
+        {advancedPage === 'behavior' && (
         <div className="bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none space-y-8 transition-all duration-500">
           <button
             type="button"
@@ -371,8 +499,8 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
             className="w-full flex items-center justify-between group cursor-pointer text-left"
           >
             <div className="max-w-[80%]">
-              <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Enable Search</span>
-              <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">Automatically skip bases that don't meet loot requirements.</span>
+              <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Recherche automatique</span>
+              <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">Ignore automatiquement les villages qui ne respectent pas les seuils de butin.</span>
             </div>
             <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${searchEnabled ? 'bg-emerald-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
                <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${searchEnabled ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
@@ -390,9 +518,9 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
               className="w-full flex items-center justify-between group cursor-pointer text-left"
             >
               <div className="max-w-[80%]">
-                <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Exit by Loot Collected</span>
+                <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Quitter selon le butin récupéré</span>
                 <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">
-                  End the battle once the configured percentage of the starting available loot has been collected.
+                  Met fin au combat quand le pourcentage choisi du butin disponible au départ a été récupéré.
                 </span>
               </div>
               <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${lootExitEnabled ? 'bg-emerald-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
@@ -403,8 +531,8 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
             <div className={`rounded-2xl border p-5 transition-all ${lootExitEnabled ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-zinc-100 dark:border-zinc-800 opacity-45'}`}>
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <div className="text-[11px] font-black text-zinc-500 uppercase tracking-[0.2em]">Loot exit threshold</div>
-                  <div className="text-xs text-zinc-400 mt-1">0–100% of the base's starting available loot</div>
+                  <div className="text-[11px] font-black text-zinc-500 uppercase tracking-[0.2em]">Seuil de sortie par butin</div>
+                  <div className="text-xs text-zinc-400 mt-1">0–100 % du butin disponible au début du combat</div>
                 </div>
                 <div className="text-3xl font-black text-zinc-950 dark:text-white tabular-nums">{lootExitPercent}%</div>
               </div>
@@ -418,7 +546,7 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                 disabled={!lootExitEnabled}
                 onChange={(e) => setLootExitPercent(Number(e.target.value))}
                 className="w-full accent-emerald-500 disabled:cursor-not-allowed"
-                aria-label="Loot exit percentage"
+                aria-label="Pourcentage de sortie selon le butin"
               />
 
               <div className="mt-4 flex items-center gap-3">
@@ -438,10 +566,236 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
                 <span className="text-xs font-medium text-zinc-500">
                   {lootExitEnabled
                     ? lootExitPercent === 0
-                      ? 'Exit as soon as the battle monitor confirms the fight can be surrendered.'
-                      : `Exit after about ${lootExitPercent}% of the initial loot has been collected.`
-                    : 'Disabled — battle ends normally.'}
+                      ? 'Quitte dès que ClashGO confirme que le combat peut être abandonné.'
+                      : `Quitter après environ ${lootExitPercent} % du butin initial récupéré.`
+                    : 'Désactivé — le combat se termine normalement.'}
                 </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <div className="space-y-4">
+            <div>
+              <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Arrêt selon les étoiles</span>
+              <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">
+                Après déploiement complet, ClashGO peut quitter dès que le nombre d’étoiles choisi est confirmé.
+              </span>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              {[0, 1, 2, 3].map((stars) => (
+                <button
+                  key={stars}
+                  type="button"
+                  onClick={() => setEndAtStars(stars)}
+                  className={
+                    'rounded-2xl border px-3 py-3 text-sm font-black transition ' +
+                    (endAtStars === stars
+                      ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                      : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:border-zinc-300 dark:hover:border-zinc-700')
+                  }
+                >
+                  {stars === 0 ? 'Off' : stars + ' ★'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <div className="space-y-5">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoCollectors}
+              onClick={() => setAutoCollectors(!autoCollectors)}
+              className="w-full flex items-center justify-between group cursor-pointer text-left"
+            >
+              <div className="max-w-[80%]">
+                <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Collecteurs automatiques</span>
+                <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">
+                  Au village uniquement, détecte les bulles de ressources à haute confiance et effectue au maximum un clic par type.
+                </span>
+              </div>
+              <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${autoCollectors ? 'bg-emerald-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
+                <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${autoCollectors ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
+              </div>
+            </button>
+
+            <div className={`rounded-2xl border p-5 transition-all ${autoCollectors ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-zinc-100 dark:border-zinc-800 opacity-45'}`}>
+              <label className="block text-[11px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-3">Intervalle de collecte</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={1}
+                  max={1440}
+                  value={collectorMinutes}
+                  disabled={!autoCollectors}
+                  aria-invalid={collectorInvalid}
+                  onChange={(e) => setCollectorMinutes(Math.max(1, Math.min(1440, Number(e.target.value) || 1)))}
+                  className={`w-28 bg-white dark:bg-zinc-950 border rounded-xl py-2.5 px-3 text-sm font-black tabular-nums focus:outline-none focus:ring-4 transition-all ${collectorInvalid ? 'border-rose-400 focus:ring-rose-500/10' : 'border-zinc-200 dark:border-zinc-700 focus:ring-emerald-500/10'}`}
+                />
+                <span className="text-xs font-medium text-zinc-500">minutes entre deux passages au village.</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={saveAcceptedBases}
+            onClick={() => setSaveAcceptedBases(!saveAcceptedBases)}
+            className="w-full flex items-center justify-between group cursor-pointer text-left"
+          >
+            <div className="max-w-[80%]">
+              <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Capturer les villages acceptés</span>
+              <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">
+                Enregistre l’image exacte du village qui a passé les seuils, avant le premier déploiement.
+              </span>
+            </div>
+            <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${saveAcceptedBases ? 'bg-emerald-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
+              <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${saveAcceptedBases ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
+            </div>
+          </button>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={privacyMaskUsername}
+            onClick={() => setPrivacyMaskUsername(!privacyMaskUsername)}
+            className="w-full flex items-center justify-between group cursor-pointer text-left"
+          >
+            <div className="max-w-[80%]">
+              <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Masquer l’identité sur les captures</span>
+              <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">
+                Applique un flou fort à la zone d’identité avant d’écrire les captures de diagnostic et les villages acceptés sur le disque.
+              </span>
+            </div>
+            <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${privacyMaskUsername ? 'bg-emerald-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
+              <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${privacyMaskUsername ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
+            </div>
+          </button>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <div className="space-y-5">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={dryRun}
+              onClick={() => setDryRun(!dryRun)}
+              className="w-full flex items-center justify-between group cursor-pointer text-left"
+            >
+              <div className="max-w-[80%]">
+                <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Mode Dry Run / Shadow</span>
+                <span className="block text-sm text-zinc-500 font-medium">
+                  Analyse les villages acceptés et génère un aperçu de la zone et de la ligne de déploiement sans poser aucune troupe.
+                </span>
+              </div>
+              <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${dryRun ? 'bg-sky-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
+                <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${dryRun ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
+              </div>
+            </button>
+            {dryRun && (
+              <div className="rounded-2xl border border-sky-500/20 bg-sky-500/5 p-4 text-xs font-semibold text-sky-700 dark:text-sky-300">
+                Aucun déploiement n’est autorisé dans ce mode. Les aperçus sont enregistrés dans les diagnostics avec le masquage d’identité actif.
+              </div>
+            )}
+          </div>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-5">
+              <label className="block text-[11px] font-black text-zinc-500 uppercase tracking-[0.18em] mb-3">Durée maximale de session</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={0}
+                  max={10080}
+                  value={maxRunMinutes}
+                  aria-invalid={maxRunInvalid}
+                  onChange={(e) => setMaxRunMinutes(Math.max(0, Math.min(10080, Number(e.target.value) || 0)))}
+                  className={`w-28 bg-zinc-50 dark:bg-zinc-950 border rounded-xl py-2.5 px-3 text-sm font-black tabular-nums focus:outline-none focus:ring-4 ${maxRunInvalid ? 'border-rose-400 focus:ring-rose-500/10' : 'border-zinc-200 dark:border-zinc-700 focus:ring-emerald-500/10'}`}
+                />
+                <span className="text-xs text-zinc-500">{maxRunMinutes === 0 ? 'illimitée' : 'minutes'}</span>
+              </div>
+              <p className="mt-3 text-xs text-zinc-500">0 = aucune limite. ClashGO s’arrête proprement une fois la durée atteinte.</p>
+            </div>
+
+            <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-5">
+              <label className="block text-[11px] font-black text-zinc-500 uppercase tracking-[0.18em] mb-3">Arrêt d’urgence Windows</label>
+              <select
+                value={emergencyStopHotkey}
+                aria-invalid={hotkeyInvalid}
+                onChange={(e) => setEmergencyStopHotkey(e.target.value)}
+                className={`w-full bg-zinc-50 dark:bg-zinc-950 border rounded-xl py-2.5 px-3 text-sm font-black focus:outline-none focus:ring-4 ${hotkeyInvalid ? 'border-rose-400 focus:ring-rose-500/10' : 'border-zinc-200 dark:border-zinc-700 focus:ring-emerald-500/10'}`}
+              >
+                <option value="ctrl+shift+end">Ctrl + Shift + End (recommandé)</option>
+                <option value="end">End uniquement</option>
+                <option value="off">Désactivé</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <div className="space-y-5">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={saveNearMissBases}
+              onClick={() => setSaveNearMissBases(!saveNearMissBases)}
+              className="w-full flex items-center justify-between group cursor-pointer text-left"
+            >
+              <div className="max-w-[80%]">
+                <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Échantillonner les villages presque acceptés</span>
+                <span className="block text-sm text-zinc-500 font-medium">
+                  Conserve un petit échantillon de villages refusés proches des seuils afin de vérifier la qualité de la recherche sans remplir le disque.
+                </span>
+              </div>
+              <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${saveNearMissBases ? 'bg-emerald-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
+                <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${saveNearMissBases ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
+              </div>
+            </button>
+
+            <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 rounded-2xl border p-5 ${saveNearMissBases ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-zinc-100 dark:border-zinc-800 opacity-45'}`}>
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500 mb-2">1 capture tous les</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={1000}
+                    disabled={!saveNearMissBases}
+                    value={nearMissSampleEvery}
+                    aria-invalid={nearMissEveryInvalid}
+                    onChange={(e) => setNearMissSampleEvery(Math.max(1, Math.min(1000, Number(e.target.value) || 1)))}
+                    className="w-24 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2.5 text-sm font-black"
+                  />
+                  <span className="text-xs text-zinc-500">refus</span>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500 mb-2">Fenêtre proche du seuil</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    disabled={!saveNearMissBases}
+                    value={nearMissWithinPercent}
+                    aria-invalid={nearMissWindowInvalid}
+                    onChange={(e) => setNearMissWithinPercent(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+                    className="w-24 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2.5 text-sm font-black"
+                  />
+                  <span className="text-xs text-zinc-500">% sous le seuil</span>
+                </div>
               </div>
             </div>
           </div>
@@ -456,21 +810,21 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
             className="w-full flex items-center justify-between group cursor-pointer text-left"
           >
             <div className="max-w-[80%]">
-              <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Upgrade Walls</span>
-              <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">Automatically use spare gold to upgrade walls.</span>
+              <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Améliorer les murs</span>
+              <span className="block text-sm text-zinc-500 dark:text-zinc-500 font-medium">Utilise automatiquement l’or disponible pour améliorer les murs.</span>
             </div>
             <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${upgradeWalls ? 'bg-emerald-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
                <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${upgradeWalls ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
             </div>
           </button>
         </div>
+        )}
 
-
-        <div className="flex flex-col items-end gap-3 pt-4">
+        <div className="sticky bottom-4 z-20 flex flex-col items-end gap-3 rounded-2xl border border-zinc-200/70 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 p-3 backdrop-blur-xl shadow-premium">
           {anyInvalid && (
             <div className="px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] font-bold text-amber-600 dark:text-amber-400 tracking-wider" role="alert">
               <span className="material-symbols-outlined text-sm align-middle mr-1">warning</span>
-              Some values are out of range — fix them before saving.
+              Certaines valeurs sont hors limite. Corrige-les avant d’enregistrer.
             </div>
           )}
           {lastSaveError && saveStatus === 'error' && (
@@ -481,13 +835,13 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
               title={lastSaveError}
             >
               <span className="material-symbols-outlined text-sm align-middle mr-1">error</span>
-              Save failed: {lastSaveError.length > 80 ? lastSaveError.slice(0, 77) + '…' : lastSaveError}
+              Échec de l’enregistrement : {lastSaveError.length > 80 ? lastSaveError.slice(0, 77) + '…' : lastSaveError}
             </div>
           )}
           <button
             type="submit"
             disabled={saveStatus === 'saving' || anyInvalid}
-            aria-label={`${saveButtonLabel} — saves your config to the bot`}
+            aria-label={`${saveButtonLabel} — enregistre la configuration du bot`}
             data-testid="config-save-btn"
             data-save-state={saveStatus}
             className={`group h-16 px-12 font-black text-xs uppercase tracking-[0.3em] rounded-3xl transition-all duration-300 active:scale-[0.98] flex items-center gap-4 border border-transparent dark:border-white/10 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed ${saveButtonClasses}`}

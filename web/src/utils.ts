@@ -69,7 +69,15 @@ export const parseLogLine = (raw: string): ParsedLogLine => {
     try {
       const parsed = JSON.parse(cleaned);
       const level = LEVEL_MAP[String(parsed.level || '').toUpperCase()] ?? 'info';
-      const message = typeof parsed.message === 'string' ? parsed.message : cleaned;
+      const baseMessage = typeof parsed.message === 'string' ? parsed.message : cleaned;
+      const extra = Object.entries(parsed)
+        .filter(([key, value]) =>
+          key !== 'level' && key !== 'time' && key !== 'message' &&
+          value !== undefined && value !== null && value !== '' &&
+          typeof value !== 'object')
+        .map(([key, value]) => `${key}=${String(value)}`)
+        .join(' · ');
+      const message = extra ? `${baseMessage} · ${extra}` : baseMessage;
       return {
         timestamp: parsed.time ? String(parsed.time).slice(11, 19) : '',
         level: level === 'info' && SUCCESS_HINTS.test(message) ? 'success' : level,

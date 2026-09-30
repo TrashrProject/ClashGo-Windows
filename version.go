@@ -8,7 +8,7 @@ package main
 // the Wails build (//go:build !cli) AND the CLI build (//go:build cli) —
 // putting them in cli.go would otherwise hide them from the GUI.
 var (
-	version = "0.6.0-windows-beta"
+	version = "0.6.7-windows-beta"
 	// commit is read only by cli.go (//go:build cli); staticcheck flags it
 	// as unused in the GUI build — that is a build-tag false positive.
 	commit = "none"
@@ -16,4 +16,10 @@ var (
 	// therefore only enter their player tag; they never configure service
 	// URLs or developer credentials.
 	accountServiceURL = ""
+	// controlServiceURL is the public licensing/support API. It is kept
+	// separate from the Clash profile proxy so either service can move
+	// independently without breaking the other.
+	controlServiceURL = ""
+	// updateChannel is injected at build time ("stable" or "beta").
+	updateChannel = "stable"
 )

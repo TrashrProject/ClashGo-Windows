@@ -6,46 +6,52 @@ on:
       version:
         description: Build version
         required: true
-        default: 0.6.0-windows-beta
+        default: 0.6.7-windows-beta
   pull_request:
     branches:
       - main
+      - windows/core-port
     types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
 
 concurrency:
-  group: windows-core-port-build-${{ github.sha }}
-  cancel-in-progress: false
+  group: windows-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'windows/core-port'
+    # feature/intelligence-v2 already runs the full Windows Beta Release
+    # workflow on every push. Skipping this duplicate PR build avoids two
+    # Windows/OpenCV/Wails jobs competing for runners while keeping normal PR
+    # validation intact for every other branch.
+    if: ${{ github.event_name != 'pull_request' || github.head_ref != 'feature/intelligence-v2' }}
     runs-on: windows-latest
     env:
       BUILD_VERSION: ${{ github.event.inputs.version || '0.6.0-windows-beta' }}
       CLASHGO_ACCOUNT_API_URL: ${{ vars.CLASHGO_ACCOUNT_API_URL }}
+      CLASHGO_CONTROL_API_URL: ${{ vars.CLASHGO_CONTROL_API_URL }}
       CGO_CXXFLAGS: --std=c++11 -DNDEBUG
       CGO_CPPFLAGS: -IC:/opencv/build/install/include
       CGO_LDFLAGS: -LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -lopencv_imgproc4130 -lopencv_imgcodecs4130
       GOFLAGS: -tags=customenv,gocv_specific_modules
     timeout-minutes: 120
     steps:
-      - name: Checkout Windows branch
-        uses: actions/checkout@v4
+      - name: Checkout tested revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: windows/core-port
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'windows/core-port' || github.sha }}
           fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: '1.25.x'
           cache: true
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '20'
           cache: npm
@@ -65,16 +71,28 @@ jobs:
             }
           }
 
-      - name: Install MinGW and CMake
+      - name: Install MinGW CMake and NSIS
         shell: powershell
         run: |
           choco install mingw cmake nsis -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Chocolatey tool installation failed" }
+
+          $nsisDir = "${env:ProgramFiles(x86)}\NSIS"
+          if (Test-Path "$nsisDir\makensis.exe") {
+            $env:PATH = "$nsisDir;$env:PATH"
+            $nsisDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
           g++ --version
+          if ($LASTEXITCODE -ne 0) { throw "g++ is unavailable" }
           cmake --version
+          if ($LASTEXITCODE -ne 0) { throw "cmake is unavailable" }
+          & "$nsisDir\makensis.exe" /VERSION
+          if ($LASTEXITCODE -ne 0) { throw "makensis is unavailable" }
 
       - name: Restore cached OpenCV
         id: opencv-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: C:\opencv\build\install
           key: opencv-4.13.0-mingw-gocv043-clashgo-minimal-v1
@@ -96,7 +114,7 @@ jobs:
 
       - name: Save OpenCV cache immediately
         if: steps.opencv-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: C:\opencv\build\install
           key: opencv-4.13.0-mingw-gocv043-clashgo-minimal-v1
@@ -138,10 +156,10 @@ jobs:
 
       - name: Build portable Windows bundle
         shell: powershell
-        run: .\tools\build-windows.ps1 -Version "$env:BUILD_VERSION" -AccountServiceURL "$env:CLASHGO_ACCOUNT_API_URL" -SkipSync -SkipTests
+        run: .\tools\build-windows.ps1 -Version "$env:BUILD_VERSION" -AccountServiceURL "$env:CLASHGO_ACCOUNT_API_URL" -ControlServiceURL "$env:CLASHGO_CONTROL_API_URL" -SkipSync -SkipTests
 
       - name: Upload portable preview
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ClashGO-Windows-Portable-${{ env.BUILD_VERSION }}
           path: |
@@ -152,6 +170,13 @@ jobs:
       - name: Build NSIS installer
         shell: powershell
         run: .\tools\build-installer.ps1 -Version "$env:BUILD_VERSION"
+
+      - name: Authenticode sign build artifacts when certificate is configured
+        shell: powershell
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: .\tools\sign-windows-artifacts.ps1 -Version "$env:BUILD_VERSION"
 
       - name: Generate distribution checksums
         shell: powershell
@@ -168,7 +193,7 @@ jobs:
           $lines | Set-Content dist\SHA256SUMS.txt -Encoding ASCII
 
       - name: Upload Windows portable build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ClashGO-Windows-${{ env.BUILD_VERSION }}
           path: |

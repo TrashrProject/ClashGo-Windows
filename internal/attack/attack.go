@@ -30,14 +30,48 @@ type Executor struct {
 	client        *adb.Client
 	cal           *game.Calibration
 	cfg           *config.AttackConfig
+	armyGuardEnabled bool
 	logger        zerolog.Logger
 	classify      func(gocv.Mat) (game.GameState, int)
+	frameProvider func(time.Duration) (gocv.Mat, error)
+	armyInspectionPath string
 	tappedSiegeXs map[int]bool
 	templates     map[string]gocv.Mat
+	// Shared, session-owned loot recognizer. The Bot owns its lifecycle;
+	// Executor borrows it so battle monitoring does not reload TemplateStore
+	// and rebuild digit caches on every attack.
+	lootRecognizer *game.LootRecognizer
 	// activeStrategy mirrors the strategy being executed so the battle-end
 	// wait can honor per-strategy knobs (e.g. EndAtPercent). Nil when no
 	// dynamic deploy has run yet.
 	activeStrategy *strategy.DynamicStrategy
+	// lastResolvedEdge is the concrete corner after resolving Rotate/Random.
+	// lastDeploySide is the physical side actually used for troop drops; on
+	// Windows it may differ because red-zone safety always wins.
+	lastResolvedEdge string
+	lastDeploySide   string
+
+	// Passive deployment safety contract. These fields mirror checks that the
+	// Windows path already performs; they never alter tap coordinates or timing.
+	lastSafetyMode        string
+	lastRedZoneValid      bool
+	lastCorridorVerified  bool
+	lastHUDSafe           bool
+	lastRedZoneBBox       image.Rectangle
+	lastDeployP1          image.Point
+	lastDeployP2          image.Point
+	lastDeployFreeSpace   int
+
+	// Windows live-bar observability. These counters measure slot-rescan and
+	// selected-card OCR cost without changing deployment decisions.
+	lastLiveBarRescans        int
+	lastLiveBarRescanMicros   int64
+	lastSlotDetectMicros      int64
+	lastSlotClassifyMicros    int64
+	lastTemplatesTried        int
+	lastTemplatesMatched      int
+	lastSelectedCardOCRCount  int
+	lastSelectedCardOCRMicros int64
 
 	// lastDestructionPct is the highest destruction percentage the battle
 	// wait measured from the stall ROI (monotonic in practice). It is the
@@ -51,6 +85,16 @@ type Executor struct {
 	// observed in the optional stall_config th_banner_zone. False when the
 	// zone is unconfigured (TH state unknown).
 	thDestroyed bool
+	lastBattleEndReason string
+	lastBattleWaitMS int64
+	lastLootExitPercent int
+	lastStarExitTarget int
+	lastStarExitSeen int
+	lastStarExitConfirmations int
+	lastStarExitTriggered bool
+	lastStarExitElapsedMS int64
+	lastBattleLootOCRSamples int
+	lastBattleLootOCRMicros int64
 
 	// Initial loot snapshot for the currently selected enemy base. The battle
 	// wait compares live "Available Loot" against this baseline when the
@@ -71,10 +115,76 @@ type Executor struct {
 	// is only allowed after deployment has been verified complete.
 	earlyExitAllowed bool
 
+	// Intelligence V3 farm exit is a per-attack runtime policy. It reuses the
+	// passive live-loot samples already collected by the battle wait and never
+	// increases ADB screenshot cadence.
+	adaptiveFarmExitEnabled bool
+	adaptiveFarmExitPercent int
+	adaptiveFarmExitStall   time.Duration
+
+	OnPlanReady  func(duration time.Duration, edge string)
 	OnPhaseStart func(phase string, edge string)
 	OnUnitDeploy func(unit string, slotX int, slotY int)
 
 	OnDukePick func(targetEdge string, chosenEdge string)
+}
+
+// LastResolvedEdge returns the concrete strategy corner selected for the
+// current attack after resolving Random/Rotate.
+func (e *Executor) LastResolvedEdge() string { return e.lastResolvedEdge }
+
+// LastDeploySide returns the physical battlefield side actually used by the
+// deployment engine (left/right/top/bottom when known).
+func (e *Executor) LastDeploySide() string { return e.lastDeploySide }
+
+type DeploymentSafetySnapshot struct {
+	Mode             string `json:"mode"`
+	RedZoneValid     bool   `json:"red_zone_valid"`
+	CorridorVerified bool   `json:"corridor_verified"`
+	HUDSafe          bool   `json:"hud_safe"`
+	RedZoneX1        int    `json:"red_zone_x1"`
+	RedZoneY1        int    `json:"red_zone_y1"`
+	RedZoneX2        int    `json:"red_zone_x2"`
+	RedZoneY2        int    `json:"red_zone_y2"`
+	DeployX1         int    `json:"deploy_x1"`
+	DeployY1         int    `json:"deploy_y1"`
+	DeployX2         int    `json:"deploy_x2"`
+	DeployY2         int    `json:"deploy_y2"`
+	FreeSpace        int    `json:"free_space"`
+}
+
+func (e *Executor) DeploymentSafety() DeploymentSafetySnapshot {
+	return DeploymentSafetySnapshot{
+		Mode:             e.lastSafetyMode,
+		RedZoneValid:     e.lastRedZoneValid,
+		CorridorVerified: e.lastCorridorVerified,
+		HUDSafe:          e.lastHUDSafe,
+		RedZoneX1:        e.lastRedZoneBBox.Min.X,
+		RedZoneY1:        e.lastRedZoneBBox.Min.Y,
+		RedZoneX2:        e.lastRedZoneBBox.Max.X,
+		RedZoneY2:        e.lastRedZoneBBox.Max.Y,
+		DeployX1:         e.lastDeployP1.X,
+		DeployY1:         e.lastDeployP1.Y,
+		DeployX2:         e.lastDeployP2.X,
+		DeployY2:         e.lastDeployP2.Y,
+		FreeSpace:        e.lastDeployFreeSpace,
+	}
+}
+
+func (e *Executor) LiveBarMetrics() (rescans int, avgRescanMS, avgDetectMS, avgClassifyMS float64, templatesTried, templatesMatched int, avgSelectedOCRMS float64) {
+	rescans = e.lastLiveBarRescans
+	if e.lastLiveBarRescans > 0 {
+		n := float64(e.lastLiveBarRescans)
+		avgRescanMS = float64(e.lastLiveBarRescanMicros) / n / 1000.0
+		avgDetectMS = float64(e.lastSlotDetectMicros) / n / 1000.0
+		avgClassifyMS = float64(e.lastSlotClassifyMicros) / n / 1000.0
+	}
+	templatesTried = e.lastTemplatesTried
+	templatesMatched = e.lastTemplatesMatched
+	if e.lastSelectedCardOCRCount > 0 {
+		avgSelectedOCRMS = float64(e.lastSelectedCardOCRMicros) / float64(e.lastSelectedCardOCRCount) / 1000.0
+	}
+	return rescans, avgRescanMS, avgDetectMS, avgClassifyMS, templatesTried, templatesMatched, avgSelectedOCRMS
 }
 
 // LastDestructionPercent returns the highest destruction percentage the
@@ -90,8 +200,95 @@ func (e *Executor) ThDestroyed() bool {
 	return e.thDestroyed
 }
 
+func (e *Executor) LastBattleEndReason() string {
+	if e.lastBattleEndReason == "" {
+		return "unknown"
+	}
+	return e.lastBattleEndReason
+}
+
+func (e *Executor) BattleExitMetrics() (waitMS int64, lootExitPercent int) {
+	return e.lastBattleWaitMS, e.lastLootExitPercent
+}
+
+type StarExitMetrics struct {
+	Target        int   `json:"target"`
+	Seen          int   `json:"seen"`
+	Confirmations int   `json:"confirmations"`
+	Triggered     bool  `json:"triggered"`
+	ElapsedMS     int64 `json:"elapsed_ms"`
+}
+
+func (e *Executor) StarExitMetrics() StarExitMetrics {
+	return StarExitMetrics{
+		Target: e.lastStarExitTarget,
+		Seen: e.lastStarExitSeen,
+		Confirmations: e.lastStarExitConfirmations,
+		Triggered: e.lastStarExitTriggered,
+		ElapsedMS: e.lastStarExitElapsedMS,
+	}
+}
+
+func (e *Executor) BattleLootOCRMetrics() (samples int, avgMS float64) {
+	samples = e.lastBattleLootOCRSamples
+	if samples > 0 {
+		avgMS = float64(e.lastBattleLootOCRMicros) / float64(samples) / 1000.0
+	}
+	return samples, avgMS
+}
+
 func (e *Executor) SetEarlyExitAllowed(allowed bool) {
 	e.earlyExitAllowed = allowed
+}
+
+func (e *Executor) SetAdaptiveFarmExit(enabled bool, minLootPercent int, stall time.Duration) {
+	if minLootPercent < 0 {
+		minLootPercent = 0
+	}
+	if minLootPercent > 100 {
+		minLootPercent = 100
+	}
+	if stall < 5*time.Second {
+		stall = 5 * time.Second
+	}
+	if stall > 30*time.Second {
+		stall = 30 * time.Second
+	}
+	e.adaptiveFarmExitEnabled = enabled
+	e.adaptiveFarmExitPercent = minLootPercent
+	e.adaptiveFarmExitStall = stall
+}
+
+func weightedFarmLootUnits(gold, elixir, dark int) int64 {
+	clamp := func(v int) int64 {
+		if v < 0 {
+			return 0
+		}
+		return int64(v)
+	}
+	return clamp(gold) + clamp(elixir) + clamp(dark)*100
+}
+
+func adaptiveFarmLootPercent(initialGold, initialElixir, initialDE, remainingGold, remainingElixir, remainingDE int) int {
+	initial := weightedFarmLootUnits(initialGold, initialElixir, initialDE)
+	if initial <= 0 {
+		return 0
+	}
+	remaining := weightedFarmLootUnits(remainingGold, remainingElixir, remainingDE)
+	if remaining < 0 {
+		remaining = 0
+	}
+	if remaining > initial {
+		remaining = initial
+	}
+	pct := int(math.Round((1 - float64(remaining)/float64(initial)) * 100))
+	if pct < 0 {
+		return 0
+	}
+	if pct > 100 {
+		return 100
+	}
+	return pct
 }
 
 // SetInitialLoot stores the pre-attack Available Loot snapshot used by the
@@ -256,10 +453,66 @@ func (e *Executor) loadTemplates() {
 		e.templates[name] = mat
 		e.logger.Debug().Str("name", name).Msg("cached attack template")
 	}
+
+	// Warm the exact multi-scale cache used by the Windows live-bar classifier.
+	// This shifts resize/allocation work to startup so the first real attack has
+	// the same hot-cache behavior as later attacks.
+	warmStarted := time.Now()
+	for name, mat := range e.templates {
+		if mat.Empty() {
+			continue
+		}
+		_ = vision.GetScaledTemplates(name, mat, 0.2, 1.2, 20)
+	}
+	e.logger.Debug().
+		Int("templates", len(e.templates)).
+		Dur("duration", time.Since(warmStarted)).
+		Msg("prewarmed attack template scale cache")
+}
+
+// Close releases native OpenCV templates owned by the attack executor.
+// The method is idempotent and must only run after the active attack sequence
+// has stopped using the executor.
+func (e *Executor) Close() {
+	if e == nil {
+		return
+	}
+	for name, mat := range e.templates {
+		if !mat.Closed() {
+			mat.Close()
+		}
+		delete(e.templates, name)
+	}
 }
 
 func (e *Executor) SetClassifier(fn func(gocv.Mat) (game.GameState, int)) {
 	e.classify = fn
+}
+
+// SetFrameProvider routes runtime screenshots through the bot's single-owner
+// FrameBroker. Tests/standalone tools may leave it nil and use direct capture.
+func (e *Executor) SetFrameProvider(fn func(time.Duration) (gocv.Mat, error)) {
+	e.frameProvider = fn
+}
+
+func (e *Executor) SetArmyInspectionPath(path string) {
+	if e == nil {
+		return
+	}
+	e.armyInspectionPath = strings.TrimSpace(path)
+}
+
+func (e *Executor) captureFrame(timeout time.Duration) (gocv.Mat, error) {
+	if e.frameProvider != nil {
+		return e.frameProvider(timeout)
+	}
+	return e.client.CaptureToMat()
+}
+
+// SetLootRecognizer injects the Bot's session-owned recognizer. Executor does
+// not own or close it; Bot.Stop remains the single lifecycle owner.
+func (e *Executor) SetLootRecognizer(lr *game.LootRecognizer) {
+	e.lootRecognizer = lr
 }
 
 // SetActiveStrategy records the strategy being executed so battle-end
@@ -270,6 +523,60 @@ func (e *Executor) SetActiveStrategy(s *strategy.DynamicStrategy) {
 
 func (e *Executor) UpdateConfig(cfg *config.AttackConfig) {
 	e.cfg = cfg
+}
+
+func (e *Executor) SetArmyGuardEnabled(enabled bool) {
+	e.armyGuardEnabled = enabled
+}
+
+// InspectArmyGuard performs a read-only pre-deploy inspection of the live
+// battle bar. It never taps the screen. A proven mismatch can therefore be
+// treated by the search loop exactly like any other rejected target and moved
+// past with the already-verified Next flow.
+func (e *Executor) InspectArmyGuard(screen gocv.Mat) (ArmyInspectionSnapshot, error) {
+	snapshot := ArmyInspectionSnapshot{Timestamp: time.Now(), Ready: true}
+	if !e.armyGuardEnabled {
+		return snapshot, nil
+	}
+	if e.cfg == nil {
+		return snapshot, fmt.Errorf("army guard: attack config unavailable")
+	}
+	profile, ok := e.cfg.Farm.ActiveProfile()
+	if !ok {
+		return snapshot, nil
+	}
+	if screen.Empty() || screen.Cols() < 2 || screen.Rows() < 2 {
+		return snapshot, fmt.Errorf("army guard: battle frame unavailable")
+	}
+
+	var pCfg PrecisionConfig
+	pData, ok := readConfigJSON("precision_config.json")
+	if !ok || json.Unmarshal(pData, &pCfg) != nil || pCfg.Width <= 0 || pCfg.Height <= 0 {
+		return snapshot, fmt.Errorf("army guard: precision config unavailable")
+	}
+
+	w, h := screen.Cols(), screen.Rows()
+	mBarY := int(float64(h) * 0.78)
+	if pCfg.BarY > 0 {
+		mBarY = int(float64(pCfg.BarY) * float64(h) / float64(pCfg.Height))
+	}
+	if mBarY > int(float64(h)*0.92) {
+		mBarY = int(float64(h) * 0.92)
+	}
+
+	slotMgr := NewSlotManager(screen, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+	slots := slotMgr.GetAllSlots()
+	if len(slots) == 0 {
+		return snapshot, fmt.Errorf("army guard: no active troop slots detected")
+	}
+
+	counter := NewTroopCounter(pCfg.Width, pCfg.Height, e.logger)
+	defer counter.Close()
+	counts := counter.DetectCounts(screen, slots, slotMgr.GetBarY())
+
+	snapshot = buildArmyInspection(slots, counts, &profile)
+	e.persistArmyInspectionSnapshot(snapshot)
+	return snapshot, nil
 }
 
 // Validate ensures all required templates for the strategy exist or are covered by manual labels
@@ -421,7 +728,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 		}
 	}
 
-	e.logger.Info().Msg("🤖 Pinpointing slot identities dynamically via template matching...")
+	e.logger.Debug().Msg("🤖 Pinpointing slot identities dynamically via template matching...")
 	for tplName, tpl := range e.templates {
 		if tpl.Empty() {
 			continue
@@ -431,7 +738,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 			sort.Slice(matches, func(i, j int) bool { return matches[i].Confidence > matches[j].Confidence })
 			bestMatch := matches[0]
 			cleanName := strings.ReplaceAll(tplName, "_", " ")
-			e.logger.Info().Str("unit", cleanName).Int("x", bestMatch.Point.X).Float64("conf", bestMatch.Confidence).Msg("pinpointed unit via template match")
+			e.logger.Debug().Str("unit", cleanName).Int("x", bestMatch.Point.X).Float64("conf", bestMatch.Confidence).Msg("pinpointed unit via template match")
 
 			unitCache[cleanName] = &bestMatch
 		}
@@ -527,7 +834,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 		gocv.PutText(&debugImg, slot.Category, image.Pt(slot.X-15, slot.Y-25), gocv.FontHersheySimplex, 0.4, c, 1)
 	}
 	gocv.IMWrite(paths.ResolveConfig("attack_deploy_debug.png"), debugImg)
-	e.logger.Info().Msg("saved visual diagnostics to attack_deploy_debug.png")
+	e.logger.Debug().Msg("saved visual diagnostics to attack_deploy_debug.png")
 
 	for name, match := range unitCache {
 		category := "Troop"
@@ -550,7 +857,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 	}
 
 	for _, phase := range s.Phases {
-		e.logger.Info().Str("phase", phase.Name).Msg("attack phase")
+		e.logger.Debug().Str("phase", phase.Name).Msg("attack phase")
 		if e.OnPhaseStart != nil {
 			e.OnPhaseStart(phase.Name, targetEdge)
 		}
@@ -598,7 +905,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 
 		if lastBar.Closed() || lastBar.Empty() {
 			var err error
-			lastBar, err = e.client.CaptureToMat()
+			lastBar, err = e.captureFrame(2 * time.Second)
 			if err != nil {
 				e.logger.Warn().Err(err).Msg("failed initial phase capture")
 				continue
@@ -623,11 +930,11 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 			if match == nil && isSiege {
 				if m, ok := unitCache["siege machine"]; ok {
 					match = m
-					e.logger.Info().Str("unit", unit.Name).Interface("pos", m.Point).Msg("mapped to manual 'siege machine' slot")
+					e.logger.Debug().Str("unit", unit.Name).Interface("pos", m.Point).Msg("mapped to manual 'siege machine' slot")
 				}
 			}
 			if match != nil {
-				e.logger.Info().Str("unit", unit.Name).Interface("pos", match.Point).Msg("using manual label coordinates from cache")
+				e.logger.Debug().Str("unit", unit.Name).Interface("pos", match.Point).Msg("using manual label coordinates from cache")
 			}
 
 			if match == nil {
@@ -636,7 +943,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 				if ok && !tpl.Empty() {
 					if lastBar.Closed() || lastBar.Empty() {
 						var err error
-						lastBar, err = e.client.CaptureToMat()
+						lastBar, err = e.captureFrame(2 * time.Second)
 						if err != nil {
 							e.logger.Warn().Err(err).Msg("failed capture")
 							continue
@@ -682,7 +989,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 								shiftY := int(-16.0 * e.cal.ScaleY)
 								match.Point.X += shiftX
 								match.Point.Y += shiftY
-								e.logger.Info().Int("orig_x", match.Point.X-shiftX).Int("orig_y", match.Point.Y-shiftY).
+								e.logger.Debug().Int("orig_x", match.Point.X-shiftX).Int("orig_y", match.Point.Y-shiftY).
 									Int("new_x", match.Point.X).Int("new_y", match.Point.Y).Msg("shifted grand warden click target upward/leftward")
 							}
 							break
@@ -711,7 +1018,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 						Point:      targetPt,
 						Confidence: 1.0,
 					}
-					e.logger.Info().Str("unit", unit.Name).Str("category", category).Interface("pos", targetPt).Msg("layout parser fallback mapping")
+					e.logger.Debug().Str("unit", unit.Name).Str("category", category).Interface("pos", targetPt).Msg("layout parser fallback mapping")
 				}
 			} else if match != nil {
 
@@ -810,10 +1117,10 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 			}
 
 			if len(deployedHeroSlots) > 0 {
-				e.logger.Info().Int("count", len(deployedHeroSlots)).Msg("bulk activating hero abilities...")
+				e.logger.Debug().Int("count", len(deployedHeroSlots)).Msg("bulk activating hero abilities...")
 				time.Sleep(80 * time.Millisecond)
 				for _, pt := range deployedHeroSlots {
-					e.logger.Info().Int("x", pt.X).Int("y", pt.Y).Msg("tapping hero icon for ability (bulk)")
+					e.logger.Debug().Int("x", pt.X).Int("y", pt.Y).Msg("tapping hero icon for ability (bulk)")
 					e.client.TapFast(pt.X, pt.Y, 2.0)
 					time.Sleep(80 * time.Millisecond)
 				}
@@ -832,18 +1139,18 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 		}
 	}
 
-	sweepScreen, err := e.client.CaptureToMat()
+	sweepScreen, err := e.captureFrame(2 * time.Second)
 	if err == nil {
 		e.SweepRemainingSlots(sweepScreen, pCfg, targetEdge, w, h, mBarY, globalUsedSlots, siegeXs, slots, slotY)
 		sweepScreen.Close()
 	}
 
-	e.logger.Info().Msg("waiting for deployment to settle before verification...")
+	e.logger.Debug().Msg("waiting for deployment to settle before verification...")
 
-	e.logger.Info().Msg("verifying deployment success...")
+	e.logger.Debug().Msg("verifying deployment success...")
 	var remainingCount int
 	for attempt := 1; attempt <= 2; attempt++ {
-		verifyScreen, err := e.client.CaptureToMat()
+		verifyScreen, err := e.captureFrame(2 * time.Second)
 		if err != nil {
 			break
 		}
@@ -911,7 +1218,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 				continue
 			}
 
-			e.logger.Info().Int("x", slot.X).Str("category", slot.Category).Msg("re-deploying remaining slot")
+			e.logger.Debug().Int("x", slot.X).Str("category", slot.Category).Msg("re-deploying remaining slot")
 
 			e.client.TapFast(slot.X, slot.Y, 2.0)
 			e.client.HumanSleep(35, 10)
@@ -956,7 +1263,7 @@ func (e *Executor) DeployDynamic(s *strategy.DynamicStrategy, screen gocv.Mat) (
 				}
 
 				time.Sleep(80 * time.Millisecond)
-				checkMat, err := e.client.CaptureToMat()
+				checkMat, err := e.captureFrame(2 * time.Second)
 				if err != nil {
 					break
 				}
@@ -1065,21 +1372,21 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 		return false
 	}
 
-	e.logger.Info().Str("unit", unit.Name).Bool("ability", isAbility).Int("x", uPt.X).Int("y", uPt.Y).Float64("conf", match.Confidence).Msg("selecting unit")
+	e.logger.Debug().Str("unit", unit.Name).Bool("ability", isAbility).Int("x", uPt.X).Int("y", uPt.Y).Float64("conf", match.Confidence).Msg("selecting unit")
 
 	if isAbility {
 
 		if !currentScreen.Empty() {
 			if e.isSlotEmpty(currentScreen, uPt.X, uPt.Y) {
-				e.logger.Info().Str("unit", unit.Name).Msg("hero dead or ability used, skipping")
+				e.logger.Debug().Str("unit", unit.Name).Msg("hero dead or ability used, skipping")
 				return false
 			}
 		} else {
-			verify, err := e.client.CaptureToMat()
+			verify, err := e.captureFrame(2 * time.Second)
 			if err == nil {
 				defer verify.Close()
 				if e.isSlotEmpty(verify, uPt.X, uPt.Y) {
-					e.logger.Info().Str("unit", unit.Name).Msg("hero dead or ability used, skipping")
+					e.logger.Debug().Str("unit", unit.Name).Msg("hero dead or ability used, skipping")
 					return false
 				}
 			}
@@ -1094,22 +1401,22 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 
 	if !currentScreen.Empty() {
 		if e.isSlotEmpty(currentScreen, uPt.X, uPt.Y) {
-			e.logger.Info().Str("unit", unit.Name).Msg("slot is empty/already deployed, skipping")
+			e.logger.Debug().Str("unit", unit.Name).Msg("slot is empty/already deployed, skipping")
 			return false
 		}
 	} else {
-		verify, err := e.client.CaptureToMat()
+		verify, err := e.captureFrame(2 * time.Second)
 		if err == nil {
 			defer verify.Close()
 			if e.isSlotEmpty(verify, uPt.X, uPt.Y) {
-				e.logger.Info().Str("unit", unit.Name).Msg("slot is empty/already deployed, skipping")
+				e.logger.Debug().Str("unit", unit.Name).Msg("slot is empty/already deployed, skipping")
 				return false
 			}
 		}
 	}
 
 	if isSiege && e.isSiegeTapped(uPt.X, w) {
-		e.logger.Info().Str("unit", unit.Name).Msg("siege slot already tapped, skipping to avoid destruction")
+		e.logger.Debug().Str("unit", unit.Name).Msg("siege slot already tapped, skipping to avoid destruction")
 		return false
 	}
 
@@ -1142,7 +1449,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 
 			for i := 0; i < 4; i++ {
 				currentEdge := edges[i]
-				e.logger.Info().Str("unit", unit.Name).Str("edge", currentEdge).Msg("FourSides spell deployment")
+				e.logger.Debug().Str("unit", unit.Name).Str("edge", currentEdge).Msg("FourSides spell deployment")
 
 				if targetPt, okT := pCfg.SpellTargets[currentEdge]; okT {
 
@@ -1212,7 +1519,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 				}
 			}
 
-			e.logger.Info().Str("unit", unit.Name).Interface("point", spellTarget).Int("count", maxSpells).Msg("Deploying spells clustered around point target")
+			e.logger.Debug().Str("unit", unit.Name).Interface("point", spellTarget).Int("count", maxSpells).Msg("Deploying spells clustered around point target")
 
 			points := make([]image.Point, 0, maxSpells)
 			for i := 0; i < maxSpells; i++ {
@@ -1258,7 +1565,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 			}
 		}
 
-		e.logger.Info().
+		e.logger.Debug().
 			Str("unit", unit.Name).
 			Str("line", selectedLine).
 			Bool("found", ok).
@@ -1277,7 +1584,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 				edgeA, okA := pCfg.SpellEdgesA[targetEdge]
 				edgeB, okB := pCfg.SpellEdgesB[targetEdge]
 				if okA && okB {
-					e.logger.Info().Msg("Deploying Rage Spells: 3 on Line A (even), 2 on Line B (far)")
+					e.logger.Debug().Msg("Deploying Rage Spells: 3 on Line A (even), 2 on Line B (far)")
 
 					p1A, p2A := edgeA.P1, edgeA.P2
 
@@ -1336,7 +1643,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 			}
 
 			for idx, pt := range points {
-				e.logger.Info().Str("unit", unit.Name).Int("idx", idx).Interface("pt", pt).Msg("tapping spell target line")
+				e.logger.Debug().Str("unit", unit.Name).Int("idx", idx).Interface("pt", pt).Msg("tapping spell target line")
 				e.client.TapFast(pt.X, pt.Y, 8.0)
 
 				if idx < len(points)-1 {
@@ -1408,7 +1715,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 				chosen = adj[rand.Intn(len(adj))]
 			}
 			deploymentEdge = chosen
-			e.logger.Info().Str("target", targetEdge).Str("duke_edge", deploymentEdge).Msg("Dragon Duke adjacent-edge placement")
+			e.logger.Debug().Str("target", targetEdge).Str("duke_edge", deploymentEdge).Msg("Dragon Duke adjacent-edge placement")
 			if e.OnDukePick != nil {
 				e.OnDukePick(targetEdge, chosen)
 			}
@@ -1416,7 +1723,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 			if edge, ok := pCfg.Edges[deploymentEdge]; ok {
 				scaled := ScaleEdge(edge, pCfg.Width, pCfg.Height, w, h)
 				p1, p2 = scaled.P1, scaled.P2
-				e.logger.Info().Str("edge", deploymentEdge).Interface("p1", p1).Interface("p2", p2).Msg("placing Dragon Duke along adjacent edge line")
+				e.logger.Debug().Str("edge", deploymentEdge).Interface("p1", p1).Interface("p2", p2).Msg("placing Dragon Duke along adjacent edge line")
 			}
 		}
 
@@ -1436,7 +1743,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 
 		if isHero {
 			jPt := e.addJitter(p1, 10)
-			e.logger.Info().Str("unit", unit.Name).Int("x", jPt.X).Int("y", jPt.Y).Msg("deploying hero")
+			e.logger.Debug().Str("unit", unit.Name).Int("x", jPt.X).Int("y", jPt.Y).Msg("deploying hero")
 
 			j2 := e.addJitter(p1, 10)
 			j3 := e.addJitter(p1, 10)
@@ -1458,7 +1765,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 			}
 
 			if p1 == p2 {
-				e.logger.Info().Str("unit", unit.Name).Int("count", maxTaps).Msg("deploying troop point batch")
+				e.logger.Debug().Str("unit", unit.Name).Int("count", maxTaps).Msg("deploying troop point batch")
 				for i := 0; i < maxTaps; {
 					rem := maxTaps - i
 					if rem >= 3 {
@@ -1480,7 +1787,7 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 					e.client.HumanSleep(200, 40)
 				}
 			} else {
-				e.logger.Info().Str("unit", unit.Name).Int("count", maxTaps).Msg("deploying troop line precisely")
+				e.logger.Debug().Str("unit", unit.Name).Int("count", maxTaps).Msg("deploying troop line precisely")
 				points := make([]image.Point, 0, maxTaps)
 				for i := 0; i < maxTaps; i++ {
 					pct := 0.5
@@ -1522,11 +1829,11 @@ func (e *Executor) deployUnit(unit strategy.Unit, match *vision.Match, pCfg Prec
 					e.client.HumanSleep(sleepBase, sleepDev)
 
 					if i < len(points) {
-						if verify, err := e.client.CaptureToMat(); err == nil {
+						if verify, err := e.captureFrame(2 * time.Second); err == nil {
 							empty := e.isSlotEmpty(verify, match.Point.X, slotY)
 							verify.Close()
 							if empty {
-								e.logger.Info().Str("unit", unit.Name).Msg("slot emptied mid-deploy, stopping batch")
+								e.logger.Debug().Str("unit", unit.Name).Msg("slot emptied mid-deploy, stopping batch")
 								break
 							}
 						}
@@ -1583,7 +1890,7 @@ func (e *Executor) EndBattle() error {
 		ex, ey = int(float64(sCfg.EndButton.X)*scaleX), int(float64(sCfg.EndButton.Y)*scaleY)
 		e.logger.Info().Int("x", ex).Int("y", ey).Msg("using pinpoint End Battle button")
 	} else {
-		screen, err := e.client.CaptureToMat()
+		screen, err := e.captureFrame(2 * time.Second)
 		if err == nil {
 			defer screen.Close()
 			positions := []image.Point{
@@ -1624,22 +1931,59 @@ func (e *Executor) EndBattle() error {
 	return nil
 }
 
+type returnHomePacing struct {
+	InitialWait time.Duration
+	PollWait    time.Duration
+	Window      time.Duration
+}
+
+func chooseReturnHomePacing(h adb.Health) returnHomePacing {
+	captureMs := h.FastCaptureMs
+	if captureMs <= 0 {
+		captureMs = h.AvgCaptureMs
+	}
+	if h.ConsecutiveFails > 0 || captureMs >= 900 {
+		return returnHomePacing{InitialWait: 450 * time.Millisecond, PollWait: 240 * time.Millisecond, Window: 1700 * time.Millisecond}
+	}
+	if captureMs > 0 && captureMs <= 500 {
+		return returnHomePacing{InitialWait: 250 * time.Millisecond, PollWait: 150 * time.Millisecond, Window: 1300 * time.Millisecond}
+	}
+	return returnHomePacing{InitialWait: 350 * time.Millisecond, PollWait: 200 * time.Millisecond, Window: 1500 * time.Millisecond}
+}
+
 func (e *Executor) ReturnHome() error {
 	hx, hy := e.cal.ScaleRef(430, 566)
-	if err := e.client.TapHuman(hx, hy, 5.0); err != nil {
+	// This button is deterministic on the verified result overlay. Avoid the
+	// 250ms human-reaction delay used for uncertain dialog interactions; the
+	// adaptive state verification below still proves the tap actually worked.
+	if err := e.client.TapFast(hx, hy, 0.8); err != nil {
 		return err
 	}
-	time.Sleep(900 * time.Millisecond)
-	screen, err := e.client.CaptureToMat()
-	if err != nil {
-		return err
+
+	// Poll a bounded verification window, but adapt the first probe and
+	// cadence to live ADB health. Healthy sessions verify earlier; degraded
+	// sessions keep a more conservative settle without changing the tap.
+	pacing := chooseReturnHomePacing(e.client.Health())
+	time.Sleep(pacing.InitialWait)
+	deadline := time.Now().Add(pacing.Window)
+	lastState := game.StateUnknown
+	for {
+		screen, err := e.captureFrame(2 * time.Second)
+		if err != nil {
+			return err
+		}
+		state, _ := e.classify(screen)
+		screen.Close()
+		lastState = state
+		if state == game.StateMainVillage {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(pacing.PollWait)
 	}
-	defer screen.Close()
-	state, _ := e.classify(screen)
-	if state != game.StateMainVillage {
-		return fmt.Errorf("did not return home")
-	}
-	return nil
+	return fmt.Errorf("did not return home within adaptive verification window (last state: %s)", lastState.String())
 }
 
 // WaitForBattleEnd is the context-free variant of
@@ -1688,6 +2032,16 @@ func validDestructionRead(pct int) bool {
 func (e *Executor) ResetBattleOutcome() {
 	e.lastDestructionPct = 0
 	e.thDestroyed = false
+	e.lastBattleEndReason = ""
+	e.lastBattleWaitMS = 0
+	e.lastLootExitPercent = 0
+	e.lastStarExitTarget = 0
+	e.lastStarExitSeen = 0
+	e.lastStarExitConfirmations = 0
+	e.lastStarExitTriggered = false
+	e.lastStarExitElapsedMS = 0
+	e.lastBattleLootOCRSamples = 0
+	e.lastBattleLootOCRMicros = 0
 }
 
 // endButtonVisible reports whether the red "End Battle" button is on the
@@ -1734,20 +2088,60 @@ func (e *Executor) endButtonVisible(screen gocv.Mat, sCfg StallConfig) bool {
 	return false
 }
 
+func battleLootSampleDue(lootExitEnabled bool, tick int) bool {
+	if lootExitEnabled {
+		return true
+	}
+	if tick <= 0 {
+		return false
+	}
+	return tick%3 == 1
+}
+
+func chooseBattleEndPoll(h adb.Health, lootExitEnabled bool) time.Duration {
+	captureMs := h.FastCaptureMs
+	if captureMs <= 0 {
+		captureMs = h.AvgCaptureMs
+	}
+	if h.ConsecutiveFails > 0 || captureMs >= 900 {
+		return 1200 * time.Millisecond
+	}
+	if captureMs > 0 && captureMs <= 500 {
+		// Loot-exit performs OCR on every poll, so keep a slightly more
+		// conservative cadence than state-only natural-result detection.
+		if lootExitEnabled {
+			return 900 * time.Millisecond
+		}
+		return 800 * time.Millisecond
+	}
+	return 1000 * time.Millisecond
+}
+
 func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duration) bool {
+	waitStarted := time.Now()
+	defer func() {
+		e.lastBattleWaitMS = time.Since(waitStarted).Milliseconds()
+	}()
 	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(1000 * time.Millisecond)
+	pollEvery := chooseBattleEndPoll(e.client.Health(), e.cfg.LootExitEnabled)
+	ticker := time.NewTicker(pollEvery)
 	defer ticker.Stop()
 
 	// Per-battle outcome reset. lastDestructionPct / thDestroyed are
 	// executor-scoped and would otherwise carry a previous battle's reads
 	// into this one's star computation (see ResetBattleOutcome).
 	e.ResetBattleOutcome()
+	e.lastStarExitTarget = e.cfg.EndAtStars
+	if e.lastStarExitTarget < 0 { e.lastStarExitTarget = 0 }
+	if e.lastStarExitTarget > 3 { e.lastStarExitTarget = 3 }
 
 	lastPct := 0
 	lastPctTime := time.Now()
 	stallLimit := time.Duration(e.cfg.StallTimerSeconds) * time.Second
 	lootExitConfirmations := 0
+	starExitConfirmations := 0
+	farmBestLootUnits := int64(0)
+	farmLootProgressAt := time.Now()
 
 	// Live-loot OCR stabilizer used both for the optional loot-exit rule and
 	// for accurate dashboard/history totals.
@@ -1767,14 +2161,30 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 		hasStallROI = !sCfg.PercentROI.Empty()
 	}
 
-	tStore, err := game.NewTemplateStore(paths.Resolve("templates"))
-	if err != nil {
-		e.logger.Error().Err(err).Msg("failed to create template store for stall detection")
-		return false
+	lootRec := e.lootRecognizer
+	var localStore *game.TemplateStore
+	var localLootRec *game.LootRecognizer
+	if lootRec == nil {
+		// Compatibility fallback for tests/standalone attack.Executor users.
+		// Production injects the already-hot session recognizer, avoiding a full
+		// TemplateStore load + digit-cache rebuild on every battle.
+		var err error
+		localStore, err = game.NewTemplateStore(paths.Resolve("templates"))
+		if err != nil {
+			e.lastBattleEndReason = "setup_error"
+			e.logger.Error().Err(err).Msg("failed to create template store for stall detection")
+			return false
+		}
+		if err := localStore.LoadTemplates(); err != nil {
+			e.logger.Warn().Err(err).Msg("fallback battle template load incomplete")
+		}
+		localLootRec = game.NewLootRecognizer(e.cal, localStore, e.logger)
+		lootRec = localLootRec
+		defer func() {
+			localLootRec.Close()
+			localStore.Close()
+		}()
 	}
-	tStore.LoadTemplates()
-	lootRec := game.NewLootRecognizer(e.cal, tStore, e.logger)
-	defer lootRec.Close()
 
 	var pRoi image.Rectangle
 	if hasStallROI {
@@ -1803,13 +2213,16 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 		)
 	}
 
+	battleTick := 0
 	for {
 		select {
 		case <-ctx.Done():
+			e.lastBattleEndReason = "cancelled"
 			e.logger.Info().Msg("battle end wait cancelled (bot stopping)")
 			return false
 		case <-ticker.C:
-			screen, err := e.client.CaptureToMat()
+			battleTick++
+			screen, err := e.captureFrame(2 * time.Second)
 			if err != nil {
 				e.logger.Warn().Err(err).Msg("battle-end wait capture failed; retrying next tick")
 				continue
@@ -1817,42 +2230,61 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			state, _ := e.classify(screen)
 
 			if state == game.StateBattleEnd || state == game.StateReturnHome {
+				e.lastBattleEndReason = "natural_result"
 				screen.Close()
 				return true
 			}
 
-			// Continuously sample the live Available Loot counters. Accept only
-			// two consecutive, mutually-consistent reads and never allow an
-			// accepted remaining amount to increase. This gives the history UI
-			// a stable loot source even when the themed result panel OCR fails.
-			if e.initialLootGold > 0 || e.initialLootElixir > 0 || e.initialLootDE > 0 {
-				liveLoot, _ := lootRec.ReadAvailableLoot(screen)
-				plausible := liveLoot.Gold >= 0 && liveLoot.Gold <= e.initialLootGold &&
-					liveLoot.Elixir >= 0 && liveLoot.Elixir <= e.initialLootElixir &&
-					liveLoot.DarkElixir >= 0 && liveLoot.DarkElixir <= e.initialLootDE
+			// Continuously sample the live Available Loot counters. Read ONCE
+			// per battle tick and share that exact result with Loot Exit below:
+			// doing a second OCR pass over the same frame was pure hot-path
+			// work and could even disagree with the first read.
+			var liveLootTick game.Resources
+			var liveLootTickErr error
+			liveLootSampled := false
+			lootSampleDue := battleLootSampleDue(e.cfg.LootExitEnabled, battleTick)
+			if (e.initialLootGold > 0 || e.initialLootElixir > 0 || e.initialLootDE > 0) && lootSampleDue {
+				lootOCRStarted := time.Now()
+				liveLootTick, liveLootTickErr = lootRec.ReadAvailableLoot(screen)
+				e.lastBattleLootOCRSamples++
+				e.lastBattleLootOCRMicros += time.Since(lootOCRStarted).Microseconds()
+				liveLootSampled = true
+				plausible := liveLootTickErr == nil &&
+					liveLootTick.Gold >= 0 && liveLootTick.Gold <= e.initialLootGold &&
+					liveLootTick.Elixir >= 0 && liveLootTick.Elixir <= e.initialLootElixir &&
+					liveLootTick.DarkElixir >= 0 && liveLootTick.DarkElixir <= e.initialLootDE
 
 				if plausible {
 					if pendingLootHits > 0 &&
-						lootClose(liveLoot.Gold, pendingLoot.Gold, e.initialLootGold) &&
-						lootClose(liveLoot.Elixir, pendingLoot.Elixir, e.initialLootElixir) &&
-						lootClose(liveLoot.DarkElixir, pendingLoot.DarkElixir, e.initialLootDE) {
+						lootClose(liveLootTick.Gold, pendingLoot.Gold, e.initialLootGold) &&
+						lootClose(liveLootTick.Elixir, pendingLoot.Elixir, e.initialLootElixir) &&
+						lootClose(liveLootTick.DarkElixir, pendingLoot.DarkElixir, e.initialLootDE) {
 						pendingLootHits++
 					} else {
 						pendingLootHits = 1
 					}
-					pendingLoot = liveLoot
+					pendingLoot = liveLootTick
 
 					if pendingLootHits >= 2 {
-						if !e.remainingLootValid || liveLoot.Gold <= e.lastRemainingGold {
-							e.lastRemainingGold = liveLoot.Gold
+						if !e.remainingLootValid || liveLootTick.Gold <= e.lastRemainingGold {
+							e.lastRemainingGold = liveLootTick.Gold
 						}
-						if !e.remainingLootValid || liveLoot.Elixir <= e.lastRemainingElixir {
-							e.lastRemainingElixir = liveLoot.Elixir
+						if !e.remainingLootValid || liveLootTick.Elixir <= e.lastRemainingElixir {
+							e.lastRemainingElixir = liveLootTick.Elixir
 						}
-						if !e.remainingLootValid || liveLoot.DarkElixir <= e.lastRemainingDE {
-							e.lastRemainingDE = liveLoot.DarkElixir
+						if !e.remainingLootValid || liveLootTick.DarkElixir <= e.lastRemainingDE {
+							e.lastRemainingDE = liveLootTick.DarkElixir
 						}
 						e.remainingLootValid = true
+						stolenUnits := weightedFarmLootUnits(
+							e.initialLootGold-e.lastRemainingGold,
+							e.initialLootElixir-e.lastRemainingElixir,
+							e.initialLootDE-e.lastRemainingDE,
+						)
+						if stolenUnits > farmBestLootUnits {
+							farmBestLootUnits = stolenUnits
+							farmLootProgressAt = time.Now()
+						}
 						e.logger.Debug().
 							Int("remaining_gold", e.lastRemainingGold).
 							Int("remaining_elixir", e.lastRemainingElixir).
@@ -1876,7 +2308,13 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 
 				initialTotal := e.initialLootGold + e.initialLootElixir + e.initialLootDE
 				if initialTotal > 0 {
-					remaining, lootErr := lootRec.ReadAvailableLoot(screen)
+					remaining, lootErr := liveLootTick, liveLootTickErr
+					if !liveLootSampled {
+						lootOCRStarted := time.Now()
+						remaining, lootErr = lootRec.ReadAvailableLoot(screen)
+						e.lastBattleLootOCRSamples++
+						e.lastBattleLootOCRMicros += time.Since(lootOCRStarted).Microseconds()
+					}
 					if lootErr == nil {
 						remainingTotal := remaining.Gold + remaining.Elixir + remaining.DarkElixir
 						if remainingTotal < 0 { remainingTotal = 0 }
@@ -1890,7 +2328,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 						if lootedPct < 0 { lootedPct = 0 }
 						if lootedPct > 100 { lootedPct = 100 }
 
-						e.logger.Info().
+						e.logger.Debug().
 							Int("loot_percent", lootedPct).
 							Int("threshold", threshold).
 							Int("remaining_gold", remaining.Gold).
@@ -1917,15 +2355,73 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 									Msg("loot threshold reached twice; ending battle early")
 								screen.Close()
 								if err := e.EndBattle(); err != nil {
+									e.lastBattleEndReason = "loot_threshold_end_failed"
 									e.logger.Warn().Err(err).Msg("loot-threshold EndBattle tap failed")
 									return false
 								}
+								e.lastBattleEndReason = "loot_threshold"
+								e.lastLootExitPercent = lootedPct
 								return true
 							}
 						}
 					} else {
 						lootExitConfirmations = 0
 						e.logger.Debug().Err(lootErr).Msg("loot-exit OCR unavailable this tick")
+					}
+				}
+			}
+
+			// Intelligence V3 farm-throughput exit. This path intentionally uses
+			// only the stable loot snapshots collected above; it does not request a
+			// second OCR pass or a faster screenshot cadence. Explicit UI loot-exit
+			// and strategy end_at_percent settings remain authoritative.
+			strategyEndAtPct := 0
+			if e.activeStrategy != nil {
+				strategyEndAtPct = e.activeStrategy.EndAtPercent
+			}
+			if e.earlyExitAllowed &&
+				e.adaptiveFarmExitEnabled &&
+				!e.cfg.LootExitEnabled &&
+				strategyEndAtPct == 0 &&
+				e.cfg.EndAtStars == 0 &&
+				e.remainingLootValid {
+				lootedPct := adaptiveFarmLootPercent(
+					e.initialLootGold, e.initialLootElixir, e.initialLootDE,
+					e.lastRemainingGold, e.lastRemainingElixir, e.lastRemainingDE,
+				)
+				threshold := e.adaptiveFarmExitPercent
+				if threshold < 0 {
+					threshold = 0
+				}
+				if threshold > 100 {
+					threshold = 100
+				}
+				stall := e.adaptiveFarmExitStall
+				if stall <= 0 {
+					stall = 12 * time.Second
+				}
+				stalledFor := time.Since(farmLootProgressAt)
+				if lootedPct >= threshold && stalledFor >= stall {
+					if !e.endButtonVisible(screen, sCfg) {
+						e.logger.Debug().
+							Int("loot_percent", lootedPct).
+							Dur("loot_stall", stalledFor).
+							Msg("V3 farm-exit ready but End Battle button is not visible")
+					} else {
+						e.logger.Info().
+							Int("loot_percent", lootedPct).
+							Int("threshold", threshold).
+							Dur("loot_stall", stalledFor).
+							Msg("Intelligence V3 ending stalled battle to maximize farm throughput")
+						screen.Close()
+						if err := e.EndBattle(); err != nil {
+							e.lastBattleEndReason = "adaptive_farm_exit_failed"
+							e.logger.Warn().Err(err).Msg("V3 farm-exit EndBattle tap failed")
+							return false
+						}
+						e.lastBattleEndReason = "adaptive_farm_exit"
+						e.lastLootExitPercent = lootedPct
+						return true
 					}
 				}
 			}
@@ -1942,7 +2438,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			// BELOW it — ending early on a stall would abandon the win
 			// the strategy is built around (e.g. valk_spam's 50%). Only
 			// the deadline bounds how long we keep waiting for it.
-			if hasStallROI && (e.cfg.StallTimerSeconds > 0 || endAtPct > 0) {
+			if hasStallROI && (e.cfg.StallTimerSeconds > 0 || endAtPct > 0 || e.cfg.EndAtStars > 0) {
 				currentPct := lootRec.ReadDestructionPercentage(screen, pRoi)
 
 				// Garbage-read guard: destruction can never exceed 100, so a
@@ -1960,6 +2456,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 					lastPctTime = time.Now()
 					screen.Close()
 					if time.Now().After(deadline) {
+						e.lastBattleEndReason = "timeout"
 						return false
 					}
 					continue
@@ -1983,13 +2480,61 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 					}
 				}
 
+				// Optional star target. Stars are derived from the same live,
+				// validated destruction + TH evidence already used by result
+				// accounting, so this adds no screenshots or parallel OCR stream.
+				// Two consecutive qualifying ticks are required before surrendering.
+				starTarget := e.cfg.EndAtStars
+				if starTarget < 0 {
+					starTarget = 0
+				}
+				if starTarget > 3 {
+					starTarget = 3
+				}
+				if e.earlyExitAllowed && starTarget > 0 {
+					currentStars := game.StarsFromOutcome(currentPct, e.thDestroyed)
+					e.lastStarExitSeen = currentStars
+					if currentStars >= starTarget {
+						starExitConfirmations++
+					} else {
+						starExitConfirmations = 0
+					}
+					e.lastStarExitConfirmations = starExitConfirmations
+
+					if starExitConfirmations >= 2 {
+						if !e.endButtonVisible(screen, sCfg) {
+							e.logger.Debug().
+								Int("stars", currentStars).
+								Int("target_stars", starTarget).
+								Int("percent", currentPct).
+								Msg("star target reached but End Battle button not visible; keeping battle alive")
+						} else {
+							e.logger.Info().
+								Int("stars", currentStars).
+								Int("target_stars", starTarget).
+								Int("percent", currentPct).
+								Msg("star target confirmed twice; ending battle")
+							screen.Close()
+							if err := e.EndBattle(); err != nil {
+								e.lastBattleEndReason = "star_threshold_end_failed"
+								e.logger.Warn().Err(err).Msg("star-threshold EndBattle tap failed")
+								return false
+							}
+							e.lastBattleEndReason = "star_threshold"
+							e.lastStarExitTriggered = true
+							e.lastStarExitElapsedMS = time.Since(waitStarted).Milliseconds()
+							return true
+						}
+					}
+				}
+
 				// Progress visibility in threshold mode: log every tick so
 				// a long battle toward end_at_percent is observable (the
 				// stall branch's "destruction increased" only fires when
 				// the stall timer is active).
 				if endAtPct > 0 && currentPct != lastPct {
 					lastPct = currentPct
-					e.logger.Info().Int("percent", currentPct).Int("threshold", endAtPct).Msg("destruction progress toward strategy threshold")
+					e.logger.Debug().Int("percent", currentPct).Int("threshold", endAtPct).Msg("destruction progress toward strategy threshold")
 				}
 
 				if e.earlyExitAllowed && endAtPercentReached(endAtPct, currentPct) {
@@ -2002,11 +2547,12 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 						e.logger.Info().Int("percent", currentPct).Int("threshold", endAtPct).Msg("destruction reached strategy threshold, ending battle!")
 						screen.Close()
 						e.EndBattle()
+						e.lastBattleEndReason = "destruction_threshold"
 						return true
 					}
 				}
 
-				if e.earlyExitAllowed && e.cfg.StallTimerSeconds > 0 && endAtPct == 0 {
+				if e.earlyExitAllowed && e.cfg.StallTimerSeconds > 0 && endAtPct == 0 && e.cfg.EndAtStars == 0 {
 					if currentPct > lastPct {
 						lastPct = currentPct
 						lastPctTime = time.Now()
@@ -2025,6 +2571,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 								e.logger.Warn().Int("last_pct", lastPct).Dur("elapsed", elapsed).Msg("stall detected, ending battle!")
 								screen.Close()
 								e.EndBattle()
+								e.lastBattleEndReason = "stall"
 								return true
 							}
 						}
@@ -2034,6 +2581,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 
 			screen.Close()
 			if time.Now().After(deadline) {
+				e.lastBattleEndReason = "timeout"
 				return false
 			}
 		}
@@ -2041,7 +2589,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 }
 
 func (e *Executor) SweepRemainingSlots(screen gocv.Mat, pCfg PrecisionConfig, targetEdge string, w, h int, mBarY int, usedSlots map[int]bool, siegeXs []int, allSlots []TroopSlot, slotY int) {
-	e.logger.Info().Msg("starting sweep of remaining/event slots...")
+	e.logger.Debug().Msg("starting sweep of remaining/event slots...")
 
 	for _, slot := range allSlots {
 		x := slot.X
@@ -2062,7 +2610,7 @@ func (e *Executor) SweepRemainingSlots(screen gocv.Mat, pCfg PrecisionConfig, ta
 		}
 
 		if !e.isSlotEmpty(screen, x, slotY) {
-			e.logger.Info().Int("x", x).Str("category", slot.Category).Msg("found undeployed troop slot during sweep, deploying...")
+			e.logger.Debug().Int("x", x).Str("category", slot.Category).Msg("found undeployed troop slot during sweep, deploying...")
 
 			e.client.TapFast(x, slotY, 2.0)
 			e.client.HumanSleep(35, 10)
@@ -2100,7 +2648,7 @@ func (e *Executor) SweepRemainingSlots(screen gocv.Mat, pCfg PrecisionConfig, ta
 				}
 
 				time.Sleep(200 * time.Millisecond)
-				checkMat, err := e.client.CaptureToMat()
+				checkMat, err := e.captureFrame(2 * time.Second)
 				if err != nil {
 					break
 				}
@@ -2108,7 +2656,7 @@ func (e *Executor) SweepRemainingSlots(screen gocv.Mat, pCfg PrecisionConfig, ta
 				checkMat.Close()
 
 				if isEmpty {
-					e.logger.Info().Int("x", x).Msg("swept slot empty, finished deploying")
+					e.logger.Debug().Int("x", x).Msg("swept slot empty, finished deploying")
 					break
 				}
 				e.client.TapFast(x, slotY, 2.0)
@@ -2139,7 +2687,7 @@ func (e *Executor) ParseLayout(screen gocv.Mat, pCfg PrecisionConfig, w, h, mBar
 			SlotY      int   `json:"slot_y"`
 		}
 		if json.Unmarshal(data, &mConf) == nil {
-			e.logger.Info().Int("slots", len(mConf.SlotXs)).Msg("using 100% precise manual slot mapping")
+			e.logger.Debug().Int("slots", len(mConf.SlotXs)).Msg("using 100% precise manual slot mapping")
 			if mConf.SlotY > 0 {
 				slotY = mConf.SlotY
 			} else if mConf.CardHeight > 0 {
@@ -2155,7 +2703,7 @@ func (e *Executor) ParseLayout(screen gocv.Mat, pCfg PrecisionConfig, w, h, mBar
 	}
 
 	if len(activeXs) == 0 {
-		e.logger.Info().Msg("manual calibration missing/empty, falling back to grid detection")
+		e.logger.Debug().Msg("manual calibration missing/empty, falling back to grid detection")
 		step := int(75.0 * e.cal.ScaleX)
 		startX := int(40.0 * e.cal.ScaleX)
 		for x := startX; x < w-20; x += step {
@@ -2164,7 +2712,7 @@ func (e *Executor) ParseLayout(screen gocv.Mat, pCfg PrecisionConfig, w, h, mBar
 			}
 		}
 	}
-	e.logger.Info().Ints("active_xs", activeXs).Msg("detected active slots in bar")
+	e.logger.Debug().Ints("active_xs", activeXs).Msg("detected active slots in bar")
 
 	if len(activeXs) == 0 {
 		return nil
@@ -2280,14 +2828,14 @@ func (e *Executor) ParseLayout(screen gocv.Mat, pCfg PrecisionConfig, w, h, mBar
 			Y:        slotY,
 			Category: cat,
 		})
-		e.logger.Info().Int("x", x).Str("category", cat).Msg("classified slot")
+		e.logger.Debug().Int("x", x).Str("category", cat).Msg("classified slot")
 	}
 
 	if len(slots) > 0 {
 		lastIdx := len(slots) - 1
 		if slots[lastIdx].Category == "Spell" && slots[lastIdx].X > w-int(100.0*e.cal.ScaleX) {
 			slots[lastIdx].Category = "CC"
-			e.logger.Info().Int("x", slots[lastIdx].X).Msg("classified last slot as CC")
+			e.logger.Debug().Int("x", slots[lastIdx].X).Msg("classified last slot as CC")
 		}
 	}
 

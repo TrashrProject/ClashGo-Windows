@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -16,14 +17,27 @@ import (
 
 	"github.com/Ducky705/ClashGO/internal/adb"
 	"github.com/Ducky705/ClashGO/internal/attack"
+	autopolicy "github.com/Ducky705/ClashGO/internal/automation"
 	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/game"
+	"github.com/Ducky705/ClashGO/internal/intelligence"
+	"github.com/Ducky705/ClashGO/internal/multiaccount"
 	"github.com/Ducky705/ClashGO/internal/paths"
+	"github.com/Ducky705/ClashGO/internal/telemetry"
 	"github.com/Ducky705/ClashGO/internal/vision"
 	"github.com/Ducky705/ClashGO/pkg/strategy"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
+
+type PreparationTimings struct {
+	AttackButtonMS      int64
+	FindMatchMS         int64
+	ArmyMenuMS          int64
+	ArmySlotMS          int64
+	BattleButtonMS      int64
+	MatchmakingReadyMS  int64
+}
 
 type Bot struct {
 	client     *adb.Client
@@ -34,16 +48,26 @@ type Bot struct {
 	templates  *game.TemplateStore
 	recognizer     *game.Recognizer
 	resourceReader *game.VillageResourceReader
+	searchLootRec  *game.LootRecognizer
 	cfg            *config.BotConfig
 
 	classify func(gocv.Mat) (game.GameState, int)
 
 	attackExec *attack.Executor
+	governor   *autopolicy.Governor
+	adaptive       *intelligence.AdaptiveEngine
+	contextual     *intelligence.ContextualEngine
+	villageMemory  *intelligence.VillageMemory
+	multiAccount   *multiaccount.Manager
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	done   chan struct{}
-	logger zerolog.Logger
+	ctx         context.Context
+	cancel      context.CancelFunc
+	done        chan struct{}
+	captureDone chan struct{}
+	frameBroker *FrameBroker
+	brokerActive atomic.Bool
+	frameSeq     atomic.Uint64
+	logger      zerolog.Logger
 
 	attackCount atomic.Int32
 	skipsCount  atomic.Int32
@@ -56,17 +80,64 @@ type Bot struct {
 	stars2      atomic.Int32
 	stars3      atomic.Int32
 	seqRunning        atomic.Bool
+	seqStartedAtUnix  atomic.Int64
+	paused            atomic.Bool
 	zoomedOut         atomic.Bool
 	recoveryAttempts  atomic.Int32
 	recoverySuccesses atomic.Int32
 	blueStacksRestarts atomic.Int32
+	cleanAttackStreak   atomic.Int32
+	soakValidated       atomic.Bool
+	returnHomeCount     atomic.Int64
+	returnHomeMicros    atomic.Int64
+	lastReturnHomeUS    atomic.Int64
+	safePacingUntilUS   atomic.Int64
+	wallUpgradePending  atomic.Bool
+	navigationFailureStreak atomic.Int32
+
+	// Feature-specific safety circuits. Optional village features fail open
+	// toward farming: repeated uncertainty disables only that feature.
+	collectorFailureStreak   atomic.Int32
+	collectorDisabledUntilUS atomic.Int64
+	wallFailureStreak        atomic.Int32
+	wallDisabledUntilUS      atomic.Int64
+
+	// Runtime health governor blocks new attacks temporarily under severe
+	// degradation and bounds critical restart storms.
+	healthHoldUntilUS        atomic.Int64
+	healthCriticalStreak     atomic.Int32
+	healthPolicyMu           sync.Mutex
+	healthRestartWindowStart time.Time
+	healthRestartsInWindow   int
+
+	// UI-drift safe mode: three prolonged Unknown-state incidents in a short
+	// window stop new raids until the user explicitly resumes.
+	uiSafetyHold          atomic.Bool
+	uiDriftMu             sync.Mutex
+	uiDriftWindowStart    time.Time
+	uiDriftIncidents      int
+
+	// Xingchen-style runtime supervision: independent heartbeat, phase/state
+	// tracking, and single-flight recovery/restart guards.
+	captureHeartbeat atomic.Int64
+	runtimeState atomic.Int32
+	runtimeStateSince atomic.Int64
+	runtimeProgress atomic.Int64
+	runtimePhase atomic.Int32
+	runtimePhaseSince atomic.Int64
+	recoveryInFlight atomic.Bool
+	restartInFlight atomic.Bool
+	multiAccountSwitchInFlight atomic.Bool
 
 	chestDismissInFlight  atomic.Bool
 	rewardDismissInFlight atomic.Bool
 	splashDismissInFlight atomic.Bool
 	connLostDismissInFlight atomic.Bool
+	collectorSweepInFlight atomic.Bool
 	lastArmyCampGuardLog    time.Time
+	lastCollectorSweep      time.Time
 	startedAt             time.Time
+	watchdogMu           sync.RWMutex
 	lastAction            time.Time
 	lastSequenceStart     time.Time
 	lastNav               time.Time
@@ -88,9 +159,24 @@ type Bot struct {
 	// phases run.
 	armySlot int
 
+	historyMu    sync.RWMutex
 	historyCache []AttackReport
+	telemetry    *telemetry.Bus
+	lastPrepTimings PreparationTimings
+	lastPlanningUS  atomic.Int64
 
-	OnStatsUpdate func()
+	uiAnchorMu        sync.RWMutex
+	uiAnchors         map[string]image.Point
+	uiAnchorAttempts        atomic.Int64
+	uiAnchorHits            atomic.Int64
+	uiAnchorFallbacks       atomic.Int64
+	uiAnchorDisabledUntilUS atomic.Int64
+
+	diagMu          sync.Mutex
+	lastDiagnostics map[string]time.Time
+
+	OnStatsUpdate     func()
+	OnAccountChanged func(playerTag, accountID, label string)
 }
 
 // NewBot builds a fully-booted Bot using a background context (no
@@ -208,6 +294,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 	graph.AddNode(game.StateMainVillage)
 
 	startedWall := time.Now()
+	vision.ResetPreferredScaleStats()
 
 	dukePicksDir := paths.ResolveConfig("output/duke_picks")
 	if err := os.MkdirAll(dukePicksDir, 0o755); err != nil {
@@ -220,6 +307,7 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 	}
 
 	attackExec := attack.NewExecutor(client, cal, &cfg.Attack, log.Logger)
+	attackExec.SetArmyGuardEnabled(cfg.Automation.AutoArmyGuard)
 
 	var templates *game.TemplateStore
 	templates, err = game.NewTemplateStore(paths.Resolve("templates"))
@@ -247,6 +335,8 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 	ctx, cancel := context.WithCancel(bootCtx)
 
 	resourceReader := game.NewVillageResourceReader(cal, templates, log.Logger)
+	searchLootRec := game.NewLootRecognizer(cal, templates, log.Logger)
+	attackExec.SetLootRecognizer(searchLootRec)
 
 	b = &Bot{
 		client:            client,
@@ -255,11 +345,15 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		templates:         templates,
 		recognizer:        recognizer,
 		resourceReader:    resourceReader,
+		searchLootRec:     searchLootRec,
 		cfg:               cfg,
 		attackExec:        attackExec,
+		governor:          autopolicy.NewGovernor(cfg.Automation),
 		ctx:               ctx,
 		cancel:            cancel,
 		done:              make(chan struct{}),
+		captureDone:       make(chan struct{}),
+		frameBroker:       NewFrameBroker(),
 		logger:            log.With().Str("bot", "orchestrator").Logger(),
 		startedAt:         startedWall,
 		lastAction:        time.Now(),
@@ -268,6 +362,113 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		stuckTimeout:      35 * time.Second,
 		cpuSampler:        newCPUSampler(),
 		dukePicksFile:     dukePicksFile,
+		telemetry:          telemetry.New(paths.ResolveConfig("telemetry/events.ndjson")),
+		lastDiagnostics:    make(map[string]time.Time),
+		uiAnchors:          make(map[string]image.Point),
+	}
+
+	multiMgr, multiErr := multiaccount.NewManager(
+		multiAccountStatePath(cfg),
+		cfg.Account.MultiAccount,
+		cfg.Account.PlayerTag,
+	)
+	if multiErr != nil {
+		b.logger.Warn().Err(multiErr).Msg("multi-account scheduler unavailable; continuing single-account")
+	} else {
+		b.multiAccount = multiMgr
+		recoveryRequired, recoveryTarget := multiMgr.RecoveryStatus()
+		if recoveryRequired {
+			b.paused.Store(true)
+			b.logger.Error().
+				Str("target_account_id", recoveryTarget).
+				Msg("interrupted multi-account switch detected; automation starts paused")
+		} else if recoveryTarget != "" {
+			// A physical_switched journal proves Clash already reached the target
+			// village before the previous process stopped. Reapply that account's
+			// config now, BEFORE adaptive/contextual intelligence is constructed.
+			if active, ok := multiMgr.Active(); ok && active.ID == recoveryTarget {
+				if err := applyManagedAccountConfig(cfg, active); err != nil {
+					_ = multiMgr.RequireRecovery(active.ID, fmt.Errorf("verified switched account cannot be restored: %w", err))
+					b.paused.Store(true)
+					b.logger.Error().Err(err).
+						Str("account_id", active.ID).
+						Msg("verified switched account profile could not be restored; automation paused")
+				} else if err := config.Save("config.json", cfg); err != nil {
+					// In-memory cfg is already corrected, so this session can safely
+					// load the target IA. Keep the physical journal for the next boot.
+					b.logger.Warn().Err(err).
+						Str("account_id", active.ID).
+						Msg("restored switched account in memory; config persistence will retry next boot")
+				} else {
+					if err := multiMgr.MarkSwitched(active.ID); err != nil {
+						b.logger.Warn().Err(err).Msg("restored account scheduler state persistence degraded")
+					}
+					if err := multiMgr.CompleteSwitch(active.ID); err != nil {
+						b.logger.Warn().Err(err).Msg("restored account journal cleanup deferred")
+					}
+					b.logger.Info().
+						Str("account_id", active.ID).
+						Str("player_tag", active.PlayerTag).
+						Msg("recovered verified multi-account switch before IA initialization")
+				}
+			}
+		}
+		if active, ok := multiMgr.Active(); ok {
+			b.logger.Info().
+				Bool("enabled", multiMgr.Enabled()).
+				Str("account_id", active.ID).
+				Str("account_label", active.Label).
+				Msg("multi-account scheduler initialized")
+		}
+	}
+
+	emulatorKind := "adb"
+	if cfg.Device.BlueStacksInstance != "" || strings.Contains(strings.ToLower(cfg.Device.DeviceID), "localhost") {
+		emulatorKind = "bluestacks"
+	}
+	adaptive, adaptiveErr := intelligence.NewAdaptiveEngine(
+		learningAccountStatePath(cfg, "adaptive_learning.json"),
+		intelligence.EnvironmentFingerprint{
+			OS: runtime.GOOS,
+			Emulator: emulatorKind,
+			DeviceID: cfg.Device.DeviceID,
+			Width: cfg.Device.Width,
+			Height: cfg.Device.Height,
+			DPI: cfg.Device.DPI,
+			Strategy: filepath.Base(cfg.Attack.StrategyFile),
+			TownHall: cfg.Attack.Farm.TownHall,
+			AccountScope: learningScopeKey(cfg),
+		},
+	)
+	if adaptiveErr != nil {
+		b.logger.Warn().Err(adaptiveErr).Msg("adaptive intelligence unavailable; continuing without learning")
+	} else {
+		b.adaptive = adaptive
+		b.logger.Info().
+			Str("mode", string(adaptive.Mode())).
+			Msg("adaptive intelligence active")
+	}
+
+	contextual, contextualErr := intelligence.NewContextualEngine(
+		learningAccountStatePath(cfg, "contextual_learning_v3.json"),
+	)
+	if contextualErr != nil {
+		b.logger.Warn().Err(contextualErr).Msg("Intelligence V3 contextual learning unavailable; continuing with legacy adaptive engine")
+	} else {
+		b.contextual = contextual
+		b.logger.Info().
+			Int("experiences", contextual.TotalSamples()).
+			Msg("Intelligence V3 contextual learning active")
+	}
+
+	villageMemory, villageErr := intelligence.NewVillageMemory(learningEnvironmentStatePath(cfg, "village_model.json"))
+	if villageErr != nil {
+		b.logger.Warn().Err(villageErr).Msg("village memory unavailable; continuing without persistent village model")
+	} else {
+		b.villageMemory = villageMemory
+		b.logger.Info().
+			Int("known_entities", len(villageMemory.Snapshot().Entities)).
+			Msg("persistent village memory loaded")
 	}
 
 	// Resolve the strategy's declared army slot once at boot so the
@@ -306,7 +507,52 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 	if histData, err := os.ReadFile(paths.ResolveConfig("attack_history.json")); err == nil {
 		var seeded []AttackReport
 		if jsonErr := json.Unmarshal(histData, &seeded); jsonErr == nil {
+			// Global history remains the dashboard view across all accounts.
 			b.historyCache = seeded
+
+			// Intelligence bootstrap must never mix accounts. In multi-account
+			// mode prefer the account-scoped history; if it does not exist yet,
+			// only accept explicitly tagged rows from the global history. Legacy
+			// untagged rows are intentionally ignored because ownership cannot be
+			// proven safely.
+			bootstrap := seeded
+			if cfg.Account.MultiAccount.Enabled && strings.TrimSpace(cfg.Account.PlayerTag) != "" {
+				bootstrap = nil
+				if accountData, accountErr := os.ReadFile(accountAttackHistoryPath(cfg)); accountErr == nil {
+					var accountSeeded []AttackReport
+					if json.Unmarshal(accountData, &accountSeeded) == nil {
+						bootstrap = accountSeeded
+					}
+				}
+				if len(bootstrap) == 0 {
+					for _, rep := range seeded {
+						if rep.PlayerTag != "" && strings.EqualFold(strings.TrimSpace(rep.PlayerTag), strings.TrimSpace(cfg.Account.PlayerTag)) {
+							bootstrap = append(bootstrap, rep)
+						}
+					}
+				}
+			}
+
+			// Bootstrap only an empty account-specific V3 state so restarts never
+			// double-count historical attacks.
+			if b.contextual != nil && b.contextual.TotalSamples() == 0 && len(bootstrap) > 0 {
+				limit := len(bootstrap)
+				if limit > 200 {
+					limit = 200
+				}
+				outcomes := make([]intelligence.ContextualOutcome, 0, limit)
+				for i := limit - 1; i >= 0; i-- {
+					outcomes = append(outcomes, contextualOutcomeFromReport(bootstrap[i], cfg.Attack.Farm.TownHall, 0, 0))
+				}
+				if err := b.contextual.ObserveMany(outcomes); err != nil {
+					b.logger.Warn().Err(err).Msg("Intelligence V3 account history bootstrap failed")
+				} else {
+					b.logger.Info().
+						Int("replayed_attacks", len(outcomes)).
+						Str("account_scope", learningScopeKey(cfg)).
+						Msg("Intelligence V3 learned from account-specific attack history")
+				}
+			}
 		} else {
 			b.logger.Warn().Err(jsonErr).Msg("failed to parse attack history, starting fresh")
 		}
@@ -329,11 +575,27 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 	b.navigator.SetDisableChestDismissal(b.cfg.Device.DisableChestDismissal)
 
 	b.attackExec.SetClassifier(b.classify)
+	b.attackExec.SetFrameProvider(b.runtimeFrameFresh)
+	if b.cfg.Account.MultiAccount.Enabled {
+		b.attackExec.SetArmyInspectionPath(AccountArmySnapshotPath(b.cfg))
+	} else {
+		b.attackExec.SetArmyInspectionPath("")
+	}
+	b.attackExec.OnPlanReady = func(duration time.Duration, edge string) {
+		b.lastPlanningUS.Store(duration.Microseconds())
+		b.logger.Info().Dur("planning", duration).Str("edge", edge).Msg("attack plan committed; starting deployment")
+		b.setRuntimePhase(PhaseDeploying)
+	}
 
 	return b, nil
 }
 
 func (b *Bot) Start() error {
+	if b.multiAccount != nil {
+		if recoveryRequired, targetID := b.multiAccount.RecoveryStatus(); recoveryRequired {
+			return fmt.Errorf("multi-account identity recovery required for target %q; confirm the account visible in BlueStacks before starting ClashGO", targetID)
+		}
+	}
 	if err := b.client.EnsureConnected(); err != nil {
 		return fmt.Errorf("ensure connect: %w", err)
 	}
@@ -350,22 +612,109 @@ func (b *Bot) Start() error {
 	}
 
 	focusX, focusY := b.cal.ScaleRef(842, 345)
-	b.logger.Info().Int("x", focusX).Int("y", focusY).Msg("performing initial focus click")
+	b.logger.Debug().Int("x", focusX).Int("y", focusY).Msg("performing initial focus click")
 	b.client.Tap(focusX, focusY)
 	b.client.JitteredSleep(250 * time.Millisecond)
 
-	go b.captureLoop()
+	now := time.Now()
+	b.captureHeartbeat.Store(now.UnixNano())
+	b.runtimeState.Store(int32(game.StateUnknown))
+	b.runtimeStateSince.Store(now.UnixNano())
+	b.runtimeProgress.Store(now.UnixNano())
+	b.runtimePhase.Store(int32(PhaseIdle))
+	b.runtimePhaseSince.Store(now.UnixNano())
+
+	b.brokerActive.Store(true)
+	go func() {
+		defer close(b.captureDone)
+		defer b.brokerActive.Store(false)
+		b.captureLoop()
+	}()
+	go b.runtimeSupervisorLoop()
 	return nil
 }
 
 func (b *Bot) Stop() {
 	b.cancel()
-	b.client.Close()
-	globalAsyncWriter.Close()
-	vision.CloseTemplateCache()
-	if b.resourceReader != nil {
-		b.resourceReader.Close()
+	if b.telemetry != nil {
+		b.telemetry.Close()
 	}
+
+	// Cut ADB first so no further taps/captures can leave the process after
+	// Cancel. When Start() was refused before broker startup (for example an
+	// unresolved multi-account identity), there is no capture goroutine to
+	// wait for; skipping that wait avoids a fake 3-second teardown stall.
+	captureWasStarted := b.brokerActive.Load()
+	b.client.Close()
+
+	if captureWasStarted {
+		select {
+		case <-b.captureDone:
+		case <-time.After(3 * time.Second):
+			b.logger.Warn().Msg("capture loop did not stop within teardown window; keeping shared templates alive")
+		}
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for b.seqRunning.Load() && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	captureStopped := !captureWasStarted
+	if captureWasStarted {
+		select {
+		case <-b.captureDone:
+			captureStopped = true
+		default:
+		}
+	}
+	if captureStopped && b.frameBroker != nil {
+		b.frameBroker.Close()
+	}
+
+	// Persist a compact human-readable session summary only after the active
+	// sequence has had a chance to finish updating its final attack report.
+	// This is off the farming hot path and never delays taps/captures.
+	if !b.seqRunning.Load() {
+		report := b.CurrentSessionReport()
+		if report.Attacks > 0 {
+			if err := saveSessionReport(report); err != nil {
+				b.logger.Warn().Err(err).Msg("failed to persist session report")
+			} else {
+				b.logger.Info().
+					Int("attacks", report.Attacks).
+					Float64("gold_per_hour", report.GoldPerHour).
+					Float64("zero_touch_rate", report.ZeroTouchRate).
+					Str("bottleneck", report.Bottleneck).
+					Msg("session report saved")
+			}
+		}
+	}
+
+	if !b.seqRunning.Load() && captureStopped {
+		if b.attackExec != nil {
+			b.attackExec.Close()
+		}
+		if b.resourceReader != nil {
+			b.resourceReader.Close()
+		}
+		if b.searchLootRec != nil {
+			b.searchLootRec.Close()
+		}
+		if b.templates != nil {
+			b.templates.Close()
+		}
+		vision.CloseTemplateCache()
+	} else {
+		// Safety wins over eager cleanup: if any goroutine may still be inside
+		// CGO/OpenCV, let the process/GC reclaim at final exit rather than close
+		// a Mat underneath active native code.
+		b.logger.Warn().
+			Bool("sequence_running", b.seqRunning.Load()).
+			Bool("capture_stopped", captureStopped).
+			Msg("native template cleanup deferred to process exit")
+	}
+
 	if b.dukePicksFile != nil {
 		_ = b.dukePicksFile.Close()
 	}
@@ -401,25 +750,33 @@ func (b *Bot) captureLoop() {
 	frames := make(chan frame, 1)
 
 	getCaptureInterval := func() time.Duration {
-		// While an attack/search sequence is running, that goroutine already
-		// performs its own fresh screenshots for state, loot and deployment.
-		// Keeping the background capture loop at 150ms at the same time meant
-		// BlueStacks was being hammered by two independent screencap streams.
-		// On the user's Pie64 instance this can terminate/restart the emulator
-		// with no Go error at all. Keep one low-rate observer alive for popup /
-		// health handling, but remove the duplicate high-frequency pressure.
+		// captureLoop is the ONLY runtime screenshot owner. Attack/search code
+		// consumes broker frames, so cadence can be tuned per phase without
+		// ever creating a second ADB screencap stream.
 		if b.seqRunning.Load() {
-			// The active attack/search goroutine owns screencaps while a
-			// sequence is running. Keep only a very low-rate observer so
-			// BlueStacks is never hit by two concurrent screencap streams.
-			return 2500 * time.Millisecond
+			switch RuntimePhase(b.runtimePhase.Load()) {
+			case PhaseAttackNavigation:
+				return 220 * time.Millisecond
+			case PhaseSearching:
+				return 700 * time.Millisecond
+			case PhasePlanning:
+				// Planning is intentionally fast: one broker stream at ~4 FPS is
+				// enough for zoom/red-zone/bar analysis without recreating the old
+				// concurrent screencap pressure.
+				return 250 * time.Millisecond
+			case PhaseDeploying:
+				return 350 * time.Millisecond
+			case PhaseBattle, PhaseParsingResult, PhaseReturningHome:
+				return 650 * time.Millisecond
+			default:
+				return 500 * time.Millisecond
+			}
 		}
-
 		switch gc.State {
-		case game.StateBattle, game.StateSearchMap, game.StateLoading:
-			return 300 * time.Millisecond
 		case game.StateMainVillage, game.StateArmySelection, game.StateArmyCamp:
 			return 250 * time.Millisecond
+		case game.StateBattle, game.StateSearchMap, game.StateLoading:
+			return 500 * time.Millisecond
 		default:
 			return 500 * time.Millisecond
 		}
@@ -448,12 +805,28 @@ func (b *Bot) captureLoop() {
 			start := time.Now()
 			screen, err := b.client.CaptureToMat()
 			dur := time.Since(start)
+			if b.telemetry != nil {
+				b.telemetry.RecordCaptureMicros(dur.Microseconds())
+			}
 			lastCapture = time.Now()
 			b.lastCapture = lastCapture
+			if err == nil && !screen.Empty() && screen.Cols() >= 2 && screen.Rows() >= 2 {
+				b.captureHeartbeat.Store(lastCapture.UnixNano())
+				if b.frameBroker != nil {
+					b.frameBroker.Publish(screen, lastCapture)
+				}
+			}
 
 			if err != nil || screen.Empty() || screen.Cols() < 2 || screen.Rows() < 2 {
 				screen.Close()
 				b.logger.Debug().Err(err).Msg("empty/degenerate capture dropped")
+				continue
+			}
+
+			if b.seqRunning.Load() {
+				// FrameBroker already owns a clone of this frame. During an active
+				// attack, do not enqueue the same Mat into the idle UI processor.
+				screen.Close()
 				continue
 			}
 
@@ -477,6 +850,15 @@ func (b *Bot) captureLoop() {
 			}
 			return
 		case f := <-frames:
+			// During an active attack, the state machine owns UI decisions. The
+			// capture loop still feeds FrameBroker, but it must not dismiss/tap
+			// anything in parallel.
+			if b.seqRunning.Load() {
+				if !f.mat.Empty() {
+					f.mat.Close()
+				}
+				continue
+			}
 			// Panic guard: one bad frame (degenerate mat, classifier
 			// edge case, cgo hiccup) must never kill the whole bot
 			// process — an unattended farm would stay dead until a
@@ -503,7 +885,37 @@ func (b *Bot) captureLoop() {
 // Called after real forward progress (successful clicks/state transitions)
 // so the stuck-check distinguishes "spinning" from "working".
 func (b *Bot) recordActivity() {
-	b.lastAction = time.Now()
+	now := time.Now()
+	b.watchdogMu.Lock()
+	b.lastAction = now
+	b.watchdogMu.Unlock()
+	b.runtimeProgress.Store(now.UnixNano())
+}
+
+func (b *Bot) recordSequenceStart() {
+	b.watchdogMu.Lock()
+	b.lastSequenceStart = time.Now()
+	b.watchdogMu.Unlock()
+}
+
+func (b *Bot) watchdogTimes() (lastAction, lastSequenceStart time.Time) {
+	b.watchdogMu.RLock()
+	lastAction = b.lastAction
+	lastSequenceStart = b.lastSequenceStart
+	b.watchdogMu.RUnlock()
+	return lastAction, lastSequenceStart
+}
+
+func (b *Bot) recordWatchdogIncident(kind string, state game.GameState, stuck time.Duration) {
+	if b.telemetry == nil {
+		return
+	}
+	b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
+		"kind":       "watchdog_" + kind,
+		"state":      state.String(),
+		"duration_ms": stuck.Milliseconds(),
+	})
+	b.telemetry.WriteIncident("watchdog_" + kind)
 }
 
 // checkStuck enforces a global watchdog: if the capture pipeline is dead,
@@ -511,9 +923,9 @@ func (b *Bot) recordActivity() {
 // one place doing nothing for too long, we cycle the game to recover from
 // hangs / dialogs / out-of-game screens without requiring user intervention.
 func (b *Bot) checkStuck(gc *game.GameContext) {
-
-	// Optional unattended wall-clock limit. This is checked from the capture
-	// loop so it also applies while Clash is idle at the village between raids.
+	// Preserve the base branch's unattended wall-clock session limit. This is
+	// checked from the capture loop, so it also applies while Clash is idle at
+	// the village between raids and while no attack sequence is active.
 	if maxRun := b.cfg.Automation.MaxRunMinutes; maxRun > 0 {
 		limit := time.Duration(maxRun) * time.Minute
 		if time.Since(b.startedAt) >= limit {
@@ -526,23 +938,28 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 		}
 	}
 
+	lastAction, lastSequenceStart := b.watchdogTimes()
+
 	if gc.ReadHealth().ConsecutiveFails >= 10 {
+		b.recordWatchdogIncident("capture_dead", gc.State, 0)
 		b.logger.Error().
 			Int("consecutive_fails", gc.ReadHealth().ConsecutiveFails).
 			Str("state", gc.State.String()).
 			Msg("capture pipeline appears dead, beginning device recovery ladder...")
 		b.recoverEmulator()
-		b.lastSequenceStart = time.Now()
+		b.recordSequenceStart()
 		return
 	}
 
 	if b.seqRunning.Load() {
-		if time.Since(b.lastSequenceStart) > 15*time.Minute {
+		if time.Since(lastSequenceStart) > 15*time.Minute {
+			seqStuck := time.Since(lastSequenceStart)
+			b.recordWatchdogIncident("sequence_timeout", gc.State, seqStuck)
 			b.logger.Warn().
-				Dur("seq_time", time.Since(b.lastSequenceStart)).
+				Dur("seq_time", time.Since(lastSequenceStart)).
 				Msg("attack sequence exceeded maximum duration, triggering emergency restart...")
 			b.restartGame()
-			b.lastSequenceStart = time.Now()
+			b.recordSequenceStart()
 		}
 		return
 	}
@@ -568,17 +985,18 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 	// boot-splash chain a generous window; the dismiss taps in processFrame
 	// advance through it.
 	if state == game.StateLogo || state == game.StateTapToContinue || state == game.StateNewsSplash {
-		bootStuck := time.Since(b.lastAction)
+		bootStuck := time.Since(lastAction)
 		const bootSplashTimeout = 5 * time.Minute
 		if bootStuck > bootSplashTimeout {
+			b.recordWatchdogIncident("boot_splash", state, bootStuck)
 			b.logger.Warn().
 				Str("state", state.String()).
-				Time("last_action", b.lastAction).
+				Time("last_action", lastAction).
 				Dur("stuck_time", bootStuck).
 				Dur("timeout", bootSplashTimeout).
 				Msg("boot splash stuck too long, triggering emergency restart...")
 			b.restartGame()
-			b.lastSequenceStart = time.Now()
+			b.recordSequenceStart()
 		}
 		return
 	}
@@ -586,38 +1004,49 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 	if state == game.StateBattle ||
 		state == game.StateSearchMap ||
 		state == game.StateLoading {
-		attackPhaseStuck := time.Since(b.lastAction)
+		attackPhaseStuck := time.Since(lastAction)
 		const attackPhaseTimeout = 30 * time.Second
 		if attackPhaseStuck > attackPhaseTimeout {
+			b.recordWatchdogIncident("attack_phase", state, attackPhaseStuck)
 			b.logger.Warn().
 				Str("state", state.String()).
-				Time("last_action", b.lastAction).
+				Time("last_action", lastAction).
 				Dur("stuck_time", attackPhaseStuck).
 				Dur("timeout", attackPhaseTimeout).
 				Msg("attack-phase state without active sequence, triggering emergency restart...")
 			b.restartGame()
-			b.lastSequenceStart = time.Now()
+			b.recordSequenceStart()
 		}
 		return
 	}
 
 	timeout := b.stuckTimeout
 
-	stuckTime := time.Since(b.lastAction)
+	stuckTime := time.Since(lastAction)
 	if stuckTime > timeout {
+		b.recordWatchdogIncident("idle", state, stuckTime)
 		b.logger.Warn().
 			Str("state", state.String()).
-			Time("last_action", b.lastAction).
+			Time("last_action", lastAction).
 			Dur("stuck_time", stuckTime).
 			Dur("timeout", timeout).
 			Msg("bot appears stuck without meaningful action, triggering emergency restart...")
 
 		b.restartGame()
-		b.lastSequenceStart = time.Now()
+		b.recordSequenceStart()
 	}
 }
 
 func (b *Bot) restartGame() {
+	if b.seqRunning.Load() {
+		b.resetAttackSoak("runtime_restart")
+	}
+	if !b.restartInFlight.CompareAndSwap(false, true) {
+		b.logger.Debug().Msg("restart already in progress; suppressing duplicate request")
+		return
+	}
+	defer b.restartInFlight.Store(false)
+
 	pkg := b.cfg.Device.PackageName
 	if pkg == "" {
 		pkg = "com.supercell.clashofclans"
@@ -638,9 +1067,9 @@ func (b *Bot) restartGame() {
 	b.client.JitteredSleep(15 * time.Second)
 	b.zoomedOut.Store(false)
 
-	b.lastAction = time.Now()
+	b.recordActivity()
 	b.lastNav = time.Now()
-	b.lastSequenceStart = time.Now()
+	b.recordSequenceStart()
 }
 
 // recoverEmulator is the mid-run escalation for a dead capture
@@ -657,8 +1086,55 @@ func (b *Bot) restartGame() {
 //     (note: drops ALL adb connections on this host — logged)
 //  4. EnsureBlueStacksMac   — emulator really gone; relaunch at the
 //     configured resolution, then poll up to 2 min for adb
+func safePacingActive(untilUS, nowUS int64) bool {
+	return untilUS > nowUS
+}
+
+func (b *Bot) forceSafePacing(reason string, duration time.Duration) {
+	if duration <= 0 {
+		duration = 2 * time.Minute
+	}
+	until := time.Now().Add(duration).UnixMicro()
+	for {
+		current := b.safePacingUntilUS.Load()
+		if current >= until || b.safePacingUntilUS.CompareAndSwap(current, until) {
+			break
+		}
+	}
+	if b.telemetry != nil {
+		b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
+			"mode": "Safe",
+			"reason": "safety_governor",
+			"incident": reason,
+			"safe_until_unix_us": until,
+		})
+	}
+}
+
+func (b *Bot) safePacingForced() bool {
+	return safePacingActive(b.safePacingUntilUS.Load(), time.Now().UnixMicro())
+}
+
 func (b *Bot) recoverEmulator() {
+	b.resetAttackSoak("device_recovery")
+	if !b.recoveryInFlight.CompareAndSwap(false, true) {
+		b.logger.Debug().Msg("device recovery already in progress; suppressing duplicate request")
+		return
+	}
+	defer func() {
+		// Recovery itself may take well over the stale-heartbeat threshold.
+		// Stamp a fresh grace period when it finishes so the supervisor does
+		// not immediately start a second recovery wave against BlueStacks.
+		b.captureHeartbeat.Store(time.Now().UnixNano())
+		b.recoveryInFlight.Store(false)
+	}()
+
 	b.recoveryAttempts.Add(1)
+	b.forceSafePacing("device_recovery", 2*time.Minute)
+	if b.telemetry != nil {
+		b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "start", "attempt": b.recoveryAttempts.Load()})
+		b.telemetry.WriteIncident("device_recovery")
+	}
 	b.logger.Warn().Msg("capture pipeline dead; beginning device recovery ladder")
 
 	deviceOK := func() bool {
@@ -670,6 +1146,9 @@ func (b *Bot) recoverEmulator() {
 		b.logger.Info().Msg("device still responsive; restarting game only")
 		b.restartGame()
 		b.recoverySuccesses.Add(1)
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "success", "method": "game_restart"})
+		}
 		return
 	}
 
@@ -680,6 +1159,9 @@ func (b *Bot) recoverEmulator() {
 	if deviceOK() {
 		b.restartGame()
 		b.recoverySuccesses.Add(1)
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "success", "method": "adb_reconnect"})
+		}
 		return
 	}
 
@@ -692,6 +1174,9 @@ func (b *Bot) recoverEmulator() {
 	if deviceOK() {
 		b.restartGame()
 		b.recoverySuccesses.Add(1)
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventRecovery, map[string]any{"stage": "success", "method": "adb_server_reset"})
+		}
 		return
 	}
 
@@ -712,10 +1197,20 @@ func (b *Bot) recoverEmulator() {
 	}
 	if !recovered {
 		b.logger.Error().Msg("device remained unreachable after BlueStacks recovery window; deferring until next watchdog cycle")
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventRecovery, map[string]any{
+				"stage": "failed", "method": "bluestacks_relaunch",
+			})
+		}
 		return
 	}
 	b.restartGame()
 	b.recoverySuccesses.Add(1)
+	if b.telemetry != nil {
+		b.telemetry.Emit(telemetry.EventRecovery, map[string]any{
+			"stage": "success", "method": "bluestacks_relaunch", "bluestacks_restart": true,
+		})
+	}
 }
 
 // locateRewardPopup detects the seasonal/event "Pick a Reward!" modal.
@@ -808,17 +1303,27 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 
 	state, score := b.classify(screen)
 
-	// Keep the console useful without flooding Wails/React at the faster
-	// capture cadence. Log immediately on state changes and at most roughly
-	// once per 750ms while a state remains stable.
-	if state != gc.State || time.Since(b.lastVisionLog) >= 750*time.Millisecond || time.Since(b.startedAt) < 3*time.Second {
+	// Keep normal output action-oriented. State changes are INFO; a stable
+	// classifier heartbeat is DEBUG-only and heavily throttled. The old 750ms
+	// INFO heartbeat flooded Wails/logBuffer even while nothing changed.
+	stateChanged := state != gc.State
+	bootVerbose := time.Since(b.startedAt) < 3*time.Second
+	if stateChanged || bootVerbose {
 		b.lastVisionLog = time.Now()
 		b.logger.Info().
 			Str("vision_state", state.String()).
 			Int("score", score).
 			Int("capture_w", screen.Cols()).
 			Int("capture_h", screen.Rows()).
-			Msg(fmt.Sprintf("vision frame classified: state=%s score=%d capture=%dx%d", state.String(), score, screen.Cols(), screen.Rows()))
+			Msg("vision state")
+	} else if time.Since(b.lastVisionLog) >= 5*time.Second {
+		b.lastVisionLog = time.Now()
+		b.logger.Debug().
+			Str("vision_state", state.String()).
+			Int("score", score).
+			Int("capture_w", screen.Cols()).
+			Int("capture_h", screen.Rows()).
+			Msg("vision heartbeat")
 	}
 
 	gc.UpdateScreen(screen, captureMs)
@@ -881,7 +1386,12 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 
 	if gc.ConfirmState(state) {
 		now := time.Now()
+		previousState := gc.State
 		gc.UpdateState(state, now)
+		b.observeRuntimeState(state, now)
+		if b.telemetry != nil && previousState != state {
+			b.telemetry.Emit(telemetry.EventStateChanged, map[string]any{"from": previousState.String(), "to": state.String(), "score": score})
+		}
 
 		select {
 		case gc.StateChange <- game.StateChange{From: gc.PrevState(), To: state, At: now}:
@@ -896,6 +1406,7 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 
 	if !b.seqRunning.Load() && (state == game.StateMainVillage || gc.State == game.StateMainVillage) {
 		b.maybeScanVillageResources(screen)
+		b.maybeCollectVillageResources(screen)
 	}
 
 	if state == game.StateChestReward {
@@ -1027,9 +1538,24 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 		return
 	}
 
+	if b.paused.Load() {
+		// A pause requested during an attack takes effect naturally once the
+		// active sequence returns home. Keep the observer alive, but never
+		// start another farming cycle until ResumeAutomation is called.
+		return
+	}
+	if b.healthAttackHoldActive() {
+		// Automatic health holds are temporary and independent of the user's
+		// Pause switch. Recovery/supervision continues while no new raid starts.
+		return
+	}
+	if b.uiSafetyHold.Load() {
+		return
+	}
+
 	if b.zoomedOut.Load() && (gc.State == game.StateMainVillage || gc.State == game.StateUnknown) && b.findAttackButton(screen, 0.30) {
 		b.logger.Info().Msg("attack button detected, starting sequence")
-		b.lastSequenceStart = time.Now()
+		b.recordSequenceStart()
 		go b.executeAttackSequence(gc)
 		return
 	}
@@ -1089,7 +1615,7 @@ func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
 	// HUD ROI. This is robust across language and avoids assuming one fixed
 	// center coordinate.
 	if x, y, ok := b.locateAttackButtonColor(screen); ok {
-		b.logger.Info().Int("x", x).Int("y", y).Msg("attack button verified via localized orange region")
+		b.logger.Debug().Int("x", x).Int("y", y).Msg("attack button verified via localized orange region")
 		return true
 	}
 
@@ -1141,7 +1667,7 @@ func (b *Bot) findAttackButton(screen gocv.Mat, threshold float32) bool {
 		return false
 	}
 
-	b.logger.Info().
+	b.logger.Debug().
 		Float64("conf", best.Confidence).
 		Int("x", best.Point.X).
 		Int("y", best.Point.Y).
@@ -1175,63 +1701,15 @@ func (b *Bot) hasAttackButtonColor(screen gocv.Mat) bool {
 func (b *Bot) locateFindMatchButtonColor(screen gocv.Mat) (int, int, bool) {
 	x0, y0 := b.cal.ScaleRef(40, 420)
 	x1, y1 := b.cal.ScaleRef(420, 640)
-
-	if x0 < 0 { x0 = 0 }
-	if y0 < 0 { y0 = 0 }
-	if x1 > screen.Cols() { x1 = screen.Cols() }
-	if y1 > screen.Rows() { y1 = screen.Rows() }
-	if x1-x0 < 2 || y1-y0 < 2 {
-		return 0, 0, false
+	roi := image.Rect(x0, y0, x1, y1)
+	x, y, ok := b.findLocalizedFindMatchButton(screen, roi)
+	if ok {
+		b.logger.Debug().
+			Int("x", x).
+			Int("y", y).
+			Msg("Find Match button verified via language-independent HSV region")
 	}
-
-	roi := screen.Region(image.Rect(x0, y0, x1, y1))
-	defer roi.Close()
-
-	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
-	defer vision.PutMat(mask)
-
-	gocv.InRangeWithScalar(
-		roi,
-		gocv.NewScalar(0, 70, 110, 0),
-		gocv.NewScalar(210, 255, 255, 0),
-		&mask,
-	)
-
-	contours := gocv.FindContours(mask, gocv.RetrievalExternal, gocv.ChainApproxSimple)
-	defer contours.Close()
-
-	bestArea := 0.0
-	bestRect := image.Rectangle{}
-	for i := 0; i < contours.Size(); i++ {
-		contour := contours.At(i)
-		area := gocv.ContourArea(contour)
-		if area <= bestArea {
-			continue
-		}
-		rect := gocv.BoundingRect(contour)
-		if rect.Dx() < 55 || rect.Dy() < 24 {
-			continue
-		}
-		bestArea = area
-		bestRect = rect
-	}
-
-	if bestArea < 900 || bestRect.Empty() {
-		return 0, 0, false
-	}
-
-	x := x0 + bestRect.Min.X + bestRect.Dx()/2
-	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
-
-	b.logger.Info().
-		Float64("area", bestArea).
-		Int("x", x).
-		Int("y", y).
-		Int("w", bestRect.Dx()).
-		Int("h", bestRect.Dy()).
-		Msg("Find Match button verified via localized orange region")
-
-	return x, y, true
+	return x, y, ok
 }
 
 // locateAttackButtonColor returns the center of the largest orange/gold blob
@@ -1294,7 +1772,7 @@ func (b *Bot) locateNextButtonColor(screen gocv.Mat) (int, int, bool) {
 	x := x0 + bestRect.Min.X + bestRect.Dx()/2
 	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
 
-	b.logger.Info().
+	b.logger.Debug().
 		Float64("area", bestArea).
 		Int("x", x).
 		Int("y", y).
@@ -1361,7 +1839,7 @@ func (b *Bot) locateBattleButtonColor(screen gocv.Mat) (int, int, bool) {
 	x := x0 + bestRect.Min.X + bestRect.Dx()/2
 	y := y0 + bestRect.Min.Y + bestRect.Dy()/2
 
-	b.logger.Info().
+	b.logger.Debug().
 		Float64("area", bestArea).
 		Int("x", x).
 		Int("y", y).
@@ -1496,6 +1974,13 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	if !b.seqRunning.CompareAndSwap(false, true) {
 		return
 	}
+	b.setRuntimePhase(PhaseAttackNavigation)
+	defer b.setRuntimePhase(PhaseIdle)
+	sequenceRecoveryStart := b.recoveryAttempts.Load()
+	sequenceBlueStacksRestartStart := b.blueStacksRestarts.Load()
+	b.lastPlanningUS.Store(0)
+	b.seqStartedAtUnix.Store(time.Now().Unix())
+	defer b.seqStartedAtUnix.Store(0)
 	defer b.seqRunning.Store(false)
 
 	if b.cfg.Debug.UseShellPipe && runtime.GOOS != "windows" {
@@ -1507,11 +1992,90 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		// ("use of closed network connection"), followed by capture/tap failures.
 		// Use the proven one-shot transport path on Windows until the pipe has a
 		// dedicated Windows implementation.
-		b.logger.Info().Msg("persistent adb shell pipe disabled on Windows-safe path")
+		b.logger.Debug().Msg("persistent adb shell pipe disabled on Windows-safe path")
 	}
 
 	if b.attackCount.Load() >= int32(b.cfg.Attack.MaxAttackPerSession) {
 		return
+	}
+
+	// Long-session governor: combine hourly rate limits, scheduled rest and
+	// recovery circuit-breaking before touching the village Attack button.
+	// Re-evaluate after every wait because more than one policy can become
+	// active at the same boundary (for example scheduled break + hourly cap).
+	for b.governor != nil {
+		gate := b.governor.Gate(time.Now(), b.attackCount.Load(), b.recoveryAttempts.Load())
+		if gate.Wait <= 0 {
+			break
+		}
+		b.logger.Info().
+			Str("reason", gate.Reason).
+			Dur("wait", gate.Wait).
+			Int32("attacks", b.attackCount.Load()).
+			Int32("recoveries", b.recoveryAttempts.Load()).
+			Msg("automation governor pausing before next attack")
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
+				"mode": "Paused",
+				"reason": "automation_governor",
+				"policy": gate.Reason,
+				"wait_ms": gate.Wait.Milliseconds(),
+			})
+		}
+		timer := time.NewTimer(gate.Wait)
+		select {
+		case <-timer.C:
+		case <-b.ctx.Done():
+			if !timer.Stop() {
+				select { case <-timer.C: default: }
+			}
+			return
+		}
+	}
+
+	sequenceStartedAt := time.Now()
+	var cooldownDurationMS int64
+	var preparationDurationMS int64
+
+	// If ClashGO stopped during an account switch after the slot tap but
+	// before the target village was verified, the physical account identity is
+	// unknown. Never attack in that state: pausing is safer than contaminating
+	// another account's IA, history, walls or farm profile.
+	if b.multiAccount != nil {
+		if recoveryRequired, targetID := b.multiAccount.RecoveryStatus(); recoveryRequired {
+			b.paused.Store(true)
+			b.logger.Error().
+				Str("target_account_id", targetID).
+				Msg("multi-account recovery required; automation paused before attack")
+			if b.telemetry != nil {
+				b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
+					"mode": "Paused",
+					"reason": "multi_account_recovery_required",
+					"target_account_id": targetID,
+				})
+			}
+			return
+		}
+	}
+
+	// A failed post-battle wall pass is never forgotten. Retry it once the bot
+	// is safely back on the Main Village, before spending time on another
+	// matchmaking cycle. Failure here does not deadlock farming: the pending
+	// bit remains set and the next home cycle gets another chance.
+	if b.cfg.Upgrade.UpgradeWalls && b.wallUpgradePending.Load() {
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
+		if err == nil && !screen.Empty() {
+			state, _ := b.classify(screen)
+			screen.Close()
+			if state == game.StateMainVillage {
+				b.logger.Info().Msg("pending wall-upgrade stage detected; retrying before next attack")
+				if b.runWallUpgradeWithCircuit(gc) {
+					b.wallUpgradePending.Store(false)
+				}
+			}
+		} else if err == nil {
+			screen.Close()
+		}
 	}
 
 	// Inter-attack cooldown. Armies need real time to retrain; without a
@@ -1523,165 +2087,352 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	gap := time.Duration(b.cfg.Attack.MinSecondsBetweenAttacks) * time.Second
 	if gap > 0 && !b.lastAttackEnd.IsZero() {
 		if wait := gap - time.Since(b.lastAttackEnd); wait > 0 {
+			cooldownStarted := time.Now()
 			b.logger.Info().
 				Dur("wait", wait).
 				Int("min_gap_s", b.cfg.Attack.MinSecondsBetweenAttacks).
 				Msg("waiting out inter-attack cooldown before next search")
 			select {
 			case <-time.After(wait):
+				cooldownDurationMS = time.Since(cooldownStarted).Milliseconds()
 			case <-b.ctx.Done():
 				return
 			}
 		}
 	}
 
+	preparationStarted := time.Now()
+	b.lastPrepTimings = PreparationTimings{}
 	if !b.clickSequence() {
-		b.logger.Warn().Msg("attack click sequence failed, restarting game to recover...")
-		b.restartGame()
+		streak := b.navigationFailureStreak.Add(1)
+		b.logger.Warn().
+			Int32("navigation_failure_streak", streak).
+			Msg("attack navigation failed; attempting local UI recovery before any game restart")
+		b.recoverAttackNavigationLocally()
+		if streak >= 3 {
+			b.navigationFailureStreak.Store(0)
+			b.logger.Warn().Msg("attack navigation failed three consecutive times; restarting game as last resort")
+			b.restartGame()
+		}
 		return
 	}
+	b.navigationFailureStreak.Store(0)
+	preparationDurationMS = time.Since(preparationStarted).Milliseconds()
 
-	b.logger.Info().Msg("waiting for base to be found...")
+	b.setRuntimePhase(PhaseSearching)
+	b.logger.Info().
+		Int64("prep_ms", preparationDurationMS).
+		Msg("search started")
+	if runtime.GOOS == "windows" {
+		// Give BlueStacks one quiet render window after entering matchmaking.
+		// Capturing immediately while HD-Player is switching from clouds/menu
+		// to the first opponent has produced native memory crashes on Pie64.
+		b.logger.Debug().Msg("Windows matchmaking settle: pausing before first search capture")
+		time.Sleep(1200 * time.Millisecond)
+	}
+	if b.telemetry != nil {
+		b.telemetry.Emit(telemetry.EventSearchStarted, nil)
+	}
 
-	lootRec := game.NewLootRecognizer(b.cal, b.templates, b.logger)
+	lootRec := b.searchLootRec
+	closeLootRec := false
+	if lootRec == nil {
+		// Defensive fallback for tests/legacy constructors. Production bots
+		// keep one recognizer hot for the whole session.
+		lootRec = game.NewLootRecognizer(b.cal, b.templates, b.logger)
+		closeLootRec = true
+	}
+	if closeLootRec {
+		defer lootRec.Close()
+	}
 
 	var remainingUndeployed int
 	var deployErr error
+	var deployDurationMS int64
+	var acceptedTargetGold, acceptedTargetElixir, acceptedTargetDE int
+	var acceptedTargetScore int
 	var stratName string = "Unknown"
 	var targetEdge string = "Unknown"
+	var deploySide string = "Unknown"
+	searchStrategyName := filepath.Base(b.cfg.Attack.StrategyFile)
+	if searchStrat, searchStratErr := strategy.ParseYAML(b.cfg.Attack.StrategyFile); searchStratErr == nil && strings.TrimSpace(searchStrat.Name) != "" {
+		searchStrategyName = searchStrat.Name
+	}
 
 	searchStart := time.Now()
-	consecutiveNextFailures := 0
-	skipsSinceRest := 0
+	attackStartedAt := time.Time{}
+	sequenceSkips := 0
+
+	// Xingchen-style search loop: one authoritative capture per cycle,
+	// one decision, one transition action. No multi-probe Next verifier and
+	// no adaptive capture bursts around the most fragile BlueStacks phase.
 	for {
-		// Stop check: a user Stop must abort the search loop even
-		// though CaptureToMat below would silently reconnect a closed
-		// transport and keep searching forever.
 		select {
 		case <-b.ctx.Done():
 			b.logger.Info().Msg("search loop cancelled by stop, abandoning attack sequence")
-			lootRec.Close()
 			return
 		default:
 		}
 
 		if time.Since(searchStart) > 5*time.Minute {
-			b.logger.Error().Msg("searching/skipping bases took too long (stuck in clouds?), restarting game...")
+			b.logger.Error().Msg("search exceeded five minutes; restarting game")
 			b.restartGame()
-			lootRec.Close()
 			return
 		}
 
-		time.Sleep(700 * time.Millisecond)
+		if !b.sleepResponsive(120 * time.Millisecond) {
+			return
+		}
 
-		screen, err := b.client.CaptureToMat()
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil {
-			return
+			b.logger.Warn().Err(err).Msg("search capture failed")
+			if !b.sleepResponsive(1200 * time.Millisecond) {
+				return
+			}
+			continue
 		}
+		if screen.Empty() {
+			screen.Close()
+			continue
+		}
+		b.captureHeartbeat.Store(time.Now().UnixNano())
 
 		state, _ := b.classify(screen)
 		if state != game.StateBattle {
 			if state == game.StateSearchMap || state == game.StateLoading {
-				b.logger.Info().Str("state", state.String()).Msg("still searching (clouds)...")
-				screen.Close()
-				continue
+				b.logger.Debug().Str("state", state.String()).Msg("matchmaking in progress")
+			} else {
+				b.logger.Debug().Str("state", state.String()).Msg("waiting for searchable base")
+				if isTransientRuntimeState(state) {
+					b.dismissInterruptions()
+				}
 			}
-			b.logger.Info().Str("state", state.String()).Msg("searching area (wait)...")
-
-			b.dismissInterruptions()
 			screen.Close()
 			continue
 		}
 
-		b.logger.Info().Msg("base found, reading loot...")
-		loot, err := lootRec.ReadAvailableLoot(screen)
-		if err != nil {
-			b.logger.Warn().Err(err).Msg("failed to read loot")
-			b.DumpDiagnostics("loot_read_failed", screen, map[string]interface{}{
-				"error": err.Error(),
-			})
+		b.logger.Info().Msg("base found; reading loot")
+		scanStarted := time.Now()
+		loot, lootErr := lootRec.ReadAvailableLoot(screen)
+		targetScanUS := time.Since(scanStarted).Microseconds()
+		if lootErr != nil {
+			b.logger.Warn().Err(lootErr).Msg("loot read failed; treating target conservatively")
 		}
 
-		b.logger.Info().
-			Int("gold", loot.Gold).
-			Int("elixir", loot.Elixir).
-			Int("de", loot.DarkElixir).
-			Msg("loot detected")
+		target := intelligence.Target{
+			Gold: loot.Gold, Elixir: loot.Elixir, DarkElixir: loot.DarkElixir,
+		}
+		rules := intelligence.TargetRules{
+			MinGold:       b.cfg.Search.MinLootGold,
+			MinElixir:     b.cfg.Search.MinLootElixir,
+			MinDarkElixir: b.cfg.Search.MinLootDarkElixir,
+			DarkOverride:  b.cfg.Search.AttackIfDarkElixirGT,
+			SearchEnabled: b.cfg.Search.Enabled,
+		}
+		decision := intelligence.EvaluateTarget(target, rules)
 
-		meetsReq := !b.cfg.Search.Enabled || (loot.Gold >= b.cfg.Search.MinLootGold &&
-			loot.Elixir >= b.cfg.Search.MinLootElixir &&
-			loot.DarkElixir >= b.cfg.Search.MinLootDarkElixir)
+		// V3 learns the value of continuing matchmaking versus attacking this
+		// concrete base. No extra screenshot is requested: it consumes the loot
+		// OCR already read from the current broker frame and historical outcomes.
+		if b.contextual != nil && lootErr == nil {
+			allowAggressiveReject := !b.safePacingForced() &&
+				b.client.Health().ConsecutiveFails == 0 &&
+				!b.recoveryInFlight.Load()
+			farmDecision := b.contextual.RecommendTarget(
+				searchStrategyName,
+				b.cfg.Attack.Farm.TownHall,
+				target,
+				rules,
+				decision,
+				time.Since(searchStart),
+				sequenceSkips,
+				allowAggressiveReject,
+			)
+			if farmDecision.Apply && farmDecision.Accept != decision.Accept {
+				b.logger.Info().
+					Bool("legacy_accept", decision.Accept).
+					Bool("v3_accept", farmDecision.Accept).
+					Float64("predicted_farm_rate", farmDecision.PredictedFarmRate).
+					Float64("baseline_farm_rate", farmDecision.BaselineFarmRate).
+					Float64("capture_efficiency", farmDecision.CaptureEfficiency).
+					Int("samples", farmDecision.Samples).
+					Int("skips", sequenceSkips).
+					Str("reason", farmDecision.Reason).
+					Msg("Intelligence V3 overrode target decision for farm throughput")
+				decision.Accept = farmDecision.Accept
+				decision.Reason = farmDecision.Reason
+			} else if farmDecision.Apply {
+				decision.Reason = farmDecision.Reason
+			}
+		}
 
-		if meetsReq {
-			b.logger.Info().Msg("loot requirements met, starting attack!")
-			b.saveAcceptedBaseScreenshot(screen, loot.Gold, loot.Elixir, loot.DarkElixir)
-			b.attackExec.SetInitialLoot(loot.Gold, loot.Elixir, loot.DarkElixir)
-			if strat, err := strategy.ParseYAML(b.cfg.Attack.StrategyFile); err == nil {
-				stratName = strat.Name
+		if decision.Accept && b.cfg.Attack.DryRun {
+			strategyName := filepath.Base(b.cfg.Attack.StrategyFile)
+			targetEdge := "TopLeft"
+			if strat, stratErr := strategy.ParseYAML(b.cfg.Attack.StrategyFile); stratErr == nil {
+				strategyName = strat.Name
 				targetEdge = strat.TargetEdge
 			}
-			remainingUndeployed, deployErr = b.deployTroops(screen)
+			b.saveDryRunPreview(screen, strategyName, targetEdge)
+			decision.Accept = false
+			decision.Reason = "dry_run_preview"
+		}
+
+		if b.telemetry != nil {
+			if decision.Accept {
+				b.telemetry.Emit(telemetry.EventTargetFound, map[string]any{
+					"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir,
+					"score": decision.Score, "accept": true, "reason": decision.Reason,
+					"scan_us": targetScanUS,
+				})
+			} else {
+				b.telemetry.RecordRejectedTarget(
+					loot.Gold, loot.Elixir, loot.DarkElixir, decision.Score, targetScanUS,
+					b.cfg.Search.MinLootGold, b.cfg.Search.MinLootElixir, b.cfg.Search.MinLootDarkElixir,
+				)
+			}
+		}
+
+		if !decision.Accept {
+			b.maybeSaveNearMissBaseScreenshot(
+				screen, loot.Gold, loot.Elixir, loot.DarkElixir, decision.Score, sequenceSkips+1,
+			)
+		}
+
+		if decision.Accept {
+			attackStartedAt = time.Now()
+			acceptedTargetGold = loot.Gold
+			acceptedTargetElixir = loot.Elixir
+			acceptedTargetDE = loot.DarkElixir
+			acceptedTargetScore = decision.Score
+			b.saveAcceptedBaseScreenshot(screen, loot.Gold, loot.Elixir, loot.DarkElixir, decision.Score)
+
+			b.logger.Info().
+				Int("score", decision.Score).
+				Int("gold", loot.Gold).
+				Int("elixir", loot.Elixir).
+				Int("de", loot.DarkElixir).
+				Msg("target accepted — attacking")
+
+			if b.telemetry != nil {
+				b.telemetry.Emit(telemetry.EventAttackStarted, map[string]any{
+					"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir,
+					"search_ms": attackStartedAt.Sub(searchStart).Milliseconds(),
+					"skips": sequenceSkips,
+				})
+			}
+
+			b.attackExec.SetInitialLoot(loot.Gold, loot.Elixir, loot.DarkElixir)
+			// Reset the per-attack learned exit policy before planning. A previous
+			// attack's policy must never leak into a strategy that cannot be parsed.
+			b.attackExec.SetAdaptiveFarmExit(false, 0, 12*time.Second)
+			b.setRuntimePhase(PhasePlanning)
+			deployStarted := time.Now()
+
+			if strat, stratErr := strategy.ParseYAML(b.cfg.Attack.StrategyFile); stratErr == nil {
+				stratName = strat.Name
+				targetEdge = strat.TargetEdge
+
+				// Intelligence V3 operates only on the frame/data already present.
+				// Fixed YAML edges remain authoritative. Rotate/Random/Adaptive may
+				// be replaced by a learned champion; challenger exploration is
+				// disabled whenever the BlueStacks safety governor is active.
+				if b.contextual != nil {
+					ctx := intelligence.AttackContext{
+						Strategy: strat.Name,
+						TownHall: b.cfg.Attack.Farm.TownHall,
+						TargetScore: acceptedTargetScore,
+						TargetGold: acceptedTargetGold,
+						TargetElixir: acceptedTargetElixir,
+						TargetDE: acceptedTargetDE,
+					}
+					allowExplore := !b.safePacingForced() &&
+						b.client.Health().ConsecutiveFails == 0 &&
+						!b.recoveryInFlight.Load()
+					rec := b.contextual.RecommendEdge(ctx, strat.TargetEdge,
+						[]string{"TopLeft", "TopRight", "BottomLeft", "BottomRight"}, allowExplore)
+					if rec.Apply {
+						original := strat.TargetEdge
+						strat.TargetEdge = rec.Edge
+						targetEdge = rec.Edge
+						b.logger.Info().
+							Str("original_edge", original).
+							Str("learned_edge", rec.Edge).
+							Bool("challenger", rec.Exploratory).
+							Float64("confidence", rec.Confidence).
+							Int("context_samples", rec.ContextSamples).
+							Str("scope", rec.ProfileScope).
+							Str("reason", rec.Reason).
+							Msg("Intelligence V3 selected attack edge")
+					}
+
+					exitRec := b.contextual.RecommendFarmExit(strat.Name, b.cfg.Attack.Farm.TownHall)
+					exitEnabled := exitRec.Enabled &&
+						!b.safePacingForced() &&
+						b.client.Health().ConsecutiveFails == 0 &&
+						!b.recoveryInFlight.Load()
+					b.attackExec.SetAdaptiveFarmExit(
+						exitEnabled,
+						exitRec.MinLootPercent,
+						time.Duration(exitRec.StallSeconds)*time.Second,
+					)
+					if exitRec.Enabled {
+						b.logger.Info().
+							Bool("enabled", exitEnabled).
+							Int("min_loot_percent", exitRec.MinLootPercent).
+							Int("stall_seconds", exitRec.StallSeconds).
+							Int("samples", exitRec.Samples).
+							Str("reason", exitRec.Reason).
+							Msg("Intelligence V3 prepared farm-throughput battle exit")
+					}
+				}
+
+				remainingUndeployed, deployErr = b.deployParsedStrategy(screen, strat)
+			} else {
+				deployErr = stratErr
+				b.logger.Warn().Err(stratErr).Str("path", b.cfg.Attack.StrategyFile).Msg("could not load strategy")
+			}
+			deployDurationMS = time.Since(deployStarted).Milliseconds()
+
+			if resolved := b.attackExec.LastResolvedEdge(); resolved != "" {
+				targetEdge = resolved
+			}
+			if side := b.attackExec.LastDeploySide(); side != "" {
+				deploySide = side
+			}
 			b.attackExec.SetEarlyExitAllowed(deployErr == nil && remainingUndeployed == 0)
+
 			if deployErr != nil || remainingUndeployed > 0 {
+				if b.telemetry != nil {
+					b.telemetry.WriteIncident("deployment_failed")
+				}
 				b.logger.Warn().
 					Err(deployErr).
 					Int("remaining", remainingUndeployed).
-					Msg("deployment not complete; keeping battle active and recording diagnostics")
-				failScreen, err := b.client.CaptureToMat()
-				if err == nil {
-					b.DumpDiagnostics("deployment_failed", failScreen, map[string]interface{}{
-						"error":      fmt.Sprintf("%v", deployErr),
-						"remaining":  remainingUndeployed,
-						"stratName":  stratName,
-						"targetEdge": targetEdge,
-					})
-					failScreen.Close()
-				}
-			} else {
-				b.logger.Info().Msg("all live deployable troop slots verified empty")
+					Msg("deployment incomplete; battle remains active")
 			}
+
+			b.setRuntimePhase(PhaseBattle)
 			screen.Close()
 			break
 		}
 
-		b.logger.Info().Msg("loot too low, skipping base...")
+		sequenceSkips++
+		b.skipsCount.Add(1)
+		b.logger.Info().
+			Int("skip", sequenceSkips).
+			Int("gold", loot.Gold).
+			Int("elixir", loot.Elixir).
+			Int("de", loot.DarkElixir).
+			Msg("target rejected — requesting next base")
 
-		// BlueStacks stability guard: changing opponents endlessly at full
-		// speed can put sustained pressure on HD-Player.exe. Rest briefly
-		// every few successful skips instead of hammering Next/capture forever.
-		if skipsSinceRest >= 8 {
-			b.logger.Info().Msg("matchmaking stability pause after 8 skips")
-			time.Sleep(1500 * time.Millisecond)
-			skipsSinceRest = 0
-		}
-
-		// NEXT is handled as a state transition, not as a blind tap.
-		// A successful ADB tap only means Android received the event; it does
-		// NOT mean Clash accepted it. We click once, then wait until clouds /
-		// loading / Unknown proves that matchmaking actually advanced.
-		clickNextFresh := func() bool {
-			fresh, capErr := b.client.CaptureToMat()
-			if capErr != nil || fresh.Empty() {
-				if !fresh.Empty() { fresh.Close() }
-				return false
-			}
-			defer fresh.Close()
-
-			if x, y, ok := b.locateNextButtonColor(fresh); ok {
-				b.logger.Info().Int("x", x).Int("y", y).Msg("Next button freshly verified; precision clicking")
-				if err := b.client.TapFast(x, y, 0.6); err == nil {
-					b.recordActivity()
-					return true
-				}
-			}
-			return false
-		}
-
-		// Use the already-live frame first.
+		// Use the frame already in memory. Only if the button cannot be found
+		// do we allow one evidence-gated retry. This prevents the old
+		// capture->tap->capture->verify->capture retry burst.
 		nextClicked := false
 		if x, y, ok := b.locateNextButtonColor(screen); ok {
-			b.logger.Info().Int("x", x).Int("y", y).Msg("Next button verified; precision clicking detected center")
-			if err := b.client.TapFast(x, y, 0.6); err == nil {
+			if err := b.client.TapRandomized(x, y); err == nil {
 				b.recordActivity()
 				nextClicked = true
 			}
@@ -1689,92 +2440,30 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		screen.Close()
 
 		if !nextClicked {
-			nextClicked = clickNextFresh()
+			nextClicked = b.waitAndClickButton("btn_next", "Next Match", 1800*time.Millisecond)
 		}
-
-		transitioned := false
-		if nextClicked {
-			// Give Clash/BlueStacks time to start the clouds transition before
-			// asking for another screenshot. The old 220ms polling burst could
-			// issue 8-12 PNG screencaps immediately after every Next tap and
-			// was correlated with HD-Player.exe access-violation crashes.
-			time.Sleep(650 * time.Millisecond)
-			for verify := 0; verify < 3 && !transitioned; verify++ {
-				probe, capErr := b.client.CaptureToMat()
-				if capErr == nil && !probe.Empty() {
-					st, _ := b.classify(probe)
-					probe.Close()
-					if st == game.StateSearchMap || st == game.StateLoading || st == game.StateUnknown {
-						transitioned = true
-						break
-					}
-				} else if !probe.Empty() {
-					probe.Close()
-				}
-				if verify < 2 {
-					time.Sleep(550 * time.Millisecond)
-				}
-			}
-		}
-
-		// If Clash ignored the first tap, reacquire the button and try ONCE.
-		// This replaces the situation where the bot looked "lost" until the
-		// user manually clicked Next, while also preventing rapid tap spam.
-		if !transitioned {
-			b.logger.Warn().Msg("Next tap did not start matchmaking; reacquiring button for one controlled retry")
-			time.Sleep(450 * time.Millisecond)
-			if clickNextFresh() {
-				time.Sleep(700 * time.Millisecond)
-				for verify := 0; verify < 3 && !transitioned; verify++ {
-					probe, capErr := b.client.CaptureToMat()
-					if capErr == nil && !probe.Empty() {
-						st, _ := b.classify(probe)
-						probe.Close()
-						if st == game.StateSearchMap || st == game.StateLoading || st == game.StateUnknown {
-							transitioned = true
-							break
-						}
-					} else if !probe.Empty() {
-						probe.Close()
-					}
-					if verify < 2 {
-						time.Sleep(600 * time.Millisecond)
-					}
-				}
-			}
-		}
-
-		if transitioned {
-			consecutiveNextFailures = 0
-			skipsSinceRest++
-			b.skipsCount.Add(1)
-			if b.OnStatsUpdate != nil {
-				b.OnStatsUpdate()
-			}
-			b.logger.Info().Msg("matchmaking transition confirmed after Next")
-			time.Sleep(1100 * time.Millisecond)
-			continue
-		}
-
-		// Never fall back to repeated blind coordinates. If two verified
-		// attempts fail, back off. After 3 consecutive failures restart only
-		// Clash (not BlueStacks) to recover a wedged matchmaking UI.
-		consecutiveNextFailures++
-		b.logger.Warn().
-			Int("failures", consecutiveNextFailures).
-			Msg("Next transition not confirmed; backing off instead of spamming taps")
-
-		if consecutiveNextFailures >= 3 {
-			b.logger.Error().Msg("Next remained unresponsive after controlled retries; restarting Clash to recover matchmaking")
-			lootRec.Close()
+		if !nextClicked {
+			b.logger.Error().Msg("Next button not visually confirmed; restarting game instead of blind tapping")
+			b.forceSafePacing("next_unresponsive", 2*time.Minute)
 			b.restartGame()
 			return
 		}
 
-		time.Sleep(1200 * time.Millisecond)
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventTargetSkipped, map[string]any{
+				"sequence_skips": sequenceSkips,
+			})
+		}
+
+		// Xingchen-style transition settle: do not poll repeatedly while
+		// BlueStacks is animating clouds / loading the next opponent.
+		if !b.sleepResponsive(450 * time.Millisecond) {
+			return
+		}
 	}
 
 	if deployErr != nil || remainingUndeployed > 0 {
+		b.forceSafePacing("incomplete_deployment", 2*time.Minute)
 		b.logger.Warn().
 			Int("remaining", remainingUndeployed).
 			Msg("deployment ended with units still unverified; battle continues but deployment is NOT marked complete")
@@ -1788,8 +2477,12 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	var battleDE int = 0
 	var bonusGold, bonusElixir, bonusDE int = 0, 0, 0
 	var parsedResults bool = false
+	starsSource := "unknown"
+	lootSource := "unknown"
+	resultConfidence := "low"
 
 	if b.attackExec.WaitForBattleEndCtx(b.ctx, 4*time.Minute) {
+		b.setRuntimePhase(PhaseParsingResult)
 
 		// WaitForBattleEnd returns the moment the result overlay's Return
 		// Home button is detected, but the overlay is still animating in:
@@ -1807,7 +2500,11 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		// zero) value is the true result. Every attempt overwrites
 		// last_battle_result.png with the freshest frame so the saved
 		// artifact matches the final parse.
-		b.client.JitteredSleep(1800 * time.Millisecond)
+		resultSettleDuration, resultPanelStable := b.waitForStableResultPanel(1800 * time.Millisecond)
+		b.logger.Debug().
+			Dur("duration", resultSettleDuration).
+			Bool("stable", resultPanelStable).
+			Msg("result panel settle completed")
 
 		// Authoritative star signal: the destruction percentage the battle
 		// wait sampled from the stall ROI (proven live: valk runs tracked
@@ -1822,20 +2519,18 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		parsedOK := false
 		prevHash := uint64(0)
 		for attempt := 0; attempt < 3 && !parsedOK; attempt++ {
-			resultScreen, err := b.client.CaptureToMat()
+			resultScreen, err := b.runtimeFrameFresh(2 * time.Second)
 			if err != nil {
 				b.logger.Warn().Err(err).Msg("battle result capture failed; retrying")
 				time.Sleep(500 * time.Millisecond)
 				continue
 			}
 			gocv.IMWrite(paths.ResolveConfig("last_battle_result.png"), resultScreen)
-			b.logger.Info().Msg("saved battle result screenshot to last_battle_result.png")
+			b.logger.Debug().Msg("saved battle result screenshot to last_battle_result.png")
 
-			lootRec := game.NewLootRecognizer(b.cal, b.templates, b.logger)
 			res, rerr := lootRec.ReadBattleResult(resultScreen)
 			hash := resultPanelHash(resultScreen, b.cal)
 			resultScreen.Close()
-			lootRec.Close()
 
 			if rerr != nil {
 				b.logger.Warn().Err(rerr).Msg("battle result parse error; retrying")
@@ -1862,6 +2557,9 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 		if parsedOK {
 			visualStars := parsedResult.Stars
+			starsSource = "result_ocr"
+			lootSource = "result_ocr"
+			resultConfidence = "medium"
 			battleGold = parsedResult.Loot.Gold
 			battleElixir = parsedResult.Loot.Elixir
 			battleDE = parsedResult.Loot.DarkElixir
@@ -1870,33 +2568,27 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			bonusDE = parsedResult.Bonus.DarkElixir
 			parsedResults = true
 
-			// Reconcile stars against the measured destruction. The result
-			// screen remains useful for distinguishing 1 vs 2 stars, but it
-			// may never claim an impossible outcome (e.g. 3 stars below 100%
-			// or 0 stars at >=50%). This removes the "random" history stars
-			// while still preserving a genuine TH star under 50%.
-			battleStars = visualStars
+			// Reconcile stars against live battle facts. Visual OCR can still
+			// reveal a TH star when the optional TH banner detector missed it,
+			// but it may never fall BELOW a confirmed live minimum (e.g. TH
+			// destroyed => at least 1★; >=50% + TH => at least 2★) or claim an
+			// impossible 3★ below 100%.
+			var overridden bool
+			battleStars, overridden = intelligence.ReconcileBattleStars(
+				visualStars,
+				finalPct,
+				b.attackExec.ThDestroyed(),
+			)
 			if finalPct >= 100 {
-				battleStars = 3
-			} else if finalPct > 0 {
-				ruleStars := game.StarsFromOutcome(finalPct, b.attackExec.ThDestroyed())
-				if finalPct >= 50 {
-					if visualStars < 1 || visualStars > 2 {
-						battleStars = ruleStars
-					}
-				} else {
-					if visualStars < 0 || visualStars > 1 {
-						battleStars = ruleStars
-					}
-				}
-				if battleStars != visualStars {
-					b.logger.Warn().
-						Int("visual_stars", visualStars).
-						Int("reconciled_stars", battleStars).
-						Int("destruction_pct", finalPct).
-						Bool("th_destroyed", b.attackExec.ThDestroyed()).
-						Msg("result-screen stars rejected as inconsistent with battle outcome")
-				}
+				starsSource = "battle_outcome"
+			} else if overridden {
+				starsSource = "reconciled_outcome"
+				b.logger.Warn().
+					Int("visual_stars", visualStars).
+					Int("reconciled_stars", battleStars).
+					Int("destruction_pct", finalPct).
+					Bool("th_destroyed", b.attackExec.ThDestroyed()).
+					Msg("result-screen stars rejected as inconsistent with battle outcome")
 			}
 
 			// Prefer the battle's live Available-Loot delta over themed
@@ -1904,6 +2596,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			// This directly measures what disappeared from the enemy's loot
 			// counters and is substantially more stable across CoC themes.
 			if liveLoot, ok := b.attackExec.EstimatedLootStolen(); ok {
+				lootSource = "live_delta"
+				if finalPct > 0 {
+					resultConfidence = "high"
+				}
 				b.logger.Info().
 					Int("live_gold", liveLoot.Gold).
 					Int("ocr_gold", battleGold).
@@ -1919,6 +2615,8 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		} else {
 			if finalPct > 0 {
 				battleStars = game.StarsFromOutcome(finalPct, b.attackExec.ThDestroyed())
+				starsSource = "battle_outcome"
+				resultConfidence = "medium"
 				b.logger.Warn().
 					Int("stars", battleStars).
 					Int("destruction_pct", finalPct).
@@ -1928,6 +2626,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			}
 
 			if liveLoot, ok := b.attackExec.EstimatedLootStolen(); ok {
+				lootSource = "live_delta"
+				if finalPct > 0 {
+					resultConfidence = "high"
+				}
 				battleGold = liveLoot.Gold
 				battleElixir = liveLoot.Elixir
 				battleDE = liveLoot.DarkElixir
@@ -1987,20 +2689,60 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	// history row appeared — and the entry was dropped entirely if
 	// ReturnHome failed.
 	b.attackCount.Add(1)
+	if b.multiAccount != nil {
+		if err := b.multiAccount.ObserveAttack(); err != nil {
+			b.logger.Warn().Err(err).Msg("could not persist multi-account attack counter")
+		}
+	}
+	if b.governor != nil {
+		b.governor.RecordAttack(time.Now())
+	}
 
 	depErrStr := ""
 	if deployErr != nil {
 		depErrStr = deployErr.Error()
 	}
 
+	attackHealth := b.client.Health()
+	attackMode := chooseSearchPacing(attackHealth).Mode
+	liveBarRescans, avgLiveBarRescanMS, avgSlotDetectMS, avgSlotClassifyMS, templatesTried, templatesMatched, avgSelectedCardOCRMS := b.attackExec.LiveBarMetrics()
+	battleLootOCRSamples, avgBattleLootOCRMS := b.attackExec.BattleLootOCRMetrics()
+	battleEndWaitMS, lootExitPercent := b.attackExec.BattleExitMetrics()
+	starExit := b.attackExec.StarExitMetrics()
+	deploySafety := b.attackExec.DeploymentSafety()
+	attackTelemetry := telemetry.Snapshot{}
+	sessionID := ""
+	if b.telemetry != nil {
+		attackTelemetry = b.telemetry.Snapshot()
+		sessionID = b.telemetry.SessionID()
+	}
+
+	activeAccountID := ""
+	activePlayerTag := strings.ToUpper(strings.TrimSpace(b.cfg.Account.PlayerTag))
+	if b.multiAccount != nil {
+		if active, ok := b.multiAccount.Active(); ok {
+			activeAccountID = active.ID
+			if strings.TrimSpace(active.PlayerTag) != "" {
+				activePlayerTag = strings.ToUpper(strings.TrimSpace(active.PlayerTag))
+			}
+		}
+	}
+
 	rep := AttackReport{
 		Timestamp:        time.Now().Format(time.RFC3339),
+		SessionID:        sessionID,
+		AccountID:        activeAccountID,
+		PlayerTag:        activePlayerTag,
 		Strategy:         stratName,
 		TargetEdge:       targetEdge,
+		DeploySide:       deploySide,
 		DeploySuccess:    deployErr == nil && remainingUndeployed == 0,
 		UndeployedSlots:  remainingUndeployed,
 		DeployError:      depErrStr,
 		ParsedResults:    parsedResults,
+		StarsSource:      starsSource,
+		LootSource:       lootSource,
+		ResultConfidence: resultConfidence,
 		Stars:            battleStars,
 		GoldStolen:       battleGold,
 		ElixirStolen:     battleElixir,
@@ -2009,13 +2751,70 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		BonusElixir:      bonusElixir,
 		BonusDE:          bonusDE,
 		TotalAttacks:     b.attackCount.Load(),
+		SearchSkips:      sequenceSkips,
+		SearchDurationMS: func() int64 { if attackStartedAt.IsZero() { return 0 }; return attackStartedAt.Sub(searchStart).Milliseconds() }(),
+		CycleDurationMS:  time.Since(searchStart).Milliseconds(),
+		DeployDurationMS: deployDurationMS,
+		BattleDurationMS: func() int64 { if attackStartedAt.IsZero() { return 0 }; return time.Since(attackStartedAt).Milliseconds() }(),
+		TargetGold:       acceptedTargetGold,
+		TargetElixir:     acceptedTargetElixir,
+		TargetDE:         acceptedTargetDE,
+		TargetScore:      acceptedTargetScore,
+		RuntimeMode:      attackMode,
+		CaptureMS:        attackHealth.AvgCaptureMs,
+		TargetScanMS:     attackTelemetry.AvgTargetScanMS,
+		LiveBarRescans:  liveBarRescans,
+		AvgLiveBarRescanMS: avgLiveBarRescanMS,
+		AvgSlotDetectMS: avgSlotDetectMS,
+		AvgSlotClassifyMS: avgSlotClassifyMS,
+		TemplatesTried: templatesTried,
+		TemplatesMatched: templatesMatched,
+		AvgSelectedCardOCRMS: avgSelectedCardOCRMS,
+		BattleLootOCRSamples: battleLootOCRSamples,
+		AvgBattleLootOCRMS: avgBattleLootOCRMS,
+		BattleEndWaitMS: battleEndWaitMS,
+		LootExitPercent: lootExitPercent,
+		PreparationDurationMS: preparationDurationMS,
+		PrepAttackButtonMS:    b.lastPrepTimings.AttackButtonMS,
+		PrepFindMatchMS:       b.lastPrepTimings.FindMatchMS,
+		PrepArmyMenuMS:        b.lastPrepTimings.ArmyMenuMS,
+		PrepArmySlotMS:        b.lastPrepTimings.ArmySlotMS,
+		PrepBattleButtonMS:    b.lastPrepTimings.BattleButtonMS,
+		PrepMatchmakingReadyMS: b.lastPrepTimings.MatchmakingReadyMS,
+		CooldownDurationMS:    cooldownDurationMS,
+		BattleEndReason:       b.attackExec.LastBattleEndReason(),
+		StarExitTarget:        starExit.Target,
+		StarExitSeen:          starExit.Seen,
+		StarExitConfirmations: starExit.Confirmations,
+		StarExitTriggered:     starExit.Triggered,
+		StarExitElapsedMS:     starExit.ElapsedMS,
+		DestructionPct:        b.attackExec.LastDestructionPercent(),
+		TownHallDestroyed: b.attackExec.ThDestroyed(),
+		SafetyMode: deploySafety.Mode,
+		RedZoneValid: deploySafety.RedZoneValid,
+		CorridorVerified: deploySafety.CorridorVerified,
+		HUDSafe: deploySafety.HUDSafe,
+		RedZoneX1: deploySafety.RedZoneX1,
+		RedZoneY1: deploySafety.RedZoneY1,
+		RedZoneX2: deploySafety.RedZoneX2,
+		RedZoneY2: deploySafety.RedZoneY2,
+		DeployLineX1: deploySafety.DeployX1,
+		DeployLineY1: deploySafety.DeployY1,
+		DeployLineX2: deploySafety.DeployX2,
+		DeployLineY2: deploySafety.DeployY2,
+		DeployFreeSpace: deploySafety.FreeSpace,
+		ReturnHomeSuccess: false,
+	}
+
+	if b.telemetry != nil {
+		b.telemetry.Emit(telemetry.EventAttackFinished, map[string]any{"strategy": rep.Strategy, "edge": rep.TargetEdge, "deploy_side": rep.DeploySide, "stars": rep.Stars, "gold": rep.GoldStolen + rep.BonusGold, "elixir": rep.ElixirStolen + rep.BonusElixir, "de": rep.DarkElixirStolen + rep.BonusDE, "deploy_success": rep.DeploySuccess, "cooldown_ms": rep.CooldownDurationMS, "prep_ms": rep.PreparationDurationMS, "search_ms": rep.SearchDurationMS, "deploy_ms": rep.DeployDurationMS, "battle_ms": rep.BattleDurationMS, "cycle_ms": rep.CycleDurationMS, "target_score": rep.TargetScore, "live_bar_rescans": rep.LiveBarRescans, "live_bar_rescan_ms": rep.AvgLiveBarRescanMS, "slot_detect_ms": rep.AvgSlotDetectMS, "slot_classify_ms": rep.AvgSlotClassifyMS, "templates_tried": rep.TemplatesTried, "templates_matched": rep.TemplatesMatched, "selected_card_ocr_ms": rep.AvgSelectedCardOCRMS, "battle_loot_ocr_samples": rep.BattleLootOCRSamples, "battle_loot_ocr_ms": rep.AvgBattleLootOCRMS, "battle_end_wait_ms": rep.BattleEndWaitMS, "loot_exit_percent": rep.LootExitPercent, "stars_source": rep.StarsSource, "loot_source": rep.LootSource, "result_confidence": rep.ResultConfidence, "end_reason": rep.BattleEndReason, "star_exit_target": rep.StarExitTarget, "star_exit_seen": rep.StarExitSeen, "star_exit_confirmations": rep.StarExitConfirmations, "star_exit_triggered": rep.StarExitTriggered, "star_exit_elapsed_ms": rep.StarExitElapsedMS, "destruction_pct": rep.DestructionPct, "town_hall_destroyed": rep.TownHallDestroyed, "safety_mode": rep.SafetyMode, "red_zone_valid": rep.RedZoneValid, "corridor_verified": rep.CorridorVerified, "hud_safe": rep.HUDSafe, "red_zone_x1": rep.RedZoneX1, "red_zone_y1": rep.RedZoneY1, "red_zone_x2": rep.RedZoneX2, "red_zone_y2": rep.RedZoneY2, "deploy_line_x1": rep.DeployLineX1, "deploy_line_y1": rep.DeployLineY1, "deploy_line_x2": rep.DeployLineX2, "deploy_line_y2": rep.DeployLineY2, "deploy_free_space": rep.DeployFreeSpace})
 	}
 
 	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
-		_ = AsyncWriteFile(paths.ResolveConfig("last_attack_report.json"), repBytes, 0644)
+		_ = AsyncWriteFileSoon(paths.ResolveConfig("last_attack_report.json"), repBytes, 0644)
 	}
 
-	history := b.historyCache
+	history := b.HistorySnapshot()
 	if history == nil {
 		if histData, err := os.ReadFile(paths.ResolveConfig("attack_history.json")); err == nil {
 			_ = json.Unmarshal(histData, &history)
@@ -2025,22 +2824,39 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	if len(history) > 500 {
 		history = history[:500]
 	}
-	b.historyCache = history
+	b.historyMu.Lock()
+	b.historyCache = append([]AttackReport(nil), history...)
+	b.historyMu.Unlock()
 	if histBytes, err := json.MarshalIndent(history, "", "  "); err == nil {
-		_ = AsyncWriteFile(paths.ResolveConfig("attack_history.json"), histBytes, 0644)
+		_ = AsyncWriteFileSoon(paths.ResolveConfig("attack_history.json"), histBytes, 0644)
 	}
 
-	// Notify the UI AFTER the report is in historyCache and
-	// attack_history.json is flushed to disk. Firing this earlier
-	// (right after ReadBattleResult) raced the App's refreshHistory
-	// cache re-read with the report write, so the UI stayed a full
-	// attack behind even though the loot totals (live atomics) moved
-	// instantly. AsyncWriteFile blocks until the worker flushes, so
-	// by the time we get here the file on disk contains this report.
+	// Multi-account sessions retain the global history for the dashboard while
+	// also writing an account-scoped history used for account-specific analysis.
+	if strings.TrimSpace(rep.PlayerTag) != "" {
+		accountPath := accountAttackHistoryPath(b.cfg)
+		var accountHistory []AttackReport
+		if data, err := os.ReadFile(accountPath); err == nil {
+			_ = json.Unmarshal(data, &accountHistory)
+		}
+		accountHistory = append([]AttackReport{rep}, accountHistory...)
+		if len(accountHistory) > 500 {
+			accountHistory = accountHistory[:500]
+		}
+		if data, err := json.MarshalIndent(accountHistory, "", "  "); err == nil {
+			_ = AsyncWriteFileSoon(accountPath, data, 0644)
+		}
+	}
+
+	// Notify the UI after historyCache is updated. Wails mirrors this cache
+	// directly, so persistence can flush independently without delaying
+	// ReturnHome or making the dashboard wait on filesystem I/O.
 	if b.OnStatsUpdate != nil {
 		b.OnStatsUpdate()
 	}
 
+	b.setRuntimePhase(PhaseReturningHome)
+	returnHomeStarted := time.Now()
 	returnedHome := false
 	if err := b.attackExec.ReturnHome(); err == nil {
 		returnedHome = true
@@ -2054,8 +2870,140 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			time.Sleep(1 * time.Second)
 		}
 	}
+	returnHomeDur := time.Since(returnHomeStarted)
+	b.returnHomeCount.Add(1)
+	b.returnHomeMicros.Add(returnHomeDur.Microseconds())
+	b.lastReturnHomeUS.Store(returnHomeDur.Microseconds())
+	// Enrich the already-published attack report with post-battle overhead.
+	// The initial row is intentionally saved before ReturnHome so battle loot
+	// appears immediately; this second lightweight write adds the true
+	// ready-to-ready timing once ReturnHome finishes.
+	rep.ReturnHomeDurationMS = returnHomeDur.Milliseconds()
+	rep.ReturnHomeSuccess = returnedHome
+	rep.FullRoutineDurationMS = time.Since(sequenceStartedAt).Milliseconds()
+	recoveryDelta := b.recoveryAttempts.Load() - sequenceRecoveryStart
+	blueStacksRestartDelta := b.blueStacksRestarts.Load() - sequenceBlueStacksRestartStart
+	b.recordAttackSoak(rep, recoveryDelta, blueStacksRestartDelta)
+
+	if b.contextual != nil {
+		outcome := contextualOutcomeFromReport(rep, b.cfg.Attack.Farm.TownHall, int(recoveryDelta), int(blueStacksRestartDelta))
+		reward, learnErr := b.contextual.Observe(outcome)
+		if learnErr != nil {
+			b.logger.Warn().Err(learnErr).Msg("Intelligence V3 attack observation could not be saved")
+		} else {
+			b.logger.Info().
+				Float64("context_reward", reward).
+				Float64("farm_rate_per_hour", intelligence.FarmResourcesPerHour(outcome)).
+				Int("gold", rep.GoldStolen).
+				Int("elixir", rep.ElixirStolen).
+				Int("dark_elixir", rep.DarkElixirStolen).
+				Int64("routine_ms", rep.FullRoutineDurationMS).
+				Str("edge", rep.TargetEdge).
+				Msg("Intelligence V3 learned from farm throughput")
+		}
+	}
+
+	if b.adaptive != nil {
+		clean := rep.DeploySuccess && rep.ReturnHomeSuccess && rep.ParsedResults &&
+			recoveryDelta == 0 && blueStacksRestartDelta == 0
+		reward, learnErr := b.adaptive.Observe(intelligence.LearningOutcome{
+			Domain: "attack",
+			Parameters: map[string]float64{
+				"search_capture_ms":   700,
+				"planning_capture_ms": 250,
+				"deploy_capture_ms":   350,
+				"card_settle_ms":      150,
+				"camera_zoom_steps":   3,
+				"camera_pan_steps":    2,
+			},
+			Clean:             clean,
+			DeploySuccess:     rep.DeploySuccess,
+			ReturnHomeSuccess: rep.ReturnHomeSuccess,
+			SafeDeployment:    rep.RedZoneValid,
+			ParsedResults:     rep.ParsedResults,
+			RecoveryCount:     int(recoveryDelta),
+			BlueStacksRestart: int(blueStacksRestartDelta),
+			PlanningMS:        b.lastPlanningUS.Load() / 1000,
+			DeployMS:          rep.DeployDurationMS,
+			CaptureMS:         rep.CaptureMS,
+		})
+		if learnErr != nil {
+			b.logger.Warn().Err(learnErr).Msg("adaptive intelligence observation could not be saved")
+		} else {
+			b.logger.Info().
+				Float64("reward", reward).
+				Str("mode", string(b.adaptive.Mode())).
+				Bool("clean", clean).
+				Msg("adaptive intelligence learned from attack")
+		}
+	}
+
+	b.historyMu.Lock()
+	if len(b.historyCache) > 0 && b.historyCache[0].Timestamp == rep.Timestamp {
+		b.historyCache[0] = rep
+	}
+	postReturnHistory := make([]AttackReport, len(b.historyCache))
+	copy(postReturnHistory, b.historyCache)
+	b.historyMu.Unlock()
+	if histBytes, err := json.MarshalIndent(postReturnHistory, "", "  "); err == nil {
+		_ = AsyncWriteFileSoon(paths.ResolveConfig("attack_history.json"), histBytes, 0644)
+	}
+	if repBytes, err := json.MarshalIndent(rep, "", "  "); err == nil {
+		_ = AsyncWriteFileSoon(paths.ResolveConfig("last_attack_report.json"), repBytes, 0644)
+	}
+	if b.OnStatsUpdate != nil {
+		b.OnStatsUpdate()
+	}
+
+	// Native regression guard: compare the newest attacks against the recent
+	// baseline after the true routine duration is known. Diagnostics only —
+	// it never changes strategy, target thresholds or deployment geometry.
+	if b.telemetry != nil {
+		perfHistory := b.HistorySnapshot()
+		limit := len(perfHistory)
+		if limit > 20 { limit = 20 }
+		samples := make([]intelligence.PerformanceSample, 0, limit)
+		for i := 0; i < limit; i++ {
+			h := perfHistory[i]
+			samples = append(samples, intelligence.PerformanceSample{
+				SearchMS: h.SearchDurationMS,
+				DeployMS: h.DeployDurationMS,
+				RoutineMS: h.FullRoutineDurationMS,
+				CaptureMS: h.CaptureMS,
+				TargetScanMS: h.TargetScanMS,
+				DeploySuccess: h.DeploySuccess,
+				ReturnHomeOK: h.ReturnHomeSuccess,
+				SafeDeployment: h.RedZoneValid && h.CorridorVerified && h.HUDSafe,
+			})
+		}
+		assessment := intelligence.AnalyzePerformance(samples)
+		if assessment.Status == "watch" {
+			b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
+				"kind": "performance_regression",
+				"recent": assessment.RecentCount,
+				"baseline": assessment.BaseCount,
+				"regressions": assessment.Regressions,
+			})
+		}
+	}
+	if b.telemetry != nil {
+		b.telemetry.Emit(telemetry.EventReturnHome, map[string]any{
+			"success": returnedHome,
+			"duration_ms": returnHomeDur.Milliseconds(),
+		})
+		if returnHomeDur >= 3*time.Second {
+			b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
+				"kind": "slow_return_home",
+				"duration_ms": returnHomeDur.Milliseconds(),
+				"success": returnedHome,
+			})
+		}
+	}
 
 	if !returnedHome {
+		if b.cfg.Upgrade.UpgradeWalls {
+			b.wallUpgradePending.Store(true)
+		}
 		b.logger.Error().Msg("failed to return home after battle, restarting game...")
 		b.restartGame()
 		return
@@ -2067,24 +3015,85 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 	sideX := int(537 * b.cal.ScaleX)
 	sideY := int(693 * b.cal.ScaleY)
-	b.logger.Info().Msg("Tapping side area to dismiss potential post-attack popups...")
+	b.logger.Debug().Msg("dismissing potential post-attack popup")
 	_ = b.client.Tap(sideX, sideY)
-	time.Sleep(1000 * time.Millisecond)
-
 	if b.cfg.Upgrade.UpgradeWalls {
-		b.UpgradeWalls(gc)
+		b.wallUpgradePending.Store(true)
+		// ReturnHome already verified the village; a short settle is sufficient
+		// before the evidence-driven wall stage starts.
+		time.Sleep(450 * time.Millisecond)
+		if b.runWallUpgradeWithCircuit(gc) {
+			b.wallUpgradePending.Store(false)
+		}
+	} else {
+		b.wallUpgradePending.Store(false)
+		// ReturnHome already verified MainVillage. For pure farming, only a
+		// short acknowledgement window is needed for the side tap itself.
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	if b.multiAccount != nil {
+		if next, due := b.multiAccount.NextDue(); due {
+			if b.wallUpgradePending.Load() {
+				b.logger.Info().
+					Str("next_account_id", next.ID).
+					Msg("multi-account rotation deferred until pending wall upgrades are resolved")
+			} else if b.multiAccountSwitchInFlight.Load() {
+				b.logger.Debug().
+					Str("next_account_id", next.ID).
+					Msg("multi-account rotation already in progress")
+			} else {
+			if allowed, remaining := b.multiAccount.SwitchAttemptAllowed(time.Now()); !allowed {
+				b.logger.Debug().
+					Dur("retry_in", remaining).
+					Str("next_account_id", next.ID).
+					Msg("multi-account switch still in failure backoff")
+			} else {
+				b.logger.Info().
+					Str("next_account_id", next.ID).
+					Str("next_account_label", next.Label).
+					Int("switch_slot", next.SwitchSlot).
+					Msg("multi-account rotation is due; waiting for safe calibrated switch")
+				// Actual Supercell-ID navigation is fail-closed and lives in
+				// switchMultiAccountIfReady. If calibration is unavailable, the
+				// current account keeps farming rather than receiving blind taps.
+				if err := b.switchMultiAccountIfReady(next); err != nil {
+					if recoveryRequired, targetID := b.multiAccount.RecoveryStatus(); recoveryRequired {
+						// The slot may already have changed accounts. Do not classify this
+						// as a retryable failure or schedule another Supercell click.
+						b.paused.Store(true)
+						b.logger.Error().
+							Err(err).
+							Str("target_account_id", targetID).
+							Msg("multi-account identity unresolved; farming paused")
+					} else {
+						_ = b.multiAccount.MarkSwitchFailed(err)
+						b.logger.Warn().Err(err).Msg("multi-account switch deferred safely")
+					}
+				}
+			}
+			}
+		}
 	}
 
 	// Cap check stays after wall upgrades so the graceful shutdown (2s
 	// grace then cancel) never interrupts an in-progress wall loop; the
 	// count itself was already incremented when the report was recorded.
 	if int(b.attackCount.Load()) >= b.cfg.Attack.MaxAttackPerSession {
+		attacks := b.attackCount.Load()
+		cap := b.cfg.Attack.MaxAttackPerSession
 		b.logger.Info().
-			Int32("attacks", b.attackCount.Load()).
-			Int("cap", b.cfg.Attack.MaxAttackPerSession).
+			Int32("attacks", attacks).
+			Int("cap", cap).
 			Msg("attack cap reached, scheduling graceful shutdown...")
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventSessionComplete, map[string]any{
+				"reason":  "attack_cap",
+				"attacks": attacks,
+				"cap":     cap,
+			})
+		}
 		go func() {
-
 			time.Sleep(2 * time.Second)
 			b.cancel()
 		}()
@@ -2099,20 +3108,16 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		}
 	}
 
-	fmt.Println()
-	fmt.Println("=========================================")
-	fmt.Println("          BATTLE REPORT SUMMARY          ")
-	fmt.Println("=========================================")
-	fmt.Printf("Strategy:      %s\n", rep.Strategy)
-	fmt.Printf("Target Edge:   %s\n", rep.TargetEdge)
-	fmt.Printf("Deploy Health: %s\n", deployStatus)
-	fmt.Printf("Stars Earned:  %d ⭐\n", rep.Stars)
-	fmt.Println("Loot Collected:")
-	fmt.Printf("  - Gold:      %d\n", rep.GoldStolen)
-	fmt.Printf("  - Elixir:    %d\n", rep.ElixirStolen)
-	fmt.Printf("  - DE:        %d\n", rep.DarkElixirStolen)
-	fmt.Println("=========================================")
-	fmt.Println()
+	b.logger.Info().
+		Str("strategy", rep.Strategy).
+		Int("stars", rep.Stars).
+		Int("gold", rep.GoldStolen+rep.BonusGold).
+		Int("elixir", rep.ElixirStolen+rep.BonusElixir).
+		Int("de", rep.DarkElixirStolen+rep.BonusDE).
+		Str("deploy", deployStatus).
+		Int64("cycle_ms", rep.CycleDurationMS).
+		Str("end_reason", rep.BattleEndReason).
+		Msg("battle complete")
 
 	b.logger.Info().
 		Int32("attacks", b.attackCount.Load()).
@@ -2122,6 +3127,150 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		Msg("=== SESSION SUMMARY ===")
 
 	b.zoomedOut.Store(false)
+}
+
+type buttonColorSpec struct {
+	low, high    gocv.Scalar
+	minW, minH   int
+	minArea      float64
+	halfW, halfH int
+}
+
+func (b *Bot) buttonColorSpec(name string) (buttonColorSpec, bool) {
+	switch name {
+	case "Attack":
+		return buttonColorSpec{
+			low: gocv.NewScalar(0, 70, 110, 0),
+			high: gocv.NewScalar(200, 255, 255, 0),
+			minW: 18, minH: 12, minArea: 180,
+			halfW: 70, halfH: 55,
+		}, true
+	case "Find Match":
+		return buttonColorSpec{
+			low: gocv.NewScalar(0, 70, 110, 0),
+			high: gocv.NewScalar(210, 255, 255, 0),
+			minW: 55, minH: 24, minArea: 900,
+			halfW: 150, halfH: 90,
+		}, true
+	case "Battle Attack":
+		return buttonColorSpec{
+			low: gocv.NewScalar(0, 110, 70, 0),
+			high: gocv.NewScalar(170, 255, 210, 0),
+			minW: 70, minH: 24, minArea: 1100,
+			halfW: 150, halfH: 90,
+		}, true
+	case "Next":
+		return buttonColorSpec{
+			low: gocv.NewScalar(0, 85, 145, 0),
+			high: gocv.NewScalar(190, 255, 255, 0),
+			minW: 45, minH: 22, minArea: 700,
+			halfW: 120, halfH: 95,
+		}, true
+	default:
+		return buttonColorSpec{}, false
+	}
+}
+
+func locateColoredButtonNear(screen gocv.Mat, center image.Point, spec buttonColorSpec) (int, int, bool) {
+	if screen.Empty() {
+		return 0, 0, false
+	}
+	x0 := center.X - spec.halfW
+	x1 := center.X + spec.halfW
+	y0 := center.Y - spec.halfH
+	y1 := center.Y + spec.halfH
+	if x0 < 0 { x0 = 0 }
+	if y0 < 0 { y0 = 0 }
+	if x1 > screen.Cols() { x1 = screen.Cols() }
+	if y1 > screen.Rows() { y1 = screen.Rows() }
+	if x1-x0 < spec.minW || y1-y0 < spec.minH {
+		return 0, 0, false
+	}
+
+	roi := screen.Region(image.Rect(x0, y0, x1, y1))
+	defer roi.Close()
+	mask := vision.GetMat(roi.Rows(), roi.Cols(), gocv.MatTypeCV8UC1)
+	defer vision.PutMat(mask)
+
+	gocv.InRangeWithScalar(roi, spec.low, spec.high, &mask)
+	contours := gocv.FindContours(mask, gocv.RetrievalExternal, gocv.ChainApproxSimple)
+	defer contours.Close()
+
+	bestArea := 0.0
+	bestRect := image.Rectangle{}
+	for i := 0; i < contours.Size(); i++ {
+		contour := contours.At(i)
+		area := gocv.ContourArea(contour)
+		if area <= bestArea {
+			continue
+		}
+		rect := gocv.BoundingRect(contour)
+		if rect.Dx() < spec.minW || rect.Dy() < spec.minH {
+			continue
+		}
+		bestArea = area
+		bestRect = rect
+	}
+	if bestArea < spec.minArea || bestRect.Empty() {
+		return 0, 0, false
+	}
+	return x0 + bestRect.Min.X + bestRect.Dx()/2,
+		y0 + bestRect.Min.Y + bestRect.Dy()/2,
+		true
+}
+
+func (b *Bot) rememberedUIAnchor(name string) (image.Point, bool) {
+	b.uiAnchorMu.RLock()
+	defer b.uiAnchorMu.RUnlock()
+	pt, ok := b.uiAnchors[name]
+	return pt, ok
+}
+
+func (b *Bot) rememberUIAnchor(name string, pt image.Point) {
+	b.uiAnchorMu.Lock()
+	b.uiAnchors[name] = pt
+	b.uiAnchorMu.Unlock()
+}
+
+func (b *Bot) locateRememberedButton(name string, screen gocv.Mat) (int, int, bool) {
+	spec, ok := b.buttonColorSpec(name)
+	if !ok {
+		return 0, 0, false
+	}
+
+	// A poor local hit-rate means the current UI layout/animation no longer
+	// matches what was learned. Temporarily bypass the cache; the full locator
+	// remains authoritative and will keep updating anchors after verified hits.
+	if until := b.uiAnchorDisabledUntilUS.Load(); until > time.Now().UnixMicro() {
+		return 0, 0, false
+	}
+
+	pt, ok := b.rememberedUIAnchor(name)
+	if !ok {
+		return 0, 0, false
+	}
+	attempts := b.uiAnchorAttempts.Add(1)
+	x, y, found := locateColoredButtonNear(screen, pt, spec)
+	if found {
+		b.uiAnchorHits.Add(1)
+		return x, y, true
+	}
+
+	fallbacks := b.uiAnchorFallbacks.Add(1)
+	hits := b.uiAnchorHits.Load()
+	if attempts >= 20 {
+		hitRate := float64(hits) * 100 / float64(attempts)
+		if hitRate < 50 {
+			b.uiAnchorDisabledUntilUS.Store(time.Now().Add(2 * time.Minute).UnixMicro())
+			b.logger.Debug().
+				Int64("attempts", attempts).
+				Int64("hits", hits).
+				Int64("fallbacks", fallbacks).
+				Float64("hit_rate", hitRate).
+				Msg("verified UI anchor cache temporarily disabled; full locator remains authoritative")
+		}
+	}
+	return 0, 0, false
 }
 
 // focusedButtonClick trades a tiny amount of latency for much better UI
@@ -2135,13 +3284,16 @@ func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, 
 	}
 
 	for attempt := 1; attempt <= attempts; attempt++ {
-		first, err := b.client.CaptureToMat()
+		first, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil || first.Empty() {
 			if !first.Empty() { first.Close() }
 			time.Sleep(70 * time.Millisecond)
 			continue
 		}
-		x1, y1, ok1 := locator(first)
+		x1, y1, ok1 := b.locateRememberedButton(name, first)
+		if !ok1 {
+			x1, y1, ok1 = locator(first)
+		}
 		first.Close()
 		if !ok1 {
 			time.Sleep(70 * time.Millisecond)
@@ -2150,12 +3302,18 @@ func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, 
 
 		// Let the button finish a few animation frames, then confirm its center.
 		time.Sleep(85 * time.Millisecond)
-		second, err := b.client.CaptureToMat()
+		second, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil || second.Empty() {
 			if !second.Empty() { second.Close() }
 			continue
 		}
-		x2, y2, ok2 := locator(second)
+		x2, y2, ok2 := 0, 0, false
+		if spec, specOK := b.buttonColorSpec(name); specOK {
+			x2, y2, ok2 = locateColoredButtonNear(second, image.Pt(x1, y1), spec)
+		}
+		if !ok2 {
+			x2, y2, ok2 = locator(second)
+		}
 		second.Close()
 		if !ok2 {
 			continue
@@ -2182,7 +3340,8 @@ func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, 
 
 		x := (x1 + x2) / 2
 		y := (y1 + y2) / 2
-		b.logger.Info().
+		b.rememberUIAnchor(name, image.Pt(x, y))
+		b.logger.Debug().
 			Str("button", name).
 			Int("x", x).
 			Int("y", y).
@@ -2205,23 +3364,27 @@ func (b *Bot) focusedButtonClick(name string, locator func(gocv.Mat) (int, int, 
 // waitForStableLocator waits until a target is visible at a stable center.
 // This is intentionally used BETWEEN critical menu clicks so the bot never
 // chains taps into an animation that has not finished opening yet.
-func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int, bool), timeout time.Duration) bool {
+func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int, bool), timeout time.Duration) (int, int, bool) {
 	deadline := time.Now().Add(timeout)
+	pollPause := chooseSearchPacing(b.client.Health()).PrepPollPause
+	if pollPause <= 0 {
+		pollPause = 100 * time.Millisecond
+	}
 	var lastX, lastY int
 	stable := 0
 
 	for time.Now().Before(deadline) {
-		screen, err := b.client.CaptureToMat()
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil || screen.Empty() {
 			if !screen.Empty() { screen.Close() }
-			time.Sleep(90 * time.Millisecond)
+			time.Sleep(pollPause)
 			continue
 		}
 		x, y, ok := locator(screen)
 		screen.Close()
 		if !ok {
 			stable = 0
-			time.Sleep(90 * time.Millisecond)
+			time.Sleep(pollPause)
 			continue
 		}
 
@@ -2239,177 +3402,185 @@ func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int
 		lastX, lastY = x, y
 
 		if stable >= 2 {
-			b.logger.Info().Str("target", name).Int("x", x).Int("y", y).Msg("next UI target is stable and ready")
-			return true
+			b.logger.Debug().Str("target", name).Int("x", x).Int("y", y).Msg("next UI target is stable and ready")
+			return x, y, true
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(pollPause)
 	}
 	b.logger.Warn().Str("target", name).Dur("timeout", timeout).Msg("next UI target did not become stable in time")
-	return false
+	return 0, 0, false
+}
+
+func (b *Bot) recoverAttackNavigationLocally() {
+	if b == nil || b.ctx.Err() != nil {
+		return
+	}
+
+	screen, err := b.runtimeFrameFresh(2 * time.Second)
+	if err != nil || screen.Empty() {
+		if err == nil {
+			screen.Close()
+		}
+		b.recordActivity()
+		return
+	}
+
+	state, _ := b.classify(screen)
+	attackVisible := b.findAttackButton(screen, 0.30)
+	screen.Close()
+
+	if state == game.StateMainVillage && attackVisible {
+		b.logger.Info().Msg("local navigation recovery: already back at village; no restart required")
+		b.recordActivity()
+		return
+	}
+
+	switch state {
+	case game.StateFindMatch, game.StateArmySelection, game.StateArmyCamp, game.StateSettings:
+		b.logger.Info().Str("state", state.String()).Msg("local navigation recovery: backing out one verified UI level")
+		_ = b.client.Back()
+		_ = b.sleepResponsive(700 * time.Millisecond)
+	case game.StateUnknown:
+		// Never press Back from Unknown. If this is actually the main village,
+		// Back would open the quit-confirm dialog and create another recovery loop.
+		b.logger.Warn().Msg("local navigation recovery: UI state unknown; leaving screen untouched for next visual pass")
+	default:
+		// For loading/search/battle states, never inject Back; those transitions
+		// can still settle naturally and the runtime supervisor owns recovery.
+		b.logger.Info().Str("state", state.String()).Msg("local navigation recovery: leaving transient state to supervisor")
+	}
+
+	b.recordActivity()
 }
 
 func (b *Bot) clickSequence() bool {
+	// Xingchen-style navigation: every action requires fresh visual evidence.
+	// No blind coordinate progression, no stacked retry loops, no duplicate
+	// capture owner while the attack sequence is active.
+	b.lastPrepTimings = PreparationTimings{}
 
-	attackClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
-		// findAttackButton already has the Windows-safe localized/color checks.
-		// Do not require the older text/template matcher a second time here:
-		// that created the contradictory "Attack detected" -> "could not find
-		// Attack button" failure seen on localized/animated village frames.
-		if b.focusedButtonClick("Attack", b.locateAttackButtonColor, 2) {
-			attackClicked = true
-			break
+	stepStarted := time.Now()
+	if !b.focusedButtonClick("Attack", b.locateAttackButtonColor, 3) {
+		// Template fallback remains available for unusual themes where the
+		// orange-region detector is inconclusive.
+		if !b.waitAndClickButton("btn_attack", "Attack", 3000*time.Millisecond) {
+			b.captureFailureDiagnostic("click_attack_failed", nil)
+			return false
 		}
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			if b.findAttackButton(screen, 0.30) {
-				x, y := b.cal.ScaleRef(64, 666)
-				screen.Close()
-				b.logger.Info().Int("x", x).Int("y", y).Msg("Attack fallback verified; precision tapping canonical center")
-				if err := b.client.TapFast(x, y, 0.5); err == nil {
-					b.recordActivity()
-					attackClicked = true
-					break
-				}
-			} else {
-				screen.Close()
+	}
+	b.lastPrepTimings.AttackButtonMS = time.Since(stepStarted).Milliseconds()
+
+	// Do not immediately assume the attack menu opened. On BlueStacks the ADB
+	// tap can return before the animation is painted, and an occasional tap is
+	// ignored altogether. Require a stable Find Match target; if the village
+	// Attack button is still visible, retry Attack once instead of restarting CoC.
+	stepStarted = time.Now()
+	if _, _, ok := b.waitForStableLocator("Find Match", b.locateFindMatchButtonColor, 8*time.Second); !ok {
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
+		stillVillage := false
+		if err == nil && !screen.Empty() {
+			state, _ := b.classify(screen)
+			stillVillage = state == game.StateMainVillage && b.findAttackButton(screen, 0.30)
+			screen.Close()
+		} else if err == nil {
+			screen.Close()
+		}
+		if stillVillage {
+			b.logger.Warn().Msg("Attack tap did not open attack menu; retrying Attack once")
+			if !b.focusedButtonClick("Attack", b.locateAttackButtonColor, 2) {
+				b.captureFailureDiagnostic("click_attack_retry_failed", nil)
+				return false
+			}
+			if _, _, ok = b.waitForStableLocator("Find Match", b.locateFindMatchButtonColor, 8*time.Second); !ok {
+				b.captureFailureDiagnostic("find_match_not_visible_after_attack_retry", nil)
+				return false
+			}
+		} else {
+			b.captureFailureDiagnostic("find_match_not_visible_after_attack", nil)
+			return false
+		}
+	}
+	if !b.focusedButtonClick("Find Match", b.locateFindMatchButtonColor, 3) {
+		// Keep the template path as a secondary, evidence-gated fallback.
+		if !b.waitAndClickButton("btn_find_match", "Find Match", 5000*time.Millisecond) {
+			b.captureFailureDiagnostic("click_find_match_failed", nil)
+			return false
+		}
+	}
+	b.lastPrepTimings.FindMatchMS = time.Since(stepStarted).Milliseconds()
+
+	// Some current CoC layouts enter matchmaking directly after Find Match.
+	// Preserve the Xingchen evidence-first flow, but do not insist on Army
+	// Arrow when the game has already progressed into clouds/base search.
+	probeDeadline := time.Now().Add(3500 * time.Millisecond)
+	for time.Now().Before(probeDeadline) {
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
+		if err != nil {
+			if !b.sleepResponsive(250 * time.Millisecond) {
+				return false
+			}
+			continue
+		}
+		if screen.Empty() {
+			screen.Close()
+			if !b.sleepResponsive(250 * time.Millisecond) {
+				return false
+			}
+			continue
+		}
+		state, _ := b.classify(screen)
+		screen.Close()
+
+		switch state {
+		case game.StateBattle, game.StateSearchMap, game.StateLoading:
+			b.logger.Info().Str("state", state.String()).Msg("matchmaking transition confirmed; skipping army picker")
+			stepStarted = time.Now()
+			ready := b.waitForBattleState(60 * time.Second)
+			b.lastPrepTimings.MatchmakingReadyMS = time.Since(stepStarted).Milliseconds()
+			return ready
+		case game.StateArmySelection, game.StateArmyCamp:
+			probeDeadline = time.Now()
+		default:
+			if !b.sleepResponsive(250 * time.Millisecond) {
+				return false
 			}
 		}
-		b.client.JitteredSleep(650 * time.Millisecond)
 	}
-	if !attackClicked {
-		b.logger.Warn().Msg("could not find or click Attack button")
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			b.DumpDiagnostics("click_attack_failed", screen, nil)
-			screen.Close()
-		}
+
+	stepStarted = time.Now()
+	if !b.waitAndClickButton("btn_army_arrow", "Army Arrow", 4500*time.Millisecond) {
+		b.captureFailureDiagnostic("click_army_arrow_failed", nil)
 		return false
 	}
-	// Do not chain directly into the next tap. Wait for the attack menu to
-	// finish opening and for Find Match to be stable in two consecutive frames.
-	if !b.waitForStableLocator("Find Match", b.locateFindMatchButtonColor, 3*time.Second) {
-		b.logger.Warn().Msg("attack menu did not settle on Find Match after Attack click")
-	}
+	b.lastPrepTimings.ArmyMenuMS = time.Since(stepStarted).Milliseconds()
 
-	findMatchClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
-		if b.focusedButtonClick("Find Match", b.locateFindMatchButtonColor, 2) {
-			findMatchClicked = true
-			break
-		}
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			state, score := b.classify(screen)
-			screen.Close()
-			if state == game.StateFindMatch {
-				x, y := b.cal.ScaleRef(215, 563)
-				b.logger.Info().
-					Int("score", score).
-					Int("x", x).
-					Int("y", y).
-					Msg("Find Match screen verified by classifier; precision tapping canonical center")
-				if err := b.client.TapFast(x, y, 0.5); err == nil {
-					b.recordActivity()
-					findMatchClicked = true
-					break
-				}
-			} else {
-				b.logger.Info().
-					Str("state", state.String()).
-					Int("score", score).
-					Msg("Find Match retry: no stable focused target yet")
-			}
-		}
-
-		// Keep the legacy template path as a final fallback, not the primary
-		// detector for this localized/current CoC screen.
-		if b.findAndClick("btn_find_match", "Find Match", 1) {
-			findMatchClicked = true
-			break
-		}
-
-		b.client.JitteredSleep(650 * time.Millisecond)
-	}
-	if !findMatchClicked {
-		b.logger.Warn().Msg("could not find or click Find Match button")
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			state, score := b.classify(screen)
-			b.DumpDiagnostics("click_find_match_failed", screen, map[string]interface{}{
-				"classified_state": state.String(),
-				"classified_score": score,
-			})
-			screen.Close()
-		}
-		return false
-	}
-	// Find Match opens a transition/menu. Give it a real state transition
-	// window instead of firing Army Arrow at a stale frame.
-	armyReadyDeadline := time.Now().Add(4 * time.Second)
-	for time.Now().Before(armyReadyDeadline) {
-		s, err := b.client.CaptureToMat()
-		if err == nil && !s.Empty() {
-			st, _ := b.classify(s)
-			s.Close()
-			if st == game.StateArmySelection || st == game.StateArmyCamp {
-				b.logger.Info().Str("state", st.String()).Msg("army menu state confirmed before next click")
-				break
-			}
-		}
-		time.Sleep(120 * time.Millisecond)
-	}
-
-	armyArrowClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
-		if b.findAndClick("btn_army_arrow", "Army Arrow", 1) {
-			armyArrowClicked = true
-			break
-		}
-		b.client.JitteredSleep(650 * time.Millisecond)
-	}
-	if !armyArrowClicked {
-		b.logger.Warn().Msg("could not find or click Army Arrow button")
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			b.DumpDiagnostics("click_army_arrow_failed", screen, nil)
-			screen.Close()
-		}
-		return false
-	}
-	b.client.JitteredSleep(650 * time.Millisecond)
-
+	stepStarted = time.Now()
 	armyClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
-		if b.selectArmySlot() {
-			armyClicked = true
-			break
-		}
-		b.client.JitteredSleep(650 * time.Millisecond)
+	if b.armySlot <= 1 {
+		armyClicked = b.waitAndClickButton("btn_army_1", "Army 1", 4000*time.Millisecond)
+	} else if b.waitForUIEvidence("btn_army_1", game.StateArmySelection, 4000*time.Millisecond) {
+		armyClicked = b.selectArmySlot()
 	}
 	if !armyClicked {
-		b.logger.Warn().Int("army_slot", b.armySlot).Msg("army recipe card did not appear, continuing anyway")
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			b.DumpDiagnostics("click_army_slot_not_found", screen, map[string]interface{}{"army_slot": b.armySlot})
-			screen.Close()
-		}
-	}
-	b.client.JitteredSleep(650 * time.Millisecond)
-
-	battleClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
-		if b.focusedButtonClick("Battle Attack", b.locateBattleButtonColor, 2) {
-			battleClicked = true
-			break
-		}
-		if b.findAndClick("btn_battle", "Battle", 1) {
-			battleClicked = true
-			break
-		}
-		b.client.JitteredSleep(650 * time.Millisecond)
-	}
-	if !battleClicked {
-		b.logger.Warn().Msg("could not find or click Battle button")
+		b.captureFailureDiagnostic("click_army_slot_not_found", map[string]interface{}{"army_slot": b.armySlot})
 		return false
 	}
+	b.lastPrepTimings.ArmySlotMS = time.Since(stepStarted).Milliseconds()
 
-	b.logger.Info().Msg("waiting for battle state (searching)...")
-	return b.waitForBattleState(60 * time.Second)
+	stepStarted = time.Now()
+	if !b.focusedButtonClick("Battle Attack", b.locateBattleButtonColor, 3) {
+		if !b.waitAndClickButton("btn_battle", "Battle", 5000*time.Millisecond) {
+			b.captureFailureDiagnostic("click_battle_failed", nil)
+			return false
+		}
+	}
+	b.lastPrepTimings.BattleButtonMS = time.Since(stepStarted).Milliseconds()
+
+	b.logger.Info().Msg("battle requested; waiting for search/base state...")
+	stepStarted = time.Now()
+	ready := b.waitForBattleState(60 * time.Second)
+	b.lastPrepTimings.MatchmakingReadyMS = time.Since(stepStarted).Milliseconds()
+	return ready
 }
 
 // selectArmySlot clicks the saved-recipe card for b.armySlot in the
@@ -2436,12 +3607,14 @@ func (b *Bot) selectArmySlot() bool {
 	cardY := 227 + (slot-1)*54
 	tapX, tapY := b.cal.ScaleRef(430, cardY)
 
-	b.logger.Info().Int("army_slot", slot).Int("x", tapX).Int("y", tapY).Msg("selecting saved army recipe card")
-	if err := b.client.TapFast(tapX, tapY, 0.7); err != nil {
+	b.logger.Debug().Int("army_slot", slot).Int("x", tapX).Int("y", tapY).Msg("selecting saved army recipe card")
+	if err := b.client.TapFast(tapX, tapY, 1.2); err != nil {
 		b.logger.Warn().Err(err).Msg("army recipe card tap failed")
 		return false
 	}
-	time.Sleep(1000 * time.Millisecond)
+	// Do not sleep here: clickSequence immediately waits for Battle to become
+	// stable on two fresh frames before clicking it. An extra fixed delay here
+	// would only slow slots 2+ without adding another verification boundary.
 	b.recordActivity()
 	return true
 }
@@ -2489,7 +3662,7 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 	)
 
 	for retry := 0; retry < maxRetries; retry++ {
-		screen, err := b.client.CaptureToMat()
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil {
 			b.logger.Warn().Err(err).Str("step", stepName).Msg("capture failed")
 			time.Sleep(500 * time.Millisecond)
@@ -2506,12 +3679,12 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 			altX, altY := b.cal.ScaleRef(525, 247)
 			if b.isGreen(screen, altX, altY) {
 				screen.Close()
-				b.logger.Info().Str("step", stepName).Msg("secondary pinpoint match (upper battle), clicking...")
+				b.logger.Debug().Str("step", stepName).Msg("secondary pinpoint match (upper battle), clicking...")
 				if err := b.client.TapFast(altX, altY, 0.6); err == nil {
 					b.recordActivity()
 					return true
 				}
-				screen, _ = b.client.CaptureToMat()
+				screen, _ = b.runtimeFrameFresh(2 * time.Second)
 			}
 		}
 
@@ -2570,7 +3743,7 @@ func (b *Bot) findAndClick(templateName, stepName string, maxRetries int) bool {
 			px, py = expectedX, expectedY
 		}
 
-		b.logger.Info().
+		b.logger.Debug().
 			Str("step", stepName).
 			Float64("conf", best.Confidence).
 			Int("x", px).Int("y", py).
@@ -2651,6 +3824,58 @@ func resultPanelHash(screen gocv.Mat, cal *game.Calibration) uint64 {
 	return h
 }
 
+// waitForStableResultPanel replaces the old blind 1.8s result-screen sleep
+// with a bounded visual settle. It can finish sooner on fast devices, but it
+// never waits longer than maxWait and never changes result parsing rules.
+func (b *Bot) waitForStableResultPanel(maxWait time.Duration) (time.Duration, bool) {
+	started := time.Now()
+	if maxWait <= 0 {
+		return 0, false
+	}
+
+	// The overlay needs a short guaranteed paint window before frame stability
+	// is meaningful. This is still far below the historical 1.8s blind sleep.
+	initial := 600 * time.Millisecond
+	if initial > maxWait {
+		initial = maxWait
+	}
+	select {
+	case <-time.After(initial):
+	case <-b.ctx.Done():
+		return time.Since(started), false
+	}
+
+	var previous uint64
+	for time.Since(started) < maxWait {
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
+		if err == nil && !screen.Empty() {
+			hash := resultPanelHash(screen, b.cal)
+			screen.Close()
+			if hash != 0 && hash == previous {
+				return time.Since(started), true
+			}
+			previous = hash
+		} else if !screen.Empty() {
+			screen.Close()
+		}
+
+		remaining := maxWait - time.Since(started)
+		if remaining <= 0 {
+			break
+		}
+		pause := 250 * time.Millisecond
+		if pause > remaining {
+			pause = remaining
+		}
+		select {
+		case <-time.After(pause):
+		case <-b.ctx.Done():
+			return time.Since(started), false
+		}
+	}
+	return time.Since(started), false
+}
+
 func (b *Bot) isGreen(screen gocv.Mat, x, y int) bool {
 	return b.colorCheck(screen, x, y,
 		gocv.NewScalar(0, 150, 0, 0),
@@ -2695,13 +3920,16 @@ func (b *Bot) colorCheck(screen gocv.Mat, x, y int, lower, upper gocv.Scalar, mi
 // by the captureLoop's next frame) will reset lastAction via recordActivity()
 // on its own.
 func (b *Bot) dismissInterruptions() {
-	screen, err := b.client.CaptureToMat()
+	screen, err := b.runtimeFrameFresh(2 * time.Second)
 	if err != nil {
 		return
 	}
 	state, _ := b.classify(screen)
 	screen.Close()
+	b.dismissInterruptionState(state)
+}
 
+func (b *Bot) dismissInterruptionState(state game.GameState) {
 	switch state {
 	case game.StateObstacleDialog:
 		b.client.TapRandomized(400, 300)
@@ -2748,41 +3976,58 @@ func (b *Bot) dismissSelection() {
 func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		screen, err := b.client.CaptureToMat()
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
 		if err != nil {
-			time.Sleep(500 * time.Millisecond)
+			b.logger.Debug().Err(err).Msg("battle-state capture unavailable")
+			if !b.sleepResponsive(350 * time.Millisecond) {
+				return false
+			}
+			continue
+		}
+		if screen.Empty() {
+			screen.Close()
+			if !b.sleepResponsive(350 * time.Millisecond) {
+				return false
+			}
 			continue
 		}
 
+		b.captureHeartbeat.Store(time.Now().UnixNano())
 		state, _ := b.classify(screen)
 		screen.Close()
 
-		switch {
-		case state == game.StateBattle:
+		switch state {
+		case game.StateBattle:
 			b.logger.Info().Msg("battle state detected, entering search loop")
 			return true
-		case state == game.StateSearchMap || state == game.StateLoading:
-			b.logger.Info().Msg("in clouds/loading...")
-			time.Sleep(300 * time.Millisecond)
-			continue
-		case state == game.StateArmySelection || state == game.StateArmyCamp:
-			b.logger.Info().Msg("in army menu, retrying Battle Attack button...")
-			if retryScreen, capErr := b.client.CaptureToMat(); capErr == nil {
-				if x, y, ok := b.locateBattleButtonColor(retryScreen); ok {
-					retryScreen.Close()
-					b.logger.Info().Int("x", x).Int("y", y).Msg("retrying with detected Battle Attack button center")
-					_ = b.client.TapFast(x, y, 0.6)
-					b.recordActivity()
-				} else {
-					retryScreen.Close()
-					b.findAndClick("btn_battle", "Battle Retry", 1)
-				}
-			}
-			time.Sleep(400 * time.Millisecond)
-		default:
-			b.logger.Info().Str("state", state.String()).Msg("waiting for battle state (searching)...")
+		case game.StateMainVillage:
+			b.logger.Warn().Msg("returned to village while waiting for battle; aborting navigation")
+			return false
+		case game.StateConnectionLost:
+			b.logger.Warn().Msg("connection lost while entering battle; clearing dialog")
 			b.dismissInterruptions()
-			time.Sleep(250 * time.Millisecond)
+			if !b.sleepResponsive(500 * time.Millisecond) {
+				return false
+			}
+		case game.StateSearchMap, game.StateLoading:
+			b.logger.Debug().Str("state", state.String()).Msg("matchmaking in progress")
+			if !b.sleepResponsive(650 * time.Millisecond) {
+				return false
+			}
+		case game.StateArmySelection, game.StateArmyCamp:
+			b.logger.Info().Msg("army UI still visible; retrying verified Battle button")
+			_ = b.waitAndClickButton("btn_battle", "Battle Retry", 1500*time.Millisecond)
+			if !b.sleepResponsive(400 * time.Millisecond) {
+				return false
+			}
+		default:
+			b.logger.Debug().Str("state", state.String()).Msg("waiting for battle/search state")
+			if isTransientRuntimeState(state) {
+				b.dismissInterruptions()
+			}
+			if !b.sleepResponsive(400 * time.Millisecond) {
+				return false
+			}
 		}
 	}
 
@@ -2790,46 +4035,18 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 	return false
 }
 
-// saveAcceptedBaseScreenshot persists the exact battle frame that passed the
-// search thresholds. It runs before deployment so the image remains useful for
-// debugging threshold/OCR decisions and for reviewing which bases the bot took.
-func (b *Bot) saveAcceptedBaseScreenshot(screen gocv.Mat, gold, elixir, darkElixir int) {
-	if !b.cfg.Search.SaveAcceptedBaseScreenshots || screen.Empty() {
-		return
-	}
-
-	dir := paths.ResolveConfig("output/accepted_bases")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		b.logger.Warn().Err(err).Str("dir", dir).Msg("could not create accepted-base screenshot directory")
-		return
-	}
-
-	name := fmt.Sprintf(
-		"accepted_%s_G%d_E%d_DE%d.png",
-		time.Now().Format("20060102_150405.000"),
-		gold,
-		elixir,
-		darkElixir,
-	)
-	path := filepath.Join(dir, name)
-	if ok := gocv.IMWrite(path, screen); !ok {
-		b.logger.Warn().Str("path", path).Msg("failed to save accepted-base screenshot")
-		return
-	}
-
-	b.logger.Info().
-		Str("path", path).
-		Int("gold", gold).
-		Int("elixir", elixir).
-		Int("de", darkElixir).
-		Msg("accepted-base screenshot saved")
-}
-
 func (b *Bot) deployTroops(screen gocv.Mat) (int, error) {
 	strat, err := strategy.ParseYAML(b.cfg.Attack.StrategyFile)
 	if err != nil {
 		b.logger.Warn().Err(err).Str("path", b.cfg.Attack.StrategyFile).Msg("could not load strategy")
 		return 0, err
+	}
+	return b.deployParsedStrategy(screen, strat)
+}
+
+func (b *Bot) deployParsedStrategy(screen gocv.Mat, strat *strategy.DynamicStrategy) (int, error) {
+	if strat == nil {
+		return 0, fmt.Errorf("nil dynamic strategy")
 	}
 
 	b.logger.Info().
@@ -2841,7 +4058,7 @@ func (b *Bot) deployTroops(screen gocv.Mat) (int, error) {
 
 	remaining, err := b.attackExec.DeployDynamicV2(strat, screen, b.cfg.Attack.StrategyFile)
 	if err != nil {
-		b.logger.Error().Err(err).Msg("dynamic deploy failed")
+		b.logger.Error().Err(err).Msg("dynamic deploy failed: " + err.Error())
 		return remaining, err
 	}
 	return remaining, nil
@@ -2865,7 +4082,7 @@ func (b *Bot) deployTroops(screen gocv.Mat) (int, error) {
 func (b *Bot) QuickDeploy() error {
 	b.logger.Info().Msg("deploy-only mode: capturing current screen once")
 
-	screen, err := b.client.CaptureToMat()
+	screen, err := b.runtimeFrameFresh(2 * time.Second)
 	if err != nil {
 		return fmt.Errorf("capture: %w", err)
 	}
@@ -2903,6 +4120,29 @@ func (b *Bot) QuickDeploy() error {
 	return nil
 }
 
+type MultiAccountRuntimeStatus struct {
+	Enabled            bool      `json:"enabled"`
+	ActiveAccountID    string    `json:"active_account_id,omitempty"`
+	ActiveAccountLabel string    `json:"active_account_label,omitempty"`
+	AttacksThisTurn    int       `json:"attacks_this_turn"`
+	NextAccountID      string    `json:"next_account_id,omitempty"`
+	NextAccountLabel   string    `json:"next_account_label,omitempty"`
+	RotationDue        bool      `json:"rotation_due"`
+	TotalSwitches      int       `json:"total_switches"`
+	LastSwitchAt       time.Time `json:"last_switch_at,omitempty"`
+	LastError          string    `json:"last_error,omitempty"`
+	RecoveryRequired   bool      `json:"recovery_required"`
+	RecoveryTargetID   string    `json:"recovery_target_account_id,omitempty"`
+	SwitchInFlight     bool      `json:"switch_in_flight"`
+}
+
+func (b *Bot) MultiAccountStatus() MultiAccountRuntimeStatus {
+	if b == nil || b.multiAccount == nil {
+		return MultiAccountRuntimeStatus{}
+	}
+	return multiAccountRuntimeStatus(b.multiAccount, b.multiAccountSwitchInFlight.Load())
+}
+
 func (b *Bot) Health() game.SystemHealth {
 	return game.SystemHealth{
 		ADBConnected:     b.client.IsConnected(),
@@ -2915,9 +4155,26 @@ func (b *Bot) Health() game.SystemHealth {
 }
 
 func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
+	if cfg == nil {
+		return
+	}
 	b.cfg = cfg
+	if b.multiAccount != nil {
+		if err := b.multiAccount.UpdateConfig(cfg.Account.MultiAccount, cfg.Account.PlayerTag); err != nil {
+			b.logger.Warn().Err(err).Msg("multi-account scheduler config update failed")
+		}
+	}
 	if b.attackExec != nil {
 		b.attackExec.UpdateConfig(&cfg.Attack)
+		b.attackExec.SetArmyGuardEnabled(cfg.Automation.AutoArmyGuard)
+	}
+	if b.governor != nil {
+		// Preserve the rolling attack timestamps and circuit-breaker state
+		// while applying member pacing changes live.
+		b.governor.UpdateConfig(cfg.Automation)
+	}
+	if !cfg.Upgrade.UpgradeWalls {
+		b.wallUpgradePending.Store(false)
 	}
 
 	if b.navigator != nil {
@@ -2926,9 +4183,179 @@ func (b *Bot) UpdateConfig(cfg *config.BotConfig) {
 	b.logger.Info().Msg("bot configuration updated in real-time")
 }
 
+
+func (b *Bot) IsSequenceRunning() bool {
+	if b == nil {
+		return false
+	}
+	return b.seqRunning.Load()
+}
+
+func (b *Bot) SequenceStartedAtUnix() int64 {
+	if b == nil {
+		return 0
+	}
+	return b.seqStartedAtUnix.Load()
+}
+
+func (b *Bot) PauseAutomation() {
+	if b == nil {
+		return
+	}
+	b.paused.Store(true)
+	b.logger.Info().Bool("sequence_running", b.seqRunning.Load()).Msg("automation pause requested")
+}
+
+func (b *Bot) ResumeAutomation() {
+	if b == nil {
+		return
+	}
+	clearedSafety := b.uiSafetyHold.Swap(false)
+	wasPaused := b.paused.Swap(false)
+	if clearedSafety || wasPaused {
+		b.recordActivity()
+		b.logger.Info().
+			Bool("cleared_ui_safety_hold", clearedSafety).
+			Msg("automation resumed")
+	}
+}
+
+func (b *Bot) IsPaused() bool {
+	return b != nil && b.paused.Load()
+}
+
+func contextualOutcomeFromReport(rep AttackReport, townHall, recoveryCount, blueStacksRestart int) intelligence.ContextualOutcome {
+	at, _ := time.Parse(time.RFC3339, rep.Timestamp)
+	return intelligence.ContextualOutcome{
+		Context: intelligence.AttackContext{
+			Strategy: rep.Strategy,
+			TownHall: townHall,
+			TargetScore: rep.TargetScore,
+			TargetGold: rep.TargetGold,
+			TargetElixir: rep.TargetElixir,
+			TargetDE: rep.TargetDE,
+		},
+		Edge: rep.TargetEdge,
+		Stars: rep.Stars,
+		DestructionPct: rep.DestructionPct,
+		GoldStolen: rep.GoldStolen,
+		ElixirStolen: rep.ElixirStolen,
+		DarkElixirStolen: rep.DarkElixirStolen,
+		CycleDurationMS: rep.CycleDurationMS,
+		FullRoutineDurationMS: rep.FullRoutineDurationMS,
+		SearchDurationMS: rep.SearchDurationMS,
+		SearchSkips: rep.SearchSkips,
+		BattleDurationMS: rep.BattleDurationMS,
+		DeploySuccess: rep.DeploySuccess,
+		ReturnHomeSuccess: rep.ReturnHomeSuccess,
+		SafeDeployment: rep.RedZoneValid && rep.HUDSafe,
+		ParsedResults: rep.ParsedResults,
+		RecoveryCount: recoveryCount,
+		BlueStacksRestart: blueStacksRestart,
+		At: at,
+	}
+}
+
+// HistorySnapshot returns an immutable copy of the bot's authoritative
+// in-memory attack history. The App uses this to update React immediately at
+// attack boundaries without writing then re-reading attack_history.json.
+func (b *Bot) HistorySnapshot() []AttackReport {
+	if b == nil {
+		return []AttackReport{}
+	}
+	b.historyMu.RLock()
+	defer b.historyMu.RUnlock()
+	out := make([]AttackReport, len(b.historyCache))
+	copy(out, b.historyCache)
+	return out
+}
+
+// RecordMemberSettingsChange adds one low-volume, user-initiated settings
+// event to the activity feed. It does not affect the farming state machine.
+func (b *Bot) RecordMemberSettingsChange(profile string, maxAttacksPerHour, maxAttacksPerSession, breakEvery, breakMinutes int) {
+	if b == nil || b.telemetry == nil {
+		return
+	}
+	b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
+		"profile":                 profile,
+		"max_attacks_per_hour":    maxAttacksPerHour,
+		"max_attacks_per_session": maxAttacksPerSession,
+		"break_every_attacks":     breakEvery,
+		"break_minutes":        breakMinutes,
+	})
+}
+
+// RecentActivity returns a compact high-level activity feed for the UI.
+// It deliberately excludes per-frame telemetry and verbose diagnostic logs.
+func (b *Bot) RecentActivity(limit int) []telemetry.Event {
+	if b == nil || b.telemetry == nil {
+		return []telemetry.Event{}
+	}
+	return b.telemetry.Recent(limit)
+}
+
 func (b *Bot) Stats() BotStats {
+	uptime := time.Since(b.startedAt)
+	hours := uptime.Hours()
+	attacks := b.attackCount.Load()
+	var goldPerHour, elixirPerHour, dePerHour, avgStars, threeStarRate float64
+	if hours > 0 {
+		goldPerHour = float64(b.totalGold.Load()) / hours
+		elixirPerHour = float64(b.totalElixir.Load()) / hours
+		dePerHour = float64(b.totalDE.Load()) / hours
+	}
+	if attacks > 0 {
+		avgStars = float64(b.totalStars.Load()) / float64(attacks)
+		threeStarRate = float64(b.stars3.Load()) * 100 / float64(attacks)
+	}
+	tm := telemetry.Snapshot{}
+	if b.telemetry != nil { tm = b.telemetry.Snapshot() }
+	scaleStats := vision.PreferredScaleRuntimeStats()
+	scaleHitRate := 0.0
+	if scaleStats.Attempts > 0 {
+		scaleHitRate = float64(scaleStats.Hits) * 100 / float64(scaleStats.Attempts)
+	}
+	avgReturnHomeMS := 0.0
+	if count := b.returnHomeCount.Load(); count > 0 {
+		avgReturnHomeMS = float64(b.returnHomeMicros.Load()) / float64(count) / 1000.0
+	}
+	var targetAcceptanceRate, avgSkipsPerAttack, recoverySuccessRate float64
+	if tm.TargetsFound > 0 {
+		targetAcceptanceRate = float64(tm.TargetsAccepted) * 100 / float64(tm.TargetsFound)
+	}
+	if attacks > 0 {
+		avgSkipsPerAttack = float64(tm.TargetsSkipped) / float64(attacks)
+	}
+	if attempts := b.recoveryAttempts.Load(); attempts > 0 {
+		recoverySuccessRate = float64(b.recoverySuccesses.Load()) * 100 / float64(attempts)
+	}
+	adbHealth := b.client.Health()
+	uiAnchorAttempts := b.uiAnchorAttempts.Load()
+	uiAnchorHits := b.uiAnchorHits.Load()
+	uiAnchorDisabled := b.uiAnchorDisabledUntilUS.Load() > time.Now().UnixMicro()
+	uiAnchorHitRate := 0.0
+	if uiAnchorAttempts > 0 {
+		uiAnchorHitRate = float64(uiAnchorHits) * 100 / float64(uiAnchorAttempts)
+	}
+	runtimeHealth := b.RuntimeHealth()
+	featureCircuits := b.FeatureCircuits()
+	diagnosis := b.DiagnoseRuntime(runtimeHealth)
+
+	runtimeSearchMode := chooseSearchPacing(adbHealth).Mode
+	if b.safePacingForced() {
+		runtimeSearchMode = "Safe"
+	}
+	memberSpeedProfile := strings.ToLower(strings.TrimSpace(b.cfg.Automation.SpeedProfile))
+	switch memberSpeedProfile {
+	case "cautious", "fast":
+	default:
+		memberSpeedProfile = "normal"
+	}
+
 	return BotStats{
 		AttacksCompleted: b.attackCount.Load(),
+		SessionAttacks:   b.attackCount.Load(),
+		SessionAttackCap: b.cfg.Attack.MaxAttackPerSession,
 		SearchSkips:      b.skipsCount.Load(),
 		TotalGold:        b.totalGold.Load(),
 		TotalElixir:      b.totalElixir.Load(),
@@ -2937,18 +4364,82 @@ func (b *Bot) Stats() BotStats {
 		Stars1:           b.stars1.Load(),
 		Stars2:           b.stars2.Load(),
 		Stars3:           b.stars3.Load(),
-		Uptime:           time.Since(b.startedAt),
-		AdbHealth:          b.client.Health(),
+		Uptime:           uptime,
+		AdbHealth:          adbHealth,
 		CPUTimeSec:         CPUTime().Seconds(),
 		CPUCores:           b.cpuSampler.Usage(),
 		RecoveryAttempts:   b.recoveryAttempts.Load(),
 		RecoverySuccesses:  b.recoverySuccesses.Load(),
 		BlueStacksRestarts: b.blueStacksRestarts.Load(),
+		CleanAttackStreak:  b.cleanAttackStreak.Load(),
+		AttackSoakValidated: b.soakValidated.Load(),
+		GoldPerHour:        goldPerHour,
+		ElixirPerHour:      elixirPerHour,
+		DEPerHour:          dePerHour,
+		AverageStars:       avgStars,
+		ThreeStarRate:      threeStarRate,
+		AverageCaptureMS:   tm.AvgCaptureMS,
+		LastCaptureMS:      tm.LastCaptureMS,
+		TelemetryEvents:    tm.Events,
+		Anomalies:          tm.Anomalies,
+		TargetsSkipped:     tm.TargetsSkipped,
+		HealthScore:          runtimeHealth.Overall,
+		ADBHealthScore:       runtimeHealth.ADB,
+		CaptureHealthScore:   runtimeHealth.Capture,
+		VisionHealthScore:    runtimeHealth.Vision,
+		UIHealthScore:        runtimeHealth.UI,
+		RecoveryHealthScore:  runtimeHealth.Recovery,
+		RuntimeHealthMode:    runtimeHealth.Mode,
+		CollectorCircuitOpen: featureCircuits.CollectorsOpen,
+		WallCircuitOpen:      featureCircuits.WallsOpen,
+		UISafetyHold:         b.uiSafetyHold.Load(),
+		HealthDiagnosis:      diagnosis.Cause,
+		HealthSuggestion:     diagnosis.Suggestion,
+		SpeedProfile:         runtimeSearchMode,
+		MemberSpeedProfile:   memberSpeedProfile,
+		TargetsSeen:          tm.TargetsFound,
+		TargetsAccepted:      tm.TargetsAccepted,
+		TargetAcceptanceRate: targetAcceptanceRate,
+		AvgSkipsPerAttack:    avgSkipsPerAttack,
+		RecoverySuccessRate:  recoverySuccessRate,
+		AverageTargetScanMS:  tm.AvgTargetScanMS,
+		LastTargetScanMS:     tm.LastTargetScanMS,
+		AverageReturnHomeMS:  avgReturnHomeMS,
+		LastReturnHomeMS:     float64(b.lastReturnHomeUS.Load()) / 1000.0,
+		AverageNextTransitionMS: tm.AvgNextTransitionMS,
+		LastNextTransitionMS:    tm.LastNextTransitionMS,
+		NextTransitions:         tm.NextTransitions,
+		NextRetries:             tm.NextRetries,
+		NextFirstPassRate:       tm.NextFirstPassRate,
+		AvgNextVerifyProbes:     tm.AvgNextVerifyProbes,
+		AvgAcceptedGE:           tm.AvgAcceptedGE,
+		AvgRejectedGE:           tm.AvgRejectedGE,
+		AvgAcceptedDE:           tm.AvgAcceptedDE,
+		AvgRejectedDE:           tm.AvgRejectedDE,
+		AvgAcceptedScore:        tm.AvgAcceptedScore,
+		AvgRejectedScore:        tm.AvgRejectedScore,
+		PreferredScaleAttempts:  scaleStats.Attempts,
+		PreferredScaleHits:      scaleStats.Hits,
+		PreferredScaleFallbacks: scaleStats.Fallbacks,
+		PreferredScaleHitRate:   scaleHitRate,
+		PreferredScaleEnabled:   scaleStats.Enabled,
+		UIAnchorAttempts:        uiAnchorAttempts,
+		UIAnchorHits:            uiAnchorHits,
+		UIAnchorFallbacks:       b.uiAnchorFallbacks.Load(),
+		UIAnchorHitRate:         uiAnchorHitRate,
+		UIAnchorEnabled:         !uiAnchorDisabled,
+		NearMissTargets:         tm.NearMissTargets,
+		NearMiss5Targets:        tm.NearMiss5Targets,
+		NearMiss10Targets:       tm.NearMiss10Targets,
+		NearMiss15Targets:       tm.NearMiss15Targets,
+		TopRejectedTargets:      tm.TopRejectedTargets,
 	}
 }
 
 type BotStats struct {
 	AttacksCompleted int32         `json:"attacks_completed"`
+	SessionAttacks   int32         `json:"session_attacks"`
+	SessionAttackCap int           `json:"session_attack_cap"`
 	SearchSkips      int32         `json:"search_skips"`
 	TotalGold        int64         `json:"total_gold"`
 	TotalElixir      int64         `json:"total_elixir"`
@@ -2964,19 +4455,89 @@ type BotStats struct {
 
 	CPUCores float64 `json:"cpu_cores"`
 
-	RecoveryAttempts   int32 `json:"recovery_attempts"`
-	RecoverySuccesses  int32 `json:"recovery_successes"`
-	BlueStacksRestarts int32 `json:"bluestacks_restarts"`
+	RecoveryAttempts    int32 `json:"recovery_attempts"`
+	RecoverySuccesses   int32 `json:"recovery_successes"`
+	BlueStacksRestarts  int32 `json:"bluestacks_restarts"`
+	CleanAttackStreak   int32 `json:"clean_attack_streak"`
+	AttackSoakValidated bool  `json:"attack_soak_validated"`
+
+	GoldPerHour      float64 `json:"gold_per_hour"`
+	ElixirPerHour    float64 `json:"elixir_per_hour"`
+	DEPerHour        float64 `json:"de_per_hour"`
+	AverageStars     float64 `json:"average_stars"`
+	ThreeStarRate    float64 `json:"three_star_rate"`
+	AverageCaptureMS float64 `json:"average_capture_ms"`
+	LastCaptureMS    float64 `json:"last_capture_ms"`
+	TelemetryEvents  int64   `json:"telemetry_events"`
+	Anomalies        int64   `json:"anomalies"`
+	TargetsSkipped   int64   `json:"targets_skipped"`
+	HealthScore          int     `json:"health_score"`
+	ADBHealthScore       int     `json:"adb_health_score"`
+	CaptureHealthScore   int     `json:"capture_health_score"`
+	VisionHealthScore    int     `json:"vision_health_score"`
+	UIHealthScore        int     `json:"ui_health_score"`
+	RecoveryHealthScore  int     `json:"recovery_health_score"`
+	RuntimeHealthMode    string  `json:"runtime_health_mode"`
+	CollectorCircuitOpen bool    `json:"collector_circuit_open"`
+	WallCircuitOpen      bool    `json:"wall_circuit_open"`
+	UISafetyHold         bool    `json:"ui_safety_hold"`
+	HealthDiagnosis      string  `json:"health_diagnosis"`
+	HealthSuggestion     string  `json:"health_suggestion"`
+	SpeedProfile         string  `json:"speed_profile"`
+	MemberSpeedProfile   string  `json:"member_speed_profile"`
+	TargetsSeen          int64   `json:"targets_seen"`
+	TargetsAccepted      int64   `json:"targets_accepted"`
+	TargetAcceptanceRate float64 `json:"target_acceptance_rate"`
+	AvgSkipsPerAttack    float64 `json:"avg_skips_per_attack"`
+	RecoverySuccessRate  float64 `json:"recovery_success_rate"`
+	AverageTargetScanMS  float64 `json:"average_target_scan_ms"`
+	LastTargetScanMS     float64 `json:"last_target_scan_ms"`
+	AverageReturnHomeMS  float64 `json:"average_return_home_ms"`
+	LastReturnHomeMS        float64 `json:"last_return_home_ms"`
+	AverageNextTransitionMS float64 `json:"average_next_transition_ms"`
+	LastNextTransitionMS    float64 `json:"last_next_transition_ms"`
+	NextTransitions         int64   `json:"next_transitions"`
+	NextRetries             int64   `json:"next_retries"`
+	NextFirstPassRate       float64 `json:"next_first_pass_rate"`
+	AvgNextVerifyProbes     float64 `json:"avg_next_verify_probes"`
+	AvgAcceptedGE           float64 `json:"avg_accepted_ge"`
+	AvgRejectedGE           float64 `json:"avg_rejected_ge"`
+	AvgAcceptedDE           float64 `json:"avg_accepted_de"`
+	AvgRejectedDE           float64 `json:"avg_rejected_de"`
+	AvgAcceptedScore        float64 `json:"avg_accepted_score"`
+	AvgRejectedScore        float64 `json:"avg_rejected_score"`
+	PreferredScaleAttempts  int64   `json:"preferred_scale_attempts"`
+	PreferredScaleHits      int64   `json:"preferred_scale_hits"`
+	PreferredScaleFallbacks int64   `json:"preferred_scale_fallbacks"`
+	PreferredScaleHitRate   float64 `json:"preferred_scale_hit_rate"`
+	PreferredScaleEnabled   bool    `json:"preferred_scale_enabled"`
+	UIAnchorAttempts        int64   `json:"ui_anchor_attempts"`
+	UIAnchorHits            int64   `json:"ui_anchor_hits"`
+	UIAnchorFallbacks       int64   `json:"ui_anchor_fallbacks"`
+	UIAnchorHitRate         float64                          `json:"ui_anchor_hit_rate"`
+	UIAnchorEnabled         bool                             `json:"ui_anchor_enabled"`
+	NearMissTargets         int64                            `json:"near_miss_targets"`
+	NearMiss5Targets        int64                            `json:"near_miss_5_targets"`
+	NearMiss10Targets       int64                            `json:"near_miss_10_targets"`
+	NearMiss15Targets       int64                            `json:"near_miss_15_targets"`
+	TopRejectedTargets      []telemetry.RejectedTargetSample `json:"top_rejected_targets,omitempty"`
 }
 
 type AttackReport struct {
 	Timestamp        string `json:"timestamp"`
+	SessionID        string `json:"session_id,omitempty"`
+	AccountID        string `json:"account_id,omitempty"`
+	PlayerTag        string `json:"player_tag,omitempty"`
 	Strategy         string `json:"strategy"`
 	TargetEdge       string `json:"target_edge"`
+	DeploySide       string `json:"deploy_side"`
 	DeploySuccess    bool   `json:"deploy_success"`
 	UndeployedSlots  int    `json:"undeployed_slots"`
 	DeployError      string `json:"deploy_error,omitempty"`
 	ParsedResults    bool   `json:"parsed_results"`
+	StarsSource      string `json:"stars_source"`
+	LootSource       string `json:"loot_source"`
+	ResultConfidence string `json:"result_confidence"`
 	Stars            int    `json:"stars"`
 	GoldStolen       int    `json:"gold_stolen"`
 	ElixirStolen     int    `json:"elixir_stolen"`
@@ -2985,6 +4546,61 @@ type AttackReport struct {
 	BonusElixir      int    `json:"bonus_elixir"`
 	BonusDE          int    `json:"bonus_de"`
 	TotalAttacks     int32  `json:"total_attacks_session"`
+	SearchSkips      int    `json:"search_skips"`
+	SearchDurationMS int64  `json:"search_duration_ms"`
+	CycleDurationMS  int64  `json:"cycle_duration_ms"`
+	DeployDurationMS int64  `json:"deploy_duration_ms"`
+	BattleDurationMS int64  `json:"battle_duration_ms"`
+	TargetGold       int    `json:"target_gold"`
+	TargetElixir     int    `json:"target_elixir"`
+	TargetDE         int    `json:"target_de"`
+	TargetScore      int     `json:"target_score"`
+	RuntimeMode      string  `json:"runtime_mode"`
+	CaptureMS        float64 `json:"capture_ms"`
+	TargetScanMS          float64 `json:"target_scan_ms"`
+	LiveBarRescans       int     `json:"live_bar_rescans"`
+	AvgLiveBarRescanMS   float64 `json:"avg_live_bar_rescan_ms"`
+	AvgSlotDetectMS       float64 `json:"avg_slot_detect_ms"`
+	AvgSlotClassifyMS     float64 `json:"avg_slot_classify_ms"`
+	TemplatesTried        int     `json:"templates_tried"`
+	TemplatesMatched      int     `json:"templates_matched"`
+	AvgSelectedCardOCRMS float64 `json:"avg_selected_card_ocr_ms"`
+	BattleLootOCRSamples int     `json:"battle_loot_ocr_samples"`
+	AvgBattleLootOCRMS   float64 `json:"avg_battle_loot_ocr_ms"`
+	BattleEndWaitMS      int64   `json:"battle_end_wait_ms"`
+	LootExitPercent      int     `json:"loot_exit_percent"`
+	PreparationDurationMS  int64 `json:"preparation_duration_ms"`
+	PrepAttackButtonMS     int64 `json:"prep_attack_button_ms"`
+	PrepFindMatchMS        int64 `json:"prep_find_match_ms"`
+	PrepArmyMenuMS         int64 `json:"prep_army_menu_ms"`
+	PrepArmySlotMS         int64 `json:"prep_army_slot_ms"`
+	PrepBattleButtonMS     int64 `json:"prep_battle_button_ms"`
+	PrepMatchmakingReadyMS int64 `json:"prep_matchmaking_ready_ms"`
+	CooldownDurationMS     int64 `json:"cooldown_duration_ms"`
+	BattleEndReason       string `json:"battle_end_reason"`
+	StarExitTarget        int    `json:"star_exit_target"`
+	StarExitSeen          int    `json:"star_exit_seen"`
+	StarExitConfirmations int    `json:"star_exit_confirmations"`
+	StarExitTriggered     bool   `json:"star_exit_triggered"`
+	StarExitElapsedMS     int64  `json:"star_exit_elapsed_ms"`
+	DestructionPct        int    `json:"destruction_pct"`
+	TownHallDestroyed     bool  `json:"town_hall_destroyed"`
+	SafetyMode            string `json:"safety_mode"`
+	RedZoneValid          bool   `json:"red_zone_valid"`
+	CorridorVerified      bool   `json:"corridor_verified"`
+	HUDSafe               bool   `json:"hud_safe"`
+	RedZoneX1             int    `json:"red_zone_x1"`
+	RedZoneY1             int    `json:"red_zone_y1"`
+	RedZoneX2             int    `json:"red_zone_x2"`
+	RedZoneY2             int    `json:"red_zone_y2"`
+	DeployLineX1          int    `json:"deploy_line_x1"`
+	DeployLineY1          int    `json:"deploy_line_y1"`
+	DeployLineX2          int    `json:"deploy_line_x2"`
+	DeployLineY2          int    `json:"deploy_line_y2"`
+	DeployFreeSpace       int    `json:"deploy_free_space"`
+	ReturnHomeDurationMS  int64 `json:"return_home_duration_ms"`
+	ReturnHomeSuccess     bool  `json:"return_home_success"`
+	FullRoutineDurationMS int64 `json:"full_routine_duration_ms"`
 }
 
 type adbLogAdapter struct {

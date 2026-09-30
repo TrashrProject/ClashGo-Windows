@@ -118,6 +118,13 @@ func TestPlatformKey(t *testing.T) {
 
 // ----- HTTP / Service flow -----
 
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+
 // TestServiceCheckNoReleases is the regression test for the
 // "Update error on every launch" bug. When the repo exists but
 // has zero published releases, the GitHub API returns 404 for
@@ -125,32 +132,23 @@ func TestPlatformKey(t *testing.T) {
 // error to the UI — it should report StateUpToDate and clear any
 // stale release fields.
 func TestServiceCheckNoReleases(t *testing.T) {
-	mux := http.NewServeMux()
-	// Both endpoints 404, mimicking a repo with no published
-	// releases. The manifest path already handles 404 internally
-	// (returns nil, nil), so the real test is the API fallback.
-	mux.HandleFunc("/repos/owner/repo/releases/latest/download/latest.json",
-		func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusNotFound)
-		})
-	mux.HandleFunc("/repos/owner/repo/releases/latest",
-		func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"message":"Not Found","documentation_url":"github.com","status":"404"}`))
-		})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	client := &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host != "api.github.com" || !strings.HasSuffix(req.URL.Path, "/repos/owner/repo/releases/latest") {
+			t.Fatalf("unexpected updater request: %s", req.URL.String())
+		}
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Status:     "404 Not Found",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"message":"Not Found","status":"404"}`)),
+			Request:    req,
+		}, nil
+	})}
 
-	// Point the Service at the test server by overriding the URL
-	// builders. We can't easily redirect Service.manifestURL /
-	// fetchLatestRelease without changing production code, so we
-	// call them directly with the test server URL — same code path.
-	s := newServiceForTest(t, "0.1.0-beta", srv.Client())
+	s := newServiceForTest(t, "0.1.0-beta", client)
 
-	// Pre-seed with a stale "available update" to verify the
-	// no-releases branch CLEARS it (regression guard: previously
-	// the status would keep showing v0.2.0 as available after the
-	// 404, because the error path only updated State/Error).
+	// Pre-seed stale release data. markNoReleases must clear every one of
+	// these fields after fetchLatestRelease returns the no-release sentinel.
 	s.statusMu.Lock()
 	s.status.LatestVersion = "0.2.0-beta"
 	s.status.Available = true
@@ -161,17 +159,10 @@ func TestServiceCheckNoReleases(t *testing.T) {
 	s.status.ExpectedSize = 999
 	s.statusMu.Unlock()
 
-	// Drive the same fetchLatestRelease path Check() uses.
 	_, err := s.fetchLatestRelease(context.Background())
 	if !errors.Is(err, errNoReleases) {
 		t.Fatalf("expected errNoReleases, got %v", err)
 	}
-
-	// Now exercise the exact same transition Check() would run.
-	// markNoReleases is the single source of truth for the
-	// "no published releases" state reset, so the test stays in
-	// sync with production — any future field added to the
-	// clearing block will be covered automatically.
 	s.markNoReleases()
 
 	st := s.GetStatus()
@@ -185,22 +176,13 @@ func TestServiceCheckNoReleases(t *testing.T) {
 		t.Errorf("Available = true want false")
 	}
 	if st.LatestVersion != "" {
-		t.Errorf("LatestVersion = %q want empty (stale value not cleared)", st.LatestVersion)
+		t.Errorf("LatestVersion = %q want empty", st.LatestVersion)
 	}
-	if st.Notes != "" {
-		t.Errorf("Notes = %q want empty (stale value not cleared)", st.Notes)
-	}
-	if st.MinSupported != "" {
-		t.Errorf("MinSupported = %q want empty (stale value not cleared)", st.MinSupported)
-	}
-	if st.ReleaseURL != "" {
-		t.Errorf("ReleaseURL = %q want empty (stale value not cleared)", st.ReleaseURL)
-	}
-	if st.AssetName != "" {
-		t.Errorf("AssetName = %q want empty (stale value not cleared)", st.AssetName)
+	if st.Notes != "" || st.MinSupported != "" || st.ReleaseURL != "" || st.AssetName != "" {
+		t.Fatalf("stale release fields were not cleared: %+v", st)
 	}
 	if st.ExpectedSize != 0 {
-		t.Errorf("ExpectedSize = %d want 0 (stale value not cleared)", st.ExpectedSize)
+		t.Errorf("ExpectedSize = %d want 0", st.ExpectedSize)
 	}
 	if st.LastCheckedUnix == 0 {
 		t.Errorf("LastCheckedUnix should be set even for no-releases")
@@ -393,6 +375,64 @@ func TestServiceDownloadVerifiesSHA(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatalf("Download timed out")
+	}
+}
+
+func TestServiceDownloadReplacesExistingSameVersion(t *testing.T) {
+	payload := []byte("fresh-update-content")
+	sum := sha256.Sum256(payload)
+	sha := hex.EncodeToString(sum[:])
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/asset.zip", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
+		_, _ = w.Write(payload)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	manifest := Manifest{
+		Version: "9.9.9",
+		Platforms: map[string]PlatformSpec{
+			platformKey(runtime.GOOS): {
+				AssetName: "asset.zip",
+				AssetURL:  srv.URL + "/asset.zip",
+				Size:      int64(len(payload)),
+				SHA256:    sha,
+			},
+		},
+	}
+	svc := newServiceForTest(t, "0.0.1", srv.Client())
+	svc.absorbManifest(manifest)
+
+	targetDir := filepath.Join(svc.downloadsDir, "9.9.9")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	finalPath := filepath.Join(targetDir, "asset.zip")
+	if err := os.WriteFile(finalPath, []byte("stale-download"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	gotPath, err := svc.Download(context.Background())
+	if err != nil {
+		t.Fatalf("Download replacing existing file: %v", err)
+	}
+	if gotPath != finalPath {
+		t.Fatalf("download path = %q, want %q", gotPath, finalPath)
+	}
+	got, err := os.ReadFile(finalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("existing file was not replaced: got %q", got)
+	}
+	if _, err := os.Stat(finalPath + ".part"); !os.IsNotExist(err) {
+		t.Fatalf("partial file left behind: %v", err)
+	}
+	if svc.GetStatus().Progress != 1.0 {
+		t.Fatalf("progress = %f, want 1.0", svc.GetStatus().Progress)
 	}
 }
 

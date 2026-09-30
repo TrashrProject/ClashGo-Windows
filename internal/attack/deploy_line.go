@@ -42,7 +42,7 @@ func (d *DeployLineCalculator) Calculate(
 	preferSide string,
 	count int,
 ) DeployLine {
-	if count <= 0 {
+	if count < 2 {
 		count = linePoints
 	}
 
@@ -68,6 +68,19 @@ func (d *DeployLineCalculator) Calculate(
 	xHi := screenW - xMinPad
 	yTop := yTopMin
 	yBot := uiCutoff - yBotPad
+
+	// Prefer the real red-line contour when available. The old BBox-only
+	// geometry turns every base into a rectangle; following the contour keeps
+	// deployment points consistently outside irregular/diamond-shaped bases.
+	if contourPoints := d.contourAwarePoints(zone, side, xLo, xHi, yTop, yBot, count); len(contourPoints) == count {
+		anchor := contourPoints[len(contourPoints)/2]
+		d.logger.Info().
+			Str("side", side).
+			Int("points", len(contourPoints)).
+			Interface("anchor", anchor).
+			Msg("calculated contour-aware deployment line")
+		return DeployLine{Points: contourPoints, Side: side, Anchor: anchor, Outside: true}
+	}
 
 	var points []image.Point
 
@@ -156,18 +169,26 @@ func (d *DeployLineCalculator) Calculate(
 
 // pickSide selects edge with most free space.
 func (d *DeployLineCalculator) pickSide(freeSpace map[string]int, prefer string) string {
-
-	if prefer != "" && freeSpace[prefer] > 0 {
+	const preferredSafeSpace = 60
+	if prefer != "" && freeSpace[prefer] >= preferredSafeSpace {
 		return prefer
 	}
 
 	best := "left"
-	bestSpace := 0
+	bestSpace := -1
 	for side, space := range freeSpace {
 		if space > bestSpace {
 			bestSpace = space
 			best = side
 		}
+	}
+	if prefer != "" && best != prefer {
+		d.logger.Info().
+			Str("preferred_side", prefer).
+			Int("preferred_space", freeSpace[prefer]).
+			Str("selected_side", best).
+			Int("selected_space", bestSpace).
+			Msg("preferred attack side too cramped; using safer red-zone side")
 	}
 	return best
 }
@@ -211,6 +232,53 @@ func (d *DeployLineCalculator) linspaceX(xStart, xEnd, y, count int) []image.Poi
 		t := float64(i) / float64(count-1)
 		x := xStart + int(float64(xEnd-xStart)*t)
 		points[i] = image.Pt(x, y)
+	}
+	return points
+}
+
+
+func (d *DeployLineCalculator) contourAwarePoints(zone RedZone, side string, xLo, xHi, yTop, yBot, count int) []image.Point {
+	if count < 2 {
+		return nil
+	}
+
+	var profile []image.Point
+	switch side {
+	case "left":
+		profile = zone.LeftBoundary
+	case "right":
+		profile = zone.RightBoundary
+	case "top":
+		profile = zone.TopBoundary
+	case "bottom":
+		profile = zone.BottomBoundary
+	default:
+		return nil
+	}
+	if len(profile) < 4 {
+		return nil
+	}
+
+	points := make([]image.Point, 0, count)
+	for i := 0; i < count; i++ {
+		t := float64(i) / float64(count-1)
+		idx := int(t * float64(len(profile)-1))
+		p := profile[idx]
+
+		switch side {
+		case "left":
+			p.X -= standoff
+		case "right":
+			p.X += standoff
+		case "top":
+			p.Y -= standoff
+		case "bottom":
+			p.Y += standoff
+		}
+
+		p.X = clamp(p.X, xLo, xHi)
+		p.Y = clamp(p.Y, yTop, yBot)
+		points = append(points, p)
 	}
 	return points
 }

@@ -8,14 +8,15 @@ interface AnalyticsProps {
 }
 
 const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory, history }) => {
+  const [advancedOpen, setAdvancedOpen] = React.useState(false);
   // `color` drives Tailwind bar classes; `hex` feeds the conic-gradient
   // (Tailwind class names are NOT valid CSS color values — using them
   // inside the gradient string would silently drop the donut).
   const starData = [
-    { label: '3 Stars', count: stats.stars_3, color: 'bg-emerald-500', hex: '#10b981', bg: 'bg-emerald-500/10' },
-    { label: '2 Stars', count: stats.stars_2, color: 'bg-zinc-800', hex: '#27272a', bg: 'bg-zinc-800/10' },
-    { label: '1 Star', count: stats.stars_1, color: 'bg-zinc-400', hex: '#a1a1aa', bg: 'bg-zinc-400/10' },
-    { label: '0 Stars', count: stats.stars_0, color: 'bg-rose-500', hex: '#f43f5e', bg: 'bg-rose-500/10' },
+    { label: '3 étoiles', count: stats.stars_3, color: 'bg-emerald-500', hex: '#10b981', bg: 'bg-emerald-500/10' },
+    { label: '2 étoiles', count: stats.stars_2, color: 'bg-zinc-800', hex: '#27272a', bg: 'bg-zinc-800/10' },
+    { label: '1 étoile', count: stats.stars_1, color: 'bg-zinc-400', hex: '#a1a1aa', bg: 'bg-zinc-400/10' },
+    { label: '0 étoile', count: stats.stars_0, color: 'bg-rose-500', hex: '#f43f5e', bg: 'bg-rose-500/10' },
   ];
 
   const validResourceHistory = resourceHistory.filter((s) => s.valid);
@@ -56,9 +57,1344 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
       .slice(0, 8);
   }, [history]);
 
+  const strategySideStats = React.useMemo(() => {
+    const map = new Map<string, {
+      key: string;
+      strategy: string;
+      side: string;
+      attacks: number;
+      stars: number;
+      goldElixir: number;
+      dark: number;
+      deployMs: number;
+      cycleMs: number;
+      routineMs: number;
+      effectiveRoutineMs: number;
+      complete: number;
+    }>();
+    for (const rep of history ?? []) {
+      const strategy = rep.strategy || 'Unknown';
+      const side = rep.deploy_side && rep.deploy_side !== 'Unknown'
+        ? rep.deploy_side
+        : (rep.target_edge || 'Unknown');
+      const key = `${strategy}::${side}`;
+      const row = map.get(key) ?? {
+        key, strategy, side, attacks: 0, stars: 0, goldElixir: 0, dark: 0,
+        deployMs: 0, cycleMs: 0, routineMs: 0, effectiveRoutineMs: 0, complete: 0,
+      };
+      row.attacks++;
+      row.stars += rep.stars || 0;
+      row.goldElixir += (rep.gold_stolen || 0) + (rep.bonus_gold || 0) + (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+      row.dark += (rep.dark_elixir_stolen || 0) + (rep.bonus_de || 0);
+      row.deployMs += rep.deploy_duration_ms || 0;
+      row.cycleMs += rep.cycle_duration_ms || 0;
+      row.routineMs += rep.full_routine_duration_ms || 0;
+      row.effectiveRoutineMs += rep.full_routine_duration_ms || rep.cycle_duration_ms || 0;
+      if (rep.deploy_success) row.complete++;
+      map.set(key, row);
+    }
+    return Array.from(map.values())
+      .sort((a, b) => b.attacks - a.attacks)
+      .slice(0, 16);
+  }, [history]);
+
+  const strategyLab = React.useMemo(() => {
+    return strategySideStats
+      .filter((row) => row.attacks >= 5)
+      .map((row) => {
+        const measuredMs = row.effectiveRoutineMs;
+        const hours = measuredMs > 0 ? measuredMs / 3_600_000 : 0;
+        const yieldPerHour = hours > 0 ? row.goldElixir / hours : 0;
+        const confidence = row.attacks >= 25 ? 'Strong' : row.attacks >= 10 ? 'Solid' : 'Building';
+        return {
+          ...row,
+          yieldPerHour,
+          avgStars: row.stars / Math.max(1, row.attacks),
+          fullDeployRate: row.complete * 100 / Math.max(1, row.attacks),
+          confidence,
+        };
+      })
+      .sort((a, b) => {
+        if (b.yieldPerHour !== a.yieldPerHour) return b.yieldPerHour - a.yieldPerHour;
+        if (b.fullDeployRate !== a.fullDeployRate) return b.fullDeployRate - a.fullDeployRate;
+        return b.avgStars - a.avgStars;
+      })
+      .slice(0, 3);
+  }, [strategySideStats]);
+
+  const modeStats = React.useMemo(() => {
+    const map = new Map<string, {
+      mode: string;
+      attacks: number;
+      stars: number;
+      fullDeploys: number;
+      searchMs: number;
+      deployMs: number;
+      cycleMs: number;
+      captureMs: number;
+      scanMs: number;
+      goldElixir: number;
+    }>();
+    for (const rep of history ?? []) {
+      const mode = rep.runtime_mode || 'Unknown';
+      const row = map.get(mode) ?? {
+        mode, attacks: 0, stars: 0, fullDeploys: 0,
+        searchMs: 0, deployMs: 0, cycleMs: 0, captureMs: 0, scanMs: 0, goldElixir: 0,
+      };
+      row.attacks++;
+      row.stars += rep.stars || 0;
+      if (rep.deploy_success) row.fullDeploys++;
+      row.searchMs += rep.search_duration_ms || 0;
+      row.deployMs += rep.deploy_duration_ms || 0;
+      row.cycleMs += rep.cycle_duration_ms || 0;
+      row.captureMs += rep.capture_ms || 0;
+      row.scanMs += rep.target_scan_ms || 0;
+      row.goldElixir += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0);
+      map.set(mode, row);
+    }
+    const order: Record<string, number> = { Fast: 0, Balanced: 1, Safe: 2, Unknown: 3 };
+    return Array.from(map.values()).sort((a, b) =>
+      (order[a.mode] ?? 9) - (order[b.mode] ?? 9)
+    );
+  }, [history]);
+
+  const performanceGuard = React.useMemo(() => {
+    const recent = (history ?? []).slice(0, 5);
+    const baseline = (history ?? []).slice(5, 20);
+    if (recent.length < 3 || baseline.length < 5) {
+      return { status: 'Apprentissage', reasons: ['Il faut davantage d’attaques pour établir une référence fiable'] };
+    }
+
+    const summarize = (rows: AttackReport[]) => {
+      let search = 0, deploy = 0, complete = 0, capture = 0, scan = 0;
+      let searchN = 0, deployN = 0, captureN = 0, scanN = 0;
+      for (const rep of rows) {
+        if ((rep.search_duration_ms || 0) > 0) { search += rep.search_duration_ms; searchN++; }
+        if ((rep.deploy_duration_ms || 0) > 0) { deploy += rep.deploy_duration_ms; deployN++; }
+        if ((rep.capture_ms || 0) > 0) { capture += rep.capture_ms; captureN++; }
+        if ((rep.target_scan_ms || 0) > 0) { scan += rep.target_scan_ms; scanN++; }
+        if (rep.deploy_success) complete++;
+      }
+      const n = rows.length;
+      return {
+        search: searchN > 0 ? search / searchN : 0,
+        deploy: deployN > 0 ? deploy / deployN : 0,
+        capture: captureN > 0 ? capture / captureN : 0,
+        scan: scanN > 0 ? scan / scanN : 0,
+        completeRate: complete * 100 / n,
+      };
+    };
+
+    const now = summarize(recent);
+    const before = summarize(baseline);
+    const reasons: string[] = [];
+    const slower = (a: number, b: number, pct: number) => b > 0 && a > b * (1 + pct / 100);
+
+    if (slower(now.search, before.search, 35)) reasons.push('La recherche est plus de 35 % plus lente que la référence');
+    if (slower(now.deploy, before.deploy, 35)) reasons.push('Le déploiement est plus de 35 % plus lent que la référence');
+    if (slower(now.capture, before.capture, 40)) reasons.push('La capture ADB est plus de 40 % plus lente');
+    if (slower(now.scan, before.scan, 50)) reasons.push('La lecture du butin est plus de 50 % plus lente');
+    if (before.completeRate - now.completeRate >= 20) reasons.push('Le taux de déploiement complet a baissé d’au moins 20 points');
+
+    return {
+      status: reasons.length === 0 ? 'Stable' : 'À surveiller',
+      reasons: reasons.length === 0 ? ['Les attaques récentes restent dans la plage de référence apprise'] : reasons,
+    };
+  }, [history]);
+
+  const sessionStats = React.useMemo(() => {
+    const map = new Map<string, {
+      id: string;
+      attacks: number;
+      stars: number;
+      triples: number;
+      complete: number;
+      gold: number;
+      elixir: number;
+      dark: number;
+      cycleMs: number;
+      routineMs: number;
+      searchMs: number;
+      deployMs: number;
+      newestAt: number;
+      oldestAt: number;
+      firstCycleMs: number;
+    }>();
+    for (const rep of history ?? []) {
+      if (!rep.session_id) continue;
+      const row = map.get(rep.session_id) ?? {
+        id: rep.session_id, attacks: 0, stars: 0, triples: 0, complete: 0,
+        gold: 0, elixir: 0, dark: 0, cycleMs: 0, routineMs: 0, searchMs: 0, deployMs: 0,
+        newestAt: 0, oldestAt: 0, firstCycleMs: 0,
+      };
+      row.attacks++;
+      row.stars += rep.stars || 0;
+      if ((rep.stars || 0) === 3) row.triples++;
+      if (rep.deploy_success) row.complete++;
+      row.gold += (rep.gold_stolen || 0) + (rep.bonus_gold || 0);
+      row.elixir += (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+      row.dark += (rep.dark_elixir_stolen || 0) + (rep.bonus_de || 0);
+      row.cycleMs += rep.cycle_duration_ms || 0;
+      row.routineMs += rep.full_routine_duration_ms || 0;
+      row.searchMs += rep.search_duration_ms || 0;
+      row.deployMs += rep.deploy_duration_ms || 0;
+      const ts = Date.parse(rep.timestamp || '');
+      if (Number.isFinite(ts)) {
+        if (ts > row.newestAt) row.newestAt = ts;
+        if (row.oldestAt === 0 || ts < row.oldestAt) {
+          row.oldestAt = ts;
+          row.firstCycleMs = rep.cycle_duration_ms || 0;
+        }
+      }
+      map.set(rep.session_id, row);
+    }
+    return Array.from(map.values())
+      .sort((a, b) => b.newestAt - a.newestAt)
+      .slice(0, 8);
+  }, [history]);
+
+  const sessionComparison = React.useMemo(() => {
+    const summarizeSession = (row: (typeof sessionStats)[number] | undefined) => {
+      if (!row) return null;
+      const fallbackWallMs = row.attacks <= 1
+        ? row.cycleMs
+        : Math.max(row.firstCycleMs, row.newestAt - row.oldestAt + row.firstCycleMs);
+      const effectiveMs = row.routineMs > 0 ? row.routineMs : fallbackWallMs;
+      const hours = effectiveMs > 0 ? effectiveMs / 3_600_000 : 0;
+      return {
+        attacks: row.attacks,
+        gePerHour: hours > 0 ? (row.gold + row.elixir) / hours : 0,
+        attacksPerHour: hours > 0 ? row.attacks / hours : 0,
+        avgStars: row.stars / Math.max(1, row.attacks),
+        fullDeployRate: row.complete * 100 / Math.max(1, row.attacks),
+        avgLoopSeconds: effectiveMs / Math.max(1, row.attacks) / 1000,
+      };
+    };
+
+    const current = summarizeSession(sessionStats[0]);
+    const previous = summarizeSession(sessionStats[1]);
+    const delta = (a: number, b: number, lowerIsBetter = false) => {
+      if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
+      const raw = (a - b) * 100 / Math.abs(b);
+      return lowerIsBetter ? -raw : raw;
+    };
+    return {
+      current,
+      previous,
+      metrics: current ? [
+        { label: 'G+E / h', value: compact(current.gePerHour), delta: previous ? delta(current.gePerHour, previous.gePerHour) : null },
+        { label: 'Attaques / h', value: current.attacksPerHour.toFixed(2), delta: previous ? delta(current.attacksPerHour, previous.attacksPerHour) : null },
+        { label: 'Étoiles moy.', value: current.avgStars.toFixed(2), delta: previous ? delta(current.avgStars, previous.avgStars) : null },
+        { label: 'Déploiement complet', value: `${current.fullDeployRate.toFixed(0)}%`, delta: previous ? delta(current.fullDeployRate, previous.fullDeployRate) : null },
+        { label: 'Cycle réel', value: `${current.avgLoopSeconds.toFixed(0)}s`, delta: previous ? delta(current.avgLoopSeconds, previous.avgLoopSeconds, true) : null },
+      ] : [],
+    };
+  }, [sessionStats]);
+
+  const latencyPercentiles = React.useMemo(() => {
+    const percentile = (values: number[], q: number) => {
+      const sorted = values.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+      if (sorted.length === 0) return 0;
+      if (sorted.length === 1) return sorted[0];
+      const pos = (sorted.length - 1) * q;
+      const lo = Math.floor(pos);
+      const hi = Math.ceil(pos);
+      if (lo === hi) return sorted[lo];
+      const weight = pos - lo;
+      return sorted[lo] * (1 - weight) + sorted[hi] * weight;
+    };
+    const rows = history ?? [];
+    const search = rows.map((r) => r.search_duration_ms || 0);
+    const deploy = rows.map((r) => r.deploy_duration_ms || 0);
+    const cycle = rows.map((r) => r.cycle_duration_ms || 0);
+    return {
+      searchP50: percentile(search, 0.50),
+      searchP90: percentile(search, 0.90),
+      deployP50: percentile(deploy, 0.50),
+      deployP90: percentile(deploy, 0.90),
+      cycleP50: percentile(cycle, 0.50),
+      cycleP90: percentile(cycle, 0.90),
+    };
+  }, [history]);
+
+  const targetScoreBuckets = React.useMemo(() => {
+    const buckets = [
+      { label: '<60', min: 1, max: 59, attacks: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
+      { label: '60–74', min: 60, max: 74, attacks: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
+      { label: '75–89', min: 75, max: 89, attacks: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
+      { label: '90–100', min: 90, max: 100, attacks: 0, stars: 0, full: 0, stolen: 0, offered: 0, cycleMs: 0 },
+    ];
+    for (const rep of history ?? []) {
+      const score = rep.target_score || 0;
+      if (score <= 0) continue;
+      const bucket = buckets.find((b) => score >= b.min && score <= b.max);
+      if (!bucket) continue;
+      bucket.attacks++;
+      bucket.stars += rep.stars || 0;
+      if (rep.deploy_success) bucket.full++;
+      bucket.stolen += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0);
+      bucket.offered += (rep.target_gold || 0) + (rep.target_elixir || 0);
+      bucket.cycleMs += rep.cycle_duration_ms || 0;
+    }
+    return buckets.filter((b) => b.attacks > 0);
+  }, [history]);
+
+  const resultTrust = React.useMemo(() => {
+    const rows = history ?? [];
+    const confidence = { high: 0, medium: 0, low: 0, unknown: 0 };
+    const stars = new Map<string, number>();
+    const loot = new Map<string, number>();
+    for (const rep of rows) {
+      const level = rep.result_confidence || 'unknown';
+      if (level === 'high' || level === 'medium' || level === 'low') {
+        confidence[level]++;
+      } else {
+        confidence.unknown++;
+      }
+      const starSource = rep.stars_source || 'legacy';
+      const lootSource = rep.loot_source || 'legacy';
+      stars.set(starSource, (stars.get(starSource) || 0) + 1);
+      loot.set(lootSource, (loot.get(lootSource) || 0) + 1);
+    }
+    const total = rows.length;
+    return {
+      total,
+      confidence,
+      highRate: total > 0 ? confidence.high * 100 / total : 0,
+      mediumRate: total > 0 ? confidence.medium * 100 / total : 0,
+      lowRate: total > 0 ? (confidence.low + confidence.unknown) * 100 / total : 0,
+      ocrStars: stars.get('result_ocr') || 0,
+      outcomeStars: (stars.get('battle_outcome') || 0) + (stars.get('reconciled_outcome') || 0),
+      liveLoot: loot.get('live_delta') || 0,
+      ocrLoot: loot.get('result_ocr') || 0,
+    };
+  }, [history]);
+
+  const endReasonStats = React.useMemo(() => {
+    const map = new Map<string, {
+      reason: string;
+      attacks: number;
+      stars: number;
+      cycleMs: number;
+      destruction: number;
+      loot: number;
+      full: number;
+    }>();
+    for (const rep of history ?? []) {
+      const reason = rep.battle_end_reason || 'unknown';
+      const row = map.get(reason) ?? {
+        reason, attacks: 0, stars: 0, cycleMs: 0, destruction: 0, loot: 0, full: 0,
+      };
+      row.attacks++;
+      row.stars += rep.stars || 0;
+      row.cycleMs += rep.cycle_duration_ms || 0;
+      row.destruction += rep.destruction_pct || 0;
+      row.loot += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0) + (rep.dark_elixir_stolen || 0);
+      if (rep.deploy_success) row.full++;
+      map.set(reason, row);
+    }
+    return Array.from(map.values()).sort((a, b) => b.attacks - a.attacks);
+  }, [history]);
+
+  const battleExitIntelligence = React.useMemo(() => {
+    const rows = (history ?? []).filter((r) => (r.battle_end_wait_ms || 0) > 0);
+    if (rows.length === 0) {
+      return {
+        attacks: 0,
+        early: 0,
+        earlyRate: 0,
+        avgWaitMS: 0,
+        naturalWaitMS: 0,
+        earlyWaitMS: 0,
+        avgLootExitPct: 0,
+        groups: [] as Array<{ reason: string; attacks: number; avgWaitMS: number; avgStars: number; avgGE: number }>,
+      };
+    }
+
+    const earlyReasons = new Set(['loot_threshold', 'destruction_threshold', 'stall']);
+    let early = 0, waitAll = 0, waitNatural = 0, naturalCount = 0, waitEarly = 0, lootPct = 0, lootPctCount = 0;
+    const map = new Map<string, { reason: string; attacks: number; waitMS: number; stars: number; ge: number }>();
+
+    for (const rep of rows) {
+      const reason = rep.battle_end_reason || 'unknown';
+      const isEarly = earlyReasons.has(reason);
+      const wait = rep.battle_end_wait_ms || 0;
+      waitAll += wait;
+      if (isEarly) {
+        early++;
+        waitEarly += wait;
+      } else if (reason === 'natural_result') {
+        naturalCount++;
+        waitNatural += wait;
+      }
+      if ((rep.loot_exit_percent || 0) > 0) {
+        lootPct += rep.loot_exit_percent || 0;
+        lootPctCount++;
+      }
+
+      const row = map.get(reason) ?? { reason, attacks: 0, waitMS: 0, stars: 0, ge: 0 };
+      row.attacks++;
+      row.waitMS += wait;
+      row.stars += rep.stars || 0;
+      row.ge += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0);
+      map.set(reason, row);
+    }
+
+    return {
+      attacks: rows.length,
+      early,
+      earlyRate: early * 100 / rows.length,
+      avgWaitMS: waitAll / rows.length,
+      naturalWaitMS: naturalCount > 0 ? waitNatural / naturalCount : 0,
+      earlyWaitMS: early > 0 ? waitEarly / early : 0,
+      avgLootExitPct: lootPctCount > 0 ? lootPct / lootPctCount : 0,
+      groups: Array.from(map.values())
+        .map((row) => ({
+          reason: row.reason,
+          attacks: row.attacks,
+          avgWaitMS: row.waitMS / Math.max(1, row.attacks),
+          avgStars: row.stars / Math.max(1, row.attacks),
+          avgGE: row.ge / Math.max(1, row.attacks),
+        }))
+        .sort((a, b) => b.attacks - a.attacks),
+    };
+  }, [history]);
+
+  const battleExitAdvisor = React.useMemo(() => {
+    const natural = (history ?? []).filter((r) =>
+      r.battle_end_reason === 'natural_result' &&
+      (r.battle_end_wait_ms || 0) > 0 &&
+      (r.full_routine_duration_ms || r.cycle_duration_ms || 0) > 0
+    );
+    const early = (history ?? []).filter((r) =>
+      ['loot_threshold', 'destruction_threshold', 'stall'].includes(r.battle_end_reason || '') &&
+      (r.battle_end_wait_ms || 0) > 0
+    );
+
+    const summarize = (rows: AttackReport[]) => {
+      let ge = 0, routine = 0, wait = 0, stars = 0, complete = 0;
+      for (const rep of rows) {
+        ge += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0);
+        routine += rep.full_routine_duration_ms || rep.cycle_duration_ms || 0;
+        wait += rep.battle_end_wait_ms || 0;
+        stars += rep.stars || 0;
+        if (rep.deploy_success) complete++;
+      }
+      const n = rows.length;
+      const hours = routine > 0 ? routine / 3_600_000 : 0;
+      return {
+        n,
+        gePerHour: hours > 0 ? ge / hours : 0,
+        avgWaitMS: n > 0 ? wait / n : 0,
+        avgStars: n > 0 ? stars / n : 0,
+        fullDeployRate: n > 0 ? complete * 100 / n : 0,
+      };
+    };
+
+    const n = summarize(natural);
+    const e = summarize(early);
+    if (n.n < 5 || e.n < 3) {
+      return {
+        status: 'apprentissage',
+        message: 'Il faut 5 fins naturelles et 3 sorties anticipées avant de comparer correctement.',
+        natural: n,
+        early: e,
+        deltaYieldPct: 0,
+      };
+    }
+
+    const deltaYieldPct = n.gePerHour > 0 ? (e.gePerHour - n.gePerHour) * 100 / n.gePerHour : 0;
+    const reliabilityDrop = n.fullDeployRate - e.fullDeployRate;
+    const starDrop = n.avgStars - e.avgStars;
+
+    let status = 'neutral';
+    let message = 'Les sorties anticipées ne montrent pas encore d’avantage clair.';
+    if (deltaYieldPct >= 8 && reliabilityDrop <= 5 && starDrop <= 0.25) {
+      status = 'prometteur';
+      message = 'Les sorties anticipées observées améliorent Or+Élixir/heure sans baisse notable de fiabilité.';
+    } else if (deltaYieldPct <= -8 || reliabilityDrop >= 15 || starDrop >= 0.5) {
+      status = 'prudence';
+      message = 'Les sorties anticipées observées coûtent actuellement trop de rendement, d’étoiles ou de fiabilité.';
+    }
+
+    return { status, message, natural: n, early: e, deltaYieldPct };
+  }, [history]);
+
+
+  const sideStats = React.useMemo(() => {
+    const map = new Map<string, {
+      side: string;
+      attacks: number;
+      stars: number;
+      loot: number;
+      deployMs: number;
+      complete: number;
+    }>();
+    for (const rep of history ?? []) {
+      const side = rep.deploy_side && rep.deploy_side !== 'Unknown'
+        ? rep.deploy_side
+        : (rep.target_edge || 'Unknown');
+      const row = map.get(side) ?? { side, attacks: 0, stars: 0, loot: 0, deployMs: 0, complete: 0 };
+      row.attacks++;
+      row.stars += rep.stars || 0;
+      row.loot += (rep.gold_stolen || 0) + (rep.bonus_gold || 0) + (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+      row.deployMs += rep.deploy_duration_ms || 0;
+      if (rep.deploy_success) row.complete++;
+      map.set(side, row);
+    }
+    return Array.from(map.values()).sort((a, b) => b.attacks - a.attacks);
+  }, [history]);
+
   const totalAttacks = stats.stars_3 + stats.stars_2 + stats.stars_1 + stats.stars_0;
   const getPercent = (count: number) => totalAttacks > 0 ? Math.round((count / totalAttacks) * 100) : 0;
   const threeStarRate = totalAttacks > 0 ? Math.round((stats.stars_3 / totalAttacks) * 100) : 0;
+  const avgSearchSeconds = history?.length
+    ? history.reduce((sum, r) => sum + (r.search_duration_ms || 0), 0) / history.length / 1000
+    : 0;
+  const avgCycleSeconds = history?.length
+    ? history.reduce((sum, r) => sum + (r.cycle_duration_ms || 0), 0) / history.length / 1000
+    : 0;
+  const avgDeploySeconds = history?.length
+    ? history.reduce((sum, r) => sum + (r.deploy_duration_ms || 0), 0) / history.length / 1000
+    : 0;
+  const avgPreparationSeconds = history?.length
+    ? history.reduce((sum, r) => sum + (r.preparation_duration_ms || 0), 0) / history.length / 1000
+    : 0;
+  const avgCooldownSeconds = history?.length
+    ? history.reduce((sum, r) => sum + (r.cooldown_duration_ms || 0), 0) / history.length / 1000
+    : 0;
+  const avgBattleSeconds = history?.length
+    ? history.reduce((sum, r) => sum + (r.battle_duration_ms || 0), 0) / history.length / 1000
+    : 0;
+  const avgCombatSeconds = Math.max(0, avgBattleSeconds - avgDeploySeconds);
+  const compact = (v: number) => {
+    const abs = Math.abs(v);
+    if (abs >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+    if (abs >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+    return Math.round(v).toLocaleString();
+  };
+
+  const deploymentSafety = React.useMemo(() => {
+    const rows = (history ?? []).filter((r) => Boolean(r.safety_mode));
+    if (rows.length === 0) {
+      return {
+        attacks: 0,
+        liveCertified: 0,
+        hudSafeRate: 0,
+        corridorRate: 0,
+        fallbacks: 0,
+        modes: [] as Array<{ mode: string; count: number }>,
+      };
+    }
+
+    const modeCounts = new Map<string, number>();
+    let liveCertified = 0;
+    let hudSafe = 0;
+    let corridor = 0;
+    let fallbacks = 0;
+    for (const rep of rows) {
+      const mode = rep.safety_mode || 'unknown';
+      modeCounts.set(mode, (modeCounts.get(mode) || 0) + 1);
+      if (rep.red_zone_valid && rep.corridor_verified && rep.hud_safe) liveCertified++;
+      if (rep.hud_safe) hudSafe++;
+      if (rep.corridor_verified) corridor++;
+      if (mode !== 'live_red_zone') fallbacks++;
+    }
+
+    return {
+      attacks: rows.length,
+      liveCertified: liveCertified * 100 / rows.length,
+      hudSafeRate: hudSafe * 100 / rows.length,
+      corridorRate: corridor * 100 / rows.length,
+      fallbacks,
+      modes: Array.from(modeCounts.entries())
+        .map(([mode, count]) => ({ mode, count }))
+        .sort((a, b) => b.count - a.count),
+    };
+  }, [history]);
+
+  const battleOCR = React.useMemo(() => {
+    const rows = (history ?? []).filter((rep) => (rep.battle_loot_ocr_samples || 0) > 0);
+    if (rows.length === 0) return { avgSamples: 0, avgMS: 0 };
+    return {
+      avgSamples: rows.reduce((sum, rep) => sum + (rep.battle_loot_ocr_samples || 0), 0) / rows.length,
+      avgMS: rows.reduce((sum, rep) => sum + (rep.avg_battle_loot_ocr_ms || 0), 0) / rows.length,
+    };
+  }, [history]);
+  const deployHotPath = React.useMemo(() => {
+    const rows = (history ?? []).filter((r) => (r.live_bar_rescans || 0) > 0);
+    if (rows.length === 0) {
+      return { attacks: 0, avgRescans: 0, avgRescanMs: 0, avgDetectMs: 0, avgClassifyMs: 0, avgTemplatesTried: 0, avgTemplatesMatched: 0, avgCardOCRMs: 0 };
+    }
+    return {
+      attacks: rows.length,
+      avgRescans: rows.reduce((sum, r) => sum + (r.live_bar_rescans || 0), 0) / rows.length,
+      avgRescanMs: rows.reduce((sum, r) => sum + (r.avg_live_bar_rescan_ms || 0), 0) / rows.length,
+      avgDetectMs: rows.reduce((sum, r) => sum + (r.avg_slot_detect_ms || 0), 0) / rows.length,
+      avgClassifyMs: rows.reduce((sum, r) => sum + (r.avg_slot_classify_ms || 0), 0) / rows.length,
+      avgTemplatesTried: rows.reduce((sum, r) => sum + (r.templates_tried || 0), 0) / rows.length,
+      avgTemplatesMatched: rows.reduce((sum, r) => sum + (r.templates_matched || 0), 0) / rows.length,
+      avgCardOCRMs: rows.reduce((sum, r) => sum + (r.avg_selected_card_ocr_ms || 0), 0) / rows.length,
+    };
+  }, [history]);
+
+
+  const deployBottleneck = React.useMemo(() => {
+    const candidates = [
+      { key: 'detect', label: 'Détection position', ms: deployHotPath.avgDetectMs },
+      { key: 'classify', label: 'Classification', ms: deployHotPath.avgClassifyMs },
+      { key: 'ocr', label: 'OCR carte sélectionnée', ms: deployHotPath.avgCardOCRMs },
+    ];
+    const measured = candidates.filter((x) => Number.isFinite(x.ms) && x.ms > 0);
+    if (measured.length === 0) {
+      return { label: 'Apprentissage', ms: 0, share: 0 };
+    }
+    const total = measured.reduce((sum, x) => sum + x.ms, 0);
+    const dominant = measured.reduce((best, x) => x.ms > best.ms ? x : best, measured[0]);
+    return {
+      label: dominant.label,
+      ms: dominant.ms,
+      share: total > 0 ? dominant.ms * 100 / total : 0,
+    };
+  }, [deployHotPath]);
+
+  const farmEfficiency = React.useMemo(() => {
+    const rows = history ?? [];
+    if (rows.length === 0) {
+      return {
+        attacksPerHour: 0,
+        gePerActiveMinute: 0,
+        gePerTrueMinute: 0,
+        overheadShare: 0,
+        avgTrueLoopSeconds: 0,
+      };
+    }
+
+    let activeMS = 0;
+    let trueMS = 0;
+    let overheadMS = 0;
+    let ge = 0;
+    for (const rep of rows) {
+      const active = (rep.search_duration_ms || 0) + (rep.deploy_duration_ms || 0) + Math.max(0, (rep.battle_duration_ms || 0) - (rep.deploy_duration_ms || 0));
+      const truth = rep.full_routine_duration_ms || rep.cycle_duration_ms || active;
+      activeMS += active;
+      trueMS += truth;
+      overheadMS += Math.max(0, truth - active);
+      ge += (rep.gold_stolen || 0) + (rep.bonus_gold || 0) + (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+    }
+
+    const hours = trueMS > 0 ? trueMS / 3_600_000 : 0;
+    const activeMinutes = activeMS > 0 ? activeMS / 60_000 : 0;
+    const trueMinutes = trueMS > 0 ? trueMS / 60_000 : 0;
+    return {
+      attacksPerHour: hours > 0 ? rows.length / hours : 0,
+      gePerActiveMinute: activeMinutes > 0 ? ge / activeMinutes : 0,
+      gePerTrueMinute: trueMinutes > 0 ? ge / trueMinutes : 0,
+      overheadShare: trueMS > 0 ? overheadMS * 100 / trueMS : 0,
+      avgTrueLoopSeconds: trueMS / Math.max(1, rows.length) / 1000,
+    };
+  }, [history]);
+
+  const lootCapture = React.useMemo(() => {
+    let offeredGE = 0, stolenGE = 0, offeredDE = 0, stolenDE = 0, targetScore = 0, scored = 0;
+    for (const rep of history ?? []) {
+      const offered = (rep.target_gold || 0) + (rep.target_elixir || 0);
+      if (offered > 0) {
+        offeredGE += offered;
+        stolenGE += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0);
+      }
+      if ((rep.target_de || 0) > 0) {
+        offeredDE += rep.target_de || 0;
+        stolenDE += rep.dark_elixir_stolen || 0;
+      }
+      if ((rep.target_score || 0) > 0) {
+        targetScore += rep.target_score || 0;
+        scored++;
+      }
+    }
+    return {
+      geRate: offeredGE > 0 ? stolenGE * 100 / offeredGE : 0,
+      deRate: offeredDE > 0 ? stolenDE * 100 / offeredDE : 0,
+      avgTargetScore: scored > 0 ? targetScore / scored : 0,
+      offeredGE,
+      stolenGE,
+    };
+  }, [history]);
+
+
+  const pipeline = React.useMemo(() => {
+    const rows = [
+      { label: 'Pause volontaire', seconds: avgCooldownSeconds, tunable: false },
+      { label: 'Préparation', seconds: avgPreparationSeconds, tunable: true },
+      { label: 'Recherche', seconds: avgSearchSeconds, tunable: true },
+      { label: 'Déploiement', seconds: avgDeploySeconds, tunable: false },
+      { label: 'Combat', seconds: avgCombatSeconds, tunable: true },
+    ];
+    const total = rows.reduce((sum, row) => sum + row.seconds, 0);
+    const tunable = rows.filter((row) => row.tunable);
+    return {
+      rows: rows.map((row) => ({ ...row, share: total > 0 ? row.seconds * 100 / total : 0 })),
+      dominant: rows.reduce((best, row) => row.seconds > best.seconds ? row : best, rows[0]),
+      dominantTunable: tunable.reduce((best, row) => row.seconds > best.seconds ? row : best, tunable[0]),
+    };
+  }, [avgCooldownSeconds, avgPreparationSeconds, avgSearchSeconds, avgDeploySeconds, avgCombatSeconds]);
+
+  const searchEfficiency = React.useMemo(() => {
+    const rows = history ?? [];
+    const measured = rows.filter((r) => (r.search_duration_ms || 0) > 0);
+    const avgLootGE = measured.length > 0
+      ? measured.reduce((sum, r) => sum +
+          (r.gold_stolen || 0) + (r.bonus_gold || 0) +
+          (r.elixir_stolen || 0) + (r.bonus_elixir || 0), 0) / measured.length
+      : 0;
+    const avgSearchMS = measured.length > 0
+      ? measured.reduce((sum, r) => sum + (r.search_duration_ms || 0), 0) / measured.length
+      : 0;
+    const avgTrueLoopMS = measured.length > 0
+      ? measured.reduce((sum, r) => sum + (r.full_routine_duration_ms || r.cycle_duration_ms || 0), 0) / measured.length
+      : 0;
+
+    const skips = stats.avg_skips_per_attack || 0;
+    const targetsPerAccept = skips + 1;
+    const scanMS = stats.average_target_scan_ms || 0;
+    const nextMS = stats.average_next_transition_ms || 0;
+    const estimatedScoutOverheadMS = targetsPerAccept * scanMS + skips * nextMS;
+    const acceptedGE = stats.avg_accepted_ge || 0;
+    const rejectedGE = stats.avg_rejected_ge || 0;
+
+    return {
+      targetsPerAccept,
+      estimatedScoutOverheadMS,
+      gePerSearchSecond: avgSearchMS > 0 ? avgLootGE / (avgSearchMS / 1000) : 0,
+      searchShare: avgTrueLoopMS > 0 ? avgSearchMS * 100 / avgTrueLoopMS : 0,
+      qualityPremium: rejectedGE > 0 ? (acceptedGE - rejectedGE) * 100 / rejectedGE : 0,
+      avgAcceptedGE: acceptedGE,
+      avgRejectedGE: rejectedGE,
+    };
+  }, [history, stats.avg_skips_per_attack, stats.average_target_scan_ms, stats.average_next_transition_ms, stats.avg_accepted_ge, stats.avg_rejected_ge]);
+
+  const autonomyReliability = React.useMemo(() => {
+    const rows = history ?? [];
+    const qualifies = (rep: AttackReport) =>
+      Boolean(rep.deploy_success) &&
+      Boolean(rep.return_home_success) &&
+      Boolean(rep.hud_safe) &&
+      Boolean(rep.corridor_verified);
+
+    let current = 0;
+    for (const rep of rows) {
+      if (!qualifies(rep)) break;
+      current++;
+    }
+
+    let best = 0;
+    let run = 0;
+    let total = 0;
+    let clean = 0;
+    let redZoneCertified = 0;
+    for (const rep of rows) {
+      total++;
+      if (qualifies(rep)) {
+        clean++;
+        run++;
+        if (run > best) best = run;
+      } else {
+        run = 0;
+      }
+      if (rep.red_zone_valid && rep.corridor_verified && rep.hud_safe) {
+        redZoneCertified++;
+      }
+    }
+
+    return {
+      current,
+      best,
+      cleanRate: total > 0 ? clean * 100 / total : 0,
+      redZoneRate: total > 0 ? redZoneCertified * 100 / total : 0,
+      clean,
+      total,
+    };
+  }, [history]);
+
+  const preparationBreakdown = React.useMemo(() => {
+    const rows = (history ?? []).filter((r) => (r.preparation_duration_ms || 0) > 0);
+    const definitions = [
+      { key: 'attack', label: 'Bouton Attaquer', read: (r: AttackReport) => r.prep_attack_button_ms || 0 },
+      { key: 'find', label: 'Trouver une partie', read: (r: AttackReport) => r.prep_find_match_ms || 0 },
+      { key: 'armyMenu', label: 'Menu armée', read: (r: AttackReport) => r.prep_army_menu_ms || 0 },
+      { key: 'armySlot', label: 'Emplacement armée', read: (r: AttackReport) => r.prep_army_slot_ms || 0 },
+      { key: 'battle', label: 'Bouton Combat', read: (r: AttackReport) => r.prep_battle_button_ms || 0 },
+      { key: 'ready', label: 'Matchmaking prêt', read: (r: AttackReport) => r.prep_matchmaking_ready_ms || 0 },
+    ];
+
+    const measured = definitions.map((d) => ({
+      key: d.key,
+      label: d.label,
+      ms: rows.length > 0 ? rows.reduce((sum, row) => sum + d.read(row), 0) / rows.length : 0,
+    }));
+    const measuredTotal = measured.reduce((sum, row) => sum + row.ms, 0);
+    const avgTotal = rows.length > 0
+      ? rows.reduce((sum, row) => sum + (row.preparation_duration_ms || 0), 0) / rows.length
+      : 0;
+    const residual = Math.max(0, avgTotal - measuredTotal);
+    const all = residual > 1
+      ? [...measured, { key: 'other', label: 'Autres délais', ms: residual }]
+      : measured;
+    const dominant = all.reduce(
+      (best, row) => row.ms > best.ms ? row : best,
+      all[0] ?? { key: 'none', label: 'Apprentissage', ms: 0 },
+    );
+    return {
+      attacks: rows.length,
+      rows: all.map((row) => ({
+        ...row,
+        share: avgTotal > 0 ? row.ms * 100 / avgTotal : 0,
+      })),
+      totalMS: avgTotal,
+      dominant,
+    };
+  }, [history]);
+
+  const latencyDistribution = React.useMemo(() => {
+    const percentile = (values: number[], p: number) => {
+      const clean = values.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+      if (clean.length === 0) return 0;
+      const idx = Math.min(clean.length - 1, Math.max(0, Math.ceil((p / 100) * clean.length) - 1));
+      return clean[idx];
+    };
+    const rows = history ?? [];
+    const search = rows.map((r) => r.search_duration_ms || 0);
+    const deploy = rows.map((r) => r.deploy_duration_ms || 0);
+    const routine = rows.map((r) => r.full_routine_duration_ms || r.cycle_duration_ms || 0);
+    const capture = rows.map((r) => r.capture_ms || 0);
+    const scan = rows.map((r) => r.target_scan_ms || 0);
+    return {
+      searchP50: percentile(search, 50), searchP95: percentile(search, 95),
+      deployP50: percentile(deploy, 50), deployP95: percentile(deploy, 95),
+      routineP50: percentile(routine, 50), routineP95: percentile(routine, 95),
+      captureP50: percentile(capture, 50), captureP95: percentile(capture, 95),
+      scanP50: percentile(scan, 50), scanP95: percentile(scan, 95),
+    };
+  }, [history]);
+
+  const targetScoreBands = React.useMemo(() => {
+    const bands = [
+      { label: '<60', min: 0, max: 59 },
+      { label: '60–69', min: 60, max: 69 },
+      { label: '70–79', min: 70, max: 79 },
+      { label: '80–89', min: 80, max: 89 },
+      { label: '90–100', min: 90, max: 100 },
+    ];
+    return bands.map((band) => {
+      const rows = (history ?? []).filter((rep) => (rep.target_score || 0) >= band.min && (rep.target_score || 0) <= band.max);
+      let stars = 0, complete = 0, ge = 0, routine = 0;
+      for (const rep of rows) {
+        stars += rep.stars || 0;
+        if (rep.deploy_success) complete++;
+        ge += (rep.gold_stolen || 0) + (rep.elixir_stolen || 0);
+        routine += rep.full_routine_duration_ms || rep.cycle_duration_ms || 0;
+      }
+      const n = rows.length;
+      const hours = routine > 0 ? routine / 3_600_000 : 0;
+      return { ...band, attacks: n, avgStars: n ? stars/n : 0, fullDeployRate: n ? complete*100/n : 0, avgGE: n ? ge/n : 0, gePerHour: hours ? ge/hours : 0 };
+    }).filter((band) => band.attacks > 0);
+  }, [history]);
+  const farmingWindows = React.useMemo(() => {
+    const buckets = new Map<number, {
+      hour: number;
+      attacks: number;
+      gold: number;
+      elixir: number;
+      dark: number;
+      stars: number;
+      complete: number;
+      routineMs: number;
+    }>();
+
+    for (const rep of history ?? []) {
+      const ts = Date.parse(rep.timestamp || '');
+      if (!Number.isFinite(ts)) continue;
+      const hour = new Date(ts).getHours();
+      const row = buckets.get(hour) ?? {
+        hour, attacks: 0, gold: 0, elixir: 0, dark: 0,
+        stars: 0, complete: 0, routineMs: 0,
+      };
+      row.attacks++;
+      row.gold += (rep.gold_stolen || 0) + (rep.bonus_gold || 0);
+      row.elixir += (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+      row.dark += (rep.dark_elixir_stolen || 0) + (rep.bonus_de || 0);
+      row.stars += rep.stars || 0;
+      if (rep.deploy_success) row.complete++;
+      row.routineMs += rep.full_routine_duration_ms || rep.cycle_duration_ms || 0;
+      buckets.set(hour, row);
+    }
+
+    return Array.from(buckets.values())
+      .filter((row) => row.attacks >= 3 && row.routineMs > 0)
+      .map((row) => {
+        const hoursMeasured = row.routineMs / 3_600_000;
+        return {
+          ...row,
+          gePerHour: hoursMeasured > 0 ? (row.gold + row.elixir) / hoursMeasured : 0,
+          dePerHour: hoursMeasured > 0 ? row.dark / hoursMeasured : 0,
+          avgStars: row.stars / row.attacks,
+          fullDeployRate: row.complete * 100 / row.attacks,
+        };
+      })
+      .sort((a, b) => b.gePerHour - a.gePerHour)
+      .slice(0, 5);
+  }, [history]);
+
+  const farmForecast = React.useMemo(() => {
+    const measured = (history ?? []).slice(0, 20).filter((rep) =>
+      (rep.full_routine_duration_ms || rep.cycle_duration_ms || 0) > 0
+    );
+
+    const recentDurations = measured.slice(0, 10).map((rep) =>
+      rep.full_routine_duration_ms || rep.cycle_duration_ms || 0
+    );
+    const durationMean = recentDurations.length
+      ? recentDurations.reduce((sum, value) => sum + value, 0) / recentDurations.length
+      : 0;
+    const durationVariance = recentDurations.length
+      ? recentDurations.reduce((sum, value) => sum + Math.pow(value - durationMean, 2), 0) / recentDurations.length
+      : 0;
+    const cv = durationMean > 0 ? Math.sqrt(durationVariance) / durationMean : 1;
+
+    if (measured.length < 3) {
+      const gph = stats.gold_per_hour || 0;
+      const eph = stats.elixir_per_hour || 0;
+      const dph = stats.de_per_hour || 0;
+      return {
+        ready: false, samples: measured.length, attacksPerHour: 0,
+        gold30: 0, elixir30: 0, de30: 0,
+        gold60: 0, elixir60: 0, de60: 0,
+        lowGE60: 0, highGE60: 0,
+        confidence: 'Apprentissage', cv,
+        rows: [1, 8, 24].map((hours) => ({
+          hours, gold: gph * hours, elixir: eph * hours, de: dph * hours,
+        })),
+      };
+    }
+
+    let totalMs = 0, gold = 0, elixir = 0, de = 0;
+    const geRates: number[] = [];
+    for (const rep of measured) {
+      const ms = rep.full_routine_duration_ms || rep.cycle_duration_ms || 0;
+      if (ms <= 0) continue;
+      const hours = ms / 3_600_000;
+      const g = (rep.gold_stolen || 0) + (rep.bonus_gold || 0);
+      const e = (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+      const d = (rep.dark_elixir_stolen || 0) + (rep.bonus_de || 0);
+      totalMs += ms;
+      gold += g;
+      elixir += e;
+      de += d;
+      if (hours > 0) geRates.push((g + e) / hours);
+    }
+
+    const hours = totalMs / 3_600_000;
+    const goldPerHour = hours > 0 ? gold / hours : 0;
+    const elixirPerHour = hours > 0 ? elixir / hours : 0;
+    const dePerHour = hours > 0 ? de / hours : 0;
+    const attacksPerHour = hours > 0 ? measured.length / hours : 0;
+
+    const percentile = (values: number[], q: number) => {
+      if (values.length === 0) return 0;
+      const sorted = [...values].sort((a, b) => a - b);
+      const pos = (sorted.length - 1) * q;
+      const lo = Math.floor(pos);
+      const hi = Math.ceil(pos);
+      if (lo === hi) return sorted[lo];
+      const weight = pos - lo;
+      return sorted[lo] * (1 - weight) + sorted[hi] * weight;
+    };
+
+    let confidence = 'Apprentissage';
+    if (measured.length >= 20 && cv <= 0.25 && (stats.health_score ?? 0) >= 90) confidence = 'High';
+    else if (measured.length >= 10 && cv <= 0.45 && (stats.health_score ?? 0) >= 75) confidence = 'Medium';
+
+    return {
+      ready: true,
+      samples: measured.length,
+      attacksPerHour,
+      gold30: goldPerHour * 0.5,
+      elixir30: elixirPerHour * 0.5,
+      de30: dePerHour * 0.5,
+      gold60: goldPerHour,
+      elixir60: elixirPerHour,
+      de60: dePerHour,
+      lowGE60: percentile(geRates, 0.25),
+      highGE60: percentile(geRates, 0.75),
+      confidence,
+      cv,
+      rows: [1, 8, 24].map((forecastHours) => ({
+        hours: forecastHours,
+        gold: goldPerHour * forecastHours,
+        elixir: elixirPerHour * forecastHours,
+        de: dePerHour * forecastHours,
+      })),
+    };
+  }, [history, stats.gold_per_hour, stats.elixir_per_hour, stats.de_per_hour, stats.health_score]);
+
+  const recentPerformance = React.useMemo(() => {
+    const summarize = (rows: AttackReport[]) => {
+      const n = rows.length;
+      if (n === 0) {
+        return {
+          attacks: 0, avgStars: 0, threeStarRate: 0, fullDeployRate: 0,
+          avgSearchMs: 0, avgDeployMs: 0, avgCycleMs: 0,
+          avgGold: 0, avgElixir: 0, avgDE: 0,
+        };
+      }
+      let stars = 0, triples = 0, complete = 0;
+      let searchMs = 0, deployMs = 0, cycleMs = 0;
+      let gold = 0, elixir = 0, de = 0;
+      for (const rep of rows) {
+        stars += rep.stars || 0;
+        if ((rep.stars || 0) === 3) triples++;
+        if (rep.deploy_success) complete++;
+        searchMs += rep.search_duration_ms || 0;
+        deployMs += rep.deploy_duration_ms || 0;
+        cycleMs += rep.cycle_duration_ms || 0;
+        gold += (rep.gold_stolen || 0) + (rep.bonus_gold || 0);
+        elixir += (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+        de += (rep.dark_elixir_stolen || 0) + (rep.bonus_de || 0);
+      }
+      return {
+        attacks: n,
+        avgStars: stars / n,
+        threeStarRate: triples * 100 / n,
+        fullDeployRate: complete * 100 / n,
+        avgSearchMs: searchMs / n,
+        avgDeployMs: deployMs / n,
+        avgCycleMs: cycleMs / n,
+        avgGold: gold / n,
+        avgElixir: elixir / n,
+        avgDE: de / n,
+      };
+    };
+
+    const current = summarize((history ?? []).slice(0, 10));
+    const previous = summarize((history ?? []).slice(10, 20));
+    return { current, previous };
+  }, [history]);
+
+  const perfDelta = (current: number, previous: number, lowerIsBetter = false) => {
+    if (!Number.isFinite(current) || !Number.isFinite(previous) || previous === 0) return null;
+    const pct = ((current - previous) / Math.abs(previous)) * 100;
+    return lowerIsBetter ? -pct : pct;
+  };
+
+  const bestRecords = React.useMemo(() => {
+    let bestLoot: AttackReport | null = null;
+    let fastestClean: AttackReport | null = null;
+    for (const rep of history ?? []) {
+      const loot = (rep.gold_stolen || 0) + (rep.bonus_gold || 0) + (rep.elixir_stolen || 0) + (rep.bonus_elixir || 0);
+      const bestLootValue = bestLoot
+        ? (bestLoot.gold_stolen || 0) + (bestLoot.bonus_gold || 0) + (bestLoot.elixir_stolen || 0) + (bestLoot.bonus_elixir || 0)
+        : -1;
+      if (loot > bestLootValue) bestLoot = rep;
+      if (rep.deploy_success && (rep.deploy_duration_ms || 0) > 0) {
+        if (!fastestClean || rep.deploy_duration_ms < fastestClean.deploy_duration_ms) fastestClean = rep;
+      }
+    }
+    return { bestLoot, fastestClean };
+  }, [history]);
+
+  const tapTransport = React.useMemo(() => {
+    const pipe = stats.adb_health?.pipe_taps_total || 0;
+    const legacy = stats.adb_health?.legacy_taps_total || 0;
+    const total = pipe + legacy;
+    return {
+      pipe,
+      legacy,
+      total,
+      pipeRate: total > 0 ? pipe * 100 / total : 0,
+      legacyRate: total > 0 ? legacy * 100 / total : 0,
+      label: total === 0 ? 'Apprentissage' : legacy >= pipe ? 'Legacy' : 'Pipe',
+    };
+  }, [stats.adb_health?.pipe_taps_total, stats.adb_health?.legacy_taps_total]);
+
+  const reliabilityScorecard = React.useMemo(() => {
+    const rows = history ?? [];
+    const count = rows.length;
+    const pct = (n: number, d: number) => d > 0 ? n * 100 / d : 0;
+
+    const fullDeploy = count > 0 ? pct(rows.filter((r) => r.deploy_success).length, count) : 0;
+    const returnRows = rows.filter((r) => (r.return_home_duration_ms || 0) > 0 || r.return_home_success);
+    const returnHome = returnRows.length > 0 ? pct(returnRows.filter((r) => r.return_home_success).length, returnRows.length) : 0;
+    const parsed = count > 0 ? pct(rows.filter((r) => r.parsed_results).length, count) : 0;
+    const trusted = count > 0
+      ? pct(rows.filter((r) => r.result_confidence === 'high' || r.result_confidence === 'medium' || r.parsed_results).length, count)
+      : 0;
+
+    const safetyRows = rows.filter((r) => Boolean(r.safety_mode));
+    const certifiedSafety = safetyRows.length > 0
+      ? pct(safetyRows.filter((r) => r.red_zone_valid && r.corridor_verified && r.hud_safe).length, safetyRows.length)
+      : 0;
+
+    const recovery = stats.recovery_attempts > 0 ? stats.recovery_success_rate || 0 : 0;
+    const nextFirstPass = stats.next_transitions > 0 ? stats.next_first_pass_rate || 0 : 0;
+
+    return [
+      {
+        label: 'Déploiement complet',
+        value: fullDeploy,
+        display: count > 0 ? `${fullDeploy.toFixed(1)}%` : '—',
+        threshold: 98,
+        sampled: count > 0,
+        detail: `${rows.filter((r) => r.deploy_success).length}/${count} attaques`,
+      },
+      {
+        label: 'Retour village',
+        value: returnHome,
+        display: returnRows.length > 0 ? `${returnHome.toFixed(1)}%` : '—',
+        threshold: 98,
+        sampled: returnRows.length > 0,
+        detail: `${returnRows.filter((r) => r.return_home_success).length}/${returnRows.length} measured`,
+      },
+      {
+        label: 'Résultat fiable',
+        value: trusted,
+        display: count > 0 ? `${trusted.toFixed(1)}%` : '—',
+        threshold: 95,
+        sampled: count > 0,
+        detail: count > 0 ? `OCR parse ${parsed.toFixed(1)}%` : 'OCR / live outcome',
+      },
+      {
+        label: 'Premier passage suivant',
+        value: nextFirstPass,
+        display: stats.next_transitions > 0 ? `${nextFirstPass.toFixed(1)}%` : '—',
+        threshold: 90,
+        sampled: stats.next_transitions >= 3,
+        detail: `${stats.next_transitions || 0} transitions`,
+      },
+      {
+        label: 'Sécurité certifiée',
+        value: certifiedSafety,
+        display: safetyRows.length > 0 ? `${certifiedSafety.toFixed(1)}%` : '—',
+        threshold: 95,
+        sampled: safetyRows.length > 0,
+        detail: 'Live red zone + corridor + HUD',
+      },
+      {
+        label: 'Récupération réussie',
+        value: recovery,
+        display: stats.recovery_attempts > 0 ? `${recovery.toFixed(1)}%` : '—',
+        threshold: 90,
+        sampled: stats.recovery_attempts > 0,
+        detail: stats.recovery_attempts > 0 ? `${stats.recovery_successes}/${stats.recovery_attempts}` : 'No recovery needed',
+      },
+    ];
+  }, [history, stats]);
+
+  const enduranceStats = React.useMemo(() => {
+    const captures = stats.adb_health?.captures_total || 0;
+    const errors = stats.adb_health?.errors_total || 0;
+    const adbEvents = captures + errors;
+    const adbErrorRate = adbEvents > 0 ? errors * 100 / adbEvents : 0;
+    const attacks = Math.max(0, stats.attacks_completed || history?.length || 0);
+    const anomalyRate = attacks > 0 ? (stats.anomalies || 0) * 100 / attacks : 0;
+    const restartRate = attacks > 0 ? (stats.bluestacks_restarts || 0) * 100 / attacks : 0;
+    const tapTotal = stats.adb_health?.taps_total || 0;
+    const legacy = stats.adb_health?.legacy_taps_total || 0;
+    const pipe = stats.adb_health?.pipe_taps_total || 0;
+
+    return {
+      adbErrorRate,
+      anomalyRate,
+      restartRate,
+      captures,
+      errors,
+      attacks,
+      tapTotal,
+      legacy,
+      pipe,
+      legacyRate: tapTotal > 0 ? legacy * 100 / tapTotal : 0,
+      captureHealth: adbEvents === 0 ? 'Apprentissage' : adbErrorRate <= 0.5 ? 'Excellent' : adbErrorRate <= 2 ? 'À surveiller' : 'Dégradé',
+    };
+  }, [stats, history]);
+
+  const resultProvenance = React.useMemo(() => {
+    const rows = history ?? [];
+    const total = rows.length;
+    const count = (predicate: (r: AttackReport) => boolean) => rows.filter(predicate).length;
+    const pct = (n: number) => total > 0 ? n * 100 / total : 0;
+
+    const lootLive = count((r) => r.loot_source === 'live_delta');
+    const lootOCR = count((r) => r.loot_source === 'result_ocr');
+    const starsOutcome = count((r) => r.stars_source === 'battle_outcome' || r.stars_source === 'reconciled_outcome');
+    const starsOCR = count((r) => r.stars_source === 'result_ocr');
+    const high = count((r) => r.result_confidence === 'high');
+    const medium = count((r) => r.result_confidence === 'medium');
+    const low = count((r) => !r.result_confidence || r.result_confidence === 'low');
+
+    return {
+      total,
+      lootLive, lootOCR, starsOutcome, starsOCR, high, medium, low,
+      lootLiveRate: pct(lootLive),
+      lootOCRRate: pct(lootOCR),
+      starsOutcomeRate: pct(starsOutcome),
+      starsOCRRate: pct(starsOCR),
+      highRate: pct(high),
+      mediumRate: pct(medium),
+      lowRate: pct(low),
+    };
+  }, [history]);
+
+  const autonomyIndex = React.useMemo(() => {
+    const sampledReliability = reliabilityScorecard.filter((row) => row.sampled);
+    const reliability = sampledReliability.length > 0
+      ? sampledReliability.reduce((sum, row) => sum + Math.max(0, Math.min(100, row.value)), 0) / sampledReliability.length
+      : 0;
+
+    const cleanRoutine = autonomyReliability.total > 0 ? autonomyReliability.cleanRate : 0;
+    const safety = deploymentSafety.attacks > 0 ? deploymentSafety.liveCertified : 0;
+    const resultTrustScore = resultTrust.total > 0
+      ? Math.min(100, resultTrust.highRate + resultTrust.mediumRate * 0.6)
+      : 0;
+    const health = Math.max(0, Math.min(100, stats.health_score ?? 0));
+
+    const samples = [
+      { key: 'reliability', label: 'Fiabilité', value: reliability, weight: 0.30, sampled: sampledReliability.length >= 3 },
+      { key: 'safety', label: 'Sécurité zone rouge', value: safety, weight: 0.25, sampled: deploymentSafety.attacks >= 3 },
+      { key: 'clean', label: 'Cycles sans intervention', value: cleanRoutine, weight: 0.20, sampled: autonomyReliability.total >= 3 },
+      { key: 'health', label: 'Santé du runtime', value: health, weight: 0.15, sampled: (stats.telemetry_events || 0) > 0 },
+      { key: 'results', label: 'Confiance résultat', value: resultTrustScore, weight: 0.10, sampled: resultTrust.total >= 3 },
+    ];
+
+    const usable = samples.filter((row) => row.sampled);
+    const weight = usable.reduce((sum, row) => sum + row.weight, 0);
+    const score = weight > 0
+      ? usable.reduce((sum, row) => sum + row.value * row.weight, 0) / weight
+      : 0;
+
+    const grade = score >= 98 ? 'Elite'
+      : score >= 95 ? 'Excellent'
+      : score >= 90 ? 'Strong'
+      : score >= 80 ? 'À surveiller'
+      : 'Apprentissage';
+
+    return {
+      score,
+      grade,
+      ready: usable.length >= 3,
+      components: samples,
+      sampledComponents: usable.length,
+    };
+  }, [reliabilityScorecard, autonomyReliability, deploymentSafety, resultTrust, stats.health_score, stats.telemetry_events]);
+
+  const optimizationAdvisor = React.useMemo(() => {
+    type Opportunity = {
+      key: string;
+      label: string;
+      evidence: string;
+      next: string;
+      score: number;
+    };
+
+    const opportunities: Opportunity[] = [];
+    const reactiveTap = stats.adb_health?.fast_tap_ms || stats.adb_health?.avg_tap_ms || 0;
+    const reactiveCapture = stats.adb_health?.fast_capture_ms || stats.adb_health?.avg_capture_ms || 0;
+    const nextRate = stats.next_first_pass_rate || 0;
+    const nextTransitions = stats.next_transitions || 0;
+
+    if (reactiveTap > 0) {
+      opportunities.push({
+        key: 'tap',
+        label: 'Transport clic Windows',
+        evidence: `${reactiveTap.toFixed(0)}ms reactive · ${tapTransport.total > 0 ? `${tapTransport.legacyRate.toFixed(0)}% legacy` : 'route en apprentissage'}`,
+        next: reactiveTap >= 100
+          ? 'High enough to justify a Windows-safe transport experiment with instant fallback.'
+          : 'Tap transport is already relatively cheap; keep the proven deployment cadence.',
+        score: reactiveTap >= 100 ? reactiveTap * 5 : reactiveTap,
+      });
+    }
+
+    if (preparationBreakdown.attacks > 0 && preparationBreakdown.dominant.ms > 0) {
+      opportunities.push({
+        key: 'prep',
+        label: `Preparation · ${preparationBreakdown.dominant.label}`,
+        evidence: `${(preparationBreakdown.dominant.ms / 1000).toFixed(2)}s average · ${preparationBreakdown.totalMS > 0 ? (preparationBreakdown.dominant.ms * 100 / preparationBreakdown.totalMS).toFixed(0) : '0'}% de la préparation`,
+        next: 'Optimize the verified UI transition only; do not replace state confirmation with blind coordinates.',
+        score: preparationBreakdown.dominant.ms,
+      });
+    }
+
+    if (nextTransitions >= 3 && nextRate > 0) {
+      const retryShare = Math.max(0, 100 - nextRate);
+      opportunities.push({
+        key: 'next',
+        label: 'Vérification transition suivante',
+        evidence: `${nextRate.toFixed(1)}% first-pass · ${(stats.avg_next_verify_probes || 0).toFixed(2)} probes`,
+        next: retryShare >= 10
+          ? 'Investigate why Clash ignores first taps before shortening any settle delay.'
+          : 'First-pass reliability is strong; do not trade it for a more aggressive tap loop.',
+        score: (stats.average_next_transition_ms || 0) * (retryShare / 100),
+      });
+    }
+
+    if (deployHotPath.attacks > 0 && deployBottleneck.ms > 0) {
+      opportunities.push({
+        key: 'livebar',
+        label: `Live bar · ${deployBottleneck.label}`,
+        evidence: `${deployBottleneck.ms.toFixed(1)}ms · ${deployBottleneck.share.toFixed(0)}% of measured scan stages`,
+        next: 'Optimize this detector in isolation while keeping live card re-indexing after every disappearance.',
+        score: deployBottleneck.ms * Math.max(1, deployHotPath.avgRescans),
+      });
+    }
+
+    if ((stats.average_target_scan_ms || 0) > 0) {
+      opportunities.push({
+        key: 'loot',
+        label: 'OCR butin',
+        evidence: `${(stats.average_target_scan_ms || 0).toFixed(0)}ms average target scan`,
+        next: 'Only optimize if it materially exceeds capture latency; target thresholds remain authoritative.',
+        score: stats.average_target_scan_ms || 0,
+      });
+    }
+
+    if (reactiveCapture > 0) {
+      opportunities.push({
+        key: 'capture',
+        label: 'Capture ADB',
+        evidence: `${reactiveCapture.toFixed(0)}ms reactive capture latency`,
+        next: reactiveCapture >= 700
+          ? 'BlueStacks/ADB is under pressure; preserve capture gating and investigate transport health.'
+          : 'Capture path is healthy enough; avoid removing the 120ms global capture budget.',
+        score: reactiveCapture >= 700 ? reactiveCapture * 2 : reactiveCapture,
+      });
+    }
+
+    if ((stats.ui_anchor_attempts || 0) >= 3) {
+      opportunities.push({
+        key: 'anchors',
+        label: 'Repères UI vérifiés',
+        evidence: `${(stats.ui_anchor_hit_rate || 0).toFixed(1)}% local hit-rate · ${stats.ui_anchor_fallbacks || 0} fallbacks`,
+        next: (stats.ui_anchor_hit_rate || 0) >= 85
+          ? 'Anchor cache is healthy; keep local verification ahead of full-screen button scans.'
+          : 'Fallback rate is high; keep the full locator authoritative and avoid widening cached click assumptions.',
+        score: (stats.ui_anchor_hit_rate || 0) >= 85 ? 40 : 120,
+      });
+    }
+
+    const ranked = opportunities
+      .filter((x) => Number.isFinite(x.score) && x.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    return {
+      top: ranked[0] ?? null,
+      items: ranked.slice(0, 4),
+      apprentissage: ranked.length === 0,
+    };
+  }, [
+    stats,
+    preparationBreakdown,
+    deployHotPath,
+    deployBottleneck,
+    tapTransport,
+  ]);
 
   // CSS-only donut (conic-gradient — no chart dependency). Each
   // segment's sweep is the star-rate percentage mapped to degrees;
@@ -74,25 +1410,981 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
   const donutBg = `conic-gradient(${gradientStops.join(', ')})`;
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 max-w-6xl mx-auto">
+    <div className="space-y-6 max-w-6xl mx-auto">
+      <section className="rounded-[2.25rem] bg-zinc-950 dark:bg-white p-6 md:p-7 shadow-premium-lg">
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Vue rapide</div>
+            <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Tes performances en un coup d’œil</h3>
+            <p className="mt-1 text-sm font-semibold text-zinc-400 dark:text-zinc-500">
+              Les chiffres utiles restent visibles ici. L’analyse technique complète est rangée plus bas.
+            </p>
+          </div>
+          <div className={
+            'rounded-full px-3 py-2 text-[9px] font-black uppercase tracking-widest ' +
+            (performanceGuard.status === 'À surveiller'
+              ? 'bg-amber-400/10 text-amber-400'
+              : 'bg-emerald-400/10 text-emerald-400')
+          }>
+            {performanceGuard.status === 'Stable' ? 'Stable' : performanceGuard.status}
+          </div>
+        </div>
+
+        <div className="mt-6 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {[
+            { label: 'Attaques', value: (stats.attacks_completed || 0).toLocaleString('fr-FR') },
+            { label: 'Or / h', value: compact(stats.gold_per_hour || 0) },
+            { label: 'Élixir / h', value: compact(stats.elixir_per_hour || 0) },
+            { label: 'Élixir noir / h', value: compact(stats.de_per_hour || 0) },
+            { label: 'Étoiles moy.', value: (stats.average_stars || 0).toFixed(2) },
+            { label: 'Santé', value: `${Math.max(0, Math.min(100, stats.health_score ?? 100))}/100` },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-4">
+              <div className="text-[8px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-4">
+          <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">Lecture ClashGO</div>
+          <div className="mt-2 text-sm font-bold text-zinc-300 dark:text-zinc-600">
+            {performanceGuard.reasons?.[0] || 'Les performances sont en cours d’apprentissage.'}
+          </div>
+        </div>
+      </section>
+
+      <button
+        type="button"
+        onClick={() => setAdvancedOpen((value) => !value)}
+        className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-5 py-4 flex items-center justify-between gap-4 text-left shadow-sm"
+      >
+        <div>
+          <div className="text-sm font-black text-zinc-950 dark:text-white">Analyse avancée</div>
+          <div className="mt-1 text-[11px] font-semibold text-zinc-500">
+            Sessions, stratégies, latences, fiabilité, OCR et diagnostics de performance.
+          </div>
+        </div>
+        <span className={`material-symbols-outlined text-zinc-400 transition-transform ${advancedOpen ? 'rotate-180' : ''}`}>expand_more</span>
+      </button>
+
+      {advancedOpen && (
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5 mb-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Intelligence V2</div>
+            <h3 className="mt-2 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Vitesse de farm</h3>
+            <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">Les chiffres qui montrent si ClashGO farm réellement vite, pas seulement s’il reste actif.</p>
+          </div>
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-zinc-500">
+            <span className="px-3 py-2 rounded-full bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10">
+              {stats.speed_profile || 'Équilibré'} mode
+            </span>
+            <span className="px-3 py-2 rounded-full bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10">
+              Santé {stats.health_score ?? 100}/100
+            </span>
+            <span>{stats.telemetry_events?.toLocaleString?.() ?? 0} événements</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+          {[
+            { label: 'Or / h', value: compact(stats.gold_per_hour || 0) },
+            { label: 'Élixir / h', value: compact(stats.elixir_per_hour || 0) },
+            { label: 'Élixir noir / h', value: compact(stats.de_per_hour || 0) },
+            { label: 'Recherche moy.', value: `${avgSearchSeconds.toFixed(1)}s` },
+            { label: 'Scan butin', value: `${(stats.average_target_scan_ms || 0).toFixed(0)}ms` },
+            { label: 'Déploiement moy.', value: `${avgDeploySeconds.toFixed(1)}s` },
+            { label: 'Cycle moy.', value: `${avgCycleSeconds.toFixed(1)}s` },
+            { label: 'Capture', value: `${(stats.average_capture_ms || 0).toFixed(0)}ms` },
+            { label: 'Capture réactive', value: `${(stats.adb_health?.fast_capture_ms || stats.adb_health?.avg_capture_ms || 0).toFixed(0)}ms` },
+            { label: 'Clic moy.', value: `${(stats.adb_health?.avg_tap_ms || 0).toFixed(0)}ms` },
+            { label: 'Clic réactif', value: `${(stats.adb_health?.fast_tap_ms || stats.adb_health?.avg_tap_ms || 0).toFixed(0)}ms` },
+            { label: 'OCR combat', value: battleOCR.avgSamples.toFixed(1) + 'x' },
+            { label: 'Coût OCR combat', value: battleOCR.avgMS.toFixed(0) + 'ms' },
+            { label: 'Route clic', value: tapTransport.total > 0 ? `${tapTransport.legacyRate.toFixed(0)}% legacy` : '—' },
+            { label: 'Retour village', value: `${((stats.average_return_home_ms || 0) / 1000).toFixed(1)}s` },
+            { label: 'Transition suivante', value: `${(stats.average_next_transition_ms || 0).toFixed(0)}ms` },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Prévision de farm</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Rendement de ressources estimé</h3>
+            <p className="text-sm text-zinc-500 mt-1">Projection basée sur le rendement mesuré. La confiance baisse si les dernières sessions sont instables.</p>
+          </div>
+          <div className="px-3 py-2 rounded-full bg-zinc-50 dark:bg-zinc-950/40 text-[9px] font-black uppercase tracking-widest text-zinc-500">
+            {farmForecast.confidence} · confiance
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {farmForecast.rows.map((row) => (
+            <div key={row.hours} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-5">
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">{row.hours}h de projection</div>
+              <div className="mt-4 grid grid-cols-3 gap-3">
+                <div>
+                  <div className="text-[8px] font-black uppercase tracking-wider text-zinc-400">Or</div>
+                  <div className="mt-1 text-lg font-black text-amber-500 tabular-nums">{compact(row.gold)}</div>
+                </div>
+                <div>
+                  <div className="text-[8px] font-black uppercase tracking-wider text-zinc-400">Élixir</div>
+                  <div className="mt-1 text-lg font-black text-fuchsia-500 tabular-nums">{compact(row.elixir)}</div>
+                </div>
+                <div>
+                  <div className="text-[8px] font-black uppercase tracking-wider text-zinc-400">DE</div>
+                  <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white tabular-nums">{compact(row.de)}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Endurance</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Stabilité sur longue durée</h3>
+            <p className="text-sm text-zinc-500 mt-1">Pression du transport et des récupérations normalisée pour comparer proprement une session longue à une session courte.</p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{enduranceStats.captureHealth}</div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {[
+            { label: 'Taux d’erreurs ADB', value: enduranceStats.captures + enduranceStats.errors > 0 ? `${enduranceStats.adbErrorRate.toFixed(2)}%` : '—', detail: `${enduranceStats.errors} erreurs / ${enduranceStats.captures} captures` },
+            { label: 'Anomalies / 100', value: enduranceStats.attacks > 0 ? enduranceStats.anomalyRate.toFixed(1) : '—', detail: `${stats.anomalies || 0} anomalies au total` },
+            { label: 'Redémarrages / 100', value: enduranceStats.attacks > 0 ? enduranceStats.restartRate.toFixed(1) : '—', detail: `${stats.bluestacks_restarts || 0} redémarrages BlueStacks` },
+            { label: 'Échecs consécutifs', value: (stats.adb_health?.consecutive_fails || 0).toString(), detail: 'Pression ADB actuelle' },
+            { label: 'Transport clic', value: enduranceStats.tapTotal > 0 ? `${enduranceStats.legacyRate.toFixed(0)}% legacy` : '—', detail: `${enduranceStats.tapTotal} clics routés` },
+            { label: 'Score de santé', value: `${stats.health_score ?? 100}/100`, detail: stats.speed_profile ? `${stats.speed_profile} · cadence` : 'Adaptive · cadence' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Origine des résultats</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Origine des données de combat</h3>
+            <p className="text-sm text-zinc-500 mt-1">Le résultat détecté en direct peut remplacer l’OCR de l’écran de résultat lorsque le signal direct est plus fiable.</p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{resultProvenance.total} attaques</div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {[
+            { label: 'Butin · delta direct', value: resultProvenance.total ? `${resultProvenance.lootLiveRate.toFixed(1)}%` : '—', detail: `${resultProvenance.lootLive} attaques` },
+            { label: 'Butin · OCR résultat', value: resultProvenance.total ? `${resultProvenance.lootOCRRate.toFixed(1)}%` : '—', detail: `${resultProvenance.lootOCR} attaques` },
+            { label: 'Étoiles · résultat', value: resultProvenance.total ? `${resultProvenance.starsOutcomeRate.toFixed(1)}%` : '—', detail: `${resultProvenance.starsOutcome} réconciliées/directes` },
+            { label: 'Étoiles · OCR', value: resultProvenance.total ? `${resultProvenance.starsOCRRate.toFixed(1)}%` : '—', detail: `${resultProvenance.starsOCR} attaques` },
+            { label: 'Confiance élevée', value: resultProvenance.total ? `${resultProvenance.highRate.toFixed(1)}%` : '—', detail: `${resultProvenance.high} attaques` },
+            { label: 'Confiance faible', value: resultProvenance.total ? `${resultProvenance.lowRate.toFixed(1)}%` : '—', detail: `${resultProvenance.low} attaques · medium ${resultProvenance.mediumRate.toFixed(1)}%` },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          <div className="flex items-center gap-5">
+            <div className="size-24 rounded-[2rem] border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 flex flex-col items-center justify-center shrink-0">
+              <div className="text-3xl font-black text-white dark:text-zinc-950 tabular-nums">
+                {autonomyIndex.ready ? autonomyIndex.score.toFixed(0) : '—'}
+              </div>
+              <div className="text-[8px] font-black uppercase tracking-[0.2em] text-zinc-500">/100</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Indice d’autonomie</div>
+              <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">
+                {autonomyIndex.ready ? autonomyIndex.grade : 'Confiance en construction'}
+              </h3>
+              <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500 max-w-2xl">
+                Calculé à partir de la fiabilité mesurée, du déploiement sûr, des routines sans intervention, de la santé du runtime et de la confiance des résultats. Aucun score « IA » caché.
+              </p>
+            </div>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-wider text-zinc-500">
+            {autonomyIndex.sampledComponents}/5 composantes mesurées
+          </div>
+        </div>
+
+        <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-3">
+          {autonomyIndex.components.map((row) => (
+            <div key={row.key} className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{row.label}</div>
+                <div className="text-[8px] font-black uppercase tracking-wider text-zinc-500">{Math.round(row.weight * 100)}%</div>
+              </div>
+              <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">
+                {row.sampled ? `${row.value.toFixed(1)}%` : 'Apprentissage'}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Score de fiabilité</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">La vitesse ne sert à rien sans fiabilité</h3>
+            <p className="text-sm text-zinc-500 mt-1">Seuils techniques explicites. « À surveiller » signifie que la mesure est sous l’objectif de fiabilité affiché, sans modifier automatiquement le comportement.</p>
+          </div>
+          <span className="material-symbols-outlined text-zinc-400">verified_user</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {reliabilityScorecard.map((metric) => {
+            const pass = metric.sampled && metric.value >= metric.threshold;
+            return (
+              <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+                  <div className={`text-[8px] font-black uppercase tracking-wider ${!metric.sampled ? 'text-zinc-400' : pass ? 'text-emerald-500' : 'text-amber-500'}`}>
+                    {!metric.sampled ? 'Apprentissage' : pass ? 'Validé' : 'À surveiller'}
+                  </div>
+                </div>
+                <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.display}</div>
+                <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+                <div className="mt-2 text-[8px] font-bold uppercase tracking-wider text-zinc-400">Cible ≥ {metric.threshold}%</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Repères UI vérifiés</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Vision locale d’abord, scan complet en cas de doute</h3>
+            <p className="text-sm text-zinc-500 mt-1">Les repères Attaquer / Rechercher / Combat ne sont mémorisés qu’après deux détections stables. La vérification visuelle reste toujours prioritaire.</p>
+          </div>
+          <span className="material-symbols-outlined text-zinc-400">my_location</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {[
+            { label: 'Tentatives repère', value: (stats.ui_anchor_attempts || 0).toLocaleString(), detail: 'Vérifications locales' },
+            { label: 'Repères trouvés', value: (stats.ui_anchor_hits || 0).toLocaleString(), detail: 'Vérifications locales réussies' },
+            { label: 'Scans de secours', value: (stats.ui_anchor_fallbacks || 0).toLocaleString(), detail: 'Recherche complète conservée' },
+            { label: 'Taux de réussite', value: (stats.ui_anchor_attempts || 0) > 0 ? `${(stats.ui_anchor_hit_rate || 0).toFixed(1)}%` : 'Apprentissage', detail: 'Plus haut = moins de travail vision' },
+            { label: 'Coupe-circuit', value: stats.ui_anchor_enabled === false ? 'FULL SCAN' : 'ACTIVE', detail: stats.ui_anchor_enabled === false ? 'Cache suspendu · recherche complète uniquement' : 'Vérification locale active' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Conseiller d’optimisation</div>
+            <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">
+              {optimizationAdvisor.top ? optimizationAdvisor.top.label : 'Analyse du fonctionnement en cours'}
+            </h3>
+            <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">
+              Analyse uniquement les ralentissements mesurés. Ne modifie jamais automatiquement la zone rouge, l’ordre des troupes, la stratégie ou la cadence des clics.
+            </p>
+          </div>
+          <span className="material-symbols-outlined text-zinc-500 text-3xl">query_stats</span>
+        </div>
+
+        {optimizationAdvisor.apprentissage ? (
+          <div className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-5 text-sm font-bold text-zinc-400 dark:text-zinc-500">
+            Lance quelques attaques pour construire une base de comparaison fiable.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+            {optimizationAdvisor.items.map((item, index) => (
+              <div key={item.key} className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                    {index === 0 ? 'Top measured opportunity' : `Measured #${index + 1}`}
+                  </div>
+                  <div className="text-[9px] font-black tabular-nums text-zinc-500">#{index + 1}</div>
+                </div>
+                <div className="mt-3 text-base font-black text-white dark:text-zinc-950">{item.label}</div>
+                <div className="mt-1 text-[10px] font-black uppercase tracking-wider text-zinc-500">{item.evidence}</div>
+                <div className="mt-4 text-xs font-medium leading-relaxed text-zinc-400 dark:text-zinc-600">{item.next}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="xl:col-span-2 grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-4">
+        <div className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 p-6 shadow-premium dark:shadow-none">
+          <div className="flex items-end justify-between gap-4 mb-5">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Anatomie du cycle</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Où passe le temps de farm</h3>
+            </div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+Best optimization target: {pipeline.dominantTunable.label}
+            </div>
+          </div>
+          <div className="space-y-4">
+            {pipeline.rows.map((row) => (
+              <div key={row.label}>
+                <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider">
+                  <span className="text-zinc-500">{row.label}</span>
+                  <span className="text-zinc-950 dark:text-white tabular-nums">{row.seconds.toFixed(1)}s · {row.share.toFixed(0)}%</span>
+                </div>
+                <div className="mt-2 h-2.5 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+                  <div className="h-full rounded-full bg-zinc-950 dark:bg-white transition-all duration-700" style={{ width: `${Math.max(2, row.share)}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 p-6 shadow-premium dark:shadow-none">
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Conversion du butin</div>
+          <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Cible → Récupéré</h3>
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">G+E capture</div>
+              <div className="mt-1 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{lootCapture.geRate.toFixed(1)}%</div>
+            </div>
+            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">DE capture</div>
+              <div className="mt-1 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{lootCapture.deRate.toFixed(1)}%</div>
+            </div>
+            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Avg target score</div>
+              <div className="mt-1 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{lootCapture.avgTargetScore.toFixed(0)}/100</div>
+            </div>
+            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Collected G+E</div>
+              <div className="mt-1 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{compact(lootCapture.stolenGE)}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Analyse de fin de combat</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Quand ClashGO termine le combat</h3>
+            <p className="text-sm text-zinc-500 mt-1">Observation uniquement. Les sorties anticipées respectent toujours la vérification du déploiement complet et du bouton de fin de combat.</p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
+            {battleExitIntelligence.attacks} measured battles
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+          {[
+            { label: 'Taux sortie anticipée', value: battleExitIntelligence.attacks ? `${battleExitIntelligence.earlyRate.toFixed(1)}%` : '—', detail: `${battleExitIntelligence.early} battles` },
+            { label: 'Attente fin moy.', value: battleExitIntelligence.attacks ? `${(battleExitIntelligence.avgWaitMS / 1000).toFixed(1)}s` : '—', detail: 'After deployment' },
+            { label: 'Attente naturelle', value: battleExitIntelligence.naturalWaitMS ? `${(battleExitIntelligence.naturalWaitMS / 1000).toFixed(1)}s` : '—', detail: 'Natural results only' },
+            { label: 'Attente anticipée', value: battleExitIntelligence.earlyWaitMS ? `${(battleExitIntelligence.earlyWaitMS / 1000).toFixed(1)}s` : '—', detail: 'Threshold/stall exits' },
+            { label: 'Butin à la sortie', value: battleExitIntelligence.avgLootExitPct ? `${battleExitIntelligence.avgLootExitPct.toFixed(1)}%` : '—', detail: 'Loot-threshold exits' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+
+        {battleExitIntelligence.groups.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                  <th className="pb-3 pr-3">Reason</th>
+                  <th className="pb-3 px-3">Attacks</th>
+                  <th className="pb-3 px-3">End wait</th>
+                  <th className="pb-3 px-3">Avg stars</th>
+                  <th className="pb-3 pl-3">Avg G+E</th>
+                </tr>
+              </thead>
+              <tbody>
+                {battleExitIntelligence.groups.map((row) => (
+                  <tr key={row.reason} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                    <td className="py-4 pr-3 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-white">{row.reason.split('_').join(' ')}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.avgWaitMS / 1000).toFixed(1)}s</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.avgStars.toFixed(2)}</td>
+                    <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{compact(row.avgGE)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+          <div className="max-w-3xl">
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Conseiller de sortie anticipée</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">
+              {battleExitAdvisor.status === 'prometteur' ? 'Prometteur pour accélérer le farm' :
+               battleExitAdvisor.status === 'prudence' ? 'Attention : les sorties actuelles dégradent les résultats' :
+               battleExitAdvisor.status === 'apprentissage' ? 'Apprentissage de ton profil de combat' : 'Aucun avantage clair pour le moment'}
+            </h3>
+            <p className="text-sm text-zinc-500 mt-1">{battleExitAdvisor.message}</p>
+            <p className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 mt-3">
+              Conseil uniquement — ne modifie jamais automatiquement la stratégie ni le seuil de sortie par butin.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 min-w-[320px]">
+            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+              <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Écart de rendement</div>
+              <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white tabular-nums">
+                {battleExitAdvisor.status === 'apprentissage' ? '—' : `${battleExitAdvisor.deltaYieldPct >= 0 ? '+' : ''}${battleExitAdvisor.deltaYieldPct.toFixed(1)}%`}
+              </div>
+            </div>
+            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+              <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Attente naturelle</div>
+              <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{battleExitAdvisor.natural.n ? `${(battleExitAdvisor.natural.avgWaitMS / 1000).toFixed(1)}s` : '—'}</div>
+            </div>
+            <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+              <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Attente anticipée</div>
+              <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{battleExitAdvisor.early.n ? `${(battleExitAdvisor.early.avgWaitMS / 1000).toFixed(1)}s` : '—'}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Fiabilité de l’autonomie</div>
+            <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Série de farm sans intervention</h3>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Counts only full deployment + verified safe corridor/HUD + successful return home.</p>
+          </div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+            {autonomyReliability.clean}/{autonomyReliability.total} clean routines
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: 'Série actuelle', value: autonomyReliability.current.toLocaleString(), detail: 'Routines propres consécutives' },
+            { label: 'Meilleure série', value: autonomyReliability.best.toLocaleString(), detail: 'Record historique' },
+            { label: 'Taux cycles propres', value: `${autonomyReliability.cleanRate.toFixed(1)}%`, detail: 'Succès autonome complet' },
+            { label: 'Taux corridor sûr', value: `${autonomyReliability.redZoneRate.toFixed(1)}%`, detail: 'Zone rouge + HUD validés' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
+              <div className="mt-2 text-2xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Détail de la préparation</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Avant le matchmaking</h3>
+            <p className="text-sm text-zinc-500 mt-1">Measures verified UI steps before search. No delay is shortened until live data proves where time is actually lost.</p>
+          </div>
+          <div className="text-right">
+            <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{preparationBreakdown.attacks} attaques mesurées</div>
+            <div className="mt-1 text-[9px] font-black uppercase tracking-wider text-zinc-500">
+              Bottleneck: {preparationBreakdown.dominant.label}{preparationBreakdown.dominant.ms > 0 ? ` · ${(preparationBreakdown.dominant.ms / 1000).toFixed(2)}s` : ''}
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+          {preparationBreakdown.rows.map((row) => (
+            <div key={row.key} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{row.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{(row.ms / 1000).toFixed(2)}s</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{row.share.toFixed(0)}% de la préparation</div>
+            </div>
+          ))}
+          <div className="rounded-2xl bg-zinc-950 dark:bg-white p-4">
+            <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">Préparation totale</div>
+            <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{(preparationBreakdown.totalMS / 1000).toFixed(2)}s</div>
+            <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">Parcours vérifié</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Efficacité du farm</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Débit réel</h3>
+            <p className="text-sm text-zinc-500 mt-1">Utilise le temps réel de routine quand il est disponible, retour au village et préparation inclus.</p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Pondéré par l’historique</div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {[
+            { label: 'Attaques / h', value: farmEfficiency.attacksPerHour.toFixed(2), detail: 'Débit réel des cycles' },
+            { label: 'O+E / min active', value: compact(farmEfficiency.gePerActiveMinute), detail: 'Recherche + déploiement + combat' },
+            { label: 'O+E / min réelle', value: compact(farmEfficiency.gePerTrueMinute), detail: 'Temps annexes inclus' },
+            { label: 'Part hors action', value: `${farmEfficiency.overheadShare.toFixed(1)}%`, detail: 'Hors farm actif' },
+            { label: 'Cycle réel moy.', value: `${farmEfficiency.avgTrueLoopSeconds.toFixed(0)}s`, detail: 'Prêt à prêt' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Sécurité du déploiement</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Respect zone rouge / HUD</h3>
+            <p className="text-sm text-zinc-500 mt-1">Passive proof of the safety checks already used by the Windows deployment path.</p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
+            {deploymentSafety.attacks > 0 ? `${deploymentSafety.attacks} attaques mesurées` : 'Apprentissage'}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: 'Direct certifié', value: deploymentSafety.attacks ? `${deploymentSafety.liveCertified.toFixed(1)}%` : '—', detail: 'Red zone + corridor + HUD' },
+            { label: 'Corridor vérifié', value: deploymentSafety.attacks ? `${deploymentSafety.corridorRate.toFixed(1)}%` : '—', detail: 'Strictly outside red bbox' },
+            { label: 'HUD sécurisé', value: deploymentSafety.attacks ? `${deploymentSafety.hudSafeRate.toFixed(1)}%` : '—', detail: 'Endpoints above UI cutoff' },
+            { label: 'Chemins de secours', value: deploymentSafety.fallbacks.toLocaleString(), detail: deploymentSafety.modes.slice(0, 2).map((m) => `${m.mode}: ${m.count}`).join(' · ') || 'No samples' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Chemin critique du déploiement</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Coût de la barre en direct par attaque</h3>
+            <p className="text-sm text-zinc-500 mt-1">Positions are still rescanned after every card; OCR is now limited to the selected card.</p>
+          </div>
+          <div className="text-right">
+            <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{deployHotPath.attacks} attaques mesurées</div>
+            <div className="mt-1 text-[9px] font-black uppercase tracking-wider text-zinc-500">
+              Bottleneck: {deployBottleneck.label}{deployBottleneck.ms > 0 ? ` · ${deployBottleneck.ms.toFixed(1)}ms / ${deployBottleneck.share.toFixed(0)}%` : ''}
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-10 gap-3">
+          {[
+            { label: 'Rescans / attaque', value: deployHotPath.avgRescans.toFixed(1), detail: 'Safety re-indexing kept' },
+            { label: 'Rescan total', value: `${deployHotPath.avgRescanMs.toFixed(1)}ms`, detail: 'Per live-bar refresh' },
+            { label: 'Détection position', value: `${deployHotPath.avgDetectMs.toFixed(1)}ms`, detail: 'Shared mask scan' },
+            { label: 'Classification', value: `${deployHotPath.avgClassifyMs.toFixed(1)}ms`, detail: 'Identity/category matching' },
+            { label: 'Templates testés', value: deployHotPath.avgTemplatesTried.toFixed(1), detail: 'Per attack average' },
+            { label: 'Templates trouvés', value: deployHotPath.avgTemplatesMatched.toFixed(1), detail: 'Semantic cards found' },
+            { label: 'Scale fast-path', value: stats.preferred_scale_enabled === false ? 'DISABLED' : `${(stats.preferred_scale_hit_rate || 0).toFixed(1)}%`, detail: stats.preferred_scale_enabled === false ? 'Circuit breaker → full scan' : `${stats.preferred_scale_hits || 0}/${stats.preferred_scale_attempts || 0} hits` },
+            { label: 'Secours d’échelle', value: (stats.preferred_scale_fallbacks || 0).toLocaleString(), detail: 'Full 20-scale scan kept' },
+            { label: 'OCR sélectionné', value: `${deployHotPath.avgCardOCRMs.toFixed(1)}ms`, detail: 'One chosen card only' },
+            { label: 'Travail scan estimé', value: `${(deployHotPath.avgRescans * (deployHotPath.avgRescanMs + deployHotPath.avgCardOCRMs)).toFixed(0)}ms`, detail: 'Measured hot-path work' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-4">
+        {[
+          { label: 'Villages vus', value: (stats.targets_seen || 0).toLocaleString(), detail: 'This session' },
+          { label: 'Taux d’acceptation', value: `${(stats.target_acceptance_rate || 0).toFixed(1)}%`, detail: 'Accepted / scanned' },
+          { label: 'Villages ignorés / attaque', value: (stats.avg_skips_per_attack || 0).toFixed(1), detail: 'Lower is faster' },
+          { label: 'Premier passage suivant', value: stats.next_transitions > 0 ? `${(stats.next_first_pass_rate || 0).toFixed(1)}%` : '—', detail: 'No controlled retry' },
+          { label: 'Nouveaux essais', value: (stats.next_retries || 0).toLocaleString(), detail: `${stats.next_transitions || 0} transitions` },
+          { label: 'Vérifications', value: (stats.avg_next_verify_probes || 0).toFixed(2), detail: 'Captures / transition' },
+          { label: 'Latence suivante', value: `${(stats.average_next_transition_ms || 0).toFixed(0)}ms`, detail: 'Tap → transition' },
+          { label: 'Récupération réussie', value: stats.recovery_attempts > 0 ? `${(stats.recovery_success_rate || 0).toFixed(0)}%` : '—', detail: stats.recovery_attempts > 0 ? `${stats.recovery_successes}/${stats.recovery_attempts}` : 'No recoveries' },
+        ].map((metric) => (
+          <div key={metric.label} className="bg-white dark:bg-zinc-900 rounded-[2rem] border border-zinc-100/70 dark:border-zinc-800/70 p-5 shadow-premium dark:shadow-none">
+            <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-400">{metric.label}</div>
+            <div className="mt-2 text-2xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+            <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Search Intelligence</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Accepted vs rejected targets</h3>
+            <p className="text-sm text-zinc-500 mt-1">Session-only aggregation. Rejected bases stay off disk and never slow the matchmaking path.</p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
+            {(stats.targets_accepted || 0).toLocaleString()} acceptés · {Math.max(0, (stats.targets_seen || 0) - (stats.targets_accepted || 0)).toLocaleString()} rejetés · {(stats.near_miss_targets || 0).toLocaleString()} quasi-valides
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {[
+            { label: 'O+E acceptés', value: compact(stats.avg_accepted_ge || 0), detail: 'Valeur moyenne des cibles' },
+            { label: 'O+E rejetés', value: compact(stats.avg_rejected_ge || 0), detail: 'Ignoré par les seuils' },
+            { label: 'Élixir noir accepté', value: compact(stats.avg_accepted_de || 0), detail: 'Élixir noir moyen des cibles' },
+            { label: 'Élixir noir rejeté', value: compact(stats.avg_rejected_de || 0), detail: 'Élixir noir des cibles ignorées' },
+            { label: 'Score accepté', value: `${(stats.avg_accepted_score || 0).toFixed(0)}/100`, detail: 'Analyse de cible' },
+            { label: 'Score rejeté', value: `${(stats.avg_rejected_score || 0).toFixed(0)}/100`, detail: 'Analyse de cible' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-6 rounded-[2.5rem] shadow-premium-lg">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Sensibilité des seuils</div>
+            <h3 className="mt-1 text-xl font-black text-white dark:text-zinc-950 tracking-tight">À quel point les villages refusés étaient proches</h3>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">
+              Observation uniquement. Ces compteurs ne modifient jamais tes seuils de butin.
+            </p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-500">
+            {(stats.near_miss_targets || 0).toLocaleString()} within 15%
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {[
+            { label: 'À moins de 5 %', value: stats.near_miss_5_targets || 0, detail: 'Presque exactement au seuil' },
+            { label: 'À moins de 10 %', value: stats.near_miss_10_targets || 0, detail: 'Écart modéré' },
+            { label: 'À moins de 15 %', value: stats.near_miss_15_targets || 0, detail: 'Fenêtre de sensibilité élargie' },
+          ].map((metric) => {
+            const rejected = Math.max(1, (stats.targets_seen || 0) - (stats.targets_accepted || 0));
+            const pct = metric.value * 100 / rejected;
+            return (
+              <div key={metric.label} className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-5">
+                <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">{metric.label}</div>
+                <div className="mt-2 flex items-end gap-2">
+                  <div className="text-3xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value.toLocaleString()}</div>
+                  <div className="pb-1 text-[10px] font-black text-zinc-500 tabular-nums">{pct.toFixed(1)}% of rejects</div>
+                </div>
+                <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">{metric.detail}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {(stats.top_rejected_targets ?? []).length > 0 && (
+        <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Meilleurs villages refusés</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Ce que les seuils ont refusé</h3>
+              <p className="text-sm text-zinc-500 mt-1">Top 5 des villages refusés conservés uniquement en mémoire. Utile pour ajuster les seuils sans enregistrer chaque refus.</p>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">visibility_off</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            {(stats.top_rejected_targets ?? []).map((target, index) => (
+              <div key={`${target.at}-${index}`} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">Skipped #{index + 1}</div>
+                  <div className="text-[9px] font-black text-zinc-500 tabular-nums">{target.score}/100</div>
+                </div>
+                <div className="mt-3 text-lg font-black text-zinc-950 dark:text-white tabular-nums">
+                  {compact((target.gold || 0) + (target.elixir || 0))} G+E
+                </div>
+                <div className="mt-1 text-[10px] font-bold text-zinc-500 tabular-nums">
+                  {compact(target.gold || 0)} G · {compact(target.elixir || 0)} E
+                </div>
+                <div className="mt-1 text-[10px] font-bold text-zinc-500 tabular-nums">
+                  {compact(target.dark_elixir || 0)} DE
+                </div>
+                <div className={`mt-3 inline-flex px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-wider ${
+                  target.near_miss ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' : 'bg-zinc-200/60 dark:bg-zinc-800 text-zinc-500'
+                }`}>
+                  {target.near_miss ? `Near miss · ${target.threshold_gap_pct.toFixed(1)}% gap` : `${target.threshold_gap_pct.toFixed(1)}% threshold gap`}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-6 rounded-[2.5rem] shadow-premium-lg">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Efficacité de la recherche</div>
+            <h3 className="mt-1 text-xl font-black text-white dark:text-zinc-950 tracking-tight">Combien coûte la recherche d’un bon village ?</h3>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Calculé à partir de la session et de l’historique, sans capture, OCR ou journal supplémentaire.</p>
+          </div>
+          <span className="material-symbols-outlined text-zinc-500">speed</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {[
+            { label: 'Bases / accept', value: searchEfficiency.targetsPerAccept.toFixed(1), detail: 'Inclut le village accepté' },
+            { label: 'Coût de recherche', value: `${(searchEfficiency.estimatedScoutOverheadMS / 1000).toFixed(2)}s`, detail: 'Scan + Suivant uniquement' },
+            { label: 'G+E / search sec', value: compact(searchEfficiency.gePerSearchSecond), detail: 'Butin obtenu par temps de recherche' },
+            { label: 'Part de la recherche', value: `${searchEfficiency.searchShare.toFixed(1)}%`, detail: 'Dans le cycle complet réel' },
+            { label: 'O+E acceptés', value: compact(searchEfficiency.avgAcceptedGE), detail: 'Moyenne des villages choisis' },
+            { label: 'Prime de qualité', value: searchEfficiency.avgRejectedGE > 0 ? `${searchEfficiency.qualityPremium >= 0 ? '+' : ''}${searchEfficiency.qualityPremium.toFixed(0)}%` : '—', detail: 'Accepted vs rejected G+E' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-white/5 dark:bg-zinc-950/5 border border-white/10 dark:border-zinc-950/10 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Stability distribution</div>
+          <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">P50 vs P95 latency</h3>
+          <p className="text-sm text-zinc-500 mt-1">P95 exposes rare slow attaques that averages hide.</p>
+          <div className="mt-5 space-y-3">
+            {[
+              { label: 'Recherche', p50: latencyDistribution.searchP50, p95: latencyDistribution.searchP95, ms: false },
+              { label: 'Deploy', p50: latencyDistribution.deployP50, p95: latencyDistribution.deployP95, ms: false },
+              { label: 'Cycle réel', p50: latencyDistribution.routineP50, p95: latencyDistribution.routineP95, ms: false },
+              { label: 'Capture ADB', p50: latencyDistribution.captureP50, p95: latencyDistribution.captureP95, ms: true },
+              { label: 'OCR butin', p50: latencyDistribution.scanP50, p95: latencyDistribution.scanP95, ms: true },
+            ].map((row) => (
+              <div key={row.label} className="grid grid-cols-[1fr_auto_auto] gap-4 items-center rounded-xl bg-zinc-50 dark:bg-zinc-950/40 px-4 py-3">
+                <div className="text-[10px] font-black uppercase tracking-wider text-zinc-500">{row.label}</div>
+                <div className="text-xs font-black text-zinc-950 dark:text-white tabular-nums">{'P50 ' + (row.ms ? row.p50.toFixed(0) + 'ms' : (row.p50 / 1000).toFixed(1) + 's')}</div>
+                <div className="text-xs font-black text-zinc-500 tabular-nums">{'P95 ' + (row.ms ? row.p95.toFixed(0) + 'ms' : (row.p95 / 1000).toFixed(1) + 's')}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Target score validation</div>
+          <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Does the score predict good farms?</h3>
+          <p className="text-sm text-zinc-500 mt-1">Observed outcomes only; score bands never change target rules automatically.</p>
+          {targetScoreBands.length === 0 ? (
+            <div className="py-10 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">Waiting for scored attaques</div>
+          ) : (
+            <div className="mt-5 overflow-x-auto">
+              <table className="w-full min-w-[540px] text-left">
+                <thead><tr className="text-[9px] font-black uppercase tracking-wider text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                  <th className="pb-2">Score</th><th className="pb-2 px-2">n</th><th className="pb-2 px-2">Stars</th><th className="pb-2 px-2">Full deploy</th><th className="pb-2 px-2">Avg G+E</th><th className="pb-2 pl-2">G+E/h</th>
+                </tr></thead>
+                <tbody>{targetScoreBands.map((band) => (
+                  <tr key={band.label} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                    <td className="py-3 text-xs font-black text-zinc-950 dark:text-white">{band.label}</td>
+                    <td className="py-3 px-2 text-xs font-bold text-zinc-500">{band.attacks}</td>
+                    <td className="py-3 px-2 text-xs font-bold text-zinc-500">{band.avgStars.toFixed(2)}</td>
+                    <td className="py-3 px-2 text-xs font-bold text-zinc-500">{band.fullDeployRate.toFixed(0) + '%'}</td>
+                    <td className="py-3 px-2 text-xs font-bold text-zinc-500">{compact(band.avgGE)}</td>
+                    <td className="py-3 pl-2 text-xs font-black text-zinc-950 dark:text-white">{compact(band.gePerHour)}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex items-end justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Best Farming Windows</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Observed performance by hour</h3>
+            <p className="text-sm text-zinc-500 mt-1">Only hours with at least 3 attaques mesurées are ranked. Local clock from saved attack timestamps.</p>
+          </div>
+          <span className="material-symbols-outlined text-zinc-400">schedule</span>
+        </div>
+
+        {farmingWindows.length === 0 ? (
+          <div className="py-8 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">
+            Need 3+ attaques in the same hour window
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                  <th className="pb-3 pr-3">Window</th>
+                  <th className="pb-3 px-3">Attacks</th>
+                  <th className="pb-3 px-3">G+E / h</th>
+                  <th className="pb-3 px-3">DE / h</th>
+                  <th className="pb-3 px-3">Avg stars</th>
+                  <th className="pb-3 pl-3">Full deploy</th>
+                </tr>
+              </thead>
+              <tbody>
+                {farmingWindows.map((row, index) => (
+                  <tr key={row.hour} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                    <td className="py-4 pr-3">
+                      <div className="text-sm font-black text-zinc-950 dark:text-white">
+                        #{index + 1} · {String(row.hour).padStart(2, '0')}:00–{String((row.hour + 1) % 24).padStart(2, '0')}:00
+                      </div>
+                    </td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
+                    <td className="py-4 px-3 text-sm font-black text-zinc-950 dark:text-white tabular-nums">{compact(row.gePerHour)}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{compact(row.dePerHour)}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.avgStars.toFixed(2)}</td>
+                    <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{row.fullDeployRate.toFixed(0)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-7 rounded-[2.5rem] shadow-premium-lg">
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Prévision de farm</div>
+            <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Projection de la prochaine heure</h3>
+            <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-500">
+              Projection basée sur les {farmForecast.samples} dernières routines complètes mesurées. Observation uniquement : aucune règle de cible n’est modifiée.
+            </p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-wider text-zinc-500">
+            {farmForecast.ready ? `${farmForecast.attacksPerHour.toFixed(2)} attaques/h` : 'Apprentissage'}
+          </div>
+        </div>
+
+        {farmForecast.ready ? (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+              {[
+                { label: '30m Or', value: compact(farmForecast.gold30) },
+                { label: '30m Elixir', value: compact(farmForecast.elixir30) },
+                { label: '30m DE', value: compact(farmForecast.de30) },
+                { label: '60m Or', value: compact(farmForecast.gold60) },
+                { label: '60m Elixir', value: compact(farmForecast.elixir60) },
+                { label: '60m DE', value: compact(farmForecast.de60) },
+                { label: 'Plage O+E à 60 min', value: `${compact(farmForecast.lowGE60)}–${compact(farmForecast.highGE60)}` },
+              ].map((metric) => (
+                <div key={metric.label} className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-4">
+                  <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{metric.label}</div>
+                  <div className="mt-2 text-xl font-black text-white dark:text-zinc-950 tabular-nums">{metric.value}</div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 text-[9px] font-bold uppercase tracking-wider text-zinc-500">
+              Plage = percentile observé 25–75 % du rendement O+E/heure par attaque, pas une garantie.
+            </div>
+          </>
+        ) : (
+          <div className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-5 text-sm font-bold text-zinc-400 dark:text-zinc-500">
+            Need at least 3 attaques with measured true-loop duration.
+          </div>
+        )}
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Forme récente</div>
+            <h3 className="mt-1 text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">10 dernières attaques</h3>
+            <p className="text-sm text-zinc-500 mt-1">Comparaison avec les 10 attaques précédentes quand l’historique est suffisant.</p>
+          </div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+            {recentPerformance.current.attacks}/10 sampled
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+          {[
+            { label: 'Étoiles moy.', value: recentPerformance.current.avgStars.toFixed(2), delta: perfDelta(recentPerformance.current.avgStars, recentPerformance.previous.avgStars) },
+            { label: '3★ rate', value: `${recentPerformance.current.threeStarRate.toFixed(0)}%`, delta: perfDelta(recentPerformance.current.threeStarRate, recentPerformance.previous.threeStarRate) },
+            { label: 'Déploiement complet', value: `${recentPerformance.current.fullDeployRate.toFixed(0)}%`, delta: perfDelta(recentPerformance.current.fullDeployRate, recentPerformance.previous.fullDeployRate) },
+            { label: 'Recherche', value: `${(recentPerformance.current.avgSearchMs / 1000).toFixed(1)}s`, delta: perfDelta(recentPerformance.current.avgSearchMs, recentPerformance.previous.avgSearchMs, true) },
+            { label: 'Deploy', value: `${(recentPerformance.current.avgDeployMs / 1000).toFixed(1)}s`, delta: perfDelta(recentPerformance.current.avgDeployMs, recentPerformance.previous.avgDeployMs, true) },
+            { label: 'Cycle', value: `${(recentPerformance.current.avgCycleMs / 1000).toFixed(0)}s`, delta: perfDelta(recentPerformance.current.avgCycleMs, recentPerformance.previous.avgCycleMs, true) },
+            { label: 'Avg G+E', value: compact(recentPerformance.current.avgGold + recentPerformance.current.avgElixir), delta: perfDelta(recentPerformance.current.avgGold + recentPerformance.current.avgElixir, recentPerformance.previous.avgGold + recentPerformance.previous.avgElixir) },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/30 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className={`mt-1 text-[9px] font-black uppercase tracking-wider ${
+                metric.delta == null ? 'text-zinc-400' : metric.delta >= 0 ? 'text-emerald-500' : 'text-rose-500'
+              }`}>
+                {metric.delta == null ? 'Pas de référence' : `${metric.delta >= 0 ? '+' : ''}${metric.delta.toFixed(0)}% vs avant`}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 flex items-center justify-between gap-4">
+            <div>
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Meilleure attaque O+E</div>
+              <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">
+                {bestRecords.bestLoot ? compact(
+                  (bestRecords.bestLoot.gold_stolen || 0) + (bestRecords.bestLoot.bonus_gold || 0) +
+                  (bestRecords.bestLoot.elixir_stolen || 0) + (bestRecords.bestLoot.bonus_elixir || 0)
+                ) : '—'}
+              </div>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">trophy</span>
+          </div>
+          <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 flex items-center justify-between gap-4">
+            <div>
+              <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Déploiement propre le plus rapide</div>
+              <div className="mt-1 text-lg font-black text-zinc-950 dark:text-white">
+                {bestRecords.fastestClean ? `${(bestRecords.fastestClean.deploy_duration_ms / 1000).toFixed(1)}s` : '—'}
+              </div>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">speed</span>
+          </div>
+        </div>
+      </div>
 
       <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
           <div>
-            <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Village Resource Tracking</h3>
-            <p className="text-sm text-zinc-500 mt-1">Automatic BlueStacks snapshots. No manual entry required.</p>
+            <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Suivi des ressources du village</h3>
+            <p className="text-sm text-zinc-500 mt-1">Mesures automatiques depuis BlueStacks. Aucune saisie manuelle.</p>
           </div>
           <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-            {validResourceHistory.length} snapshots
+            {validResourceHistory.length} mesures
           </div>
         </div>
 
         {lastResource ? (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
-              { label: 'Gold', current: lastResource.gold, delta: resourceDelta.gold, icon: 'monetization_on' },
+              { label: 'Or', current: lastResource.gold, delta: resourceDelta.gold, icon: 'monetization_on' },
               { label: 'Elixir', current: lastResource.elixir, delta: resourceDelta.elixir, icon: 'water_drop' },
-              { label: 'Dark Elixir', current: lastResource.dark_elixir, delta: resourceDelta.dark, icon: 'opacity' },
+              { label: 'Élixir noir', current: lastResource.dark_elixir, delta: resourceDelta.dark, icon: 'opacity' },
             ].map((item) => (
               <div key={item.label} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/30 p-5">
                 <div className="flex items-center justify-between gap-4">
@@ -124,7 +2416,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         </div>
         {totalAttacks === 0 ? (
           <div className="py-12 text-center text-zinc-400 dark:text-zinc-700 text-[11px] font-black uppercase tracking-[0.3em] italic">
-            No attacks recorded yet // Run the bot to populate analytics
+            Aucune attaque enregistrée · lance le bot pour alimenter les statistiques
           </div>
         ) : (
         <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-10 items-center">
@@ -132,7 +2424,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
           <div className="relative w-36 h-36 mx-auto rounded-full transition-transform duration-500 group-hover:scale-[1.03]" style={{ background: donutBg }}>
             <div className="absolute inset-[16px] bg-white dark:bg-zinc-900 rounded-full flex flex-col items-center justify-center border border-zinc-100 dark:border-zinc-800/60 shadow-sm">
               <span className="text-3xl font-bold text-zinc-950 dark:text-white tabular-nums tracking-tight leading-none">{threeStarRate}%</span>
-              <span className="mt-1.5 text-[9px] font-black text-zinc-400 dark:text-zinc-600 uppercase tracking-[0.2em]">3★ Rate</span>
+              <span className="mt-1.5 text-[9px] font-black text-zinc-400 dark:text-zinc-600 uppercase tracking-[0.2em]">Taux 3★</span>
             </div>
           </div>
           <div className="space-y-6">
@@ -164,7 +2456,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
             <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Strategy Performance</h3>
             <p className="text-sm text-zinc-500 mt-1">Built automatically from saved attack history.</p>
           </div>
-          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">{history?.length ?? 0} attacks</div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">{history?.length ?? 0} attaques</div>
         </div>
 
         {strategyStats.length === 0 ? (
@@ -203,24 +2495,437 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         )}
       </div>
 
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div>
+            <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Deployment Side Performance</h3>
+            <p className="text-sm text-zinc-500 mt-1">Measured from the physical side actually used outside the live red zone.</p>
+          </div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Observed only · no automatic strategy changes</div>
+        </div>
+        {sideStats.length === 0 ? (
+          <div className="py-10 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">Waiting for attack history</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {sideStats.map((row) => (
+              <div key={row.side} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/30 p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-black uppercase tracking-wider text-zinc-950 dark:text-white">{row.side}</div>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{row.attacks} attaques</div>
+                </div>
+                <div className="mt-5 grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Avg stars</div>
+                    <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{(row.stars / Math.max(1, row.attacks)).toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Full deploy</div>
+                    <div className="mt-1 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{Math.round(row.complete / Math.max(1, row.attacks) * 100)}%</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Avg loot</div>
+                    <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white tabular-nums">{compact(row.loot / Math.max(1, row.attacks))}</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Avg deploy</div>
+                    <div className="mt-1 text-sm font-black text-zinc-950 dark:text-white tabular-nums">{(row.deployMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="xl:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+          <div className="flex items-center justify-between gap-4 mb-5">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Tail latency</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">P50 / P90 Timing</h3>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">speed</span>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: 'Recherche', p50: latencyPercentiles.searchP50, p90: latencyPercentiles.searchP90 },
+              { label: 'Deploy', p50: latencyPercentiles.deployP50, p90: latencyPercentiles.deployP90 },
+              { label: 'Cycle', p50: latencyPercentiles.cycleP50, p90: latencyPercentiles.cycleP90 },
+            ].map((row) => (
+              <div key={row.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 p-4">
+                <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">{row.label}</div>
+                <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{(row.p50 / 1000).toFixed(1)}s</div>
+                <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">P50</div>
+                <div className="mt-3 text-sm font-black text-zinc-700 dark:text-zinc-200 tabular-nums">{(row.p90 / 1000).toFixed(1)}s</div>
+                <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">P90</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+          <div className="flex items-center justify-between gap-4 mb-5">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Target Intelligence</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Score Bucket Results</h3>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">target</span>
+          </div>
+          {targetScoreBuckets.length === 0 ? (
+            <div className="py-8 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">Waiting for scored attaques</div>
+          ) : (
+            <div className="space-y-2">
+              {targetScoreBuckets.map((row) => (
+                <div key={row.label} className="grid grid-cols-[70px_1fr_1fr_1fr] items-center gap-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/40 px-3 py-3">
+                  <div className="text-xs font-black text-zinc-950 dark:text-white">{row.label}</div>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Avg stars</div>
+                    <div className="text-sm font-black text-zinc-700 dark:text-zinc-200 tabular-nums">{(row.stars / row.attacks).toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Loot capture</div>
+                    <div className="text-sm font-black text-zinc-700 dark:text-zinc-200 tabular-nums">{row.offered > 0 ? `${(row.stolen * 100 / row.offered).toFixed(0)}%` : '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Cycle</div>
+                    <div className="text-sm font-black text-zinc-700 dark:text-zinc-200 tabular-nums">{(row.cycleMs / row.attacks / 1000).toFixed(0)}s</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Persistent sessions</div>
+            <h3 className="mt-1 text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Farm Session Comparison</h3>
+            <p className="text-sm text-zinc-500 mt-1">New sessions are grouped automatically from saved attack reports.</p>
+          </div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">{sessionStats.length} recent sessions</div>
+        </div>
+        {sessionStats.length === 0 ? (
+          <div className="py-10 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">
+            New attaques will start building session history
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+              {sessionComparison.metrics.map((metric) => (
+                <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+                  <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+                  <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+                  <div className={`mt-1 text-[9px] font-black uppercase tracking-wider ${metric.delta == null ? 'text-zinc-400' : metric.delta >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                    {metric.delta == null ? 'No previous session' : `${metric.delta >= 0 ? '+' : ''}${metric.delta.toFixed(0)}% vs avantious`}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                  <th className="pb-3 pr-4">Session</th>
+                  <th className="pb-3 px-3">Attacks</th>
+                  <th className="pb-3 px-3">Avg stars</th>
+                  <th className="pb-3 px-3">3★</th>
+                  <th className="pb-3 px-3">Full deploy</th>
+                  <th className="pb-3 px-3">G / h</th>
+                  <th className="pb-3 px-3">E / h</th>
+                  <th className="pb-3 px-3">DE / h</th>
+                  <th className="pb-3 px-3">Search</th>
+                  <th className="pb-3 px-3">Deploy</th>
+                  <th className="pb-3 pl-3">True loop</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessionStats.map((row, index) => {
+                  // Prefer the explicit ready-to-return-home routine timings.
+                  // Older history rows lack that field, so keep the wall-clock
+                  // fallback for backward compatibility.
+                  const fallbackWallMs = row.attacks <= 1
+                    ? row.cycleMs
+                    : Math.max(row.firstCycleMs, row.newestAt - row.oldestAt + row.firstCycleMs);
+                  const effectiveMs = row.routineMs > 0 ? row.routineMs : fallbackWallMs;
+                  const hours = effectiveMs > 0 ? effectiveMs / 3_600_000 : 0;
+                  return (
+                    <tr key={row.id} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                      <td className="py-4 pr-4">
+                        <div className="text-sm font-black text-zinc-950 dark:text-white">#{index + 1}</div>
+                        <div className="mt-1 text-[9px] font-bold text-zinc-400 font-mono">{row.id.slice(-12)}</div>
+                      </td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.stars / Math.max(1, row.attacks)).toFixed(2)}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{Math.round(row.triples / Math.max(1, row.attacks) * 100)}%</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{Math.round(row.complete / Math.max(1, row.attacks) * 100)}%</td>
+                      <td className="py-4 px-3 text-sm font-bold text-amber-500 tabular-nums">{hours > 0 ? compact(row.gold / hours) : '—'}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-fuchsia-500 tabular-nums">{hours > 0 ? compact(row.elixir / hours) : '—'}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{hours > 0 ? compact(row.dark / hours) : '—'}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.searchMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.deployMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</td>
+                      <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{(effectiveMs / Math.max(1, row.attacks) / 1000).toFixed(0)}s</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          </>
+        )}
+      </div>
+
+      <div className="xl:col-span-2 grid grid-cols-1 lg:grid-cols-[0.9fr_1.4fr] gap-4">
+        <div className="bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Performance Guard</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">{performanceGuard.status}</h3>
+            </div>
+            <span className="material-symbols-outlined text-zinc-400">
+              {performanceGuard.status === 'Stable' ? 'verified' : performanceGuard.status === 'À surveiller' ? 'monitor_heart' : 'school'}
+            </span>
+          </div>
+          <div className="mt-5 space-y-2">
+            {performanceGuard.reasons.map((reason) => (
+              <div key={reason} className="rounded-xl bg-zinc-50 dark:bg-zinc-950/40 px-3 py-2 text-[10px] font-bold text-zinc-500">
+                {reason}
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-[9px] font-bold uppercase tracking-wider text-zinc-400">
+            Observation uniquement — ne modifie jamais les coordonnées de déploiement ni la stratégie.
+          </p>
+        </div>
+
+        <div className="bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+          <div className="flex items-center justify-between gap-4 mb-5">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Comparaison des modes</div>
+              <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Rapide / Équilibré / Prudent</h3>
+            </div>
+            <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400">{history?.length ?? 0} attaques</div>
+          </div>
+          {modeStats.length === 0 ? (
+            <div className="py-8 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">En attente de données de session</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left">
+                <thead>
+                  <tr className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                    <th className="pb-3 pr-3">Mode</th>
+                    <th className="pb-3 px-3">Attacks</th>
+                    <th className="pb-3 px-3">Avg stars</th>
+                    <th className="pb-3 px-3">Full deploy</th>
+                    <th className="pb-3 px-3">Search</th>
+                    <th className="pb-3 px-3">Deploy</th>
+                    <th className="pb-3 px-3">Capture</th>
+                    <th className="pb-3 pl-3">G+E</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {modeStats.map((row) => (
+                    <tr key={row.mode} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                      <td className="py-4 pr-3 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-white">{row.mode}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.stars / Math.max(1, row.attacks)).toFixed(2)}</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{Math.round(row.fullDeploys / Math.max(1, row.attacks) * 100)}%</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.searchMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.deployMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</td>
+                      <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.captureMs / Math.max(1, row.attacks)).toFixed(0)}ms</td>
+                      <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{compact(row.goldElixir / Math.max(1, row.attacks))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-6 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Result Trust</div>
+            <h3 className="mt-1 text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Origine des données de combat</h3>
+            <p className="text-sm text-zinc-500 mt-1">ClashGO mémorise si les étoiles et le butin proviennent de l’OCR du résultat, du combat mesuré ou des variations de butin détectées en direct.</p>
+          </div>
+          <div className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
+            {resultTrust.total > 0 ? `${resultTrust.highRate.toFixed(0)}% confiance élevée` : 'En attente de résultats'}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+          {[
+            { label: 'Confiance élevée', value: resultTrust.confidence.high.toLocaleString(), detail: 'Combat + variation directe' },
+            { label: 'Confiance moyenne', value: resultTrust.confidence.medium.toLocaleString(), detail: 'Source unique fiable' },
+            { label: 'Faible / inconnue', value: (resultTrust.confidence.low + resultTrust.confidence.unknown).toLocaleString(), detail: 'Secours / anciennes données' },
+            { label: 'Étoiles via OCR', value: resultTrust.ocrStars.toLocaleString(), detail: 'Écran de résultat' },
+            { label: 'Étoiles via combat', value: resultTrust.outcomeStars.toLocaleString(), detail: 'Destruction / réconciliation' },
+            { label: 'Butin en direct', value: resultTrust.liveLoot.toLocaleString(), detail: 'Source stable prioritaire' },
+            { label: 'Butin via OCR', value: resultTrust.ocrLoot.toLocaleString(), detail: 'Secours écran de résultat' },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 p-4">
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{metric.label}</div>
+              <div className="mt-2 text-xl font-black text-zinc-950 dark:text-white tabular-nums">{metric.value}</div>
+              <div className="mt-1 text-[9px] font-bold uppercase tracking-wider text-zinc-400">{metric.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Battle termination</div>
+            <h3 className="mt-1 text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Why Battles End</h3>
+            <p className="text-sm text-zinc-500 mt-1">Natural result, thresholds, stalls and timeouts measured separately.</p>
+          </div>
+          <span className="material-symbols-outlined text-zinc-400">flag</span>
+        </div>
+        {endReasonStats.length === 0 ? (
+          <div className="py-10 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">Waiting for completed attaques</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                  <th className="pb-3 pr-4">Reason</th>
+                  <th className="pb-3 px-3">Attacks</th>
+                  <th className="pb-3 px-3">Avg stars</th>
+                  <th className="pb-3 px-3">Avg destruction</th>
+                  <th className="pb-3 px-3">Full deploy</th>
+                  <th className="pb-3 px-3">Avg loot</th>
+                  <th className="pb-3 pl-3">Avg cycle</th>
+                </tr>
+              </thead>
+              <tbody>
+                {endReasonStats.map((row) => (
+                  <tr key={row.reason} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                    <td className="py-4 pr-4 text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-white">{row.reason.split('_').join(' ')}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.stars / row.attacks).toFixed(2)}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.destruction / row.attacks).toFixed(0)}%</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{Math.round(row.full / row.attacks * 100)}%</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{compact(row.loot / row.attacks)}</td>
+                    <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.cycleMs / row.attacks / 1000).toFixed(0)}s</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="xl:col-span-2 bg-zinc-950 dark:bg-white p-8 rounded-[3rem] shadow-premium-lg">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Strategy Lab</div>
+            <h3 className="mt-1 text-2xl font-black text-white dark:text-zinc-950 tracking-tight">Observed Farming Leaders</h3>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Requires at least 5 attaques per strategy × side. Observation only; ClashGO never changes your strategy from this panel.</p>
+          </div>
+          <span className="material-symbols-outlined text-zinc-500">science</span>
+        </div>
+
+        {strategyLab.length === 0 ? (
+          <div className="py-10 text-center text-zinc-500 text-xs font-black uppercase tracking-widest">
+            Need 5+ attaques on the same strategy × side to compare reliably
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {strategyLab.map((row, index) => (
+              <div key={row.key} className="rounded-2xl border border-white/10 dark:border-zinc-950/10 bg-white/5 dark:bg-zinc-950/5 p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">Observed #{index + 1}</div>
+                  <div className="text-[9px] font-black uppercase tracking-wider text-zinc-500">{row.confidence} · n={row.attacks}</div>
+                </div>
+                <div className="mt-3 text-lg font-black text-white dark:text-zinc-950 truncate">{row.strategy}</div>
+                <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-zinc-500">{row.side}</div>
+                <div className="mt-5 grid grid-cols-3 gap-2">
+                  <div>
+                    <div className="text-[8px] font-black uppercase tracking-wider text-zinc-500">G+E / h</div>
+                    <div className="mt-1 text-sm font-black text-white dark:text-zinc-950 tabular-nums">{compact(row.yieldPerHour)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[8px] font-black uppercase tracking-wider text-zinc-500">Stars</div>
+                    <div className="mt-1 text-sm font-black text-white dark:text-zinc-950 tabular-nums">{row.avgStars.toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[8px] font-black uppercase tracking-wider text-zinc-500">Full deploy</div>
+                    <div className="mt-1 text-sm font-black text-white dark:text-zinc-950 tabular-nums">{row.fullDeployRate.toFixed(0)}%</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="xl:col-span-2 bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none">
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div>
+            <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Strategy × Deploy Side</h3>
+            <p className="text-sm text-zinc-500 mt-1">Observed combinations only. These numbers never change deployment automatically.</p>
+          </div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Top 16 samples</div>
+        </div>
+
+        {strategySideStats.length === 0 ? (
+          <div className="py-10 text-center text-zinc-400 text-xs font-black uppercase tracking-widest">Waiting for attack history</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-left">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                  <th className="pb-3 pr-4">Strategy</th>
+                  <th className="pb-3 px-3">Side</th>
+                  <th className="pb-3 px-3">Attacks</th>
+                  <th className="pb-3 px-3">Avg stars</th>
+                  <th className="pb-3 px-3">Full deploy</th>
+                  <th className="pb-3 px-3">Avg G+E</th>
+                  <th className="pb-3 px-3">Avg DE</th>
+                  <th className="pb-3 px-3">Deploy</th>
+                  <th className="pb-3 pl-3">Cycle</th>
+                </tr>
+              </thead>
+              <tbody>
+                {strategySideStats.map((row) => (
+                  <tr key={row.key} className="border-b border-zinc-50 dark:border-zinc-800/60 last:border-0">
+                    <td className="py-4 pr-4 text-sm font-black text-zinc-950 dark:text-white">{row.strategy}</td>
+                    <td className="py-4 px-3 text-xs font-black uppercase tracking-wider text-zinc-500">{row.side}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{row.attacks}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.stars / Math.max(1, row.attacks)).toFixed(2)}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{Math.round(row.complete / Math.max(1, row.attacks) * 100)}%</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{compact(row.goldElixir / Math.max(1, row.attacks))}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{compact(row.dark / Math.max(1, row.attacks))}</td>
+                    <td className="py-4 px-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.deployMs / Math.max(1, row.attacks) / 1000).toFixed(1)}s</td>
+                    <td className="py-4 pl-3 text-sm font-bold text-zinc-500 tabular-nums">{(row.cycleMs / Math.max(1, row.attacks) / 1000).toFixed(0)}s</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div className="bg-white dark:bg-zinc-900 p-8 rounded-[3rem] border border-zinc-100/50 dark:border-zinc-800/50 shadow-premium dark:shadow-none transition-all duration-500">
         <div className="flex justify-between items-center mb-8">
-          <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Financial Performance</h3>
+          <h3 className="text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Performance des ressources</h3>
           <div className="w-12 h-12 rounded-2xl bg-zinc-50 dark:bg-zinc-800 flex items-center justify-center border border-zinc-100 dark:border-zinc-700 shadow-sm">
             <span className="material-symbols-outlined text-zinc-500 dark:text-zinc-500">insights</span>
           </div>
         </div>
         {stats.attacks_completed === 0 ? (
           <div className="py-12 text-center text-zinc-400 dark:text-zinc-700 text-[11px] font-black uppercase tracking-[0.3em] italic">
-            No revenue recorded yet // Run the bot to populate metrics
+            Aucune ressource enregistrée · lance le bot pour alimenter les mesures
           </div>
         ) : (
         <div className="space-y-8">
           {[
-            { label: 'Total Revenue', value: (stats.total_gold + stats.total_elixir).toLocaleString(), icon: 'account_balance_wallet', color: 'text-zinc-950 dark:text-zinc-100' },
-            { label: 'Avg Gold / Attack', value: stats.attacks_completed > 0 ? Math.round(stats.total_gold / stats.attacks_completed).toLocaleString() : '0', icon: 'monetization_on', color: 'text-amber-500' },
-            { label: 'Avg Elixir / Attack', value: stats.attacks_completed > 0 ? Math.round(stats.total_elixir / stats.attacks_completed).toLocaleString() : '0', icon: 'water_drop', color: 'text-fuchsia-500' },
-            { label: 'Avg Dark Elixir / Attack', value: stats.attacks_completed > 0 ? Math.round(stats.total_de / stats.attacks_completed).toLocaleString() : '0', icon: 'water_drop', color: 'text-zinc-950 dark:text-zinc-100' }
+            { label: 'Ressources totales', value: (stats.total_gold + stats.total_elixir).toLocaleString(), icon: 'account_balance_wallet', color: 'text-zinc-950 dark:text-zinc-100' },
+            { label: 'Avg Or / Attack', value: stats.attacks_completed > 0 ? Math.round(stats.total_gold / stats.attacks_completed).toLocaleString() : '0', icon: 'monetization_on', color: 'text-amber-500' },
+            { label: 'Élixir moyen / attaque', value: stats.attacks_completed > 0 ? Math.round(stats.total_elixir / stats.attacks_completed).toLocaleString() : '0', icon: 'water_drop', color: 'text-fuchsia-500' },
+            { label: 'Avg Élixir noir / Attack', value: stats.attacks_completed > 0 ? Math.round(stats.total_de / stats.attacks_completed).toLocaleString() : '0', icon: 'water_drop', color: 'text-zinc-950 dark:text-zinc-100' }
           ].map((m, i) => (
             <div key={i} className="flex justify-between items-center group">
               <div className="flex items-center gap-6">
@@ -229,7 +2934,7 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
                 </div>
                 <div>
                   <span className="block text-[10px] font-black text-zinc-500 dark:text-zinc-500 uppercase tracking-[0.2em] mb-1">{m.label}</span>
-                  <div className="text-xs text-zinc-400 dark:text-zinc-700 font-bold uppercase tracking-widest">Calculated Average</div>
+                  <div className="text-xs text-zinc-400 dark:text-zinc-700 font-bold uppercase tracking-widest">Moyenne calculée</div>
                 </div>
               </div>
               <span className="text-3xl font-bold text-zinc-950 dark:text-white tracking-tight tabular-nums">{m.value}</span>
@@ -239,6 +2944,8 @@ const Analytics: React.FC<AnalyticsProps> = React.memo(({ stats, resourceHistory
         )}
       </div>
 
+      </div>
+      )}
     </div>
   );
 });

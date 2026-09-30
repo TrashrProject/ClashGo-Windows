@@ -9,10 +9,11 @@ import (
 )
 
 type writeRequest struct {
-	path  string
-	data  []byte
-	perms os.FileMode
-	done  chan error
+	path     string
+	data     []byte
+	perms    os.FileMode
+	done     chan error
+	flushNow bool
 }
 
 type AsyncWriter struct {
@@ -70,7 +71,7 @@ func (aw *AsyncWriter) worker() {
 			// Fire-and-forget requests (done == nil) still batch and
 			// ride the ticker, so high-frequency best-effort writes keep
 			// their coalescing.
-			if req.done != nil || len(pending) >= 10 {
+			if req.done != nil || req.flushNow || len(pending) >= 10 {
 				flush()
 			}
 		case <-ticker.C:
@@ -106,6 +107,35 @@ func (aw *AsyncWriter) Write(path string, data []byte, perms os.FileMode) error 
 	}
 }
 
+// WriteSoon queues an immediate-flush write without waiting for disk I/O.
+// It is intended for hot-path snapshots such as attack_history.json where the
+// in-memory state is already authoritative for the UI. Shutdown-critical
+// persistence continues to use Write(), which waits for completion.
+func (aw *AsyncWriter) WriteSoon(path string, data []byte, perms os.FileMode) error {
+	payload := append([]byte(nil), data...)
+
+	aw.mu.Lock()
+	if aw.closed {
+		aw.mu.Unlock()
+		// Once the worker is closed, preserve the caller's durability
+		// expectation rather than silently dropping a late write.
+		return os.WriteFile(path, payload, perms)
+	}
+
+	select {
+	case aw.requests <- writeRequest{
+		path: path, data: payload, perms: perms, flushNow: true,
+	}:
+		aw.mu.Unlock()
+		return nil
+	default:
+		aw.mu.Unlock()
+		// Saturation should be exceptionally rare (queue=100, attack-level
+		// cadence). Fall back to a direct write so history is never dropped.
+		return os.WriteFile(path, payload, perms)
+	}
+}
+
 func (aw *AsyncWriter) Close() {
 	aw.mu.Lock()
 	if aw.closed {
@@ -122,4 +152,17 @@ var globalAsyncWriter = NewAsyncWriter()
 
 func AsyncWriteFile(path string, data []byte, perms os.FileMode) error {
 	return globalAsyncWriter.Write(path, data, perms)
+}
+
+// AsyncWriteFileSoon queues a flush-immediate write and returns after enqueue.
+// Use only where the caller already owns an in-memory authoritative snapshot.
+func AsyncWriteFileSoon(path string, data []byte, perms os.FileMode) error {
+	return globalAsyncWriter.WriteSoon(path, data, perms)
+}
+
+// CloseAsyncWriter shuts down the process-global persistence worker.
+// Bot Stop/Start cycles intentionally do NOT call this; otherwise every later
+// session falls back to synchronous os.WriteFile and loses the async path.
+func CloseAsyncWriter() {
+	globalAsyncWriter.Close()
 }

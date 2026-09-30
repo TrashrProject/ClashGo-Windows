@@ -1,14 +1,30 @@
 param(
-    [string]$Version = "0.6.0-windows-beta",
+    [string]$Version = "0.6.7-windows-beta",
+    [ValidateSet("stable","beta")][string]$Channel = "stable",
     [string]$AccountServiceURL = $env:CLASHGO_ACCOUNT_API_URL,
+    [string]$ControlServiceURL = $env:CLASHGO_CONTROL_API_URL,
     [switch]$SkipSync,
     [switch]$SkipTests
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$wailsConfigPath = Join-Path $repoRoot "wails.json"
+$wailsConfigOriginal = $null
 Push-Location $repoRoot
 try {
+    # Keep the executable's Windows metadata on the exact same version as the
+    # Go ldflags, VERSION.txt, installer and update manifest. The checked-in
+    # wails.json stays stable; this edit exists only for the duration of build.
+    if (Test-Path $wailsConfigPath) {
+        $wailsConfigOriginal = [System.IO.File]::ReadAllText($wailsConfigPath)
+        $wailsConfig = $wailsConfigOriginal | ConvertFrom-Json
+        if (-not $wailsConfig.info) { throw "wails.json is missing info metadata" }
+        $wailsConfig.info.productVersion = $Version
+        $json = $wailsConfig | ConvertTo-Json -Depth 20
+        [System.IO.File]::WriteAllText($wailsConfigPath, $json, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "Wails productVersion synchronized to $Version"
+    }
     if (-not $SkipSync -and -not (Test-Path ".\assets\templates\btn_attack.png")) { & ".\tools\sync-upstream-runtime.ps1" }
     if (-not (Test-Path ".\assets\templates\btn_attack.png")) { throw "Runtime templates are missing. Run tools\sync-upstream-runtime.ps1 first." }
 
@@ -73,7 +89,9 @@ $env:CGO_LDFLAGS = "-LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -l
     try {
         npm ci
         if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
-    } finally { Pop-Location }
+    } finally {
+        Pop-Location
+    }
 
     if (-not $SkipTests) {
         Write-Host "Running focused tests..."
@@ -82,7 +100,7 @@ $env:CGO_LDFLAGS = "-LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -l
     }
 
     $commit = (git rev-parse HEAD).Trim()
-    $ldflags = "-X main.version=$Version -X main.commit=$commit"
+    $ldflags = "-X main.version=$Version -X main.commit=$commit -X main.updateChannel=$Channel"
     if ($AccountServiceURL) {
         $service = $AccountServiceURL.Trim().TrimEnd("/")
         if ($service -notmatch '^https?://') {
@@ -97,6 +115,19 @@ $env:CGO_LDFLAGS = "-LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -l
         Write-Host "Embedding hosted account service URL for zero-config linking."
     } else {
         Write-Host "No hosted account service URL embedded; local development fallback will be used."
+    }
+    if ($ControlServiceURL) {
+        $control = $ControlServiceURL.Trim().TrimEnd("/")
+        if ($control -notmatch '^https?://') {
+            throw "ControlServiceURL must begin with http:// or https://"
+        }
+        if ($control -match '\s') {
+            throw "ControlServiceURL cannot contain spaces"
+        }
+        $ldflags += " -X main.controlServiceURL=$control"
+        Write-Host "Embedding hosted licensing/support service URL."
+    } else {
+        Write-Host "No hosted control service URL embedded; local development fallback will be used."
     }
     Write-Host "Building Wails Windows application..."
     wails build -clean -webview2 embed -o ClashGO.exe -tags $gocvTags -ldflags $ldflags
@@ -132,7 +163,7 @@ $env:CGO_LDFLAGS = "-LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -l
         }
     }
 
-    $versionText = "ClashGO Windows`r`nVersion: $Version`r`nCommit: $commit`r`nBuilt: $(Get-Date -Format o)`r`n"
+    $versionText = "ClashGO Windows`r`nVersion: $Version`r`nChannel: $Channel`r`nCommit: $commit`r`nBuilt: $(Get-Date -Format o)`r`n"
     Set-Content -Path (Join-Path $bundle "VERSION.txt") -Value $versionText -Encoding UTF8
 
     if (-not (Test-Path $distRoot)) { New-Item -ItemType Directory -Force -Path $distRoot | Out-Null }
@@ -143,4 +174,9 @@ $env:CGO_LDFLAGS = "-LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -l
     Write-Host "BUILD COMPLETE"
     Write-Host "Folder: $bundle"
     Write-Host "ZIP:    $zip"
-} finally { Pop-Location }
+} finally {
+    if ($null -ne $wailsConfigOriginal) {
+        [System.IO.File]::WriteAllText($wailsConfigPath, $wailsConfigOriginal, (New-Object System.Text.UTF8Encoding($false)))
+    }
+    Pop-Location
+}

@@ -3,6 +3,10 @@ package bot
 import (
 	"image"
 	"testing"
+	"time"
+
+	"github.com/Ducky705/ClashGO/internal/telemetry"
+	"github.com/Ducky705/ClashGO/internal/config"
 )
 
 func TestButtonROIConsistency(t *testing.T) {
@@ -49,5 +53,87 @@ func TestHistoryCacheNoWipeOnReadError(t *testing.T) {
 	}
 	if b.historyCache[0].Timestamp != "now" || b.historyCache[1].Timestamp != "earlier" {
 		t.Errorf("history cache order/copy wrong: %+v", b.historyCache)
+	}
+}
+
+func TestHistorySnapshotReturnsIndependentCopy(t *testing.T) {
+	b := &Bot{
+		historyCache: []AttackReport{
+			{Timestamp: "one", Stars: 3},
+			{Timestamp: "two", Stars: 2},
+		},
+	}
+
+	got := b.HistorySnapshot()
+	if len(got) != 2 {
+		t.Fatalf("snapshot len=%d want 2", len(got))
+	}
+
+	got[0].Stars = 0
+	got = append(got, AttackReport{Timestamp: "mutated"})
+
+	again := b.HistorySnapshot()
+	if len(again) != 2 {
+		t.Fatalf("mutating returned slice changed bot cache len=%d", len(again))
+	}
+	if again[0].Stars != 3 {
+		t.Fatalf("mutating returned report leaked into bot cache: %+v", again[0])
+	}
+}
+
+func TestHistorySnapshotNilBotIsEmpty(t *testing.T) {
+	var b *Bot
+	if got := b.HistorySnapshot(); len(got) != 0 {
+		t.Fatalf("nil bot snapshot len=%d want 0", len(got))
+	}
+}
+
+
+func TestRecordMemberSettingsChangeAddsActivity(t *testing.T) {
+	bus := telemetry.New("")
+	defer bus.Close()
+
+	b := &Bot{telemetry: bus}
+	b.RecordMemberSettingsChange("fast", 16, 100, 6, 2)
+
+	events := b.RecentActivity(1)
+	if len(events) != 1 {
+		t.Fatalf("recent activity len=%d want 1", len(events))
+	}
+	if events[0].Type != telemetry.EventSpeedProfile {
+		t.Fatalf("event type=%q want %q", events[0].Type, telemetry.EventSpeedProfile)
+	}
+	if got := events[0].Fields["profile"]; got != "fast" {
+		t.Fatalf("profile=%v want fast", got)
+	}
+	if got := events[0].Fields["max_attacks_per_hour"]; got != 16 {
+		t.Fatalf("max_attacks_per_hour=%v want 16", got)
+	}
+	if got := events[0].Fields["max_attacks_per_session"]; got != 100 {
+		t.Fatalf("max_attacks_per_session=%v want 100", got)
+	}
+}
+
+
+func TestSafePacingWindowDoesNotMutateMemberProfile(t *testing.T) {
+	b := &Bot{}
+	b.cfg = config.DefaultConfig()
+	b.cfg.Automation.SpeedProfile = "fast"
+
+	now := time.Now()
+	b.safePacingUntilUS.Store(now.Add(2 * time.Minute).UnixMicro())
+
+	if !safePacingActive(b.safePacingUntilUS.Load(), now.UnixMicro()) {
+		t.Fatal("expected temporary safe pacing window to be active")
+	}
+	if b.cfg.Automation.SpeedProfile != "fast" {
+		t.Fatalf("temporary safe pacing changed member profile to %q", b.cfg.Automation.SpeedProfile)
+	}
+
+	if safePacingActive(b.safePacingUntilUS.Load(), now.Add(3*time.Minute).UnixMicro()) {
+		t.Fatal("safe pacing should expire without changing the stored profile")
+	}
+	if b.cfg.Automation.SpeedProfile != "fast" {
+		t.Fatalf("expired safety window changed member profile to %q", b.cfg.Automation.SpeedProfile)
 	}
 }

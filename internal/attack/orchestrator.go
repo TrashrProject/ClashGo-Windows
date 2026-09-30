@@ -15,6 +15,12 @@ import (
 	"gocv.io/x/gocv"
 )
 
+// xingchenCompatibleAttackFlow keeps Windows on the same generic deployment
+// planner as the proven Xingchen-style path. The experimental Windows-only
+// adaptive-camera/live-slot engine remains in source for diagnostics, but is
+// deliberately bypassed until it can survive repeated soak tests.
+const xingchenCompatibleAttackFlow = true
+
 // DeployDynamicV2 deploys troops using dynamic red line detection.
 // No hardcoded precision_config.json needed - detects deployment boundary live.
 //
@@ -22,6 +28,7 @@ import (
 // the matching formula.json (loaded as <stem>_formula.json next to the
 // YAML). Pass "" to skip formula lookup entirely.
 func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat, strategyPath string) (int, error) {
+	analysisStarted := time.Now()
 	w, h := screen.Cols(), screen.Rows()
 	targetEdge := s.TargetEdge
 
@@ -52,169 +59,50 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// re-picking TopLeft every process restart. See
 		// rotation_state.go for the failure-mode / concurrency story.
 		targetEdge = NextEdgeIndex()
-		e.logger.Info().Str("edge", targetEdge).Msg("rotated to next edge")
+		e.logger.Debug().Str("edge", targetEdge).Msg("rotated to next edge")
 	case strings.EqualFold(targetEdge, "Random"):
 		edges := []string{"TopLeft", "TopRight", "BottomLeft", "BottomRight"}
 		targetEdge = edges[rand.Intn(len(edges))]
-		e.logger.Info().Str("edge", targetEdge).Msg("random edge selected")
+		e.logger.Debug().Str("edge", targetEdge).Msg("random edge selected")
 	}
 
-	// 1. Detect red zone (deployment boundary)
-	redDetector := NewRedLineDetector(e.logger)
-	uiCutoff := int(float64(h) * 0.85) // above troop bar
-	redZone := redDetector.Detect(screen, uiCutoff)
+	e.lastResolvedEdge = targetEdge
+	e.lastDeploySide = cornerToSide(targetEdge)
+	e.lastSafetyMode = "not_evaluated"
+	e.lastRedZoneValid = false
+	e.lastCorridorVerified = false
+	e.lastHUDSafe = false
+	e.lastRedZoneBBox = image.Rectangle{}
+	e.lastDeployP1 = image.Point{}
+	e.lastDeployP2 = image.Point{}
+	e.lastDeployFreeSpace = 0
+	e.lastLiveBarRescans = 0
+	e.lastLiveBarRescanMicros = 0
+	e.lastSlotDetectMicros = 0
+	e.lastSlotClassifyMicros = 0
+	e.lastTemplatesTried = 0
+	e.lastTemplatesMatched = 0
+	e.lastSelectedCardOCRCount = 0
+	e.lastSelectedCardOCRMicros = 0
 
-	// Windows adaptive camera search.
-	//
-	// A static screenshot is not enough when the village is zoomed-in or
-	// shifted against an edge: there may literally be no safe strip behind
-	// the red deployment boundary. Before choosing any troop-drop line, let
-	// the bot manipulate the map like a player would: zoom OUT, re-detect,
-	// then pan the map to expose more legal terrain. Every gesture is followed
-	// by a fresh capture + fresh red-line detection. We never deploy from stale
-	// pre-gesture coordinates.
-	deployScreen := screen
-	var cameraFrame gocv.Mat
-	cameraFrameOwned := false
+	// 1. Normalize the battlefield camera BEFORE red-zone geometry, slot
+	// detection or troop planning. This is a bounded Xingchen-style stage:
+	// establish scale, re-capture, re-detect the live red boundary, expose the
+	// intended attack side if needed, then freeze that fresh frame for the
+	// generic deployment planner.
+	uiCutoff := int(float64(h) * 0.85) // above troop bar
+	cameraStarted := time.Now()
+	deployScreen, cameraFrameOwned, redZone := e.normalizeBattlefieldCamera(screen, targetEdge, uiCutoff)
+	cameraMS := time.Since(cameraStarted).Milliseconds()
 	defer func() {
-		if cameraFrameOwned && !cameraFrame.Empty() {
-			cameraFrame.Close()
+		if cameraFrameOwned && !deployScreen.Empty() {
+			deployScreen.Close()
 		}
 	}()
 
-	if runtime.GOOS == "windows" {
-		freeSpace := func(z RedZone) (string, int) {
-			if !z.Valid {
-				return "", 0
-			}
-			free := map[string]int{
-				"left":   z.BBox.Min.X,
-				"right":  w - z.BBox.Max.X,
-				"top":    z.BBox.Min.Y,
-				"bottom": uiCutoff - z.BBox.Max.Y,
-			}
-			side := "left"
-			best := free[side]
-			for _, s := range []string{"right", "top", "bottom"} {
-				if free[s] > best {
-					side, best = s, free[s]
-				}
-			}
-			return side, best
-		}
-
-		refreshCamera := func(reason string) bool {
-			fresh, err := e.client.CaptureToMat()
-			if err != nil || fresh.Empty() {
-				if !fresh.Empty() {
-					fresh.Close()
-				}
-				e.logger.Warn().Err(err).Str("reason", reason).Msg("adaptive camera capture failed")
-				return false
-			}
-			if cameraFrameOwned && !cameraFrame.Empty() {
-				cameraFrame.Close()
-			}
-			cameraFrame = fresh
-			cameraFrameOwned = true
-			deployScreen = cameraFrame
-			redZone = redDetector.Detect(deployScreen, uiCutoff)
-			side, free := freeSpace(redZone)
-			e.logger.Info().
-				Str("reason", reason).
-				Bool("red_zone_valid", redZone.Valid).
-				Str("best_side", side).
-				Int("free_space", free).
-				Msg("adaptive camera re-evaluated deployment space")
-			return true
-		}
-
-		// Aim for a meaningful strip outside the red line, not merely a few
-		// pixels. ~90px on the 860-wide reference frame leaves enough room for
-		// the line itself, contour error and multiple troop taps.
-		minSafeFree := int(90.0 * float64(w) / 860.0)
-		if minSafeFree < 64 {
-			minSafeFree = 64
-		}
-
-		side, free := freeSpace(redZone)
-		e.logger.Info().
-			Bool("red_zone_valid", redZone.Valid).
-			Str("best_side", side).
-			Int("free_space", free).
-			Int("required_free_space", minSafeFree).
-			Msg("adaptive camera evaluating battlefield")
-
-		// IMPORTANT (Windows / BlueStacks):
-		// Do NOT use Client.ZoomOut()/ZoomIn() here. Those methods inject
-		// low-level multi-touch sendevent batches. BlueStacks 5 on the user's
-		// Pie64 instance can terminate the emulator process under repeated
-		// synthetic multi-touch. Startup already had a Windows-safe path that
-		// deliberately skipped native zoom for this reason.
-		//
-		// Keep adaptive camera movement to single-pointer map pans only. They
-		// are handled by Android's normal input swipe path and are much more
-		// stable on BlueStacks.
-		if !redZone.Valid || free < minSafeFree {
-			e.logger.Info().
-				Int("free_space", free).
-				Int("required_free_space", minSafeFree).
-				Msg("adaptive camera: native pinch zoom disabled on Windows-safe path; using map pan only")
-		}
-
-		// Drag the MAP toward the opposite
-		// direction so the already-best legal side gains even more empty land.
-		// Gestures stay in the playfield, well above the troop bar.
-		for panTry := 1; panTry <= 2 && redZone.Valid && free < minSafeFree; panTry++ {
-			cx := w / 2
-			cy := int(float64(uiCutoff) * 0.52)
-			dx := int(float64(w) * 0.20)
-			dy := int(float64(uiCutoff) * 0.18)
-			x2, y2 := cx, cy
-
-			switch side {
-			case "left":
-				// Move village right -> expose more legal space on left.
-				x2 = cx + dx
-			case "right":
-				x2 = cx - dx
-			case "top":
-				y2 = cy + dy
-			case "bottom":
-				y2 = cy - dy
-			}
-
-			e.logger.Info().
-				Int("attempt", panTry).
-				Str("target_safe_side", side).
-				Int("from_x", cx).Int("from_y", cy).
-				Int("to_x", x2).Int("to_y", y2).
-				Msg("adaptive camera: panning map to expose legal deployment area")
-
-			if err := e.client.Swipe(cx, cy, x2, y2, 260); err != nil {
-				e.logger.Warn().Err(err).Msg("adaptive camera map pan failed")
-				break
-			}
-			time.Sleep(360 * time.Millisecond)
-			if !refreshCamera("map_pan") {
-				break
-			}
-			side, free = freeSpace(redZone)
-		}
-
-		// No native pinch-zoom recovery on Windows. If panning lost the red
-		// boundary, keep the failure visible to the caller rather than sending
-		// an unsafe multi-touch gesture that can crash BlueStacks.
-		if !redZone.Valid && cameraFrameOwned {
-			e.logger.Warn().Msg("adaptive camera lost red boundary after pan; refusing unsafe Windows pinch-zoom recovery")
-		}
-
-		side, free = freeSpace(redZone)
-		e.logger.Info().
-			Bool("red_zone_valid", redZone.Valid).
-			Str("selected_side", side).
-			Int("free_space", free).
-			Msg("adaptive camera search complete")
+	e.lastRedZoneValid = redZone.Valid
+	if redZone.Valid {
+		e.lastRedZoneBBox = redZone.BBox
 	}
 
 	// 2. Load precision config FIRST so we can detect user-pinned coords
@@ -355,7 +243,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// meaningful as the formula's intent reference and avoids
 		// "which center do we reflect around" ambiguity.
 		formulaPtr.ApplyScreenScale(formulaPtr.Screen.W, formulaPtr.Screen.H, w, h)
-		e.logger.Info().
+		e.logger.Debug().
 			Str("strategy", s.Name).
 			Int("units", len(formulaPtr.Units)).
 			Int("formula_w", formulaPtr.Screen.W).
@@ -393,23 +281,51 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		deployLine = pinnedLine
 	}
 
-	// 4. Initialize SlotManager
-	slotMgr := NewSlotManager(deployScreen, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+	// 4. Initialize SlotManager exactly once on the normalized frame. When
+	// every strategy unit has a template, limit the expensive portrait matcher
+	// to that small subset instead of scanning the entire attack template set.
+	slotStarted := time.Now()
+	slotTemplates := e.templates
+	templateFastPath := false
+	if selected, ok := strategyTemplateSubset(e.templates, s); ok {
+		slotTemplates = selected
+		templateFastPath = true
+	}
+	slotMgr := NewSlotManager(deployScreen, pCfg, w, h, mBarY, slotTemplates, e.classify, e.logger)
+	slotMS := time.Since(slotStarted).Milliseconds()
 	if len(slotMgr.GetAllSlots()) == 0 {
 		return 0, fmt.Errorf("no active slots detected")
 	}
 
-	// 5. Detect troop counts
+	// 5. Detect troop counts once. When every strategy card was identified,
+	// OCR only those cards; otherwise fall back to the whole bar. Farm-profile
+	// validation intentionally keeps the full-bar path.
+	countStarted := time.Now()
 	troopCounter := NewTroopCounter(pCfg.Width, pCfg.Height, e.logger)
-	troopCounts := troopCounter.DetectCounts(deployScreen, slotMgr.GetAllSlots(), mBarY)
-	countMap := GetAllCounts(troopCounts)
+	defer troopCounter.Close()
 	farmProfile, farmControlled := e.cfg.Farm.ActiveProfile()
+	countSlots := slotMgr.GetAllSlots()
+	countFastPath := false
+	if !farmControlled {
+		if selected, ok := strategyCountSlots(slotMgr, s); ok {
+			countSlots = selected
+			countFastPath = true
+		}
+	}
+	troopCounts := troopCounter.DetectCounts(deployScreen, countSlots, mBarY)
+	countMS := time.Since(countStarted).Milliseconds()
+	countMap := GetAllCounts(troopCounts)
 	if farmControlled {
 		writeArmyInspection(slotMgr.GetAllSlots(), troopCounts, &farmProfile)
 	} else {
 		writeArmyInspection(slotMgr.GetAllSlots(), troopCounts, nil)
 	}
-	e.logger.Info().Interface("counts", countMap).Msg("detected troop counts")
+	e.logger.Debug().
+		Bool("fast_path", countFastPath).
+		Int("ocr_slots", len(countSlots)).
+		Int("bar_slots", len(slotMgr.GetAllSlots())).
+		Interface("counts", countMap).
+		Msg("detected troop counts")
 
 	// Windows-safe deployment path.
 	//
@@ -420,8 +336,8 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	// the live logs show ("unit not found in bar", repeated top-up taps, heroes
 	// never transitioning). For Windows, prefer the slots we just detected on
 	// THIS live 860x732 battle frame and deploy them directly along a safe edge.
-	if runtime.GOOS == "windows" {
-		e.logger.Info().Int("slots", len(slotMgr.GetAllSlots())).Msg("using Windows live-slot deployment path")
+	if runtime.GOOS == "windows" && !xingchenCompatibleAttackFlow {
+		e.logger.Debug().Int("slots", len(slotMgr.GetAllSlots())).Msg("using Windows live-slot deployment path")
 
 		// Build the Windows deployment line from the LIVE red deployment
 		// boundary, not from fixed percentages. Clash of Clans only accepts
@@ -446,84 +362,67 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			deploySide = "right"
 		}
 
-		if redZone.Valid {
-			const outsidePad = 34
-			free := map[string]int{
-				"left":   redZone.BBox.Min.X,
-				"right":  w - redZone.BBox.Max.X,
-				"top":    redZone.BBox.Min.Y,
-				"bottom": uiCutoff - redZone.BBox.Max.Y,
+		// A real user pin is an explicit calibration made against this player's
+		// current BlueStacks layout. Honor it before the coarse red-zone BBox.
+		// The BBox can legitimately span almost the whole frame when disconnected
+		// red/orange UI contours are merged, which previously discarded a valid
+		// user line and aborted the attack with "no safe Windows deploy corridor".
+		if userPinnedForTarget && len(deployLine.Points) >= 2 {
+			p1 = sanitizeWindowsDeployPoint(deployLine.Points[0], w, h)
+			p2 = sanitizeWindowsDeployPoint(deployLine.Points[len(deployLine.Points)-1], w, h)
+			if p1.Y >= uiCutoff || p2.Y >= uiCutoff {
+				return len(slotMgr.GetAllSlots()), fmt.Errorf("user-pinned Windows deploy line intersects lower battle HUD")
 			}
-
-			// Reliability first on Windows: use the side with the most real
-			// free space outside the detected red box, regardless of the
-			// strategy's preferred corner. The old preference could pick a
-			// very narrow strip and force taps back toward the village.
-			// Never choose the bottom side on Windows. The lower battle HUD
-			// contains Surrender/End Battle, Overall Damage and the troop bar.
-			// A geometrically "free" strip there is not a safe tap region.
-			deploySide = "left"
-			best := free["left"]
-			for _, side := range []string{"right", "top"} {
-				if free[side] > best {
-					deploySide = side
-					best = free[side]
-				}
-			}
-
-			switch deploySide {
-			case "right":
-				x := redZone.BBox.Max.X + outsidePad
-				if x > w-edgeMargin { x = w-edgeMargin }
-				fieldTop := int(float64(h) * 0.22)
-				fieldBottom := int(float64(h) * 0.58)
-				y1 := clamp(redZone.BBox.Min.Y+45, fieldTop, fieldBottom)
-				y2 := clamp(redZone.BBox.Max.Y-45, fieldTop, fieldBottom)
-				if y2-y1 < int(float64(h)*0.12) {
-					mid := (fieldTop + fieldBottom) / 2
-					half := int(float64(h) * 0.10)
-					y1, y2 = mid-half, mid+half
-				}
-				p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
-			case "top":
-				y := redZone.BBox.Min.Y - outsidePad
-				if y < edgeMargin { y = edgeMargin }
-				x1 := clamp(redZone.BBox.Min.X+35, edgeMargin, w-edgeMargin)
-				x2 := clamp(redZone.BBox.Max.X-35, edgeMargin, w-edgeMargin)
-				p1, p2 = image.Pt(x1, y), image.Pt(x2, y)
-			case "bottom":
-				y := redZone.BBox.Max.Y + outsidePad
-				if y > uiCutoff-edgeMargin { y = uiCutoff-edgeMargin }
-				x1 := clamp(redZone.BBox.Min.X+35, edgeMargin, w-edgeMargin)
-				x2 := clamp(redZone.BBox.Max.X-35, edgeMargin, w-edgeMargin)
-				p1, p2 = image.Pt(x1, y), image.Pt(x2, y)
-			default: // left
-				x := redZone.BBox.Min.X - outsidePad
-				if x < edgeMargin { x = edgeMargin }
-				fieldTop := int(float64(h) * 0.22)
-				fieldBottom := int(float64(h) * 0.58)
-				y1 := clamp(redZone.BBox.Min.Y+45, fieldTop, fieldBottom)
-				y2 := clamp(redZone.BBox.Max.Y-45, fieldTop, fieldBottom)
-				if y2-y1 < int(float64(h)*0.12) {
-					mid := (fieldTop + fieldBottom) / 2
-					half := int(float64(h) * 0.10)
-					y1, y2 = mid-half, mid+half
-				}
-				p1, p2 = image.Pt(x, y1), image.Pt(x, y2)
-			}
-
+			deploySide = targetEdge
+			e.lastDeploySide = deploySide
+			e.lastRedZoneBBox = redZone.BBox
+			e.lastDeployP1 = p1
+			e.lastDeployP2 = p2
+			e.lastDeployFreeSpace = 0
+			e.lastSafetyMode = "user_pinned"
+			e.lastRedZoneValid = redZone.Valid
+			e.lastCorridorVerified = true
+			e.lastHUDSafe = true
+			e.logger.Info().
+				Str("target", targetEdge).
+				Interface("p1", p1).
+				Interface("p2", p2).
+				Msg("Windows user-pinned deploy line locked")
+		} else if side, rp1, rp2, freeSpace, ok := windowsDeployCorridor(redZone, w, h, uiCutoff); ok {
+			deploySide, p1, p2 = side, rp1, rp2
+			e.lastDeploySide = deploySide
+			e.lastRedZoneBBox = redZone.BBox
+			e.lastDeployP1 = p1
+			e.lastDeployP2 = p2
+			e.lastDeployFreeSpace = freeSpace
+			e.lastSafetyMode = "live_red_zone"
+			e.lastRedZoneValid = true
+			e.lastCorridorVerified = true
+			e.lastHUDSafe = sanitizeWindowsDeployPoint(p1, w, h) == p1 && sanitizeWindowsDeployPoint(p2, w, h) == p2
 			e.logger.Info().
 				Str("side", deploySide).
 				Interface("red_bbox", redZone.BBox).
 				Interface("p1", p1).
 				Interface("p2", p2).
-				Int("free_space", free[deploySide]).
-				Msg("Windows deploy line locked to widest free side outside live red zone")
+				Int("free_space", freeSpace).
+				Msg("Windows deploy corridor locked outside live red zone")
+		} else if redZone.Valid {
+			// A live red zone was detected but no mathematically safe line could
+			// be constructed. Do not silently fall back to historical/manual
+			// coordinates: refusing to tap is safer than deploying into the red
+			// polygon or lower HUD.
+			return len(slotMgr.GetAllSlots()), fmt.Errorf("live red zone detected but no safe Windows deploy corridor exists")
 		} else if len(deployLine.Points) >= 2 {
 			// Existing calculator already keeps these points near the outer
 			// edge; use them if red-line detection itself was unavailable.
 			p1 = deployLine.Points[0]
 			p2 = deployLine.Points[len(deployLine.Points)-1]
+			e.lastDeployP1 = p1
+			e.lastDeployP2 = p2
+			e.lastSafetyMode = "pinned_or_calculated"
+			e.lastRedZoneValid = false
+			e.lastCorridorVerified = false
+			e.lastHUDSafe = sanitizeWindowsDeployPoint(p1, w, h) == p1 && sanitizeWindowsDeployPoint(p2, w, h) == p2
 			e.logger.Warn().
 				Interface("p1", p1).
 				Interface("p2", p2).
@@ -532,10 +431,17 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			// Last-resort line hugs the LEFT border rather than the middle.
 			p1 = image.Pt(edgeMargin, int(float64(h)*0.25))
 			p2 = image.Pt(edgeMargin, int(float64(h)*0.68))
+			e.lastDeployP1 = p1
+			e.lastDeployP2 = p2
+			e.lastSafetyMode = "fallback_outer_edge"
+			e.lastRedZoneValid = false
+			e.lastCorridorVerified = false
+			e.lastHUDSafe = sanitizeWindowsDeployPoint(p1, w, h) == p1 && sanitizeWindowsDeployPoint(p2, w, h) == p2
 			e.logger.Warn().Msg("Windows deploy line fallback: hugging outer left border")
 		}
 
 		tapExec := NewTapExecutor(e.client, e.cal, e.logger)
+	tapExec.SetFrameProvider(e.frameProvider)
 		tapExec.StartDeployBudget()
 		// Candidate deploy lines MUST all stay on the SAME verified outside
 		// side of the live red boundary. The previous implementation rotated
@@ -551,35 +457,17 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		baseLine := [2]image.Point{p1, p2}
 		safeLines = append(safeLines, baseLine)
 
-		nudgeOutside := func(line [2]image.Point, pixels int) [2]image.Point {
-			out := line
-			switch deploySide {
-			case "right":
-				out[0].X = clamp(out[0].X+pixels, edgeMargin, w-edgeMargin)
-				out[1].X = clamp(out[1].X+pixels, edgeMargin, w-edgeMargin)
-			case "top":
-				out[0].Y = clamp(out[0].Y-pixels, edgeMargin, uiCutoff-edgeMargin)
-				out[1].Y = clamp(out[1].Y-pixels, edgeMargin, uiCutoff-edgeMargin)
-			case "bottom":
-				out[0].Y = clamp(out[0].Y+pixels, edgeMargin, uiCutoff-edgeMargin)
-				out[1].Y = clamp(out[1].Y+pixels, edgeMargin, uiCutoff-edgeMargin)
-			default: // left
-				out[0].X = clamp(out[0].X-pixels, edgeMargin, w-edgeMargin)
-				out[1].X = clamp(out[1].X-pixels, edgeMargin, w-edgeMargin)
-			}
-			return out
-		}
-
 		// One stable line only on Windows. Repeatedly nudging farther outward
 		// eventually pushed taps into screen chrome / HUD. The base line is
 		// already outside the detected red boundary by outsidePad.
-		_ = nudgeOutside
-		e.logger.Info().
+		e.logger.Debug().
 			Str("side", deploySide).
 			Int("safe_lines", len(safeLines)).
 			Interface("closest", safeLines[0]).
 			Interface("furthest", safeLines[len(safeLines)-1]).
 			Msg("Windows safe deploy corridor locked behind red boundary")
+
+		var armyState *ArmyStateManager
 
 		// One helper for initial deploy + reconciliation. Every troop-like card
 		// uses this verified outside corridor. Retries only move farther OUT.
@@ -603,6 +491,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 						(redZone.BBox.Min.Y+redZone.BBox.Max.Y)/2,
 					)
 				}
+				if armyState != nil {
+					armyState.RecordDeploy(slot.UnitName, slot.Category, n, slot.X, slot.Y, deploySide, spellPoint, spellPoint)
+				}
 				tapExec.TapDeployPoint(spellPoint, n, 2)
 			} else {
 				// Keep the whole army on one coherent deployment line. The old
@@ -611,7 +502,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				// waste taps near the red boundary. Use the furthest verified
 				// safe line consistently for normal troops.
 				line := safeLines[len(safeLines)-1]
-				e.logger.Info().
+				e.logger.Debug().
 					Str("unit", slot.UnitName).
 					Str("category", slot.Category).
 					Interface("p1", line[0]).
@@ -619,8 +510,15 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 					Msg("Windows deploy: using outer-edge line")
 
 				if slot.Category == "Hero" || slot.Category == "Siege" || slot.Category == "CC" {
-					tapExec.TapDeployPoint(image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2), 1, 2)
+					pt := image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2)
+					if armyState != nil {
+						armyState.RecordDeploy(slot.UnitName, slot.Category, 1, slot.X, slot.Y, deploySide, pt, pt)
+					}
+					tapExec.TapDeployPoint(pt, 1, 2)
 				} else {
+					if armyState != nil {
+						armyState.RecordDeploy(slot.UnitName, slot.Category, n, slot.X, slot.Y, deploySide, line[0], line[1])
+					}
 					// Windows/BlueStacks can drop rapid tap triples under load.
 					// Use paced one-by-one line deployment so a 9-count EDrag
 					// card does not end with 1-2 troops still sitting in the bar.
@@ -634,25 +532,13 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// the initial X positions therefore makes every later tap drift onto the
 		// next card (and eventually onto hero ability buttons). This is exactly
 		// the observed "select ED -> jump to siege -> hammer last hero" failure.
-		categoryPriority := func(cat string) int {
-			switch cat {
-			case "Troop":
-				return 0
-			case "Hero":
-				return 1
-			case "Siege", "CC":
-				return 2
-			case "Spell":
-				return 3
-			default:
-				return 0
-			}
-		}
-		var armyState *ArmyStateManager
+		// Always create a replay recorder. When no farm profile is active the
+		// manager simply has no expected-unit inventory, but RecordDeploy still
+		// captures the real live-bar actions and geometry for Attack Replay.
+		armyState = NewArmyStateManager(farmProfile)
+		defer writeAttackTrace(s.Name, armyState)
 		if farmControlled {
-			armyState = NewArmyStateManager(farmProfile)
-			defer writeAttackTrace(s.Name, armyState)
-			e.logger.Info().
+			e.logger.Debug().
 				Int("town_hall", farmProfile.TownHall).
 				Str("profile", farmProfile.Label).
 				Int("troop_capacity", farmProfile.TroopCapacity).
@@ -660,6 +546,11 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				Msg("Windows deployment controlled by farm composition profile")
 		}
 		oneShotDone := make(map[string]bool)
+		// Anonymous Siege/CC cards must be blacklisted by CATEGORY after their
+		// first deployment, not by X. The live bar compacts after cards empty;
+		// an unnamed siege can therefore move to a new X and otherwise look like
+		// a fresh one-shot card on the next scan.
+		anonymousOneShotDone := make(map[string]bool)
 		// Structurally detected heroes may not have a portrait-template name.
 		// Their relative left-to-right order remains stable even as troop cards
 		// disappear, so remember how many anonymous hero cards were already
@@ -686,23 +577,29 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				continue
 			}
 
-			liveMgr := NewSlotManager(fresh, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+			rescanStarted := time.Now()
+			liveMgr := NewSlotManagerLiveRescan(fresh, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+			detectMS, classifyMS := liveMgr.Timing()
+			tried, matched := liveMgr.TemplateWork()
+			e.lastSlotDetectMicros += int64(detectMS * 1000)
+			e.lastSlotClassifyMicros += int64(classifyMS * 1000)
+			e.lastTemplatesTried += tried
+			e.lastTemplatesMatched += matched
 			liveSlots := append([]*TrackedSlot(nil), liveMgr.GetAllSlots()...)
 			if len(liveSlots) == 0 {
 				fresh.Close()
 				liveRemaining = 0
-				e.logger.Info().Int("round", liveRound).Msg("Windows live deployment: no active cards remain")
+				e.logger.Debug().Int("round", liveRound).Msg("Windows live deployment: no active cards remain")
 				break
 			}
 
 			sort.SliceStable(liveSlots, func(i, j int) bool {
-				pi := categoryPriority(liveSlots[i].Category)
-				pj := categoryPriority(liveSlots[j].Category)
+				pi := windowsCategoryPriority(liveSlots[i].Category)
+				pj := windowsCategoryPriority(liveSlots[j].Category)
 				if pi != pj { return pi < pj }
 				return liveSlots[i].X < liveSlots[j].X
 			})
 
-			liveCounts := troopCounter.DetectCounts(fresh, liveSlots, liveMgr.GetBarY())
 			var chosen *TrackedSlot
 			chosenCount := 0
 			chosenActivity := 0.0
@@ -712,6 +609,11 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				key := oneShotKey(slot)
 				// Skip every identity explicitly blacklisted for this battle.
 				if oneShotDone[key] {
+					continue
+				}
+				if strings.TrimSpace(slot.UnitName) == "" &&
+					windowsAnonymousOneShotCategory(slot.Category) &&
+					anonymousOneShotDone[slot.Category] {
 					continue
 				}
 				if slot.Category == "Hero" && strings.TrimSpace(slot.UnitName) == "" {
@@ -749,37 +651,53 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 					continue
 				}
 
-				count := GetCountForSlot(liveCounts, slot.X)
-				if count > 50 { count = 0 }
-				if armyState != nil && count > 0 && strings.TrimSpace(slot.UnitName) != "" {
-					armyState.ObserveRemaining(slot.UnitName, count)
-				}
-
+				// Slot ordering/activity decides which card is next. OCR only that
+				// selected card instead of every visible card on every rescan.
+				// This preserves the live re-indexing safety while removing
+				// repeated digit-template work from the Windows hot path.
 				chosen = slot
-				chosenCount = count
 				chosenActivity = activity
 				break
 			}
+			e.lastLiveBarRescans++
+			e.lastLiveBarRescanMicros += time.Since(rescanStarted).Microseconds()
 
 			if chosen == nil {
 				fresh.Close()
 				liveRemaining = 0
-				e.logger.Info().Int("round", liveRound).Msg("Windows live deployment: only spent/ability cards remain")
+				e.logger.Debug().Int("round", liveRound).Msg("Windows live deployment: only spent/ability cards remain")
 				break
+			}
+
+			ocrStarted := time.Now()
+			chosenCount = troopCounter.DetectCount(fresh, chosen, liveMgr.GetBarY())
+			e.lastSelectedCardOCRCount++
+			e.lastSelectedCardOCRMicros += time.Since(ocrStarted).Microseconds()
+			if chosenCount > 50 { chosenCount = 0 }
+			if armyState != nil && chosenCount > 0 && strings.TrimSpace(chosen.UnitName) != "" {
+				armyState.ObserveRemaining(chosen.UnitName, chosenCount)
 			}
 
 			key := oneShotKey(chosen)
 			cardAttempts[key]++
-			e.logger.Info().
-				Int("round", liveRound).
-				Str("unit", chosen.UnitName).
-				Str("category", chosen.Category).
-				Int("slot_x", chosen.X).
-				Int("slot_y", chosen.Y).
-				Int("ocr_count", chosenCount).
-				Float64("activity", chosenActivity).
-				Int("attempt", cardAttempts[key]).
-				Msg("Windows live deployment: freshly reacquired current card")
+			if cardAttempts[key] == 1 {
+				e.logger.Info().
+					Str("unit", chosen.UnitName).
+					Str("category", chosen.Category).
+					Int("count", chosenCount).
+					Msg("deploying card")
+			} else {
+				e.logger.Debug().
+					Int("round", liveRound).
+					Str("unit", chosen.UnitName).
+					Str("category", chosen.Category).
+					Int("slot_x", chosen.X).
+					Int("slot_y", chosen.Y).
+					Int("ocr_count", chosenCount).
+					Float64("activity", chosenActivity).
+					Int("attempt", cardAttempts[key]).
+					Msg("reacquired card for deployment reconciliation")
+			}
 
 			// Use the current fresh coordinates only. Close the frame before
 			// sending ADB input; the card will be reacquired again afterwards.
@@ -788,20 +706,27 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			if chosen.Category == "Hero" || chosen.Category == "Siege" || chosen.Category == "CC" {
 				line := safeLines[len(safeLines)-1]
 				pt := image.Pt((line[0].X+line[1].X)/2, (line[0].Y+line[1].Y)/2)
+				if armyState != nil {
+					armyState.RecordDeploy(chosen.UnitName, chosen.Category, 1, chosen.X, chosen.Y, deploySide, pt, pt)
+				}
 				tapExec.TapSlot(chosen, 1)
 				tapExec.HumanSleep(130, 15)
 				tapExec.TapDeployPoint(pt, 1, 1)
 				oneShotDone[key] = true
+				if strings.TrimSpace(chosen.UnitName) == "" &&
+					windowsAnonymousOneShotCategory(chosen.Category) {
+					anonymousOneShotDone[chosen.Category] = true
+				}
 				if chosen.Category == "Hero" && strings.TrimSpace(chosen.UnitName) == "" {
 					unknownHeroesDeployed++
-					e.logger.Info().
+					e.logger.Debug().
 						Int("anonymous_heroes_deployed", unknownHeroesDeployed).
 						Msg("Windows anonymous hero deployed once; advancing structural hero cursor")
 				}
 				if armyState != nil && strings.TrimSpace(chosen.UnitName) != "" {
 					armyState.CompleteOneShot(chosen.UnitName)
 				}
-				e.logger.Info().
+				e.logger.Debug().
 					Str("unit", chosen.UnitName).
 					Str("category", chosen.Category).
 					Interface("deploy_point", pt).
@@ -825,7 +750,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 					profileFirstDeploy[key] = true
 					if chosenCount <= 0 {
 						count = desired
-						e.logger.Info().
+						e.logger.Debug().
 							Str("unit", chosen.UnitName).
 							Int("profile_count", desired).
 							Msg("farm profile: OCR unavailable; using configured count as guarded fallback")
@@ -859,6 +784,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			// Do not trust old coordinates after this point. On the next loop
 			// the whole bar is captured and re-indexed from scratch.
 			if cardAttempts[key] >= 8 && chosen.UnitName != "" && chosenCount <= 0 {
+				if armyState != nil {
+					armyState.RecordReplayEvent("failed", chosen.UnitName, chosen.Category)
+				}
 				e.logger.Warn().
 					Str("unit", chosen.UnitName).
 					Str("category", chosen.Category).
@@ -874,7 +802,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		// remain. Deployed hero ability cards are intentionally ignored.
 		finalFrame, finalErr := tapExec.CaptureFresh()
 		if finalErr == nil && !finalFrame.Empty() {
-			finalMgr := NewSlotManager(finalFrame, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+			finalMgr := NewSlotManagerLiveRescan(finalFrame, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
 			finalCounts := troopCounter.DetectCounts(finalFrame, finalMgr.GetAllSlots(), finalMgr.GetBarY())
 			liveRemaining = 0
 			for _, slot := range finalMgr.GetAllSlots() {
@@ -905,6 +833,13 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		if profileIncomplete > totalRemaining {
 			totalRemaining = profileIncomplete
 		}
+		if armyState != nil {
+			if totalRemaining > 0 {
+				armyState.RecordReplayEvent("deployment_incomplete", "", "")
+			} else {
+				armyState.RecordReplayEvent("deployment_complete", "", "")
+			}
+		}
 
 		e.logger.Info().
 			Int("visible_remaining", liveRemaining).
@@ -923,6 +858,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 	// 6. Initialize tap executor
 	tapExec := NewTapExecutor(e.client, e.cal, e.logger)
+	tapExec.SetFrameProvider(e.frameProvider)
 	// Give deployers a unit-name -> slot lookup (used to pair Amount:"All"
 	// spells with their live OCR counts).
 	tapExec.SetSlotResolver(slotMgr.GetSlot)
@@ -935,190 +871,160 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	// battle had already ended because no wall-clock bound existed.
 	tapExec.StartDeployBudget()
 
-	// 7. Plan phases
+	// 7. Build the complete immutable plan before the first deploy tap.
 	planner := NewDeployPlanner(slotMgr, pCfg, targetEdge, w, h, e.logger)
-	plans := planner.PlanDeployment(s)
+	prepared := planner.Prepare(s)
+	plans := prepared.Phases
+	analysisMS := time.Since(analysisStarted).Milliseconds()
+
+	planLog := e.logger.Info().
+		Int64("analysis_ms", analysisMS).
+		Int64("camera_ms", cameraMS).
+		Int64("slot_ms", slotMS).
+		Int64("count_ms", countMS).
+		Bool("template_fast_path", templateFastPath).
+		Int("templates_considered", len(slotTemplates)).
+		Bool("count_fast_path", countFastPath).
+		Int("ocr_slots", len(countSlots)).
+		Int64("planner_ms", prepared.BuiltIn.Milliseconds()).
+		Int("slots", len(slotMgr.GetAllSlots())).
+		Int("resolved_units", prepared.ResolvedUnits).
+		Str("target_edge", targetEdge).
+		Bool("red_zone_valid", redZone.Valid)
+	if len(prepared.MissingUnits) > 0 {
+		planLog = planLog.Strs("missing_units", prepared.MissingUnits)
+	}
+	planLog.Msg("attack plan ready")
+
+	// Planning should normally be only a few seconds. Do not abort a valid
+	// attack solely because a slow machine exceeded the target; surface the
+	// exact timing instead so the hot path can be tuned without blind delays.
+	if analysisMS > 5000 {
+		e.logger.Warn().
+			Int64("analysis_ms", analysisMS).
+			Int64("camera_ms", cameraMS).
+			Int64("slot_ms", slotMS).
+			Int64("count_ms", countMS).
+			Msg("attack preparation exceeded 5s target")
+	}
+	if e.OnPlanReady != nil {
+		e.OnPlanReady(time.Since(analysisStarted), targetEdge)
+	}
 
 	// 8. Collect strategy unit names
 	strategyNames := GetStrategyUnitNames(s)
 
-	// 9. Execute each phase
+	// 9. Execute the prebuilt plan through one deployment scheduler. A whole
+	// card transaction (select -> settle -> deploy -> one bounded verify) is
+	// atomic from the scheduler's point of view, so no second action can steal
+	// the selected troop/spell between taps.
+	scheduler := NewDeployScheduler(e.logger)
 	for _, plan := range plans {
-		// Hard deploy-time stop: if the budget ran out mid-plan, abandon
-		// the remaining phases instead of tapping into the battle timer.
-		// The leftover slots are reported as undeployed so the attack
-		// report shows the partial failure instead of a phantom success.
 		if tapExec.DeployBudgetExhausted() {
 			remaining := len(slotMgr.GetUndeployedSlots())
 			e.logger.Warn().
 				Str("phase", plan.Phase.Name).
 				Dur("budget", DeployBudget).
 				Int("undeployed", remaining).
-				Msg("deploy budget exhausted before phases completed; stopping deploy (battle-timer guard)")
+				Msg("deploy budget exhausted before phases completed; stopping deploy")
 			return remaining, fmt.Errorf("deploy budget exhausted (%s); %d slots undeployed", DeployBudget, remaining)
 		}
 
-		e.logger.Info().Str("phase", plan.Phase.Name).Msg("attack phase")
+		e.logger.Debug().Str("phase", plan.Phase.Name).Msg("attack phase")
 		if e.OnPhaseStart != nil {
 			e.OnPhaseStart(plan.Phase.Name, targetEdge)
 		}
 
-		// Deploy spells. Thread the live OCR counts + slot resolver so
-		// Amount:"All" spells tap exactly the count the army carries
-		// instead of a hardcoded 5 (the valk EQ army carries e.g. 4 EQs
-		// on one card; the edrag rush carries 11 rage on another).
 		spellDeployer := NewSpellDeployerWithCounts(tapExec, pCfg, formulaPtr, w, h, countMap, e.logger)
 		spellDeployer.SetCounter(troopCounter, slotMgr.GetBarY())
-		for _, up := range ResolveSpellTargets(plan) {
-			if up.Slot == nil {
+		for _, planned := range ResolveSpellTargets(plan) {
+			if planned.Slot == nil {
 				continue
 			}
-			e.logger.Info().
-				Str("unit", up.Unit.Name).
-				Int("x", up.Slot.X).
-				Msg("deploying spell")
-
-			if e.OnUnitDeploy != nil {
-				e.OnUnitDeploy(up.Unit.Name, up.Slot.X, slotMgr.GetSlotY())
-			}
-
-			tapExec.TapSlot(up.Slot, 8)
-			// 150ms is the empirically-required CoC slot-selection
-			// animation floor (matches deploySingleHero's settle on
-			// heroes). The previous 35ms was too fast: the bot
-			// frequently "selected" the ED slot but CoC was still
-			// mid-animation from the prior phase, so taps fired on
-			// the OLD unit type instead of ED. Live data:
-			// auto_edrag_rush showed zero EDs on the field after
-			// the deploy despite the bot reporting "all units
-			// successfully deployed". Same fix applies to Spells +
-			// Siege (they share the 35ms gap and the same bug).
-			tapExec.HumanSleep(150, 30)
-
-			success := spellDeployer.DeploySpell(up.Unit, up.Slot, targetEdge, plan.Phase.Pattern)
-			if success {
-				slotMgr.MarkDeployed(strings.ToLower(up.Unit.Name))
-				// Post-deploy verify: live-OCR the card count and re-fire
-				// any spells that didn't drop (same reconcile philosophy as
-				// the troop path). Best-effort — a failed OCR just logs.
-				// 4 rounds: each round fires only the unconfirmed remainder,
-				// and the internal no-progress stop aborts early when OCR
-				// reads the same count twice — so more headroom only helps
-				// genuinely draining multi-charge cards, never the spent-
-				// card loop (live: 1-charge rage re-fired for the old 2-
-				// round budget while OCR read "1" every time).
-				if extra, confirmed := spellDeployer.VerifyAndReconcile(up.Unit, up.Slot, targetEdge, plan.Phase.Pattern, 4); extra > 0 {
-					e.logger.Info().
-						Str("unit", up.Unit.Name).
-						Int("extra_fired", extra).
-						Bool("confirmed_empty", confirmed).
-						Msg("spell reconcile fired extra spells")
+			up := planned
+			scheduler.Run("spell:"+up.Unit.Name, func() {
+				if e.OnUnitDeploy != nil {
+					e.OnUnitDeploy(up.Unit.Name, up.Slot.X, slotMgr.GetSlotY())
 				}
-			}
+				tapExec.TapSlot(up.Slot, 8)
+				// Keep the empirically safe card-selection settle; removing this
+				// saves little but can deploy the previously-selected card.
+				tapExec.HumanSleep(150, 30)
+				if spellDeployer.DeploySpell(up.Unit, up.Slot, targetEdge, plan.Phase.Pattern) {
+					slotMgr.MarkDeployed(strings.ToLower(up.Unit.Name))
+					// Exactly one targeted confirmation. No multi-round OCR loop on
+					// the normal path.
+					if extra, confirmed := spellDeployer.VerifyAndReconcile(up.Unit, up.Slot, targetEdge, plan.Phase.Pattern, 1); extra > 0 {
+						e.logger.Debug().
+							Str("unit", up.Unit.Name).
+							Int("extra_fired", extra).
+							Bool("confirmed_empty", confirmed).
+							Msg("spell recovery top-up")
+					}
+				}
+			})
 		}
 
-		// Deploy troops
 		heroMgr := NewHeroManager(tapExec, slotMgr, pCfg, targetEdge, w, h, formulaPtr, troopCounter, e.logger)
-		// Bridge: when HeroManager's resolveHeroTarget fires for the
-		// Dragon Duke, route the event through Executor.OnDukePick so a
-		// single observer (live bot's NDJSON writer, debug_test's
-		// recorder) sees BOTH the legacy adjacent-corner random pick and
-		// the new "follow the chosen edge" behavior. chosen == target in
-		// the new path — Duke falls through to the chosen edge with a
-		// random point along it.
 		heroMgr.OnDukeDeployed = func(target string) {
 			if e.OnDukePick != nil {
 				e.OnDukePick(target, target)
 			}
 		}
-		for _, up := range ResolveTroopTargets(plan) {
-			if up.Slot == nil {
+
+		for _, planned := range ResolveTroopTargets(plan) {
+			if planned.Slot == nil {
 				continue
 			}
-			e.logger.Info().
-				Str("unit", up.Unit.Name).
-				Int("x", up.Slot.X).
-				Msg("deploying troop")
-
-			if e.OnUnitDeploy != nil {
-				e.OnUnitDeploy(up.Unit.Name, up.Slot.X, slotMgr.GetSlotY())
-			}
-
-			tapExec.TapSlot(up.Slot, 8)
-			// 150ms is the empirically-required CoC slot-selection
-			// animation floor (matches deploySingleHero's settle on
-			// heroes). The previous 35ms was too fast: the bot
-			// frequently "selected" the ED slot but CoC was still
-			// mid-animation from the prior phase, so taps fired on
-			// the OLD unit type instead of ED. Live data:
-			// auto_edrag_rush showed zero EDs on the field after
-			// the deploy despite the bot reporting "all units
-			// successfully deployed". Same fix applies to Spells +
-			// Siege (they share the 35ms gap and the same bug).
-			tapExec.HumanSleep(150, 30)
-
-			detectedCount := GetCountForSlot(troopCounts, up.Slot.X)
-			heroMgr.DeployTroops(up.Unit, up.Slot, plan.Phase.Pattern, plan.Phase.Offset, plan.Phase.Pattern, screen, detectedCount)
+			up := planned
+			scheduler.Run("troop:"+up.Unit.Name, func() {
+				if e.OnUnitDeploy != nil {
+					e.OnUnitDeploy(up.Unit.Name, up.Slot.X, slotMgr.GetSlotY())
+				}
+				tapExec.TapSlot(up.Slot, 8)
+				tapExec.HumanSleep(150, 30)
+				detectedCount := GetCountForSlot(troopCounts, up.Slot.X)
+				heroMgr.DeployTroops(
+					up.Unit,
+					up.Slot,
+					plan.Phase.Pattern,
+					plan.Phase.Offset,
+					plan.Phase.Pattern,
+					deployScreen,
+					detectedCount,
+				)
+			})
 		}
 
-		// Deploy siege
-		for _, up := range ResolveSiegeTargets(plan) {
-			if up.Slot == nil {
+		for _, planned := range ResolveSiegeTargets(plan) {
+			if planned.Slot == nil {
 				continue
 			}
-			e.logger.Info().
-				Str("unit", up.Unit.Name).
-				Int("x", up.Slot.X).
-				Msg("deploying siege")
-
-			if e.OnUnitDeploy != nil {
-				e.OnUnitDeploy(up.Unit.Name, up.Slot.X, slotMgr.GetSlotY())
-			}
-
-			tapExec.TapSlot(up.Slot, 8)
-			// 150ms is the empirically-required CoC slot-selection
-			// animation floor (matches deploySingleHero's settle on
-			// heroes). The previous 35ms was too fast: the bot
-			// frequently "selected" the ED slot but CoC was still
-			// mid-animation from the prior phase, so taps fired on
-			// the OLD unit type instead of ED. Live data:
-			// auto_edrag_rush showed zero EDs on the field after
-			// the deploy despite the bot reporting "all units
-			// successfully deployed". Same fix applies to Spells +
-			// Siege (they share the 35ms gap and the same bug).
-			tapExec.HumanSleep(150, 30)
-
-			heroMgr.DeploySiege(up.Unit, up.Slot)
+			up := planned
+			scheduler.Run("siege:"+up.Unit.Name, func() {
+				if e.OnUnitDeploy != nil {
+					e.OnUnitDeploy(up.Unit.Name, up.Slot.X, slotMgr.GetSlotY())
+				}
+				tapExec.TapSlot(up.Slot, 8)
+				tapExec.HumanSleep(150, 30)
+				heroMgr.DeploySiege(up.Unit, up.Slot)
+			})
 		}
 
-		// Deploy heroes
 		if strings.Contains(plan.Phase.Name, "Heroes") {
 			heroUnits := make([]strategy.Unit, 0)
 			for _, up := range ResolveHeroTargets(plan) {
 				heroUnits = append(heroUnits, up.Unit)
 			}
 			if len(heroUnits) > 0 {
-				heroMgr.DeployHeroes(heroUnits, screen)
+				scheduler.Run("heroes:"+plan.Phase.Name, func() {
+					heroMgr.DeployHeroes(heroUnits, deployScreen)
+				})
 			}
 		}
 
-		// Phase delay defaults tightened: Heroes/Siege used to sit at
-		// 500ms post-phase, which compounded with each hero's 800ms settle
-		// inside hero_manager.go to produce a >1.5s wall-clock gap between
-		// heroes (visibly bot-paced).
-		//
-		// USER YAML WINS. The previous override unconditionally clamped
-		// to 100ms regardless of the strategy's `delay_after_ms`, which
-		// made the field useless for Heroes/Siege. New rule: only fall
-		// back when the YAML value is unset (0); any explicit YAML value
-		// (including small ones like 50ms) is preserved.
-		//
-		// Overall cap is maxPhaseDelay. Anything above gets WARN-logged
-		// so authors can spot unintentional bloat. The cap is high
-		// enough for spells (which legitimately need a long settle for
-		// the multi-tap flow to register).
 		const heroSiegeDefault = 50 * time.Millisecond
-		const interPhaseMin = 50 * time.Millisecond // Safety floor so YAML values like delay_after_ms: 10 do not bypass the inter-phase settle window — CoC needs ~50ms minimum between phases to register the new troop bar state.
+		const interPhaseMin = 50 * time.Millisecond
 		const maxPhaseDelay = 200 * time.Millisecond
 		pDelay := time.Duration(plan.Phase.DelayAfterMS) * time.Millisecond
 		isHeroOrSiege := strings.Contains(plan.Phase.Name, "Heroes") || strings.Contains(plan.Phase.Name, "Siege")
@@ -1133,7 +1039,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				Str("phase", plan.Phase.Name).
 				Dur("requested", pDelay).
 				Dur("clamped_to", maxPhaseDelay).
-				Msg("phase delay_after_ms exceeds cap; clamping to keep attack human-paced")
+				Msg("phase delay exceeds cap; clamping")
 			pDelay = maxPhaseDelay
 		}
 		if pDelay > 0 {
@@ -1141,18 +1047,35 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		}
 	}
 
-	// 10. Sweep remaining. Pass formulaPtr so the sweep path honors
-	// user-pinned _event_troop / _event_spell coords the same way
-	// DeployHeroes / DeployTroops already do. Without this the bot
-	// silently dropped event troops on the dynamically-detected
-	// red-zone line, ignoring the user's pin entirely.
-	sweeper := NewSweeper(tapExec, slotMgr, pCfg, deployLine, w, h, formulaPtr, troopCounter, s.EventTroopsAutoDeployEnabled(), e.logger)
-	sweeper.Sweep(strategyNames, countMap)
+	if ops, scheduledFor := scheduler.Stats(); ops > 0 {
+		e.logger.Info().
+			Uint64("scheduled_actions", ops).
+			Dur("scheduler_total", scheduledFor).
+			Msg("deployment scheduler completed prepared actions")
+	}
 
-	// 11. Verify
-	verifier := NewVerifier(tapExec, slotMgr, pCfg, targetEdge, w, h, DefaultVerifyConfig(), troopCounter, e.logger)
+	// 10. Recovery-only sweep. On the normal path every planned card has
+	// already been marked deployed, so skip the expensive fresh-frame sweep.
+	remainingBeforeSweep := len(slotMgr.GetUndeployedSlots())
+	if remainingBeforeSweep > 0 {
+		e.logger.Debug().Int("remaining", remainingBeforeSweep).Msg("running recovery sweep for unresolved cards")
+		sweeper := NewSweeper(tapExec, slotMgr, pCfg, deployLine, w, h, formulaPtr, troopCounter, s.EventTroopsAutoDeployEnabled(), e.logger)
+		sweeper.Sweep(strategyNames, countMap)
+	}
+
+	// 11. One checkpoint only when something still appears unresolved.
+	remainingAfterSweep := len(slotMgr.GetUndeployedSlots())
+	if remainingAfterSweep == 0 {
+		e.logger.Info().Dur("deploy_total", time.Since(analysisStarted)).Msg("deployment complete without recovery scan")
+		return 0, nil
+	}
+
+	verifier := NewVerifier(tapExec, slotMgr, pCfg, targetEdge, w, h, FastVerifyConfig(), troopCounter, e.logger)
 	remainingCount := verifier.VerifyAll()
-
+	e.logger.Info().
+		Int("remaining", remainingCount).
+		Dur("deploy_total", time.Since(analysisStarted)).
+		Msg("deployment recovery checkpoint complete")
 	return remainingCount, nil
 }
 
