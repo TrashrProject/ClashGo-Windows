@@ -560,9 +560,9 @@ func (b *Bot) captureLoop() {
 			case PhaseSearching:
 				return 700 * time.Millisecond
 			case PhasePlanning:
-				return 280 * time.Millisecond
+				return 650 * time.Millisecond
 			case PhaseDeploying:
-				return 280 * time.Millisecond
+				return 350 * time.Millisecond
 			case PhaseBattle, PhaseParsingResult, PhaseReturningHome:
 				return 650 * time.Millisecond
 			default:
