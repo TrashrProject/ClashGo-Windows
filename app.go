@@ -4268,6 +4268,218 @@ func (a *App) SaveAccountConfig(playerTag string) error {
 	return nil
 }
 
+type MultiAccountView struct {
+	Enabled            bool                    `json:"enabled"`
+	ActiveAccountID    string                  `json:"active_account_id,omitempty"`
+	DefaultAttacksTurn int                     `json:"default_attacks_per_turn"`
+	Accounts           []config.ManagedAccount `json:"accounts"`
+}
+
+func (a *App) GetMultiAccountConfig() MultiAccountView {
+	cfg := config.LoadOrDefault("config.json")
+	m := cfg.Account.MultiAccount
+	accounts := append([]config.ManagedAccount(nil), m.Accounts...)
+	return MultiAccountView{
+		Enabled:            m.Enabled,
+		ActiveAccountID:    m.ActiveAccountID,
+		DefaultAttacksTurn: m.DefaultAttacksTurn,
+		Accounts:           accounts,
+	}
+}
+
+func (a *App) SaveMultiAccountConfig(configJSON string) error {
+	if a.botSessionActiveOrStarting() {
+		return fmt.Errorf("stop ClashGO before changing multi-account configuration")
+	}
+
+	var incoming config.MultiAccountConfig
+	if err := json.Unmarshal([]byte(configJSON), &incoming); err != nil {
+		return fmt.Errorf("invalid multi-account configuration: %w", err)
+	}
+	if incoming.DefaultAttacksTurn <= 0 {
+		incoming.DefaultAttacksTurn = 10
+	}
+	if incoming.DefaultAttacksTurn > 100 {
+		return fmt.Errorf("default attacks per turn must be between 1 and 100")
+	}
+	if len(incoming.Accounts) > 20 {
+		return fmt.Errorf("a maximum of 20 Clash accounts is supported")
+	}
+
+	seenIDs := map[string]bool{}
+	seenTags := map[string]bool{}
+	seenSlots := map[int]bool{}
+	activeFound := false
+
+	for i := range incoming.Accounts {
+		acc := &incoming.Accounts[i]
+		acc.ID = strings.TrimSpace(acc.ID)
+		acc.Label = strings.TrimSpace(acc.Label)
+		if acc.ID == "" {
+			acc.ID = fmt.Sprintf("account-%d", i+1)
+		}
+		if seenIDs[acc.ID] {
+			return fmt.Errorf("duplicate account id %q", acc.ID)
+		}
+		seenIDs[acc.ID] = true
+
+		tag, err := normalizePlayerTag(acc.PlayerTag)
+		if err != nil {
+			return fmt.Errorf("account %q: %w", acc.Label, err)
+		}
+		acc.PlayerTag = tag
+		if seenTags[tag] {
+			return fmt.Errorf("player tag %s is already configured", tag)
+		}
+		seenTags[tag] = true
+
+		if acc.SwitchSlot < 0 || acc.SwitchSlot > 20 {
+			return fmt.Errorf("account %q switch slot must be between 1 and 20", acc.Label)
+		}
+		if acc.Enabled && acc.SwitchSlot > 0 {
+			if seenSlots[acc.SwitchSlot] {
+				return fmt.Errorf("switch slot %d is used by more than one enabled account", acc.SwitchSlot)
+			}
+			seenSlots[acc.SwitchSlot] = true
+		}
+		if acc.MaxAttacksPerTurn < 0 || acc.MaxAttacksPerTurn > 100 {
+			return fmt.Errorf("account %q attacks per turn must be between 0 and 100", acc.Label)
+		}
+		if acc.TownHall != 0 && (acc.TownHall < 8 || acc.TownHall > 18) {
+			return fmt.Errorf("account %q town hall must be between 8 and 18", acc.Label)
+		}
+		if raw := strings.TrimSpace(acc.StrategyFile); raw != "" {
+			name := filepath.Base(filepath.Clean(raw))
+			ext := strings.ToLower(filepath.Ext(name))
+			if ext != ".yaml" && ext != ".csv" {
+				return fmt.Errorf("account %q has unsupported strategy %q", acc.Label, name)
+			}
+			resolved := paths.Resolve(filepath.Join("strategies", name))
+			if info, err := os.Stat(resolved); err != nil || info.IsDir() {
+				return fmt.Errorf("strategy %q for account %q was not found", name, acc.Label)
+			}
+			acc.StrategyFile = name
+		}
+		if acc.ID == incoming.ActiveAccountID {
+			activeFound = true
+		}
+	}
+
+	if incoming.ActiveAccountID != "" && !activeFound {
+		return fmt.Errorf("active multi-account profile %q was not found", incoming.ActiveAccountID)
+	}
+	if incoming.ActiveAccountID == "" {
+		for _, acc := range incoming.Accounts {
+			if acc.Enabled {
+				incoming.ActiveAccountID = acc.ID
+				activeFound = true
+				break
+			}
+		}
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Account.MultiAccount = incoming
+	if incoming.ActiveAccountID != "" {
+		for _, acc := range incoming.Accounts {
+			if acc.ID != incoming.ActiveAccountID {
+				continue
+			}
+			cfg.Account.PlayerTag = acc.PlayerTag
+			if acc.TownHall >= 8 && acc.TownHall <= 18 {
+				if _, ok := cfg.Attack.Farm.Profiles[fmt.Sprintf("%d", acc.TownHall)]; ok {
+					cfg.Attack.Farm.TownHall = acc.TownHall
+					cfg.Attack.Farm.Enabled = true
+				}
+			}
+			if acc.StrategyFile != "" {
+				cfg.Attack.StrategyFile = paths.Resolve(filepath.Join("strategies", filepath.Base(acc.StrategyFile)))
+			}
+			break
+		}
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	oldTag, hadOldTag := a.loadMemberAccountTag()
+	accountPath := a.memberAccountPath()
+	if err := a.persistMemberAccountTag(cfg.Account.PlayerTag); err != nil {
+		return err
+	}
+	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldTag {
+			_ = saveMemberAccountFile(accountPath, oldTag)
+		} else if accountPath != "" {
+			_ = os.Remove(accountPath)
+			_ = os.Remove(accountPath + ".bak")
+			_ = os.Remove(accountPath + ".tmp")
+		}
+		return err
+	}
+	return nil
+}
+
+func (a *App) GetMultiAccountSwitchCalibration() string {
+	data, err := os.ReadFile(paths.ResolveConfig("multi_account_switch.json"))
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func (a *App) SaveMultiAccountSwitchCalibration(calibrationJSON string) error {
+	if a.botSessionActiveOrStarting() {
+		return fmt.Errorf("stop ClashGO before changing multi-account calibration")
+	}
+	var probe struct {
+		Version int `json:"version"`
+		Width int `json:"width"`
+		Height int `json:"height"`
+		Settings map[string]int `json:"settings_button"`
+		Supercell map[string]int `json:"supercell_id_button"`
+		Switch map[string]int `json:"switch_account_button"`
+		Slots map[string]map[string]int `json:"account_slots"`
+	}
+	if err := json.Unmarshal([]byte(calibrationJSON), &probe); err != nil {
+		return fmt.Errorf("invalid multi-account calibration: %w", err)
+	}
+	validRect := func(r map[string]int) bool {
+		return r["x2"] > r["x1"] && r["y2"] > r["y1"] &&
+			r["x1"] >= 0 && r["y1"] >= 0 && r["x2"] <= probe.Width && r["y2"] <= probe.Height
+	}
+	if probe.Width <= 0 || probe.Height <= 0 ||
+		!validRect(probe.Settings) || !validRect(probe.Supercell) || !validRect(probe.Switch) {
+		return fmt.Errorf("multi-account calibration is incomplete")
+	}
+	if len(probe.Slots) == 0 {
+		return fmt.Errorf("at least one account slot must be calibrated")
+	}
+	for slot, rect := range probe.Slots {
+		if _, err := strconv.Atoi(slot); err != nil || !validRect(rect) {
+			return fmt.Errorf("invalid calibrated account slot %q", slot)
+		}
+	}
+	var normalized any
+	if err := json.Unmarshal([]byte(calibrationJSON), &normalized); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(normalized, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := paths.ResolveConfig("multi_account_switch.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	_ = os.Remove(path)
+	return os.Rename(tmp, path)
+}
+
 // ClearAccount removes the local player link. No developer credential is
 // stored on the client anymore, so unlinking is intentionally lightweight.
 func (a *App) ClearAccount() error {
