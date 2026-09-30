@@ -234,6 +234,61 @@ func (b *Bot) waitForAccountVisualChange(startSeq, beforeHash uint64, timeout ti
 	return bestDistance, false
 }
 
+func accountSceneStableDistance(a, b uint64) int {
+	return bits.OnesCount64(a ^ b)
+}
+
+func (b *Bot) waitForStableAccountScene(timeout time.Duration) (int, bool) {
+	if b == nil {
+		return 0, false
+	}
+	if timeout <= 0 {
+		timeout = 4 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	lastHash, lastSeq, err := b.accountSceneFingerprint(1500 * time.Millisecond)
+	if err != nil {
+		return 0, false
+	}
+	stableTransitions := 0
+	bestDistance := 64
+	for time.Now().Before(deadline) {
+		if b.ctx.Err() != nil {
+			return bestDistance, false
+		}
+		if b.frameSeq.Load() <= lastSeq {
+			if !b.sleepResponsive(120 * time.Millisecond) {
+				return bestDistance, false
+			}
+			continue
+		}
+		currentHash, seq, err := b.accountSceneFingerprint(1200 * time.Millisecond)
+		if err != nil || seq <= lastSeq {
+			if !b.sleepResponsive(120 * time.Millisecond) {
+				return bestDistance, false
+			}
+			continue
+		}
+		distance := accountSceneStableDistance(lastHash, currentHash)
+		if distance < bestDistance {
+			bestDistance = distance
+		}
+		if distance <= 4 {
+			stableTransitions++
+			if stableTransitions >= 2 {
+				return distance, true
+			}
+		} else {
+			stableTransitions = 0
+		}
+		lastHash, lastSeq = currentHash, seq
+		if !b.sleepResponsive(120 * time.Millisecond) {
+			return bestDistance, false
+		}
+	}
+	return bestDistance, false
+}
+
 func (b *Bot) accountState(timeout time.Duration) (game.GameState, error) {
 	screen, err := b.runtimeFrameFresh(timeout)
 	if err != nil {
@@ -398,6 +453,10 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) (retErr erro
 	if state, err := b.accountState(2 * time.Second); err != nil || state == game.StateMainVillage {
 		_ = b.client.Back()
 		return fmt.Errorf("account selector was not confirmed")
+	}
+	if distance, ok := b.waitForStableAccountScene(4 * time.Second); !ok {
+		_ = b.client.Back()
+		return fmt.Errorf("account selector did not become visually stable (distance=%d)", distance)
 	}
 
 	if err := b.tapAccountRect(c, slot, "account_slot"); err != nil {
