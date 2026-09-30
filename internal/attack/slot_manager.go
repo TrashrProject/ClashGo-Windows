@@ -872,6 +872,52 @@ func (sm *SlotManager) GetEventTroops(strategyUnitNames []string) []*TrackedSlot
 	return result
 }
 
+// RefreshAfterSlotConsumed verifies a disappearing card by structure rather
+// than OCR at its OLD X coordinate. Once CoC compacts the troop bar, that old
+// coordinate may already belong to the next card, so an OCR read there can
+// falsely look like "troops remain".
+//
+// Success means the live card count matches exactly what it should be after
+// removing consumed. Remaining identities are preserved left-to-right and
+// only their X coordinates are updated.
+func (sm *SlotManager) RefreshAfterSlotConsumed(screen gocv.Mat, consumed *TrackedSlot) bool {
+	if sm == nil || consumed == nil || screen.Empty() {
+		return false
+	}
+	activeXs := sm.detectActiveSlots(screen)
+	if len(activeXs) == 0 {
+		return false
+	}
+
+	remaining := make([]*TrackedSlot, 0, len(sm.slots))
+	for _, slot := range sm.slots {
+		if slot == consumed || slot.State == SlotDeployed || slot.State == SlotFailed || slot.IsEmpty {
+			continue
+		}
+		remaining = append(remaining, slot)
+	}
+	if len(activeXs) != len(remaining) {
+		return false
+	}
+
+	sort.Slice(remaining, func(i, j int) bool { return remaining[i].X < remaining[j].X })
+	sort.Ints(activeXs)
+	for i, slot := range remaining {
+		slot.X = activeXs[i]
+		slot.Y = sm.slotY
+	}
+	sm.xIndex = make(map[int]*TrackedSlot, len(sm.slots))
+	for _, slot := range sm.slots {
+		sm.xIndex[slot.X] = slot
+	}
+
+	sm.logger.Debug().
+		Str("consumed", consumed.UnitName).
+		Ints("remaining_xs", activeXs).
+		Msg("troop card consumption confirmed from bar compaction")
+	return true
+}
+
 // RefreshActivePositions remaps only undeployed cards to the currently
 // visible troop-bar centers. It is deliberately conservative: the update is
 // applied only when the number of detected live cards exactly matches the
