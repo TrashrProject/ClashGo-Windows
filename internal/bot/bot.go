@@ -104,6 +104,7 @@ type Bot struct {
 	runtimePhaseSince atomic.Int64
 	recoveryInFlight atomic.Bool
 	restartInFlight atomic.Bool
+	multiAccountSwitchInFlight atomic.Bool
 
 	chestDismissInFlight  atomic.Bool
 	rewardDismissInFlight atomic.Bool
@@ -2923,6 +2924,15 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 	if b.multiAccount != nil {
 		if next, due := b.multiAccount.NextDue(); due {
+			if b.wallUpgradePending.Load() {
+				b.logger.Info().
+					Str("next_account_id", next.ID).
+					Msg("multi-account rotation deferred until pending wall upgrades are resolved")
+			} else if b.multiAccountSwitchInFlight.Load() {
+				b.logger.Debug().
+					Str("next_account_id", next.ID).
+					Msg("multi-account rotation already in progress")
+			} else {
 			if allowed, remaining := b.multiAccount.SwitchAttemptAllowed(time.Now()); !allowed {
 				b.logger.Debug().
 					Dur("retry_in", remaining).
@@ -2941,6 +2951,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 					_ = b.multiAccount.MarkSwitchFailed(err)
 					b.logger.Warn().Err(err).Msg("multi-account switch deferred safely")
 				}
+			}
 			}
 		}
 	}
