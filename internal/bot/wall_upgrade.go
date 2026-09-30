@@ -297,6 +297,7 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 	stageStarted := time.Now()
 	attempts := 0
 	resourceVerified := false
+	verificationEvidenceAvailable := false
 	for attempts < 2 {
 		attempts++
 		retryableFailure = false
@@ -315,6 +316,9 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 			}
 			now := readResources()
 			spent, comparable := resourcesSpent(resourceBaseline, now)
+			if comparable {
+				verificationEvidenceAvailable = true
+			}
 			if !comparable {
 				// Keep the claims pending. The next success/run-boundary probe gets
 				// another chance to verify them instead of teaching from uncertainty.
@@ -359,6 +363,7 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 		if claimedThisRun > 0 && !retryableFailure && claimsSinceCheck > 0 {
 			afterRun := readResources()
 			if spent, comparable := resourcesSpent(resourceBaseline, afterRun); comparable {
+				verificationEvidenceAvailable = true
 				if spent {
 					resourceVerified = true
 					recordVerifiedSuccess(claimsSinceCheck)
@@ -388,7 +393,10 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 		}
 	}
 
-	completed := b.ctx.Err() == nil && !retryableFailure && terminalReason == "all_unaffordable"
+	completed := b.ctx.Err() == nil &&
+		!retryableFailure &&
+		terminalReason == "all_unaffordable" &&
+		(upgradesLearned == 0 || verifiedUpgrades > 0 || !verificationEvidenceAvailable)
 	b.logger.Info().
 		Int("claimed_wall_upgrades", upgradesLearned).
 		Int("verified_wall_upgrades", verifiedUpgrades).
