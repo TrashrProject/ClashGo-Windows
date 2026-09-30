@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, ConfirmMultiAccountRecovery, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetControlServiceConfig, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetMultiAccountConfig, GetMultiAccountStatus, GetMultiAccountSwitchCalibration, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, SaveMultiAccountConfig, SetBetaControlServiceURL, UndoMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetControlServiceConfig, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetMultiAccountConfig, GetMultiAccountStatus, GetMultiAccountSwitchCalibration, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, ResolveMultiAccountRecovery, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, SaveMultiAccountConfig, SetBetaControlServiceURL, UndoMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
 import MultiAccountCalibration from './MultiAccountCalibration';
 
@@ -1070,19 +1070,28 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   };
 
   const confirmMultiAccountRecovery = async (account: ManagedAccount) => {
-    if (multiAccountRecoveryBusy || !multiAccountStatus?.recovery_required) return;
+    if (multiAccountRecoveryBusy || automationActive || !multiAccountStatus?.recovery_required) return;
     setMultiAccountRecoveryBusy(true);
     setMultiAccountError('');
     setMultiAccountMessage('');
     try {
-      const status = await ConfirmMultiAccountRecovery(account.id);
-      setMultiAccountStatus(status as MultiAccountRuntimeStatusView);
-      setMultiAccount(current => ({ ...current, active_account_id: account.id }));
+      await ResolveMultiAccountRecovery(account.id);
+      const [status, cfg] = await Promise.all([
+        GetMultiAccountStatus(),
+        GetMultiAccountConfig(),
+      ]);
+      const nextStatus = status as MultiAccountRuntimeStatusView;
+      const nextConfig = (cfg || {}) as MultiAccountConfigView;
+      setMultiAccountStatus(nextStatus);
+      setMultiAccount({
+        enabled: Boolean(nextConfig.enabled),
+        active_account_id: nextConfig.active_account_id || account.id,
+        default_attacks_per_turn: Math.max(1, Number(nextConfig.default_attacks_per_turn || 10)),
+        accounts: Array.isArray(nextConfig.accounts) ? nextConfig.accounts : multiAccount.accounts,
+      });
       onAccountChanged(account.player_tag);
       setMultiAccountMessage(
-        automationActive
-          ? `Compte confirmé : ${account.label || account.player_tag}. L’IA de ce compte est rechargée. Le bot reste en pause jusqu’à ta reprise volontaire.`
-          : `Compte confirmé : ${account.label || account.player_tag}. L’état multi-compte est réparé pour le prochain démarrage.`
+        `Compte confirmé : ${account.label || account.player_tag}. ClashGO peut maintenant être démarré avec l’IA isolée de ce compte.`
       );
     } catch (e) {
       setMultiAccountError(friendlyAccountActionError(e));
@@ -1565,7 +1574,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     </span>
                   </div>
                   <p className="mt-2 text-[11px] font-semibold leading-relaxed text-zinc-600 dark:text-zinc-300">
-                    Un changement de compte a été interrompu avant confirmation. ClashGO a bloqué le farm pour éviter d’utiliser l’IA, les remparts ou l’historique du mauvais compte. Regarde quel village est réellement affiché dans BlueStacks puis confirme-le ci-dessous.
+                    Un changement de compte a été interrompu avant confirmation. ClashGO refuse maintenant de démarrer pour éviter d’utiliser l’IA, les remparts ou l’historique du mauvais compte. Regarde quel village est réellement affiché dans BlueStacks puis confirme-le ci-dessous, bot arrêté.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {multiAccount.accounts.filter(account => account.enabled).map(account => (
