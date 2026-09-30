@@ -45,6 +45,15 @@ type AutomationConfig struct {
 	// AutoProfileSync keeps account data fresh without manual Sync clicks.
 	AutoProfileSync bool `json:"auto_profile_sync"`
 
+	// AutoCollectors periodically taps verified resource bubbles while the bot
+	// is idle on the main village. It never runs during search/deploy/battle.
+	AutoCollectors bool `json:"auto_collectors"`
+	CollectorInterval Duration `json:"collector_interval"`
+
+	// PrivacyMaskUsername masks the top-left player identity region in every
+	// screenshot ClashGO writes to disk (diagnostics + accepted targets).
+	PrivacyMaskUsername bool `json:"privacy_mask_username"`
+
 	// MaxAttacksPerHour bounds the rolling one-hour farming rate. 0 disables it.
 	MaxAttacksPerHour int `json:"max_attacks_per_hour"`
 
@@ -135,6 +144,10 @@ type AttackConfig struct {
 	StallTimerSeconds   int      `json:"stall_timer_seconds"`
 	LootExitEnabled     bool     `json:"loot_exit_enabled"`
 	LootExitPercent     int      `json:"loot_exit_percent"`
+	// EndAtStars ends a completed deployment once the live battle outcome has
+	// reached N stars (1..3) and the Surrender/End Battle button is verified.
+	// 0 disables the rule. Destruction-based exit remains strategy-controlled.
+	EndAtStars          int      `json:"end_at_stars"`
 	// MinSecondsBetweenAttacks is the minimum pause between the end of one
 	// battle (Return Home) and the start of the next attack sequence.
 	// Armies take real time to retrain; without this gate the bot attacked
@@ -241,6 +254,7 @@ type SearchConfig struct {
 	MinLootGold          int  `json:"min_loot_gold"`
 	MinLootElixir        int  `json:"min_loot_elixir"`
 	MinLootDarkElixir    int  `json:"min_loot_de"`
+	SaveAcceptedBaseScreenshots bool `json:"save_accepted_base_screenshots"`
 
 	// AdaptiveSearch progressively relaxes loot thresholds after a long skip
 	// streak, but never below AdaptiveFloorPercent of the configured values.
@@ -333,6 +347,7 @@ func DefaultConfig() *BotConfig {
 			StallTimerSeconds:        10,
 			LootExitEnabled:          false,
 			LootExitPercent:          100,
+			EndAtStars:               0,
 			MinSecondsBetweenAttacks: 30,
 			Farm: FarmConfig{
 				Enabled:  false,
@@ -351,6 +366,7 @@ func DefaultConfig() *BotConfig {
 			MinLootGold:          750000,
 			MinLootElixir:        750000,
 			MinLootDarkElixir:    2000,
+			SaveAcceptedBaseScreenshots: true,
 			AdaptiveSearch:          true,
 			AdaptiveStartAfterSkips: 8,
 			AdaptiveStepEverySkips:  4,
@@ -385,6 +401,9 @@ func DefaultConfig() *BotConfig {
 			AutoArmyGuard:          true,
 			AutoResourceTracking:   true,
 			AutoProfileSync:        true,
+			AutoCollectors:         false,
+			CollectorInterval:      Duration{10 * time.Minute},
+			PrivacyMaskUsername:    true,
 			MaxAttacksPerHour:      12,
 			BreakEveryAttacks:      5,
 			BreakDuration:          Duration{3 * time.Minute},
