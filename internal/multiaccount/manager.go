@@ -18,8 +18,10 @@ type State struct {
 	ActiveAccountID string    `json:"active_account_id,omitempty"`
 	AttacksThisTurn int       `json:"attacks_this_turn"`
 	TotalSwitches   int       `json:"total_switches"`
-	LastSwitchAt    time.Time `json:"last_switch_at,omitempty"`
-	LastError       string    `json:"last_error,omitempty"`
+	LastSwitchAt             time.Time `json:"last_switch_at,omitempty"`
+	LastSwitchAttemptAt      time.Time `json:"last_switch_attempt_at,omitempty"`
+	ConsecutiveSwitchFailures int      `json:"consecutive_switch_failures"`
+	LastError                string    `json:"last_error,omitempty"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
@@ -206,6 +208,30 @@ func (m *Manager) NextDue() (config.ManagedAccount, bool) {
 	return config.ManagedAccount{}, false
 }
 
+func (m *Manager) SwitchAttemptAllowed(now time.Time) (bool, time.Duration) {
+	if m == nil {
+		return false, 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.state.ConsecutiveSwitchFailures <= 0 || m.state.LastSwitchAttemptAt.IsZero() {
+		return true, 0
+	}
+	failures := m.state.ConsecutiveSwitchFailures
+	if failures > 4 {
+		failures = 4
+	}
+	cooldown := 30 * time.Second * time.Duration(1<<uint(failures-1))
+	if cooldown > 4*time.Minute {
+		cooldown = 4 * time.Minute
+	}
+	remaining := cooldown - now.Sub(m.state.LastSwitchAttemptAt)
+	if remaining <= 0 {
+		return true, 0
+	}
+	return false, remaining
+}
+
 func (m *Manager) MarkSwitched(accountID string) error {
 	if m == nil {
 		return nil
@@ -219,11 +245,14 @@ func (m *Manager) MarkSwitched(accountID string) error {
 	if m.state.ActiveAccountID != accountID {
 		m.state.TotalSwitches++
 	}
+	now := time.Now()
 	m.state.ActiveAccountID = accountID
 	m.state.AttacksThisTurn = 0
-	m.state.LastSwitchAt = time.Now()
+	m.state.LastSwitchAt = now
+	m.state.LastSwitchAttemptAt = now
+	m.state.ConsecutiveSwitchFailures = 0
 	m.state.LastError = ""
-	m.state.UpdatedAt = time.Now()
+	m.state.UpdatedAt = now
 	return m.saveLocked()
 }
 
@@ -233,10 +262,13 @@ func (m *Manager) MarkSwitchFailed(err error) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	now := time.Now()
+	m.state.LastSwitchAttemptAt = now
+	m.state.ConsecutiveSwitchFailures++
 	if err != nil {
 		m.state.LastError = err.Error()
 	}
-	m.state.UpdatedAt = time.Now()
+	m.state.UpdatedAt = now
 	return m.saveLocked()
 }
 
