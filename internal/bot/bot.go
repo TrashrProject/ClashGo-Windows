@@ -560,6 +560,11 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 }
 
 func (b *Bot) Start() error {
+	if b.multiAccount != nil {
+		if recoveryRequired, targetID := b.multiAccount.RecoveryStatus(); recoveryRequired {
+			return fmt.Errorf("multi-account identity recovery required for target %q; confirm the account visible in BlueStacks before starting ClashGO", targetID)
+		}
+	}
 	if err := b.client.EnsureConnected(); err != nil {
 		return fmt.Errorf("ensure connect: %w", err)
 	}
