@@ -4254,6 +4254,18 @@ func (a *App) GetMultiAccountCalibration() (bot.MultiAccountSwitchCalibration, e
 	return bot.LoadMultiAccountSwitchCalibration()
 }
 
+func (a *App) GetMultiAccountSwitchCalibration() (string, error) {
+	calibration, err := bot.LoadMultiAccountSwitchCalibration()
+	if err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(calibration)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
 func (a *App) SaveMultiAccountCalibration(raw string) error {
 	if a.botSessionActiveOrStarting() {
 		return fmt.Errorf("stop ClashGO before changing multi-account calibration")
