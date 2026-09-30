@@ -411,24 +411,11 @@ func (hm *HeroManager) DeployTroops(
 		p1, p2 = hm.resolveTroopTarget(slot, offset)
 	}
 
-	// Use the once-cached planning OCR for the main pass. Only fall back to a
-	// live pre-read when planning could not determine a count. This removes one
-	// capture/OCR round-trip per normal troop card.
+	// Use the once-cached planning OCR for the main pass. Do NOT capture again
+	// before deploying: planning already inspected this card, and pre-reading
+	// every card was adding one full frame + OCR round-trip per troop.
 	preCount := detectedCount
-	preVisualEmpty := false
-	if preCount <= 0 {
-		preCount, preVisualEmpty = hm.liveCountAndEmpty(slot, false)
-	}
-	if preVisualEmpty && preCount <= 0 {
-		hm.logger.Info().
-			Str("unit", unit.Name).
-			Bool("formula_pinned", hasFormula).
-			Msg("slot already empty at deploy start; marking deployed (no taps fired)")
-		hm.slotManager.MarkDeployed(unitName)
-		return true
-	}
-
-	tapCount := hm.resolveLiveTapCount(unit, slot, preCount, detectedCount)
+	tapCount := hm.resolveLiveTapCount(unit, slot, 0, detectedCount)
 
 	var deployed func(int, int)
 	if p1 == p2 {
@@ -441,74 +428,86 @@ func (hm *HeroManager) DeployTroops(
 			Str("unit", unit.Name).
 			Str("src", "formula").
 			Int("count", tapCount).
-			Int("live_count", preCount).
-			Int("detected_count", detectedCount).
+			Int("planned_count", preCount).
 			Interface("p1", p1).
 			Interface("p2", p2).
-			Msg("deploying troop (formula-driven live-count)")
+			Msg("deploying troop from prepared attack plan")
 	} else {
 		hm.logger.Info().
 			Str("unit", unit.Name).
 			Str("src", "edge").
 			Int("count", tapCount).
-			Int("live_count", preCount).
-			Int("detected_count", detectedCount).
-			Msg("deploying troop (live-count-driven)")
+			Int("planned_count", preCount).
+			Msg("deploying troop from prepared attack plan")
 	}
 	deployed(tapCount, hm.lineJitter(hasFormula))
 
-	const reconcileRounds = 1
-	const reconcileSettleMs = 150
-	for round := 0; round < reconcileRounds; round++ {
-		// Battle-timer guard: the reconcile top-ups exist to catch genuine
-		// drops CoC swallowed, not to re-fire a spent card forever. Once
-		// the deploy budget is gone the slot is left for the (also
-		// budget-guarded) sweep.
-		if hm.executor.DeployBudgetExhausted() {
-			hm.logger.Warn().Str("unit", unit.Name).Msg("troop reconcile: deploy budget exhausted; stopping")
-			hm.slotManager.RecordAttempt(unitName, false)
-			return false
-		}
-		hm.executor.HumanSleep(reconcileSettleMs, 30)
+	// Exactly one post-deploy checkpoint. The same fresh frame is reused for:
+	//   1. structural bar-compaction confirmation,
+	//   2. one targeted OCR fallback only if the card did not disappear.
+	// No second verifier capture is started here.
+	if hm.executor.DeployBudgetExhausted() {
+		hm.slotManager.RecordAttempt(unitName, false)
+		return false
+	}
+	hm.executor.HumanSleep(150, 30)
 
-		live, visualEmpty := hm.liveCountAndEmpty(slot, true)
-		if live <= 0 && visualEmpty {
-			hm.slotManager.MarkDeployed(unitName)
-			hm.logger.Info().
-				Str("unit", unit.Name).
-				Int("round", round+1).
-				Int("fired_total", tapCount).
-				Msg("reconcile confirmed slot empty; deploy complete")
-			return true
+	post, err := hm.executor.CaptureFresh()
+	if err != nil || post.Empty() {
+		if !post.Empty() {
+			post.Close()
 		}
-		if live <= 0 {
+		hm.logger.Warn().Err(err).Str("unit", unit.Name).
+			Msg("post-deploy checkpoint unavailable; leaving card for recovery sweep")
+		hm.slotManager.RecordAttempt(unitName, false)
+		return false
+	}
+	defer post.Close()
 
-			hm.logger.Warn().
-				Str("unit", unit.Name).
-				Int("round", round+1).
-				Bool("visual_empty", visualEmpty).
-				Msg("reconcile: visual-empty-but-OCR-zero; treating as transient ghost")
-			continue
-		}
-
-		hm.executor.TapSlot(slot, 4)
-		hm.executor.HumanSleep(reconcileSettleMs, 30)
-		deployed(live, hm.lineJitter(hasFormula))
+	if hm.slotManager.RefreshAfterSlotConsumed(post, slot) {
+		hm.slotManager.MarkSlotDeployed(slot)
 		hm.logger.Info().
 			Str("unit", unit.Name).
-			Int("round", round+1).
+			Int("fired_total", tapCount).
+			Msg("deployment confirmed by troop-bar compaction")
+		return true
+	}
+
+	live := 0
+	if hm.troopCounter != nil && hm.troopCounter.HasDigitTemplates() {
+		live = hm.troopCounter.DetectCount(post, slot, hm.slotManager.GetBarY())
+	}
+	visualEmpty := isSlotEmptyStatic(post, slot.X, slot.Y, hm.w, hm.h)
+	if live <= 0 && visualEmpty {
+		hm.slotManager.MarkSlotDeployed(slot)
+		_ = hm.slotManager.RefreshActivePositions(post)
+		hm.logger.Info().
+			Str("unit", unit.Name).
+			Int("fired_total", tapCount).
+			Msg("deployment confirmed empty at post-deploy checkpoint")
+		return true
+	}
+
+	if live > 0 {
+		// One correction only. If CoC swallowed part of the line, reselect the
+		// same still-visible card and fire exactly the observed remainder.
+		hm.executor.TapSlot(slot, 4)
+		hm.executor.HumanSleep(120, 20)
+		deployed(live, hm.lineJitter(hasFormula))
+		hm.slotManager.MarkSlotDeployed(slot)
+		hm.logger.Info().
+			Str("unit", unit.Name).
 			Int("remaining", live).
-			Msg("reconcile: re-selected slot and fired top-up taps")
+			Msg("single post-deploy top-up fired")
+		return true
 	}
 
 	hm.logger.Warn().
 		Str("unit", unit.Name).
-		Int("reconcile_rounds", reconcileRounds).
-		Int("initial_count", tapCount).
-		Msg("reconcile exhausted; leaving slot in SlotAttempted for sweep to retry")
+		Bool("visual_empty", visualEmpty).
+		Msg("post-deploy state inconclusive; leaving card for recovery sweep")
 	hm.slotManager.RecordAttempt(unitName, false)
 	return false
-}
 
 // DeploySiege deploys a siege machine.
 //
