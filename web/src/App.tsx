@@ -464,8 +464,13 @@ function App() {
       setLootExitPercent(conf.attack.loot_exit_percent ?? 100);
       setEndAtStars(conf.attack.end_at_stars ?? 0);
       setAutoCollectors(conf.automation?.auto_collectors ?? false);
-      const intervalNs = Number(conf.automation?.collector_interval ?? 0);
-      setCollectorMinutes(intervalNs > 0 ? Math.max(1, Math.round(intervalNs / 60_000_000_000)) : 10);
+      {
+        const rawInterval = String(conf.automation?.collector_interval ?? '');
+        const h = rawInterval.match(/([0-9.]+)h/);
+        const m = rawInterval.match(/([0-9.]+)m/);
+        const parsedMinutes = (h ? Number(h[1]) * 60 : 0) + (m ? Number(m[1]) : 0);
+        setCollectorMinutes(parsedMinutes > 0 ? Math.max(1, Math.round(parsedMinutes)) : 10);
+      }
       setPrivacyMaskUsername(conf.automation?.privacy_mask_username ?? true);
       setSaveAcceptedBases(conf.search.save_accepted_base_screenshots ?? true);
       setSimpleMode(conf.automation?.simple_mode ?? true);
@@ -570,6 +575,17 @@ function App() {
         setStallTimer(conf.attack.stall_timer_seconds);
         setLootExitEnabled(conf.attack.loot_exit_enabled ?? false);
         setLootExitPercent(conf.attack.loot_exit_percent ?? 100);
+        setEndAtStars(conf.attack.end_at_stars ?? 0);
+        setAutoCollectors(conf.automation?.auto_collectors ?? false);
+        {
+          const rawInterval = String(conf.automation?.collector_interval ?? '');
+          const h = rawInterval.match(/([0-9.]+)h/);
+          const m = rawInterval.match(/([0-9.]+)m/);
+          const parsedMinutes = (h ? Number(h[1]) * 60 : 0) + (m ? Number(m[1]) : 0);
+          setCollectorMinutes(parsedMinutes > 0 ? Math.max(1, Math.round(parsedMinutes)) : 10);
+        }
+        setPrivacyMaskUsername(conf.automation?.privacy_mask_username ?? true);
+        setSaveAcceptedBases(conf.search.save_accepted_base_screenshots ?? true);
         const configuredSimpleMode = conf.automation?.simple_mode ?? true;
         setSimpleMode(configuredSimpleMode);
         setIsRunning(running);
