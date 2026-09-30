@@ -947,7 +947,13 @@ func (b *Bot) recoverEmulator() {
 		b.logger.Debug().Msg("device recovery already in progress; suppressing duplicate request")
 		return
 	}
-	defer b.recoveryInFlight.Store(false)
+	defer func() {
+		// Recovery itself may take well over the stale-heartbeat threshold.
+		// Stamp a fresh grace period when it finishes so the supervisor does
+		// not immediately start a second recovery wave against BlueStacks.
+		b.captureHeartbeat.Store(time.Now().UnixNano())
+		b.recoveryInFlight.Store(false)
+	}()
 
 	b.recoveryAttempts.Add(1)
 	b.forceSafePacing("device_recovery", 2*time.Minute)
