@@ -44,5 +44,18 @@ func (b *Bot) runtimeFrame(timeout, maxAge time.Duration) (gocv.Mat, error) {
 // runtimeFrameFresh is the common attack/search helper: wait for a frame that
 // was captured recently enough to make a UI decision.
 func (b *Bot) runtimeFrameFresh(timeout time.Duration) (gocv.Mat, error) {
-	return b.runtimeFrame(timeout, 1500*time.Millisecond)
+	maxAge := 1 * time.Second
+	switch RuntimePhase(b.runtimePhase.Load()) {
+	case PhaseAttackNavigation:
+		maxAge = 700 * time.Millisecond
+	case PhaseSearching:
+		maxAge = 1200 * time.Millisecond
+	case PhasePlanning:
+		maxAge = 500 * time.Millisecond
+	case PhaseDeploying:
+		maxAge = 550 * time.Millisecond
+	case PhaseBattle, PhaseParsingResult, PhaseReturningHome:
+		maxAge = 1200 * time.Millisecond
+	}
+	return b.runtimeFrame(timeout, maxAge)
 }
