@@ -884,6 +884,8 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		Int64("count_ms", countMS).
 		Bool("template_fast_path", templateFastPath).
 		Int("templates_considered", len(slotTemplates)).
+		Bool("count_fast_path", countFastPath).
+		Int("ocr_slots", len(countSlots)).
 		Int64("planner_ms", prepared.BuiltIn.Milliseconds()).
 		Int("slots", len(slotMgr.GetAllSlots())).
 		Int("resolved_units", prepared.ResolvedUnits).
