@@ -4291,6 +4291,19 @@ func (a *App) GetMultiAccountStatus() bot.MultiAccountRuntimeStatus {
 	}
 }
 
+func (a *App) ConfirmMultiAccountRecovery(accountID string) (bot.MultiAccountRuntimeStatus, error) {
+	a.mu.Lock()
+	b := a.bot
+	a.mu.Unlock()
+	if b == nil {
+		return bot.MultiAccountRuntimeStatus{}, fmt.Errorf("start ClashGO before resolving multi-account recovery")
+	}
+	if err := b.ConfirmMultiAccountRecovery(strings.TrimSpace(accountID)); err != nil {
+		return b.MultiAccountStatus(), err
+	}
+	return b.MultiAccountStatus(), nil
+}
+
 func (a *App) GetMultiAccountCalibration() (bot.MultiAccountSwitchCalibration, error) {
 	return bot.LoadMultiAccountSwitchCalibration()
 }
