@@ -4888,8 +4888,43 @@ type CurrentArmySnapshot struct {
 	Warnings       []string          `json:"warnings,omitempty"`
 }
 
+func (a *App) activeAccountSnapshotConfig() (*config.BotConfig, bool) {
+	cfg := config.LoadOrDefault("config.json")
+	if !cfg.Account.MultiAccount.Enabled {
+		return cfg, true
+	}
+
+	status := a.GetMultiAccountStatus()
+	if status.RecoveryRequired {
+		return cfg, false
+	}
+	activeID := strings.TrimSpace(status.ActiveAccountID)
+	if activeID == "" {
+		activeID = strings.TrimSpace(cfg.Account.MultiAccount.ActiveAccountID)
+	}
+	for _, account := range cfg.Account.MultiAccount.Accounts {
+		if !account.Enabled || account.ID != activeID {
+			continue
+		}
+		cfg.Account.PlayerTag = account.PlayerTag
+		cfg.Account.MultiAccount.ActiveAccountID = account.ID
+		return cfg, true
+	}
+	// In multi-account mode an unknown active profile is treated as unsafe.
+	// Returning no snapshot is better than showing another village's data.
+	return cfg, false
+}
+
 func (a *App) GetCurrentArmy() *CurrentArmySnapshot {
-	data, err := os.ReadFile(paths.ResolveConfig("current_army.json"))
+	cfg, safe := a.activeAccountSnapshotConfig()
+	if !safe {
+		return nil
+	}
+	path := paths.ResolveConfig("current_army.json")
+	if cfg.Account.MultiAccount.Enabled {
+		path = bot.AccountArmySnapshotPath(cfg)
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -4918,7 +4953,15 @@ type VillageResourceSnapshot struct {
 // balances. These values come from the BlueStacks HUD scanner, not from the
 // public Clash player API.
 func (a *App) GetVillageResources() *VillageResourceSnapshot {
-	data, err := os.ReadFile(paths.ResolveConfig("village_resources.json"))
+	cfg, safe := a.activeAccountSnapshotConfig()
+	if !safe {
+		return nil
+	}
+	path := paths.ResolveConfig("village_resources.json")
+	if cfg.Account.MultiAccount.Enabled {
+		path = bot.AccountVillageResourcesPath(cfg)
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -4947,7 +4990,15 @@ func (a *App) GetLatestAttackTrace() string {
 }
 
 func (a *App) GetVillageResourceHistory() []VillageResourceSnapshot {
-	data, err := os.ReadFile(paths.ResolveConfig("village_resource_history.json"))
+	cfg, safe := a.activeAccountSnapshotConfig()
+	if !safe {
+		return []VillageResourceSnapshot{}
+	}
+	path := paths.ResolveConfig("village_resource_history.json")
+	if cfg.Account.MultiAccount.Enabled {
+		path = bot.AccountVillageResourceHistoryPath(cfg)
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return []VillageResourceSnapshot{}
 	}
