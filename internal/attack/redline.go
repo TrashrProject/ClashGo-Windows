@@ -15,10 +15,16 @@ type RedZone struct {
 	BBox     image.Rectangle
 	Valid    bool
 	Contours int
-	// Boundary contains a detached copy of the detected red-line contour.
-	// It survives after OpenCV contour objects are released and lets the
-	// deploy-line calculator follow irregular bases instead of using only BBox.
+
+	// Boundary is retained as a detached compatibility copy of the accepted
+	// OpenCV contour. New deployment geometry uses the side-specific profiles
+	// below because they are already ordered for fast resampling.
 	Boundary []image.Point
+
+	LeftBoundary   []image.Point
+	RightBoundary  []image.Point
+	TopBoundary    []image.Point
+	BottomBoundary []image.Point
 }
 
 
@@ -168,12 +174,9 @@ func (r *RedLineDetector) Detect(screen gocv.Mat, uiCutoff int) RedZone {
 			Float64("area", b.area).
 			Msg("red zone detected")
 
-		return RedZone{
-			BBox:     rect,
-			Valid:    true,
-			Contours: contours.Size(),
-			Boundary: append([]image.Point(nil), b.points...),
-		}
+		zone := redZoneFromRect(mask, rect, contours.Size())
+		zone.Boundary = append([]image.Point(nil), b.points...)
+		return zone
 	}
 
 	xMin, yMin := w, uiCutoff
@@ -204,12 +207,9 @@ func (r *RedLineDetector) Detect(screen gocv.Mat, uiCutoff int) RedZone {
 		for _, b := range boxes {
 			boundary = append(boundary, b.points...)
 		}
-		return RedZone{
-			BBox:     combined,
-			Valid:    true,
-			Contours: contours.Size(),
-			Boundary: boundary,
-		}
+		zone := redZoneFromRect(mask, combined, contours.Size())
+		zone.Boundary = boundary
+		return zone
 	}
 
 	r.logger.Warn().Msg("red zone detection failed: no contour spans 55% of playfield")
