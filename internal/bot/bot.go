@@ -3148,223 +3148,92 @@ func (b *Bot) waitForStableLocator(name string, locator func(gocv.Mat) (int, int
 }
 
 func (b *Bot) clickSequence() bool {
-
+	// Xingchen-style navigation: every action requires fresh visual evidence.
+	// No blind coordinate progression, no stacked retry loops, no duplicate
+	// capture owner while the attack sequence is active.
 	b.lastPrepTimings = PreparationTimings{}
-	prepPace := chooseSearchPacing(b.client.Health())
-	if b.safePacingForced() {
-		prepPace = chooseSearchPacing(adb.Health{ConsecutiveFails: 1})
-	}
+
 	stepStarted := time.Now()
-	attackClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
-		// findAttackButton already has the Windows-safe localized/color checks.
-		// Do not require the older text/template matcher a second time here:
-		// that created the contradictory "Attack detected" -> "could not find
-		// Attack button" failure seen on localized/animated village frames.
-		if b.focusedButtonClick("Attack", b.locateAttackButtonColor, 2) {
-			attackClicked = true
-			break
-		}
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			if b.findAttackButton(screen, 0.30) {
-				x, y := b.cal.ScaleRef(64, 666)
-				screen.Close()
-				b.logger.Debug().Int("x", x).Int("y", y).Msg("Attack fallback verified; precision tapping canonical center")
-				if err := b.client.TapFast(x, y, 0.5); err == nil {
-					b.recordActivity()
-					attackClicked = true
-					break
-				}
-			} else {
-				screen.Close()
-			}
-		}
-		b.client.JitteredSleep(prepPace.PrepRetryPause)
-	}
-	if !attackClicked {
-		b.logger.Warn().Msg("could not find or click Attack button")
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			b.DumpDiagnostics("click_attack_failed", screen, nil)
-			screen.Close()
-		}
+	if !b.waitAndClickButton("btn_attack", "Attack", 2500*time.Millisecond) {
+		b.captureFailureDiagnostic("click_attack_failed", nil)
 		return false
 	}
 	b.lastPrepTimings.AttackButtonMS = time.Since(stepStarted).Milliseconds()
+
 	stepStarted = time.Now()
-	// Do not chain directly into the next tap. Wait for the attack menu to
-	// finish opening and for Find Match to be stable in two consecutive frames.
-	// When it is stable, reuse that already-verified center immediately instead
-	// of paying for a second two-frame focusedButtonClick verification.
-	findMatchClicked := false
-	if x, y, ok := b.waitForStableLocator("Find Match", b.locateFindMatchButtonColor, 3*time.Second); ok {
-		if err := b.client.TapFast(x, y, 0.6); err == nil {
-			b.recordActivity()
-			findMatchClicked = true
-			b.logger.Debug().Int("x", x).Int("y", y).Msg("Find Match stable — clicked")
-		}
-	} else {
-		b.logger.Warn().Msg("attack menu did not settle on Find Match after Attack click")
-	}
-
-	for attempt := 0; !findMatchClicked && attempt < 3; attempt++ {
-		if b.focusedButtonClick("Find Match", b.locateFindMatchButtonColor, 2) {
-			findMatchClicked = true
-			break
-		}
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			state, score := b.classify(screen)
-			screen.Close()
-			if state == game.StateFindMatch {
-				x, y := b.cal.ScaleRef(215, 563)
-				b.logger.Debug().
-					Int("score", score).
-					Int("x", x).
-					Int("y", y).
-					Msg("Find Match screen verified by classifier; precision tapping canonical center")
-				if err := b.client.TapFast(x, y, 0.5); err == nil {
-					b.recordActivity()
-					findMatchClicked = true
-					break
-				}
-			} else {
-				b.logger.Debug().
-					Str("state", state.String()).
-					Int("score", score).
-					Msg("Find Match retry: no stable focused target yet")
-			}
-		}
-
-		// Keep the legacy template path as a final fallback, not the primary
-		// detector for this localized/current CoC screen.
-		if b.findAndClick("btn_find_match", "Find Match", 1) {
-			findMatchClicked = true
-			break
-		}
-
-		b.client.JitteredSleep(prepPace.PrepRetryPause)
-	}
-	if !findMatchClicked {
-		b.logger.Warn().Msg("could not find or click Find Match button")
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			state, score := b.classify(screen)
-			b.DumpDiagnostics("click_find_match_failed", screen, map[string]interface{}{
-				"classified_state": state.String(),
-				"classified_score": score,
-			})
-			screen.Close()
-		}
+	if !b.waitAndClickButton("btn_find_match", "Find Match", 4500*time.Millisecond) {
+		b.captureFailureDiagnostic("click_find_match_failed", nil)
 		return false
 	}
 	b.lastPrepTimings.FindMatchMS = time.Since(stepStarted).Milliseconds()
-	stepStarted = time.Now()
-	// Find Match may either open the army-selection flow OR immediately
-	// enter matchmaking, depending on the current CoC UI/account state.
-	// Do not keep probing Army Arrow after matchmaking has already started:
-	// those stale template retries caused needless framebuffer pressure and
-	// recovery churn on BlueStacks Windows.
-	armyReadyDeadline := time.Now().Add(4 * time.Second)
-	matchmakingStarted := false
-	for time.Now().Before(armyReadyDeadline) {
-		s, err := b.client.CaptureToMat()
-		if err == nil && !s.Empty() {
-			st, _ := b.classify(s)
-			s.Close()
-			switch st {
-			case game.StateBattle, game.StateSearchMap, game.StateLoading:
-				matchmakingStarted = true
-				b.logger.Info().Str("state", st.String()).Msg("matchmaking already started; skipping Army Arrow / recipe selection")
-			case game.StateArmySelection, game.StateArmyCamp:
-				b.logger.Debug().Str("state", st.String()).Msg("army menu state confirmed before next click")
+
+	// Some current CoC layouts enter matchmaking directly after Find Match.
+	// Preserve the Xingchen evidence-first flow, but do not insist on Army
+	// Arrow when the game has already progressed into clouds/base search.
+	probeDeadline := time.Now().Add(3500 * time.Millisecond)
+	for time.Now().Before(probeDeadline) {
+		screen, err := b.client.CaptureToMat()
+		if err != nil {
+			if !b.sleepResponsive(250 * time.Millisecond) {
+				return false
 			}
-			if matchmakingStarted || st == game.StateArmySelection || st == game.StateArmyCamp {
-				break
-			}
-		} else if !s.Empty() {
-			s.Close()
+			continue
 		}
-		time.Sleep(prepPace.PrepPollPause)
-	}
-	if matchmakingStarted {
-		stepStarted = time.Now()
-		b.logger.Info().Msg("waiting for battle state (searching)...")
-		ready := b.waitForBattleState(60 * time.Second)
-		b.lastPrepTimings.MatchmakingReadyMS = time.Since(stepStarted).Milliseconds()
-		return ready
+		if screen.Empty() {
+			screen.Close()
+			if !b.sleepResponsive(250 * time.Millisecond) {
+				return false
+			}
+			continue
+		}
+		state, _ := b.classify(screen)
+		screen.Close()
+
+		switch state {
+		case game.StateBattle, game.StateSearchMap, game.StateLoading:
+			b.logger.Info().Str("state", state.String()).Msg("matchmaking transition confirmed; skipping army picker")
+			stepStarted = time.Now()
+			ready := b.waitForBattleState(60 * time.Second)
+			b.lastPrepTimings.MatchmakingReadyMS = time.Since(stepStarted).Milliseconds()
+			return ready
+		case game.StateArmySelection, game.StateArmyCamp:
+			probeDeadline = time.Now()
+		default:
+			if !b.sleepResponsive(250 * time.Millisecond) {
+				return false
+			}
+		}
 	}
 
-	armyArrowClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
-		if b.findAndClick("btn_army_arrow", "Army Arrow", 1) {
-			armyArrowClicked = true
-			break
-		}
-		b.client.JitteredSleep(prepPace.PrepRetryPause)
-	}
-	if !armyArrowClicked {
-		b.logger.Warn().Msg("could not find or click Army Arrow button")
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			b.DumpDiagnostics("click_army_arrow_failed", screen, nil)
-			screen.Close()
-		}
+	stepStarted = time.Now()
+	if !b.waitAndClickButton("btn_army_arrow", "Army Arrow", 4500*time.Millisecond) {
+		b.captureFailureDiagnostic("click_army_arrow_failed", nil)
 		return false
 	}
 	b.lastPrepTimings.ArmyMenuMS = time.Since(stepStarted).Milliseconds()
-	stepStarted = time.Now()
-	// This is the one intentional post-click settle in the army picker.
-	// Fast/Balanced can shorten it, while Safe preserves the proven 650ms.
-	b.client.JitteredSleep(prepPace.PrepSettlePause)
 
+	stepStarted = time.Now()
 	armyClicked := false
-	for attempt := 0; attempt < 3; attempt++ {
-		if b.selectArmySlot() {
-			armyClicked = true
-			break
-		}
-		b.client.JitteredSleep(prepPace.PrepRetryPause)
+	if b.armySlot <= 1 {
+		armyClicked = b.waitAndClickButton("btn_army_1", "Army 1", 4000*time.Millisecond)
+	} else if b.waitForUIEvidence("btn_army_1", game.StateArmySelection, 4000*time.Millisecond) {
+		armyClicked = b.selectArmySlot()
 	}
 	if !armyClicked {
-		b.logger.Warn().Int("army_slot", b.armySlot).Msg("army recipe card did not appear, continuing anyway")
-		if screen, err := b.client.CaptureToMat(); err == nil {
-			b.DumpDiagnostics("click_army_slot_not_found", screen, map[string]interface{}{"army_slot": b.armySlot})
-			screen.Close()
-		}
+		b.captureFailureDiagnostic("click_army_slot_not_found", map[string]interface{}{"army_slot": b.armySlot})
+		return false
 	}
 	b.lastPrepTimings.ArmySlotMS = time.Since(stepStarted).Milliseconds()
+
 	stepStarted = time.Now()
-
-	battleClicked := false
-	// Selecting the saved army already triggers the menu transition. Instead
-	// of sleeping 650ms blindly and THEN doing another two-frame verifier,
-	// wait directly for the Battle button to become stable and reuse that
-	// verified center. This shortens the happy path while preserving the same
-	// visual safety requirement.
-	if x, y, ok := b.waitForStableLocator("Battle Attack", b.locateBattleButtonColor, 3*time.Second); ok {
-		if err := b.client.TapFast(x, y, 0.6); err == nil {
-			b.recordActivity()
-			battleClicked = true
-			b.logger.Debug().Int("x", x).Int("y", y).Msg("Battle Attack stable — clicked")
-		}
-	}
-
-	for attempt := 0; !battleClicked && attempt < 3; attempt++ {
-		if b.focusedButtonClick("Battle Attack", b.locateBattleButtonColor, 2) {
-			battleClicked = true
-			break
-		}
-		if b.findAndClick("btn_battle", "Battle", 1) {
-			battleClicked = true
-			break
-		}
-		b.client.JitteredSleep(prepPace.PrepRetryPause)
-	}
-	if !battleClicked {
-		b.logger.Warn().Msg("could not find or click Battle button")
+	if !b.waitAndClickButton("btn_battle", "Battle", 5000*time.Millisecond) {
+		b.captureFailureDiagnostic("click_battle_failed", nil)
 		return false
 	}
 	b.lastPrepTimings.BattleButtonMS = time.Since(stepStarted).Milliseconds()
-	stepStarted = time.Now()
 
-	b.logger.Info().Msg("waiting for battle state (searching)...")
+	b.logger.Info().Msg("battle requested; waiting for search/base state...")
+	stepStarted = time.Now()
 	ready := b.waitForBattleState(60 * time.Second)
 	b.lastPrepTimings.MatchmakingReadyMS = time.Since(stepStarted).Milliseconds()
 	return ready
@@ -3395,7 +3264,7 @@ func (b *Bot) selectArmySlot() bool {
 	tapX, tapY := b.cal.ScaleRef(430, cardY)
 
 	b.logger.Debug().Int("army_slot", slot).Int("x", tapX).Int("y", tapY).Msg("selecting saved army recipe card")
-	if err := b.client.TapFast(tapX, tapY, 0.7); err != nil {
+	if err := b.client.TapRandomized(tapX, tapY); err != nil {
 		b.logger.Warn().Err(err).Msg("army recipe card tap failed")
 		return false
 	}
@@ -3765,42 +3634,56 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 	for time.Now().Before(deadline) {
 		screen, err := b.client.CaptureToMat()
 		if err != nil {
-			time.Sleep(500 * time.Millisecond)
+			b.logger.Debug().Err(err).Msg("battle-state capture unavailable")
+			if !b.sleepResponsive(350 * time.Millisecond) {
+				return false
+			}
+			continue
+		}
+		if screen.Empty() {
+			screen.Close()
+			if !b.sleepResponsive(350 * time.Millisecond) {
+				return false
+			}
 			continue
 		}
 
+		b.captureHeartbeat.Store(time.Now().UnixNano())
 		state, _ := b.classify(screen)
 		screen.Close()
 
-		switch {
-		case state == game.StateBattle:
+		switch state {
+		case game.StateBattle:
 			b.logger.Info().Msg("battle state detected, entering search loop")
 			return true
-		case state == game.StateSearchMap || state == game.StateLoading:
-			b.logger.Debug().Msg("in clouds/loading")
-			// BlueStacks Pie64 is sensitive to sustained framebuffer capture
-			// bursts while Clash is matchmaking. We only need state polling
-			// here, not video-rate observation.
-			time.Sleep(900 * time.Millisecond)
-			continue
-		case state == game.StateArmySelection || state == game.StateArmyCamp:
-			b.logger.Debug().Msg("in army menu, retrying Battle Attack button")
-			if retryScreen, capErr := b.client.CaptureToMat(); capErr == nil {
-				if x, y, ok := b.locateBattleButtonColor(retryScreen); ok {
-					retryScreen.Close()
-					b.logger.Debug().Int("x", x).Int("y", y).Msg("retrying with detected Battle Attack button center")
-					_ = b.client.TapFast(x, y, 0.6)
-					b.recordActivity()
-				} else {
-					retryScreen.Close()
-					b.findAndClick("btn_battle", "Battle Retry", 1)
-				}
+		case game.StateMainVillage:
+			b.logger.Warn().Msg("returned to village while waiting for battle; aborting navigation")
+			return false
+		case game.StateConnectionLost:
+			b.logger.Warn().Msg("connection lost while entering battle; clearing dialog")
+			b.dismissInterruptions()
+			if !b.sleepResponsive(500 * time.Millisecond) {
+				return false
 			}
-			time.Sleep(800 * time.Millisecond)
+		case game.StateSearchMap, game.StateLoading:
+			b.logger.Debug().Str("state", state.String()).Msg("matchmaking in progress")
+			if !b.sleepResponsive(650 * time.Millisecond) {
+				return false
+			}
+		case game.StateArmySelection, game.StateArmyCamp:
+			b.logger.Info().Msg("army UI still visible; retrying verified Battle button")
+			_ = b.waitAndClickButton("btn_battle", "Battle Retry", 1500*time.Millisecond)
+			if !b.sleepResponsive(400 * time.Millisecond) {
+				return false
+			}
 		default:
-			b.logger.Debug().Str("state", state.String()).Msg("waiting for battle state")
-			b.dismissInterruptionState(state)
-			time.Sleep(650 * time.Millisecond)
+			b.logger.Debug().Str("state", state.String()).Msg("waiting for battle/search state")
+			if isTransientRuntimeState(state) {
+				b.dismissInterruptions()
+			}
+			if !b.sleepResponsive(400 * time.Millisecond) {
+				return false
+			}
 		}
 	}
 
