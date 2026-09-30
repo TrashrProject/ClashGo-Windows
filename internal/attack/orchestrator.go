@@ -15,6 +15,12 @@ import (
 	"gocv.io/x/gocv"
 )
 
+// xingchenCompatibleAttackFlow keeps Windows on the same generic deployment
+// planner as the proven Xingchen-style path. The experimental Windows-only
+// adaptive-camera/live-slot engine remains in source for diagnostics, but is
+// deliberately bypassed until it can survive repeated soak tests.
+const xingchenCompatibleAttackFlow = true
+
 // DeployDynamicV2 deploys troops using dynamic red line detection.
 // No hardcoded precision_config.json needed - detects deployment boundary live.
 //
@@ -105,7 +111,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		}
 	}()
 
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" && !xingchenCompatibleAttackFlow {
 		freeSpace := func(z RedZone) (string, int) {
 			side, _, _, free, ok := windowsDeployCorridor(z, w, h, uiCutoff)
 			if !ok {
@@ -459,7 +465,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	// the live logs show ("unit not found in bar", repeated top-up taps, heroes
 	// never transitioning). For Windows, prefer the slots we just detected on
 	// THIS live 860x732 battle frame and deploy them directly along a safe edge.
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" && !xingchenCompatibleAttackFlow {
 		e.logger.Debug().Int("slots", len(slotMgr.GetAllSlots())).Msg("using Windows live-slot deployment path")
 
 		// Build the Windows deployment line from the LIVE red deployment
