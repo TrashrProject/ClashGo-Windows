@@ -2108,6 +2108,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 	lastPctTime := time.Now()
 	stallLimit := time.Duration(e.cfg.StallTimerSeconds) * time.Second
 	lootExitConfirmations := 0
+	starExitConfirmations := 0
 	farmBestLootUnits := int64(0)
 	farmLootProgressAt := time.Now()
 
@@ -2351,6 +2352,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 				e.adaptiveFarmExitEnabled &&
 				!e.cfg.LootExitEnabled &&
 				strategyEndAtPct == 0 &&
+				e.cfg.EndAtStars == 0 &&
 				e.remainingLootValid {
 				lootedPct := adaptiveFarmLootPercent(
 					e.initialLootGold, e.initialLootElixir, e.initialLootDE,
@@ -2405,7 +2407,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 			// BELOW it — ending early on a stall would abandon the win
 			// the strategy is built around (e.g. valk_spam's 50%). Only
 			// the deadline bounds how long we keep waiting for it.
-			if hasStallROI && (e.cfg.StallTimerSeconds > 0 || endAtPct > 0) {
+			if hasStallROI && (e.cfg.StallTimerSeconds > 0 || endAtPct > 0 || e.cfg.EndAtStars > 0) {
 				currentPct := lootRec.ReadDestructionPercentage(screen, pRoi)
 
 				// Garbage-read guard: destruction can never exceed 100, so a
@@ -2480,6 +2482,50 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 					}
 				}
 
+				// Optional star target. Stars are derived from the same live,
+				// validated destruction + TH evidence already used by result
+				// accounting, so this adds no screenshots or parallel OCR stream.
+				// Two consecutive qualifying ticks are required before surrendering.
+				starTarget := e.cfg.EndAtStars
+				if starTarget < 0 {
+					starTarget = 0
+				}
+				if starTarget > 3 {
+					starTarget = 3
+				}
+				if e.earlyExitAllowed && starTarget > 0 {
+					currentStars := game.StarsFromOutcome(currentPct, e.thDestroyed)
+					if currentStars >= starTarget {
+						starExitConfirmations++
+					} else {
+						starExitConfirmations = 0
+					}
+
+					if starExitConfirmations >= 2 {
+						if !e.endButtonVisible(screen, sCfg) {
+							e.logger.Debug().
+								Int("stars", currentStars).
+								Int("target_stars", starTarget).
+								Int("percent", currentPct).
+								Msg("star target reached but End Battle button not visible; keeping battle alive")
+						} else {
+							e.logger.Info().
+								Int("stars", currentStars).
+								Int("target_stars", starTarget).
+								Int("percent", currentPct).
+								Msg("star target confirmed twice; ending battle")
+							screen.Close()
+							if err := e.EndBattle(); err != nil {
+								e.lastBattleEndReason = "star_threshold_end_failed"
+								e.logger.Warn().Err(err).Msg("star-threshold EndBattle tap failed")
+								return false
+							}
+							e.lastBattleEndReason = "star_threshold"
+							return true
+						}
+					}
+				}
+
 				// Progress visibility in threshold mode: log every tick so
 				// a long battle toward end_at_percent is observable (the
 				// stall branch's "destruction increased" only fires when
@@ -2504,7 +2550,7 @@ func (e *Executor) WaitForBattleEndCtx(ctx context.Context, timeout time.Duratio
 					}
 				}
 
-				if e.earlyExitAllowed && e.cfg.StallTimerSeconds > 0 && endAtPct == 0 {
+				if e.earlyExitAllowed && e.cfg.StallTimerSeconds > 0 && endAtPct == 0 && e.cfg.EndAtStars == 0 {
 					if currentPct > lastPct {
 						lastPct = currentPct
 						lastPctTime = time.Now()
