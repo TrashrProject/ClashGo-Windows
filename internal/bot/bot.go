@@ -21,6 +21,7 @@ import (
 	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/Ducky705/ClashGO/internal/game"
 	"github.com/Ducky705/ClashGO/internal/intelligence"
+	"github.com/Ducky705/ClashGO/internal/multiaccount"
 	"github.com/Ducky705/ClashGO/internal/paths"
 	"github.com/Ducky705/ClashGO/internal/telemetry"
 	"github.com/Ducky705/ClashGO/internal/vision"
@@ -57,6 +58,7 @@ type Bot struct {
 	adaptive       *intelligence.AdaptiveEngine
 	contextual     *intelligence.ContextualEngine
 	villageMemory  *intelligence.VillageMemory
+	multiAccount   *multiaccount.Manager
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -336,6 +338,24 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		telemetry:          telemetry.New(paths.ResolveConfig("telemetry/events.ndjson")),
 		lastDiagnostics:    make(map[string]time.Time),
 		uiAnchors:          make(map[string]image.Point),
+	}
+
+	multiMgr, multiErr := multiaccount.NewManager(
+		multiAccountStatePath(cfg),
+		cfg.Account.MultiAccount,
+		cfg.Account.PlayerTag,
+	)
+	if multiErr != nil {
+		b.logger.Warn().Err(multiErr).Msg("multi-account scheduler unavailable; continuing single-account")
+	} else {
+		b.multiAccount = multiMgr
+		if active, ok := multiMgr.Active(); ok {
+			b.logger.Info().
+				Bool("enabled", multiMgr.Enabled()).
+				Str("account_id", active.ID).
+				Str("account_label", active.Label).
+				Msg("multi-account scheduler initialized")
+		}
 	}
 
 	emulatorKind := "adb"
@@ -2539,6 +2559,11 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	// history row appeared — and the entry was dropped entirely if
 	// ReturnHome failed.
 	b.attackCount.Add(1)
+	if b.multiAccount != nil {
+		if err := b.multiAccount.ObserveAttack(); err != nil {
+			b.logger.Warn().Err(err).Msg("could not persist multi-account attack counter")
+		}
+	}
 	if b.governor != nil {
 		b.governor.RecordAttack(time.Now())
 	}
@@ -2839,6 +2864,23 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		// ReturnHome already verified MainVillage. For pure farming, only a
 		// short acknowledgement window is needed for the side tap itself.
 		time.Sleep(300 * time.Millisecond)
+	}
+
+	if b.multiAccount != nil {
+		if next, due := b.multiAccount.NextDue(); due {
+			b.logger.Info().
+				Str("next_account_id", next.ID).
+				Str("next_account_label", next.Label).
+				Int("switch_slot", next.SwitchSlot).
+				Msg("multi-account rotation is due; waiting for safe calibrated switch")
+			// Actual Supercell-ID navigation is fail-closed and lives in
+			// switchMultiAccountIfReady. If calibration is unavailable, the
+			// current account keeps farming rather than receiving blind taps.
+			if err := b.switchMultiAccountIfReady(next); err != nil {
+				_ = b.multiAccount.MarkSwitchFailed(err)
+				b.logger.Warn().Err(err).Msg("multi-account switch deferred safely")
+			}
+		}
 	}
 
 	// Cap check stays after wall upgrades so the graceful shutdown (2s
