@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetControlServiceConfig, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetMultiAccountConfig, GetMultiAccountStatus, GetMultiAccountSwitchCalibration, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, SaveMultiAccountConfig, SetBetaControlServiceURL, UndoMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, ConfirmMultiAccountRecovery, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetControlServiceConfig, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetMultiAccountConfig, GetMultiAccountStatus, GetMultiAccountSwitchCalibration, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, SaveMultiAccountConfig, SetBetaControlServiceURL, UndoMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
 import MultiAccountCalibration from './MultiAccountCalibration';
 
@@ -53,6 +53,9 @@ type MultiAccountRuntimeStatusView = {
   total_switches: number;
   last_switch_at?: string;
   last_error?: string;
+  recovery_required?: boolean;
+  recovery_target_account_id?: string;
+  switch_in_flight?: boolean;
 };
 
 type FarmUnit = { name: string; count: number; housing: number };
@@ -420,6 +423,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [multiAccountError, setMultiAccountError] = React.useState('');
   const [multiAccountCalibrated, setMultiAccountCalibrated] = React.useState(false);
   const [multiAccountStatus, setMultiAccountStatus] = React.useState<MultiAccountRuntimeStatusView | null>(null);
+  const [multiAccountRecoveryBusy, setMultiAccountRecoveryBusy] = React.useState(false);
 
   React.useEffect(() => {
     if (memberPage !== 'account') return;
@@ -1062,6 +1066,24 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       setMultiAccountError(friendlyAccountActionError(e));
     } finally {
       setMultiAccountBusy(false);
+    }
+  };
+
+  const confirmMultiAccountRecovery = async (account: ManagedAccount) => {
+    if (multiAccountRecoveryBusy || !automationActive || !multiAccountStatus?.recovery_required) return;
+    setMultiAccountRecoveryBusy(true);
+    setMultiAccountError('');
+    setMultiAccountMessage('');
+    try {
+      const status = await ConfirmMultiAccountRecovery(account.id);
+      setMultiAccountStatus(status as MultiAccountRuntimeStatusView);
+      setMultiAccount(current => ({ ...current, active_account_id: account.id }));
+      onAccountChanged(account.player_tag);
+      setMultiAccountMessage(`Compte confirmé : ${account.label || account.player_tag}. L’IA de ce compte a été rechargée et l’automatisation peut reprendre.`);
+    } catch (e) {
+      setMultiAccountError(friendlyAccountActionError(e));
+    } finally {
+      setMultiAccountRecoveryBusy(false);
     }
   };
 
