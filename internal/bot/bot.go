@@ -3017,8 +3017,18 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				// switchMultiAccountIfReady. If calibration is unavailable, the
 				// current account keeps farming rather than receiving blind taps.
 				if err := b.switchMultiAccountIfReady(next); err != nil {
-					_ = b.multiAccount.MarkSwitchFailed(err)
-					b.logger.Warn().Err(err).Msg("multi-account switch deferred safely")
+					if recoveryRequired, targetID := b.multiAccount.RecoveryStatus(); recoveryRequired {
+						// The slot may already have changed accounts. Do not classify this
+						// as a retryable failure or schedule another Supercell click.
+						b.paused.Store(true)
+						b.logger.Error().
+							Err(err).
+							Str("target_account_id", targetID).
+							Msg("multi-account identity unresolved; farming paused")
+					} else {
+						_ = b.multiAccount.MarkSwitchFailed(err)
+						b.logger.Warn().Err(err).Msg("multi-account switch deferred safely")
+					}
 				}
 			}
 			}
