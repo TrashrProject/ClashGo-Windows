@@ -31,6 +31,18 @@ interface ConfigViewProps {
   setPrivacyMaskUsername: (v: boolean) => void;
   saveAcceptedBases: boolean;
   setSaveAcceptedBases: (v: boolean) => void;
+  dryRun: boolean;
+  setDryRun: (v: boolean) => void;
+  maxRunMinutes: number;
+  setMaxRunMinutes: (v: number) => void;
+  emergencyStopHotkey: string;
+  setEmergencyStopHotkey: (v: string) => void;
+  saveNearMissBases: boolean;
+  setSaveNearMissBases: (v: boolean) => void;
+  nearMissSampleEvery: number;
+  setNearMissSampleEvery: (v: number) => void;
+  nearMissWithinPercent: number;
+  setNearMissWithinPercent: (v: number) => void;
   simpleMode: boolean;
   testSessionActive?: boolean;
   automationActive?: boolean;
@@ -76,6 +88,12 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   collectorMinutes, setCollectorMinutes,
   privacyMaskUsername, setPrivacyMaskUsername,
   saveAcceptedBases, setSaveAcceptedBases,
+  dryRun, setDryRun,
+  maxRunMinutes, setMaxRunMinutes,
+  emergencyStopHotkey, setEmergencyStopHotkey,
+  saveNearMissBases, setSaveNearMissBases,
+  nearMissSampleEvery, setNearMissSampleEvery,
+  nearMissWithinPercent, setNearMissWithinPercent,
   simpleMode,
   testSessionActive = false,
   automationActive = false,
@@ -185,7 +203,13 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
   const lootExitInvalid = invalid(lootExitPercent, 100);
   const starExitInvalid = !Number.isFinite(endAtStars) || endAtStars < 0 || endAtStars > 3;
   const collectorInvalid = !Number.isFinite(collectorMinutes) || collectorMinutes < 1 || collectorMinutes > 1440;
-  const anyInvalid = stallInvalid || lootExitInvalid || starExitInvalid || collectorInvalid || thresholdItems.some((t) => invalid(t.value, THRESHOLD_MAX));
+  const maxRunInvalid = !Number.isFinite(maxRunMinutes) || maxRunMinutes < 0 || maxRunMinutes > 10080;
+  const nearMissEveryInvalid = !Number.isFinite(nearMissSampleEvery) || nearMissSampleEvery < 1 || nearMissSampleEvery > 1000;
+  const nearMissWindowInvalid = !Number.isFinite(nearMissWithinPercent) || nearMissWithinPercent < 1 || nearMissWithinPercent > 50;
+  const hotkeyInvalid = !['ctrl+shift+end', 'end', 'off'].includes(String(emergencyStopHotkey || '').toLowerCase());
+  const anyInvalid = stallInvalid || lootExitInvalid || starExitInvalid || collectorInvalid || maxRunInvalid ||
+    nearMissEveryInvalid || nearMissWindowInvalid || hotkeyInvalid ||
+    thresholdItems.some((t) => invalid(t.value, THRESHOLD_MAX));
 
   const settingsLocked = testSessionActive || automationActive;
 
@@ -656,6 +680,125 @@ const ConfigView: React.FC<ConfigViewProps> = React.memo(({
               <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${privacyMaskUsername ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
             </div>
           </button>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <div className="space-y-5">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={dryRun}
+              onClick={() => setDryRun(!dryRun)}
+              className="w-full flex items-center justify-between group cursor-pointer text-left"
+            >
+              <div className="max-w-[80%]">
+                <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Mode Dry Run / Shadow</span>
+                <span className="block text-sm text-zinc-500 font-medium">
+                  Analyse les villages acceptés et génère un aperçu de la zone et de la ligne de déploiement sans poser aucune troupe.
+                </span>
+              </div>
+              <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${dryRun ? 'bg-sky-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
+                <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${dryRun ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
+              </div>
+            </button>
+            {dryRun && (
+              <div className="rounded-2xl border border-sky-500/20 bg-sky-500/5 p-4 text-xs font-semibold text-sky-700 dark:text-sky-300">
+                Aucun déploiement n’est autorisé dans ce mode. Les aperçus sont enregistrés dans les diagnostics avec le masquage d’identité actif.
+              </div>
+            )}
+          </div>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-5">
+              <label className="block text-[11px] font-black text-zinc-500 uppercase tracking-[0.18em] mb-3">Durée maximale de session</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={0}
+                  max={10080}
+                  value={maxRunMinutes}
+                  aria-invalid={maxRunInvalid}
+                  onChange={(e) => setMaxRunMinutes(Math.max(0, Math.min(10080, Number(e.target.value) || 0)))}
+                  className={`w-28 bg-zinc-50 dark:bg-zinc-950 border rounded-xl py-2.5 px-3 text-sm font-black tabular-nums focus:outline-none focus:ring-4 ${maxRunInvalid ? 'border-rose-400 focus:ring-rose-500/10' : 'border-zinc-200 dark:border-zinc-700 focus:ring-emerald-500/10'}`}
+                />
+                <span className="text-xs text-zinc-500">{maxRunMinutes === 0 ? 'illimitée' : 'minutes'}</span>
+              </div>
+              <p className="mt-3 text-xs text-zinc-500">0 = aucune limite. ClashGO s’arrête proprement une fois la durée atteinte.</p>
+            </div>
+
+            <div className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-5">
+              <label className="block text-[11px] font-black text-zinc-500 uppercase tracking-[0.18em] mb-3">Arrêt d’urgence Windows</label>
+              <select
+                value={emergencyStopHotkey}
+                aria-invalid={hotkeyInvalid}
+                onChange={(e) => setEmergencyStopHotkey(e.target.value)}
+                className={`w-full bg-zinc-50 dark:bg-zinc-950 border rounded-xl py-2.5 px-3 text-sm font-black focus:outline-none focus:ring-4 ${hotkeyInvalid ? 'border-rose-400 focus:ring-rose-500/10' : 'border-zinc-200 dark:border-zinc-700 focus:ring-emerald-500/10'}`}
+              >
+                <option value="ctrl+shift+end">Ctrl + Shift + End (recommandé)</option>
+                <option value="end">End uniquement</option>
+                <option value="off">Désactivé</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
+
+          <div className="space-y-5">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={saveNearMissBases}
+              onClick={() => setSaveNearMissBases(!saveNearMissBases)}
+              className="w-full flex items-center justify-between group cursor-pointer text-left"
+            >
+              <div className="max-w-[80%]">
+                <span className="block text-lg font-bold text-zinc-950 dark:text-white mb-1 tracking-tight">Échantillonner les villages presque acceptés</span>
+                <span className="block text-sm text-zinc-500 font-medium">
+                  Conserve un petit échantillon de villages refusés proches des seuils afin de vérifier la qualité de la recherche sans remplir le disque.
+                </span>
+              </div>
+              <div className={`w-14 h-7 rounded-full transition-all duration-500 relative shrink-0 ${saveNearMissBases ? 'bg-emerald-500/80' : 'bg-zinc-200 dark:bg-zinc-800'}`}>
+                <div className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-500 shadow-lg ${saveNearMissBases ? 'left-8 bg-white' : 'left-1 bg-white dark:bg-zinc-500'}`}></div>
+              </div>
+            </button>
+
+            <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 rounded-2xl border p-5 ${saveNearMissBases ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-zinc-100 dark:border-zinc-800 opacity-45'}`}>
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500 mb-2">1 capture tous les</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={1000}
+                    disabled={!saveNearMissBases}
+                    value={nearMissSampleEvery}
+                    aria-invalid={nearMissEveryInvalid}
+                    onChange={(e) => setNearMissSampleEvery(Math.max(1, Math.min(1000, Number(e.target.value) || 1)))}
+                    className="w-24 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2.5 text-sm font-black"
+                  />
+                  <span className="text-xs text-zinc-500">refus</span>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500 mb-2">Fenêtre proche du seuil</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    disabled={!saveNearMissBases}
+                    value={nearMissWithinPercent}
+                    aria-invalid={nearMissWindowInvalid}
+                    onChange={(e) => setNearMissWithinPercent(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+                    className="w-24 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2.5 text-sm font-black"
+                  />
+                  <span className="text-xs text-zinc-500">% sous le seuil</span>
+                </div>
+              </div>
+            </div>
+          </div>
 
           <div className="h-px bg-zinc-50 dark:bg-zinc-800/50 w-full"></div>
 
