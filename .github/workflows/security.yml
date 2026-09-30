@@ -22,9 +22,9 @@ jobs:
   dependency-and-static:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: '1.25.x'
           cache: true
@@ -43,7 +43,7 @@ jobs:
           go install honnef.co/go/tools/cmd/staticcheck@latest
           staticcheck ./internal/config ./internal/telemetry ./internal/intelligence ./internal/multiaccount ./internal/licensing ./internal/support ./internal/updater ./internal/paths ./cmd/account_proxy
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '20'
           cache: npm
@@ -65,23 +65,23 @@ jobs:
     name: CodeQL JavaScript
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: github/codeql-action/init@1190a975f95ce23525efb6a3fc21ea29567c1b52
         with:
           languages: javascript-typescript
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@1190a975f95ce23525efb6a3fc21ea29567c1b52
 
   sbom:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Generate repository SBOM
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
         with:
           path: .
           format: spdx-json
           output-file: clashgo-sbom.spdx.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ClashGO-SBOM
           path: clashgo-sbom.spdx.json
