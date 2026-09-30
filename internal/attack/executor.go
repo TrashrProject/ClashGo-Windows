@@ -30,6 +30,7 @@ type TapExecutor struct {
 	client      *adb.Client
 	cal         *game.Calibration
 	logger      zerolog.Logger
+	frameProvider func(time.Duration) (gocv.Mat, error)
 	lineForward bool
 
 	// deployDeadline is when this battle's deploy budget runs out. Zero
@@ -60,8 +61,17 @@ func NewTapExecutor(client *adb.Client, cal *game.Calibration, logger zerolog.Lo
 	}
 }
 
-// CaptureFresh captures a fresh screen from the device.
+// SetFrameProvider routes verifier/sweeper screenshots through the runtime
+// FrameBroker. A nil provider preserves standalone/test behavior.
+func (t *TapExecutor) SetFrameProvider(fn func(time.Duration) (gocv.Mat, error)) {
+	t.frameProvider = fn
+}
+
+// CaptureFresh returns a fresh-enough shared runtime frame when available.
 func (t *TapExecutor) CaptureFresh() (gocv.Mat, error) {
+	if t.frameProvider != nil {
+		return t.frameProvider(2 * time.Second)
+	}
 	return t.client.CaptureToMat()
 }
 
