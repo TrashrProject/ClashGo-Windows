@@ -90,11 +90,8 @@ $env:CGO_LDFLAGS = "-LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -l
         npm ci
         if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
     } finally {
-    if ($null -ne $wailsConfigOriginal) {
-        [System.IO.File]::WriteAllText($wailsConfigPath, $wailsConfigOriginal, (New-Object System.Text.UTF8Encoding($false)))
+        Pop-Location
     }
-    Pop-Location
-}
 
     if (-not $SkipTests) {
         Write-Host "Running focused tests..."
@@ -177,4 +174,9 @@ $env:CGO_LDFLAGS = "-LC:/opencv/build/install/x64/mingw/lib -lopencv_core4130 -l
     Write-Host "BUILD COMPLETE"
     Write-Host "Folder: $bundle"
     Write-Host "ZIP:    $zip"
-} finally { Pop-Location }
+} finally {
+    if ($null -ne $wailsConfigOriginal) {
+        [System.IO.File]::WriteAllText($wailsConfigPath, $wailsConfigOriginal, (New-Object System.Text.UTF8Encoding($false)))
+    }
+    Pop-Location
+}
