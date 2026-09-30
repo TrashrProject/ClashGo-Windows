@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetControlServiceConfig, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, SetBetaControlServiceURL, UndoMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetControlServiceConfig, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetMultiAccountConfig, GetMultiAccountSwitchCalibration, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, SaveMultiAccountConfig, SetBetaControlServiceURL, UndoMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
@@ -21,6 +21,24 @@ type CurrentArmy = {
   ready: boolean;
   uncertain: boolean;
   warnings?: string[];
+};
+
+type ManagedAccount = {
+  id: string;
+  label?: string;
+  player_tag: string;
+  enabled: boolean;
+  switch_slot?: number;
+  max_attacks_per_turn?: number;
+  town_hall?: number;
+  strategy_file?: string;
+};
+
+type MultiAccountConfigView = {
+  enabled: boolean;
+  active_account_id?: string;
+  default_attacks_per_turn: number;
+  accounts: ManagedAccount[];
 };
 
 type FarmUnit = { name: string; count: number; housing: number };
@@ -341,6 +359,28 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   React.useEffect(() => {
     setAccountTagInput(playerTag || '');
   }, [playerTag]);
+
+  React.useEffect(() => {
+    if (memberPage !== 'account') return;
+    let active = true;
+    void Promise.all([
+      GetMultiAccountConfig(),
+      GetMultiAccountSwitchCalibration().catch(() => ''),
+    ]).then(([cfg, calibration]) => {
+      if (!active) return;
+      const value = (cfg || {}) as MultiAccountConfigView;
+      setMultiAccount({
+        enabled: Boolean(value.enabled),
+        active_account_id: value.active_account_id || '',
+        default_attacks_per_turn: Math.max(1, Number(value.default_attacks_per_turn || 10)),
+        accounts: Array.isArray(value.accounts) ? value.accounts : [],
+      });
+      setMultiAccountCalibrated(Boolean(String(calibration || '').trim()));
+    }).catch(() => {
+      // Multi-account is optional; leave the single-account UI unaffected.
+    });
+    return () => { active = false; };
+  }, [memberPage]);
   const [confirmDeactivate, setConfirmDeactivate] = React.useState(false);
   const [supportCodeCopied, setSupportCodeCopied] = React.useState(false);
   const [supportSummaryCopied, setSupportSummaryCopied] = React.useState(false);
@@ -352,6 +392,16 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [accountTagInput, setAccountTagInput] = React.useState(playerTag || '');
   const [accountLinkBusy, setAccountLinkBusy] = React.useState(false);
   const [accountLinkMessage, setAccountLinkMessage] = React.useState('');
+  const [multiAccount, setMultiAccount] = React.useState<MultiAccountConfigView>({
+    enabled: false,
+    active_account_id: '',
+    default_attacks_per_turn: 10,
+    accounts: [],
+  });
+  const [multiAccountBusy, setMultiAccountBusy] = React.useState(false);
+  const [multiAccountMessage, setMultiAccountMessage] = React.useState('');
+  const [multiAccountError, setMultiAccountError] = React.useState('');
+  const [multiAccountCalibrated, setMultiAccountCalibrated] = React.useState(false);
 
   const refreshLicense = React.useCallback(async () => {
     try {
@@ -883,6 +933,99 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     }
   };
 
+  const addMultiAccount = () => {
+    setMultiAccount(current => {
+      const used = new Set(current.accounts.map(a => a.id));
+      let n = current.accounts.length + 1;
+      while (used.has(`account-${n}`)) n += 1;
+      const next: ManagedAccount = {
+        id: `account-${n}`,
+        label: `Compte ${n}`,
+        player_tag: '',
+        enabled: true,
+        switch_slot: n,
+        max_attacks_per_turn: 0,
+        town_hall: 0,
+        strategy_file: '',
+      };
+      return {
+        ...current,
+        active_account_id: current.active_account_id || next.id,
+        accounts: [...current.accounts, next],
+      };
+    });
+    setMultiAccountMessage('');
+    setMultiAccountError('');
+  };
+
+  const updateMultiAccount = (index: number, patch: Partial<ManagedAccount>) => {
+    setMultiAccount(current => ({
+      ...current,
+      accounts: current.accounts.map((account, i) => i === index ? { ...account, ...patch } : account),
+    }));
+    setMultiAccountMessage('');
+    setMultiAccountError('');
+  };
+
+  const removeMultiAccount = (index: number) => {
+    setMultiAccount(current => {
+      const removed = current.accounts[index];
+      const accounts = current.accounts.filter((_, i) => i !== index);
+      let active = current.active_account_id || '';
+      if (removed?.id === active) {
+        active = accounts.find(a => a.enabled)?.id || accounts[0]?.id || '';
+      }
+      return { ...current, active_account_id: active, accounts };
+    });
+    setMultiAccountMessage('');
+    setMultiAccountError('');
+  };
+
+  const saveMultiAccounts = async () => {
+    if (multiAccountBusy || automationActive) return;
+    setMultiAccountBusy(true);
+    setMultiAccountMessage('');
+    setMultiAccountError('');
+    try {
+      const payload: MultiAccountConfigView = {
+        ...multiAccount,
+        default_attacks_per_turn: Math.max(1, Math.min(100, Number(multiAccount.default_attacks_per_turn || 10))),
+        accounts: multiAccount.accounts.map((account, index) => ({
+          ...account,
+          id: account.id || `account-${index + 1}`,
+          label: String(account.label || '').trim(),
+          player_tag: String(account.player_tag || '').trim().toUpperCase(),
+          switch_slot: Math.max(0, Number(account.switch_slot || 0)),
+          max_attacks_per_turn: Math.max(0, Math.min(100, Number(account.max_attacks_per_turn || 0))),
+          town_hall: Math.max(0, Number(account.town_hall || 0)),
+          strategy_file: String(account.strategy_file || '').trim(),
+        })),
+      };
+      await SaveMultiAccountConfig(JSON.stringify(payload));
+      const refreshed = await GetMultiAccountConfig();
+      const value = (refreshed || payload) as MultiAccountConfigView;
+      setMultiAccount({
+        enabled: Boolean(value.enabled),
+        active_account_id: value.active_account_id || '',
+        default_attacks_per_turn: Number(value.default_attacks_per_turn || 10),
+        accounts: Array.isArray(value.accounts) ? value.accounts : [],
+      });
+      const active = value.accounts?.find(a => a.id === value.active_account_id);
+      if (active?.player_tag) onAccountChanged(active.player_tag);
+      setMultiAccountMessage(
+        value.enabled
+          ? (multiAccountCalibrated
+              ? 'Multi-comptes enregistré. La rotation automatique est prête.'
+              : 'Multi-comptes enregistré. Il reste à calibrer le sélecteur Supercell ID avant la rotation automatique.')
+          : 'Configuration multi-comptes enregistrée.'
+      );
+    } catch (e) {
+      setMultiAccountError(friendlyAccountActionError(e));
+    } finally {
+      setMultiAccountBusy(false);
+    }
+  };
+
   const unlink = async () => {
     if (accountActionLockRef.current || automationActive) return;
     accountActionLockRef.current = true;
@@ -1266,6 +1409,206 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               </div>
             </div>
           </div>
+        </section>
+      )}
+
+      {memberPage === 'account' && (
+        <section className="rounded-[2rem] border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-premium dark:shadow-none">
+          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Multi-comptes</div>
+              <h3 className="mt-1 text-xl font-black text-zinc-950 dark:text-white">Rotation automatique Supercell ID</h3>
+              <p className="mt-2 text-sm font-semibold text-zinc-500 max-w-2xl">
+                Chaque compte conserve sa propre mémoire IA. ClashGO change de compte uniquement depuis le village et seulement après une calibration valide.
+              </p>
+            </div>
+            <label className="flex items-center gap-3 rounded-2xl border border-zinc-200 dark:border-zinc-700 px-4 py-3">
+              <input
+                type="checkbox"
+                checked={multiAccount.enabled}
+                disabled={automationActive || multiAccountBusy}
+                onChange={(e) => setMultiAccount(current => ({ ...current, enabled: e.target.checked }))}
+                className="h-4 w-4"
+              />
+              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-300">Activer</span>
+            </label>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-[220px_1fr]">
+            <label className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4">
+              <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Attaques / tour par défaut</span>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={multiAccount.default_attacks_per_turn}
+                disabled={automationActive || multiAccountBusy}
+                onChange={(e) => setMultiAccount(current => ({ ...current, default_attacks_per_turn: Number(e.target.value || 1) }))}
+                className="mt-2 h-10 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 text-sm font-black outline-none"
+              />
+            </label>
+            <div className={
+              'rounded-2xl border p-4 ' +
+              (multiAccountCalibrated
+                ? 'border-emerald-500/20 bg-emerald-500/5'
+                : 'border-amber-500/20 bg-amber-500/5')
+            }>
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-base">
+                  {multiAccountCalibrated ? 'verified' : 'warning'}
+                </span>
+                <span className={
+                  'text-[10px] font-black uppercase tracking-widest ' +
+                  (multiAccountCalibrated ? 'text-emerald-500' : 'text-amber-500')
+                }>
+                  {multiAccountCalibrated ? 'Sélecteur calibré' : 'Calibration Supercell ID requise'}
+                </span>
+              </div>
+              <p className="mt-1 text-xs font-semibold text-zinc-500">
+                Sans calibration, ClashGO n’effectuera aucun clic de changement de compte : la rotation sera simplement différée.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-3">
+            {multiAccount.accounts.map((account, index) => (
+              <div
+                key={account.id || index}
+                className={
+                  'rounded-2xl border p-4 ' +
+                  (multiAccount.active_account_id === account.id
+                    ? 'border-sky-400/40 bg-sky-500/5'
+                    : 'border-zinc-100 dark:border-zinc-800')
+                }
+              >
+                <div className="grid gap-3 lg:grid-cols-[44px_1.2fr_1.3fr_90px_90px_120px_auto] lg:items-end">
+                  <label className="flex h-10 items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-700">
+                    <input
+                      type="checkbox"
+                      checked={account.enabled}
+                      disabled={automationActive || multiAccountBusy}
+                      onChange={(e) => updateMultiAccount(index, { enabled: e.target.checked })}
+                      title="Compte actif dans la rotation"
+                    />
+                  </label>
+                  <label>
+                    <span className="text-[8px] font-black uppercase tracking-widest text-zinc-400">Nom</span>
+                    <input
+                      value={account.label || ''}
+                      disabled={automationActive || multiAccountBusy}
+                      onChange={(e) => updateMultiAccount(index, { label: e.target.value })}
+                      className="mt-1 h-10 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 text-xs font-bold outline-none"
+                      placeholder={`Compte ${index + 1}`}
+                    />
+                  </label>
+                  <label>
+                    <span className="text-[8px] font-black uppercase tracking-widest text-zinc-400">PlayerTag</span>
+                    <input
+                      value={account.player_tag || ''}
+                      disabled={automationActive || multiAccountBusy}
+                      onChange={(e) => updateMultiAccount(index, { player_tag: e.target.value.toUpperCase() })}
+                      className="mt-1 h-10 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 text-xs font-mono font-bold outline-none"
+                      placeholder="#2ABC123"
+                    />
+                  </label>
+                  <label>
+                    <span className="text-[8px] font-black uppercase tracking-widest text-zinc-400">Slot</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={account.switch_slot || ''}
+                      disabled={automationActive || multiAccountBusy}
+                      onChange={(e) => updateMultiAccount(index, { switch_slot: Number(e.target.value || 0) })}
+                      className="mt-1 h-10 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 text-xs font-bold outline-none"
+                    />
+                  </label>
+                  <label>
+                    <span className="text-[8px] font-black uppercase tracking-widest text-zinc-400">HDV</span>
+                    <input
+                      type="number"
+                      min={8}
+                      max={18}
+                      value={account.town_hall || ''}
+                      disabled={automationActive || multiAccountBusy}
+                      onChange={(e) => updateMultiAccount(index, { town_hall: Number(e.target.value || 0) })}
+                      className="mt-1 h-10 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 text-xs font-bold outline-none"
+                    />
+                  </label>
+                  <label>
+                    <span className="text-[8px] font-black uppercase tracking-widest text-zinc-400">Attaques / tour</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={account.max_attacks_per_turn || 0}
+                      disabled={automationActive || multiAccountBusy}
+                      onChange={(e) => updateMultiAccount(index, { max_attacks_per_turn: Number(e.target.value || 0) })}
+                      className="mt-1 h-10 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 text-xs font-bold outline-none"
+                      title="0 = valeur par défaut"
+                    />
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={automationActive || multiAccountBusy}
+                      onClick={() => setMultiAccount(current => ({ ...current, active_account_id: account.id }))}
+                      className={
+                        'h-10 rounded-xl px-3 text-[9px] font-black uppercase tracking-wider ' +
+                        (multiAccount.active_account_id === account.id
+                          ? 'bg-sky-500 text-white'
+                          : 'border border-zinc-200 dark:border-zinc-700 text-zinc-500')
+                      }
+                    >
+                      {multiAccount.active_account_id === account.id ? 'Actif' : 'Choisir'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={automationActive || multiAccountBusy}
+                      onClick={() => removeMultiAccount(index)}
+                      className="h-10 rounded-xl border border-rose-500/20 px-3 text-rose-500"
+                      title="Supprimer"
+                    >
+                      <span className="material-symbols-outlined text-base">delete</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {multiAccount.accounts.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-zinc-200 dark:border-zinc-700 p-6 text-center text-xs font-semibold text-zinc-500">
+                Ajoute au moins deux comptes pour activer la rotation.
+              </div>
+            )}
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={addMultiAccount}
+              disabled={automationActive || multiAccountBusy || multiAccount.accounts.length >= 20}
+              className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-zinc-600 dark:text-zinc-300 disabled:opacity-40"
+            >
+              + Ajouter un compte
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveMultiAccounts()}
+              disabled={automationActive || multiAccountBusy}
+              className="rounded-xl bg-zinc-950 dark:bg-white px-5 py-2.5 text-[10px] font-black uppercase tracking-widest text-white dark:text-zinc-950 disabled:opacity-40"
+            >
+              {multiAccountBusy ? 'Enregistrement…' : 'Enregistrer le multi-compte'}
+            </button>
+          </div>
+          {automationActive && (
+            <div className="mt-3 text-[10px] font-bold text-amber-500">Arrête ClashGO avant de modifier la rotation des comptes.</div>
+          )}
+          {multiAccountMessage && (
+            <div className="mt-3 rounded-xl bg-emerald-500/10 px-4 py-3 text-[11px] font-bold text-emerald-500">{multiAccountMessage}</div>
+          )}
+          {multiAccountError && (
+            <div className="mt-3 rounded-xl bg-rose-500/10 px-4 py-3 text-[11px] font-bold text-rose-500">{multiAccountError}</div>
+          )}
         </section>
       )}
 
