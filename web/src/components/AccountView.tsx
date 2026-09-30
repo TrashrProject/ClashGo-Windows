@@ -3,6 +3,7 @@ import React from 'react';
 import { InterfaceLevel } from '../types';
 import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetControlServiceConfig, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetMultiAccountConfig, GetMultiAccountStatus, GetMultiAccountSwitchCalibration, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, SaveMultiAccountConfig, SetBetaControlServiceURL, UndoMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
+import MultiAccountCalibration from './MultiAccountCalibration';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
 type CurrentArmyUnit = {
@@ -1580,6 +1581,16 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               )}
             </div>
           </div>
+
+          <MultiAccountCalibration
+            accounts={multiAccount.accounts}
+            disabled={automationActive || multiAccountBusy}
+            calibrated={multiAccountCalibrated}
+            onSaved={() => {
+              setMultiAccountCalibrated(true);
+              setMultiAccountMessage('Calibration Supercell ID enregistrée. La rotation peut maintenant effectuer des changements de compte vérifiés.');
+            }}
+          />
 
           <div className="mt-5 space-y-3">
             {multiAccount.accounts.map((account, index) => (
