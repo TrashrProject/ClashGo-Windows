@@ -125,6 +125,11 @@ type WallUpgradeHooks struct {
 	// interrupts an otherwise-unbounded wall-upgrade run.
 	StopCheck func() bool
 
+	// DeepSearch is used only by the single bounded recovery pass. The normal
+	// path is intentionally fast; a retry expands the wall-row scan so a
+	// transient menu animation cannot make the wall stage disappear entirely.
+	DeepSearch bool
+
 	// OnStep is the optional phase-boundary instrumentation hook.
 	OnStep func(step string, data map[string]any)
 }
@@ -140,6 +145,8 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) {
 		lastSearchAttempt float64
 		lastWallConf      float64
 		upgradesLearned   int
+		retryableFailure  bool
+		terminalReason    string
 	)
 
 	if b.villageMemory != nil {
@@ -175,6 +182,7 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) {
 
 		case "upgrade_success":
 			upgradesLearned++
+			retryableFailure = false
 			if b.villageMemory != nil {
 				_ = b.villageMemory.MarkEntityResult(wallMemoryID, true)
 			}
@@ -184,7 +192,7 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) {
 					Domain: "wall_upgrade",
 					Parameters: map[string]float64{
 						"wall_search_attempt": lastSearchAttempt,
-						"builder_open_settle_ms": 1500,
+						"builder_open_settle_ms": 850,
 					},
 					Clean: true,
 					DeploySuccess: true,
@@ -195,7 +203,15 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) {
 				})
 			}
 
-		case "wall_text_not_found", "tap_builder_failed":
+		case "all_unaffordable":
+			terminalReason = step
+			retryableFailure = false
+
+		case "wall_text_not_found", "tap_builder_failed", "not_in_main_village",
+			"aborted_capture_defensive", "scroll_failed", "scroll_up_failed",
+			"upgrade_screen_capture_failed", "upgrade_not_found":
+			terminalReason = step
+			retryableFailure = true
 			if b.villageMemory != nil {
 				_ = b.villageMemory.MarkEntityResult(wallMemoryID, false)
 			}
@@ -205,7 +221,7 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) {
 					Domain: "wall_upgrade",
 					Parameters: map[string]float64{
 						"wall_search_attempt": lastSearchAttempt,
-						"builder_open_settle_ms": 1500,
+						"builder_open_settle_ms": 850,
 					},
 					DeploySuccess: false,
 					RewardOverride: &reward,
@@ -214,21 +230,83 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) {
 		}
 	}
 
-	RunWallUpgradeLoop(&WallUpgradeHooks{
-		Logger:    b.logger,
-		Client:    b.client,
-		Cal:       b.cal,
-		Templates: b.templates,
-		Classify:  b.classify,
-		Dismiss:   b.dismissSelection,
-		StopCheck: func() bool { return b.ctx.Err() != nil },
-		OnStep:    observe,
-	})
+	readResources := func() game.VillageResourceSnapshot {
+		if b.resourceReader == nil {
+			return game.VillageResourceSnapshot{}
+		}
+		screen, err := b.runtimeFrameFresh(2 * time.Second)
+		if err != nil || screen.Empty() {
+			if !screen.Empty() {
+				screen.Close()
+			}
+			return game.VillageResourceSnapshot{}
+		}
+		defer screen.Close()
+		return b.resourceReader.Read(screen)
+	}
+
+	stageStarted := time.Now()
+	before := readResources()
+	attempts := 0
+	for attempts < 2 {
+		attempts++
+		retryableFailure = false
+		terminalReason = ""
+
+		RunWallUpgradeLoop(&WallUpgradeHooks{
+			Logger:    b.logger,
+			Client:    b.client,
+			Cal:       b.cal,
+			Templates: b.templates,
+			Classify:  b.classify,
+			Dismiss:   b.dismissSelection,
+			StopCheck: func() bool { return b.ctx.Err() != nil },
+			DeepSearch: attempts > 1,
+			OnStep:    observe,
+		})
+
+		if b.ctx.Err() != nil || !retryableFailure {
+			break
+		}
+		b.logger.Warn().
+			Str("reason", terminalReason).
+			Int("attempt", attempts).
+			Msg("wall stage hit a transient failure; running one bounded deep retry")
+		b.dismissSelection()
+		if !b.sleepResponsive(650 * time.Millisecond) {
+			break
+		}
+	}
+
+	// Cheap end-to-end verification: if the loop reported one or more wall
+	// upgrades, at least gold OR elixir should have decreased. This costs only
+	// one extra post-stage capture, not one capture per wall. If OCR is valid
+	// and neither resource moved, surface the discrepancy instead of silently
+	// pretending the wall stage succeeded.
+	after := readResources()
+	resourceVerified := false
+	if upgradesLearned > 0 && before.Valid && after.Valid {
+		goldSpent := before.GoldValid && after.GoldValid && after.Gold < before.Gold
+		elixirSpent := before.ElixirValid && after.ElixirValid && after.Elixir < before.Elixir
+		resourceVerified = goldSpent || elixirSpent
+		if !resourceVerified {
+			b.logger.Warn().
+				Int("before_gold", before.Gold).
+				Int("after_gold", after.Gold).
+				Int("before_elixir", before.Elixir).
+				Int("after_elixir", after.Elixir).
+				Msg("wall loop reported upgrades but village resources did not decrease; review wall calibration")
+		}
+	}
 
 	b.logger.Info().
 		Int("learned_wall_upgrades", upgradesLearned).
+		Int("wall_stage_attempts", attempts).
+		Dur("wall_stage_duration", time.Since(stageStarted)).
+		Bool("resource_spend_verified", resourceVerified).
 		Float64("last_wall_confidence", lastWallConf).
-		Msg("wall-upgrade shadow learning cycle complete")
+		Str("terminal_reason", terminalReason).
+		Msg("wall-upgrade cycle complete")
 }
 
 // RunWallUpgradeLoop drives the wall-upgrade sequence with explicit deps
