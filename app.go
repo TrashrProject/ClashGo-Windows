@@ -3610,8 +3610,48 @@ func (a *App) applyMemberAccountForCurrentLicense() error {
 		return nil
 	}
 	cfg := config.LoadOrDefault("config.json")
-	tag, exists := a.loadMemberAccountTag()
-	if !exists {
+	storedTag, exists := a.loadMemberAccountTag()
+	tag := strings.TrimSpace(storedTag)
+
+	// Multi-account scheduler state is updated only after ClashGO has observed
+	// a real Supercell-ID loading transition and a verified MainVillage return.
+	// Prefer that durable truth over the older per-license single-account tag,
+	// otherwise a process restart could silently point metadata/learning back
+	// to the account used before automatic rotation.
+	if verifiedTag, ok := bot.ResolveMultiAccountActivePlayerTag(cfg); ok {
+		tag = verifiedTag
+		for _, account := range cfg.Account.MultiAccount.Accounts {
+			if account.Enabled && strings.EqualFold(strings.TrimSpace(account.PlayerTag), tag) {
+				cfg.Account.MultiAccount.ActiveAccountID = account.ID
+				break
+			}
+		}
+		if !exists || !strings.EqualFold(strings.TrimSpace(storedTag), tag) {
+			if err := a.persistMemberAccountTag(tag); err != nil {
+				return err
+			}
+		}
+	} else if cfg.Account.MultiAccount.Enabled {
+		// First multi-account boot may not have scheduler state yet. Keep a
+		// config tag that already matches the configured enabled active profile
+		// rather than replacing it with an older member snapshot.
+		current := strings.TrimSpace(cfg.Account.PlayerTag)
+		for _, account := range cfg.Account.MultiAccount.Accounts {
+			if account.Enabled &&
+				account.ID == cfg.Account.MultiAccount.ActiveAccountID &&
+				strings.EqualFold(strings.TrimSpace(account.PlayerTag), current) {
+				tag = current
+				if !exists || !strings.EqualFold(strings.TrimSpace(storedTag), tag) {
+					if err := a.persistMemberAccountTag(tag); err != nil {
+						return err
+					}
+				}
+				break
+			}
+		}
+	}
+
+	if strings.TrimSpace(tag) == "" && !exists {
 		// Migration path for the first version that introduces per-license
 		// accounts: the currently linked tag belongs to the currently active
 		// license. Deactivation clears it, so a future different license can
@@ -3648,7 +3688,6 @@ func (a *App) applyMemberAccountForCurrentLicense() error {
 	a.mu.Unlock()
 	return nil
 }
-
 type MemberAutomationProfile struct {
 	SimpleMode          *bool                         `json:"simple_mode,omitempty"`
 	SearchEnabled       bool                          `json:"search_enabled"`
