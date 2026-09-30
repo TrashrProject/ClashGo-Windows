@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/Ducky705/ClashGO/internal/game"
 	"github.com/Ducky705/ClashGO/internal/paths"
 	"github.com/Ducky705/ClashGO/internal/vision"
 	"gocv.io/x/gocv"
@@ -179,6 +180,12 @@ func (b *Bot) maybeCollectVillageResources(screen gocv.Mat) {
 			if b.ctx.Err() != nil || b.seqRunning.Load() || b.paused.Load() {
 				return
 			}
+			confirmed, ok := b.confirmCollectorTarget(target)
+			if !ok {
+				b.logger.Debug().Str("collector", target.kind).Msg("collector candidate did not survive two-frame verification")
+				continue
+			}
+			target = confirmed
 			if err := b.client.TapFast(target.point.X, target.point.Y, 0.8); err != nil {
 				b.logger.Debug().Err(err).Str("collector", target.kind).Msg("collector tap failed")
 				continue
@@ -197,6 +204,37 @@ func (b *Bot) maybeCollectVillageResources(screen gocv.Mat) {
 			}
 		}
 	}(targets)
+}
+
+func (b *Bot) confirmCollectorTarget(original collectorTarget) (collectorTarget, bool) {
+	fresh, err := b.runtimeFrameFresh(1500 * time.Millisecond)
+	if err != nil || fresh.Empty() {
+		if err == nil {
+			fresh.Close()
+		}
+		return collectorTarget{}, false
+	}
+	defer fresh.Close()
+
+	state, _ := b.classify(fresh)
+	if state != game.StateMainVillage {
+		return collectorTarget{}, false
+	}
+
+	candidates := b.findCollectorTargets(fresh)
+	maxDX := 34.0 * math.Max(b.cal.ScaleX, 0.1)
+	maxDY := 34.0 * math.Max(b.cal.ScaleY, 0.1)
+	for _, candidate := range candidates {
+		if candidate.kind != original.kind {
+			continue
+		}
+		dx := math.Abs(float64(candidate.point.X - original.point.X))
+		dy := math.Abs(float64(candidate.point.Y - original.point.Y))
+		if dx <= maxDX && dy <= maxDY {
+			return candidate, true
+		}
+	}
+	return collectorTarget{}, false
 }
 
 // findCollectorTargets finds at most one compact, high-saturation resource
@@ -226,7 +264,7 @@ func (b *Bot) findCollectorTargets(screen gocv.Mat) []collectorTarget {
 			kind: "gold",
 			lower: gocv.NewScalar(16, 150, 175, 0),
 			upper: gocv.NewScalar(39, 255, 255, 0),
-			minArea: 45, maxArea: 900, minAspect: 0.55, maxAspect: 1.85,
+			minArea: 70, maxArea: 650, minAspect: 0.68, maxAspect: 1.45,
 		},
 		{
 			kind: "elixir",
@@ -238,7 +276,7 @@ func (b *Bot) findCollectorTargets(screen gocv.Mat) []collectorTarget {
 			kind: "dark_elixir",
 			lower: gocv.NewScalar(125, 85, 45, 0),
 			upper: gocv.NewScalar(174, 255, 135, 0),
-			minArea: 55, maxArea: 520, minAspect: 0.72, maxAspect: 1.40,
+			minArea: 65, maxArea: 460, minAspect: 0.75, maxAspect: 1.35,
 		},
 	}
 
@@ -269,7 +307,7 @@ func (b *Bot) findCollectorTargets(screen gocv.Mat) []collectorTarget {
 			}
 			refW := float64(rect.Dx()) / math.Max(b.cal.ScaleX, 0.1)
 			refH := float64(rect.Dy()) / math.Max(b.cal.ScaleY, 0.1)
-			if refW < 6 || refW > 42 || refH < 6 || refH > 42 {
+			if refW < 10 || refW > 38 || refH < 10 || refH > 38 {
 				continue
 			}
 			aspect := refW / refH
@@ -277,7 +315,7 @@ func (b *Bot) findCollectorTargets(screen gocv.Mat) []collectorTarget {
 				continue
 			}
 			fill := area / float64(rect.Dx()*rect.Dy())
-			if fill < 0.38 {
+			if fill < 0.44 {
 				continue
 			}
 
