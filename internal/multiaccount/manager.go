@@ -22,7 +22,9 @@ type State struct {
 	LastSwitchAttemptAt      time.Time `json:"last_switch_attempt_at,omitempty"`
 	ConsecutiveSwitchFailures int      `json:"consecutive_switch_failures"`
 	LastError                string    `json:"last_error,omitempty"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	RecoveryRequired         bool      `json:"recovery_required,omitempty"`
+	RecoveryTargetAccountID  string    `json:"recovery_target_account_id,omitempty"`
+	UpdatedAt                time.Time `json:"updated_at"`
 }
 
 type Manager struct {
@@ -31,6 +33,17 @@ type Manager struct {
 	cfg   config.MultiAccountConfig
 	state State
 }
+
+type switchJournal struct {
+	Version       int       `json:"version"`
+	FromAccountID string    `json:"from_account_id,omitempty"`
+	ToAccountID   string    `json:"to_account_id"`
+	ToPlayerTag   string    `json:"to_player_tag,omitempty"`
+	Phase         string    `json:"phase"`
+	StartedAt     time.Time `json:"started_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
 
 func NewManager(path string, cfg config.MultiAccountConfig, currentTag string) (*Manager, error) {
 	m := &Manager{
@@ -50,6 +63,25 @@ func NewManager(path string, cfg config.MultiAccountConfig, currentTag string) (
 		m.state.Version = 1
 	}
 	m.reconcileActiveLocked(currentTag)
+	if journal, ok := m.loadSwitchJournalLocked(); ok {
+		switch journal.Phase {
+		case "physical_switched":
+			if target := m.accountByIDLocked(journal.ToAccountID); target != nil && target.Enabled {
+				m.state.ActiveAccountID = target.ID
+				m.state.AttacksThisTurn = 0
+				m.state.RecoveryRequired = false
+				m.state.RecoveryTargetAccountID = target.ID
+				m.state.LastError = "recovered verified account switch from journal"
+			}
+		case "prepared":
+			// The process stopped after navigation started but before a new
+			// MainVillage was confirmed. We cannot prove which account Clash is
+			// showing, so block unattended farming instead of guessing.
+			m.state.RecoveryRequired = true
+			m.state.RecoveryTargetAccountID = journal.ToAccountID
+			m.state.LastError = "account switch was interrupted before verification; confirm the active Clash account"
+		}
+	}
 	if err := m.saveLocked(); err != nil {
 		return nil, err
 	}
@@ -142,7 +174,7 @@ func (m *Manager) Enabled() bool {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.cfg.Enabled && m.enabledCountLocked() >= 2
+	return m.cfg.Enabled && m.enabledCountLocked() >= 2 && !m.state.RecoveryRequired
 }
 
 func (m *Manager) State() State {
@@ -187,7 +219,7 @@ func (m *Manager) NextDue() (config.ManagedAccount, bool) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !m.cfg.Enabled || m.enabledCountLocked() < 2 {
+	if !m.cfg.Enabled || m.enabledCountLocked() < 2 || m.state.RecoveryRequired {
 		return config.ManagedAccount{}, false
 	}
 	active := m.accountByIDLocked(m.state.ActiveAccountID)
@@ -245,6 +277,89 @@ func (m *Manager) SwitchAttemptAllowed(now time.Time) (bool, time.Duration) {
 	return false, remaining
 }
 
+func (m *Manager) BeginSwitch(accountID string) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	target := m.accountByIDLocked(accountID)
+	if target == nil || !target.Enabled {
+		return fmt.Errorf("unknown or disabled multi-account profile %q", accountID)
+	}
+	now := time.Now()
+	j := switchJournal{
+		Version:       1,
+		FromAccountID: m.state.ActiveAccountID,
+		ToAccountID:   target.ID,
+		ToPlayerTag:   target.PlayerTag,
+		Phase:         "prepared",
+		StartedAt:     now,
+		UpdatedAt:     now,
+	}
+	return m.saveSwitchJournalLocked(j)
+}
+
+func (m *Manager) MarkPhysicalSwitch(accountID string) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.loadSwitchJournalLocked()
+	if !ok || j.ToAccountID != accountID {
+		return fmt.Errorf("switch journal missing or targets another account")
+	}
+	j.Phase = "physical_switched"
+	j.UpdatedAt = time.Now()
+	m.state.RecoveryRequired = false
+	m.state.RecoveryTargetAccountID = accountID
+	return m.saveSwitchJournalLocked(j)
+}
+
+func (m *Manager) AbortPreparedSwitch(accountID string) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.loadSwitchJournalLocked()
+	if !ok {
+		return nil
+	}
+	if j.ToAccountID != accountID || j.Phase != "prepared" {
+		return nil
+	}
+	return m.removeSwitchJournalLocked()
+}
+
+func (m *Manager) CompleteSwitch(accountID string) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.loadSwitchJournalLocked()
+	if !ok {
+		return nil
+	}
+	if j.ToAccountID != accountID {
+		return fmt.Errorf("cannot complete switch journal for %q", accountID)
+	}
+	m.state.RecoveryRequired = false
+	m.state.RecoveryTargetAccountID = ""
+	return m.removeSwitchJournalLocked()
+}
+
+func (m *Manager) RecoveryStatus() (bool, string) {
+	if m == nil {
+		return false, ""
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.state.RecoveryRequired, m.state.RecoveryTargetAccountID
+}
+
 func (m *Manager) MarkSwitched(accountID string) error {
 	if m == nil {
 		return nil
@@ -265,6 +380,8 @@ func (m *Manager) MarkSwitched(accountID string) error {
 	m.state.LastSwitchAttemptAt = now
 	m.state.ConsecutiveSwitchFailures = 0
 	m.state.LastError = ""
+	m.state.RecoveryRequired = false
+	m.state.RecoveryTargetAccountID = ""
 	m.state.UpdatedAt = now
 	return m.saveLocked()
 }
@@ -330,6 +447,60 @@ func (m *Manager) enabledCountLocked() int {
 		}
 	}
 	return n
+}
+
+func (m *Manager) switchJournalPathLocked() string {
+	if strings.TrimSpace(m.path) == "" {
+		return ""
+	}
+	return m.path + ".switch.json"
+}
+
+func (m *Manager) loadSwitchJournalLocked() (switchJournal, bool) {
+	path := m.switchJournalPathLocked()
+	if path == "" {
+		return switchJournal{}, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return switchJournal{}, false
+	}
+	var j switchJournal
+	if json.Unmarshal(data, &j) != nil || j.ToAccountID == "" || j.Phase == "" {
+		return switchJournal{}, false
+	}
+	return j, true
+}
+
+func (m *Manager) saveSwitchJournalLocked(j switchJournal) error {
+	path := m.switchJournalPathLocked()
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(j, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	_ = os.Remove(path)
+	return os.Rename(tmp, path)
+}
+
+func (m *Manager) removeSwitchJournalLocked() error {
+	path := m.switchJournalPathLocked()
+	if path == "" {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func (m *Manager) saveLocked() error {
