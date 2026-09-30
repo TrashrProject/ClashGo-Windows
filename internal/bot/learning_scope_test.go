@@ -119,3 +119,42 @@ func TestResolveMultiAccountActivePlayerTagRejectsDisabledStateAccount(t *testin
 		t.Fatalf("disabled scheduler account unexpectedly resolved to %q", tag)
 	}
 }
+
+
+func TestAccountRuntimeSnapshotPathsSeparatePlayerTags(t *testing.T) {
+	t.Setenv("CLASHGO_CONFIG_DIR", t.TempDir())
+	a := config.DefaultConfig()
+	b := config.DefaultConfig()
+	a.Account.PlayerTag = "#AAA111"
+	b.Account.PlayerTag = "#BBB222"
+
+	pairs := [][2]string{
+		{AccountVillageResourcesPath(a), AccountVillageResourcesPath(b)},
+		{AccountVillageResourceHistoryPath(a), AccountVillageResourceHistoryPath(b)},
+		{AccountArmySnapshotPath(a), AccountArmySnapshotPath(b)},
+	}
+	for i, pair := range pairs {
+		if pair[0] == pair[1] {
+			t.Fatalf("snapshot path pair %d shared across accounts: %q", i, pair[0])
+		}
+	}
+}
+
+func TestAccountRuntimeSnapshotPathsStableForSamePlayerTag(t *testing.T) {
+	t.Setenv("CLASHGO_CONFIG_DIR", t.TempDir())
+	a := config.DefaultConfig()
+	b := config.DefaultConfig()
+	a.Account.PlayerTag = "#SAME123"
+	b.Account.PlayerTag = "#SAME123"
+	b.Device.DeviceID = "127.0.0.1:7777"
+
+	if AccountVillageResourcesPath(a) != AccountVillageResourcesPath(b) {
+		t.Fatal("same PlayerTag should keep the same resource snapshot path")
+	}
+	if AccountVillageResourceHistoryPath(a) != AccountVillageResourceHistoryPath(b) {
+		t.Fatal("same PlayerTag should keep the same resource history path")
+	}
+	if AccountArmySnapshotPath(a) != AccountArmySnapshotPath(b) {
+		t.Fatal("same PlayerTag should keep the same army snapshot path")
+	}
+}
