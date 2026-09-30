@@ -130,8 +130,9 @@ type WallUpgradeHooks struct {
 	// transient menu animation cannot make the wall stage disappear entirely.
 	DeepSearch bool
 
-	// PreferredWallAttempt is the previously learned number of upward swipes
-	// from the deterministic menu bottom to the Wall row. -1 means unknown.
+	// PreferredWallAttempt is only a diagnostic hint for where the Wall row
+	// was found previously. The list is dynamic, so navigation never skips
+	// directly to this position and always re-scans the current list.
 	PreferredWallAttempt int
 
 	// VerifyUpgradeProgress is called immediately after a claimed wall upgrade.
@@ -485,11 +486,10 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 		h.Logger.Info().Msg("Template-matching fallback: no rect assets loaded — using btn_upgrade_wall template + cost-color")
 	}
 
-	// Once a wall row has been found, remember how many upward menu swipes
-	// were required from the deterministic bottom position. Subsequent wall
-	// upgrades can jump straight back near that row and validate it with one
-	// capture instead of repeating the full search. Production may seed the
-	// first iteration from persistent VillageMemory.
+	// Keep the historical location only as a hint for diagnostics. Builder
+	// menu ordering is dynamic: a wall can move when another upgrade vanishes,
+	// builders change state, or resources change. Every iteration therefore
+	// scans the live list from a deterministic bottom position.
 	preferredWallAttempt := h.PreferredWallAttempt
 	if preferredWallAttempt < 0 || preferredWallAttempt > 12 {
 		preferredWallAttempt = -1
@@ -669,116 +669,107 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 		}
 
 		wallClicked := false
-		searchAttemptOffset := 0
-		if preferredWallAttempt > 0 && !h.DeepSearch {
-			// Replay the known scroll distance without doing capture/match work at
-			// every intermediate position. The first capture below validates that
-			// the row is still where the previous successful iteration found it.
-			startY := menuROI.Min.Y + menuROI.Dx()/2
-			endY := startY + int(140*h.Cal.ScaleY)
-			for i := 0; i < preferredWallAttempt; i++ {
-				if err := h.Client.Swipe(scrollX, startY, scrollX, endY, 260); err != nil {
-					break
-				}
-				time.Sleep(180 * time.Millisecond)
-			}
-			searchAttemptOffset = preferredWallAttempt
-			h.step("wall_search_fast_forward", map[string]any{"attempt": preferredWallAttempt})
-			time.Sleep(250 * time.Millisecond)
+		if preferredWallAttempt >= 0 {
+			h.step("wall_search_hint", map[string]any{"previous_attempt": preferredWallAttempt})
 		}
 
-		maxSearchAttempts := 8
+		// Dynamic list scan. Normal mode samples every two 140px swipes; the
+		// ~680px-tall menu viewport still overlaps heavily between samples, so a
+		// Wall row cannot be skipped while we cut capture/matching work roughly
+		// in half. The deep retry samples every swipe for maximum certainty.
+		scanStride := 2
+		maxUpSwipes := 12
 		if h.DeepSearch {
-			maxSearchAttempts = 12
-			searchAttemptOffset = 0
+			scanStride = 1
+			maxUpSwipes = 16
 		}
-		for localAttempt := 0; localAttempt < maxSearchAttempts; localAttempt++ {
-			attempt := searchAttemptOffset + localAttempt
+		upSwipes := 0
+		for {
+			attempt := upSwipes
 			screen, err := h.Client.CaptureToMat()
 			if err != nil {
-				time.Sleep(500 * time.Millisecond)
-				continue
+				// Retry the same viewport once rather than scrolling past a row
+				// merely because ADB dropped one frame.
+				time.Sleep(300 * time.Millisecond)
+				screen, err = h.Client.CaptureToMat()
 			}
-			// Robust 0.78 threshold, 60 scale steps.
-			matches, _ := vision.MatchMultiScaleROICached(screen, wallTpl, "text_wall", 0.3, 1.5, 20, 0.78, menuROI)
+			if err == nil && !screen.Empty() {
+				matches, _ := vision.MatchMultiScaleROICached(screen, wallTpl, "text_wall", 0.3, 1.5, 20, 0.78, menuROI)
 
-			h.step("wall_text_search", map[string]any{
-				"attempt": attempt,
-				"matches": len(matches),
-			})
+				h.step("wall_text_search", map[string]any{
+					"attempt":          attempt,
+					"previous_attempt": preferredWallAttempt,
+					"matches":          len(matches),
+				})
 
-			// Filter out false-positives that landed OUTSIDE the menu ROI
-			// even though the matcher was given the ROI as an argument
-			// (the ROI is advisory for MatchMultiScale — real returns can
-			// still be at y < menuROI.Min.Y, e.g. against the top-bar gold
-			// text "1/2" or username area on the village map). The user's
-			// freshly-captured text_wall.png will match on a real wall row
-			// within the menu bbox; matches below the bottom HUD or above
-			// the top bar are not the wall row we're looking for.
-			//
-			// Note: we deliberately do NOT filter by scale — the user's
-			// current 56x12 text_wall.png has padding around a real 22x5
-			// letter region, so its natural match lands at scale ~0.40.
-			// Filtering by scale >= 0.60 would block all real matches.
-			var best *vision.Match
-			for _, m := range matches {
-				if m.Point.Y < menuROI.Min.Y || m.Point.Y > menuROI.Max.Y ||
-					m.Point.X < menuROI.Min.X || m.Point.X > menuROI.Max.X {
-					continue
+				var best *vision.Match
+				for _, m := range matches {
+					if m.Point.Y < menuROI.Min.Y || m.Point.Y > menuROI.Max.Y ||
+						m.Point.X < menuROI.Min.X || m.Point.X > menuROI.Max.X {
+						continue
+					}
+					mCopy := m
+					best = &mCopy
+					break
 				}
-				mCopy := m
-				best = &mCopy
+
+				if best != nil {
+					h.Logger.Info().
+						Float64("conf", best.Confidence).
+						Float64("scale", best.Scale).
+						Int("x", best.Point.X).
+						Int("y", best.Point.Y).
+						Int("current_scroll", attempt).
+						Int("previous_scroll", preferredWallAttempt).
+						Msg("Wall text template found in dynamic builder-list scan")
+					hookScreen := screen.Clone()
+					payload := map[string]any{
+						"attempt":          attempt,
+						"previous_attempt": preferredWallAttempt,
+						"conf":             best.Confidence,
+						"scale":            best.Scale,
+						"x":                best.Point.X,
+						"y":                best.Point.Y,
+						"matches":          matches,
+					}
+					if !hookScreen.Empty() {
+						payload["screen"] = hookScreen
+					}
+					h.step("wall_text_found", payload)
+					if err := h.Client.Tap(best.Point.X, best.Point.Y); err == nil {
+						wallClicked = true
+						preferredWallAttempt = attempt
+					}
+				}
+				screen.Close()
+			} else if err == nil {
+				screen.Close()
+			}
+
+			if wallClicked || upSwipes >= maxUpSwipes {
 				break
 			}
 
-			if best != nil {
-				h.Logger.Info().
-					Float64("conf", best.Confidence).
-					Float64("scale", best.Scale).
-					Int("x", best.Point.X).
-					Int("y", best.Point.Y).
-					Msg("Wall text template found")
-				hookScreen := screen.Clone()
-				if hookScreen.Empty() {
-					h.step("wall_text_found", map[string]any{
-						"attempt": attempt,
-						"conf":    best.Confidence,
-						"scale":   best.Scale,
-						"x":       best.Point.X,
-						"y":       best.Point.Y,
-						"matches": matches,
-					})
-				} else {
-					h.step("wall_text_found", map[string]any{
-						"attempt": attempt,
-						"conf":    best.Confidence,
-						"scale":   best.Scale,
-						"x":       best.Point.X,
-						"y":       best.Point.Y,
-						"screen":  hookScreen,
-						"matches": matches,
-					})
-				}
-				if err := h.Client.Tap(best.Point.X, best.Point.Y); err == nil {
-					wallClicked = true
-					preferredWallAttempt = attempt
-				}
-			}
-			screen.Close()
-
-			if wallClicked {
-				break
-			}
-
-			h.Logger.Debug().Int("scrollX", scrollX).Msg("Wall text not visible, scrolling up...")
 			startY := menuROI.Min.Y + menuROI.Dx()/2
 			endY := startY + int(140*h.Cal.ScaleY)
-			if err := h.Client.Swipe(scrollX, startY, scrollX, endY, 280); err != nil {
-				h.Logger.Error().Err(err).Msg("Failed to swipe up")
-				h.step("scroll_up_failed", map[string]any{"err": err.Error()})
+			steps := scanStride
+			if remaining := maxUpSwipes - upSwipes; steps > remaining {
+				steps = remaining
+			}
+			for i := 0; i < steps; i++ {
+				if err := h.Client.Swipe(scrollX, startY, scrollX, endY, 260); err != nil {
+					h.Logger.Error().Err(err).Msg("Failed to swipe up")
+					h.step("scroll_up_failed", map[string]any{"err": err.Error()})
+					steps = i
+					break
+				}
+				upSwipes++
+				time.Sleep(160 * time.Millisecond)
+			}
+			if steps == 0 {
 				break
 			}
-			time.Sleep(350 * time.Millisecond)
+			time.Sleep(220 * time.Millisecond)
 		}
 
 		if !wallClicked {
