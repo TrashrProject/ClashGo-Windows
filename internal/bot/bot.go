@@ -350,6 +350,43 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		b.logger.Warn().Err(multiErr).Msg("multi-account scheduler unavailable; continuing single-account")
 	} else {
 		b.multiAccount = multiMgr
+		recoveryRequired, recoveryTarget := multiMgr.RecoveryStatus()
+		if recoveryRequired {
+			b.paused.Store(true)
+			b.logger.Error().
+				Str("target_account_id", recoveryTarget).
+				Msg("interrupted multi-account switch detected; automation starts paused")
+		} else if recoveryTarget != "" {
+			// A physical_switched journal proves Clash already reached the target
+			// village before the previous process stopped. Reapply that account's
+			// config now, BEFORE adaptive/contextual intelligence is constructed.
+			if active, ok := multiMgr.Active(); ok && active.ID == recoveryTarget {
+				if err := applyManagedAccountConfig(cfg, active); err != nil {
+					_ = multiMgr.RequireRecovery(active.ID, fmt.Errorf("verified switched account cannot be restored: %w", err))
+					b.paused.Store(true)
+					b.logger.Error().Err(err).
+						Str("account_id", active.ID).
+						Msg("verified switched account profile could not be restored; automation paused")
+				} else if err := config.Save("config.json", cfg); err != nil {
+					// In-memory cfg is already corrected, so this session can safely
+					// load the target IA. Keep the physical journal for the next boot.
+					b.logger.Warn().Err(err).
+						Str("account_id", active.ID).
+						Msg("restored switched account in memory; config persistence will retry next boot")
+				} else {
+					if err := multiMgr.MarkSwitched(active.ID); err != nil {
+						b.logger.Warn().Err(err).Msg("restored account scheduler state persistence degraded")
+					}
+					if err := multiMgr.CompleteSwitch(active.ID); err != nil {
+						b.logger.Warn().Err(err).Msg("restored account journal cleanup deferred")
+					}
+					b.logger.Info().
+						Str("account_id", active.ID).
+						Str("player_tag", active.PlayerTag).
+						Msg("recovered verified multi-account switch before IA initialization")
+				}
+			}
+		}
 		if active, ok := multiMgr.Active(); ok {
 			b.logger.Info().
 				Bool("enabled", multiMgr.Enabled()).
