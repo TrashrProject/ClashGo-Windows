@@ -2617,10 +2617,13 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		} else {
 			b.logger.Info().
 				Float64("context_reward", reward).
+				Float64("farm_rate_per_hour", intelligence.FarmResourcesPerHour(outcome)).
+				Int("gold", rep.GoldStolen).
+				Int("elixir", rep.ElixirStolen).
+				Int("dark_elixir", rep.DarkElixirStolen).
+				Int64("routine_ms", rep.FullRoutineDurationMS).
 				Str("edge", rep.TargetEdge).
-				Int("stars", rep.Stars).
-				Int("destruction", rep.DestructionPct).
-				Msg("Intelligence V3 learned from attack outcome")
+				Msg("Intelligence V3 learned from farm throughput")
 		}
 	}
 
@@ -3796,6 +3799,8 @@ func contextualOutcomeFromReport(rep AttackReport, townHall, recoveryCount, blue
 		GoldStolen: rep.GoldStolen,
 		ElixirStolen: rep.ElixirStolen,
 		DarkElixirStolen: rep.DarkElixirStolen,
+		CycleDurationMS: rep.CycleDurationMS,
+		FullRoutineDurationMS: rep.FullRoutineDurationMS,
 		DeploySuccess: rep.DeploySuccess,
 		ReturnHomeSuccess: rep.ReturnHomeSuccess,
 		SafeDeployment: rep.RedZoneValid && rep.HUDSafe,
