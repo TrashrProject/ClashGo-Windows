@@ -109,6 +109,13 @@ type Bot struct {
 	healthRestartWindowStart time.Time
 	healthRestartsInWindow   int
 
+	// UI-drift safe mode: three prolonged Unknown-state incidents in a short
+	// window stop new raids until the user explicitly resumes.
+	uiSafetyHold          atomic.Bool
+	uiDriftMu             sync.Mutex
+	uiDriftWindowStart    time.Time
+	uiDriftIncidents      int
+
 	// Xingchen-style runtime supervision: independent heartbeat, phase/state
 	// tracking, and single-flight recovery/restart guards.
 	captureHeartbeat atomic.Int64
@@ -1539,6 +1546,9 @@ func (b *Bot) processFrame(gc *game.GameContext, screen gocv.Mat, err error, cap
 	if b.healthAttackHoldActive() {
 		// Automatic health holds are temporary and independent of the user's
 		// Pause switch. Recovery/supervision continues while no new raid starts.
+		return
+	}
+	if b.uiSafetyHold.Load() {
 		return
 	}
 
@@ -4158,9 +4168,13 @@ func (b *Bot) ResumeAutomation() {
 	if b == nil {
 		return
 	}
-	if b.paused.Swap(false) {
+	clearedSafety := b.uiSafetyHold.Swap(false)
+	wasPaused := b.paused.Swap(false)
+	if clearedSafety || wasPaused {
 		b.recordActivity()
-		b.logger.Info().Msg("automation resumed")
+		b.logger.Info().
+			Bool("cleared_ui_safety_hold", clearedSafety).
+			Msg("automation resumed")
 	}
 }
 
@@ -4283,6 +4297,7 @@ func (b *Bot) Stats() BotStats {
 	}
 	runtimeHealth := b.RuntimeHealth()
 	featureCircuits := b.FeatureCircuits()
+	diagnosis := b.DiagnoseRuntime(runtimeHealth)
 
 	runtimeSearchMode := chooseSearchPacing(adbHealth).Mode
 	if b.safePacingForced() {
@@ -4335,6 +4350,9 @@ func (b *Bot) Stats() BotStats {
 		RuntimeHealthMode:    runtimeHealth.Mode,
 		CollectorCircuitOpen: featureCircuits.CollectorsOpen,
 		WallCircuitOpen:      featureCircuits.WallsOpen,
+		UISafetyHold:         b.uiSafetyHold.Load(),
+		HealthDiagnosis:      diagnosis.Cause,
+		HealthSuggestion:     diagnosis.Suggestion,
 		SpeedProfile:         runtimeSearchMode,
 		MemberSpeedProfile:   memberSpeedProfile,
 		TargetsSeen:          tm.TargetsFound,
@@ -4420,6 +4438,9 @@ type BotStats struct {
 	RuntimeHealthMode    string  `json:"runtime_health_mode"`
 	CollectorCircuitOpen bool    `json:"collector_circuit_open"`
 	WallCircuitOpen      bool    `json:"wall_circuit_open"`
+	UISafetyHold         bool    `json:"ui_safety_hold"`
+	HealthDiagnosis      string  `json:"health_diagnosis"`
+	HealthSuggestion     string  `json:"health_suggestion"`
 	SpeedProfile         string  `json:"speed_profile"`
 	MemberSpeedProfile   string  `json:"member_speed_profile"`
 	TargetsSeen          int64   `json:"targets_seen"`
