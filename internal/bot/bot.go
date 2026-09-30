@@ -54,8 +54,9 @@ type Bot struct {
 
 	attackExec *attack.Executor
 	governor   *autopolicy.Governor
-	adaptive      *intelligence.AdaptiveEngine
-	villageMemory *intelligence.VillageMemory
+	adaptive       *intelligence.AdaptiveEngine
+	contextual     *intelligence.ContextualEngine
+	villageMemory  *intelligence.VillageMemory
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -363,6 +364,18 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 			Msg("adaptive intelligence active")
 	}
 
+	contextual, contextualErr := intelligence.NewContextualEngine(
+		learningAccountStatePath(cfg, "contextual_learning_v3.json"),
+	)
+	if contextualErr != nil {
+		b.logger.Warn().Err(contextualErr).Msg("Intelligence V3 contextual learning unavailable; continuing with legacy adaptive engine")
+	} else {
+		b.contextual = contextual
+		b.logger.Info().
+			Int("experiences", contextual.TotalSamples()).
+			Msg("Intelligence V3 contextual learning active")
+	}
+
 	villageMemory, villageErr := intelligence.NewVillageMemory(learningEnvironmentStatePath(cfg, "village_model.json"))
 	if villageErr != nil {
 		b.logger.Warn().Err(villageErr).Msg("village memory unavailable; continuing without persistent village model")
@@ -410,6 +423,26 @@ func NewBotWithContext(bootCtx context.Context, cfg *config.BotConfig) (b *Bot, 
 		var seeded []AttackReport
 		if jsonErr := json.Unmarshal(histData, &seeded); jsonErr == nil {
 			b.historyCache = seeded
+			// Bootstrap V3 from the history ClashGO already collected. Only do
+			// this for an empty V3 state so restarting the app never double-counts
+			// the same historical attacks.
+			if b.contextual != nil && b.contextual.TotalSamples() == 0 && len(seeded) > 0 {
+				limit := len(seeded)
+				if limit > 200 {
+					limit = 200
+				}
+				outcomes := make([]intelligence.ContextualOutcome, 0, limit)
+				// History is newest-first. Feed oldest-first so EWMA ends weighted
+				// toward the most recent real attacks.
+				for i := limit - 1; i >= 0; i-- {
+					outcomes = append(outcomes, contextualOutcomeFromReport(seeded[i], cfg.Attack.Farm.TownHall, 0, 0))
+				}
+				if err := b.contextual.ObserveMany(outcomes); err != nil {
+					b.logger.Warn().Err(err).Msg("Intelligence V3 history bootstrap failed")
+				} else {
+					b.logger.Info().Int("replayed_attacks", len(outcomes)).Msg("Intelligence V3 learned from existing attack history")
+				}
+			}
 		} else {
 			b.logger.Warn().Err(jsonErr).Msg("failed to parse attack history, starting fresh")
 		}
@@ -2085,6 +2118,41 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			if strat, stratErr := strategy.ParseYAML(b.cfg.Attack.StrategyFile); stratErr == nil {
 				stratName = strat.Name
 				targetEdge = strat.TargetEdge
+
+				// Intelligence V3 operates only on the frame/data already present.
+				// Fixed YAML edges remain authoritative. Rotate/Random/Adaptive may
+				// be replaced by a learned champion; challenger exploration is
+				// disabled whenever the BlueStacks safety governor is active.
+				if b.contextual != nil {
+					ctx := intelligence.AttackContext{
+						Strategy: strat.Name,
+						TownHall: b.cfg.Attack.Farm.TownHall,
+						TargetScore: acceptedTargetScore,
+						TargetGold: acceptedTargetGold,
+						TargetElixir: acceptedTargetElixir,
+						TargetDE: acceptedTargetDE,
+					}
+					allowExplore := !b.safePacingForced() &&
+						b.client.Health().ConsecutiveFails == 0 &&
+						!b.recoveryInFlight.Load()
+					rec := b.contextual.RecommendEdge(ctx, strat.TargetEdge,
+						[]string{"TopLeft", "TopRight", "BottomLeft", "BottomRight"}, allowExplore)
+					if rec.Apply {
+						original := strat.TargetEdge
+						strat.TargetEdge = rec.Edge
+						targetEdge = rec.Edge
+						b.logger.Info().
+							Str("original_edge", original).
+							Str("learned_edge", rec.Edge).
+							Bool("challenger", rec.Exploratory).
+							Float64("confidence", rec.Confidence).
+							Int("context_samples", rec.ContextSamples).
+							Str("scope", rec.ProfileScope).
+							Str("reason", rec.Reason).
+							Msg("Intelligence V3 selected attack edge")
+					}
+				}
+
 				remainingUndeployed, deployErr = b.deployParsedStrategy(screen, strat)
 			} else {
 				deployErr = stratErr
@@ -2540,6 +2608,21 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	recoveryDelta := b.recoveryAttempts.Load() - sequenceRecoveryStart
 	blueStacksRestartDelta := b.blueStacksRestarts.Load() - sequenceBlueStacksRestartStart
 	b.recordAttackSoak(rep, recoveryDelta, blueStacksRestartDelta)
+
+	if b.contextual != nil {
+		outcome := contextualOutcomeFromReport(rep, b.cfg.Attack.Farm.TownHall, int(recoveryDelta), int(blueStacksRestartDelta))
+		reward, learnErr := b.contextual.Observe(outcome)
+		if learnErr != nil {
+			b.logger.Warn().Err(learnErr).Msg("Intelligence V3 attack observation could not be saved")
+		} else {
+			b.logger.Info().
+				Float64("context_reward", reward).
+				Str("edge", rep.TargetEdge).
+				Int("stars", rep.Stars).
+				Int("destruction", rep.DestructionPct).
+				Msg("Intelligence V3 learned from attack outcome")
+		}
+	}
 
 	if b.adaptive != nil {
 		clean := rep.DeploySuccess && rep.ReturnHomeSuccess && rep.ParsedResults &&
@@ -3694,6 +3777,33 @@ func (b *Bot) ResumeAutomation() {
 
 func (b *Bot) IsPaused() bool {
 	return b != nil && b.paused.Load()
+}
+
+func contextualOutcomeFromReport(rep AttackReport, townHall, recoveryCount, blueStacksRestart int) intelligence.ContextualOutcome {
+	at, _ := time.Parse(time.RFC3339, rep.Timestamp)
+	return intelligence.ContextualOutcome{
+		Context: intelligence.AttackContext{
+			Strategy: rep.Strategy,
+			TownHall: townHall,
+			TargetScore: rep.TargetScore,
+			TargetGold: rep.TargetGold,
+			TargetElixir: rep.TargetElixir,
+			TargetDE: rep.TargetDE,
+		},
+		Edge: rep.TargetEdge,
+		Stars: rep.Stars,
+		DestructionPct: rep.DestructionPct,
+		GoldStolen: rep.GoldStolen,
+		ElixirStolen: rep.ElixirStolen,
+		DarkElixirStolen: rep.DarkElixirStolen,
+		DeploySuccess: rep.DeploySuccess,
+		ReturnHomeSuccess: rep.ReturnHomeSuccess,
+		SafeDeployment: rep.RedZoneValid && rep.HUDSafe,
+		ParsedResults: rep.ParsedResults,
+		RecoveryCount: recoveryCount,
+		BlueStacksRestart: blueStacksRestart,
+		At: at,
+	}
 }
 
 // HistorySnapshot returns an immutable copy of the bot's authoritative
