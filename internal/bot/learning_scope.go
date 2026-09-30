@@ -42,6 +42,33 @@ func learningScopeKey(cfg *config.BotConfig) string {
 	return hex.EncodeToString(sum[:10])
 }
 
-func learningStatePath(cfg *config.BotConfig, name string) string {
+func learningEnvironmentScopeKey(cfg *config.BotConfig) string {
+	if cfg == nil {
+		return "default-env"
+	}
+	seed := fmt.Sprintf(
+		"%s|%s|%s|%dx%d|%d",
+		learningScopeKey(cfg),
+		strings.ToLower(strings.TrimSpace(cfg.Device.DeviceID)),
+		strings.ToLower(strings.TrimSpace(cfg.Device.BlueStacksInstance)),
+		cfg.Device.Width,
+		cfg.Device.Height,
+		cfg.Device.DPI,
+	)
+	sum := sha256.Sum256([]byte(seed))
+	return hex.EncodeToString(sum[:10])
+}
+
+func learningAccountStatePath(cfg *config.BotConfig, name string) string {
 	return paths.ResolveConfig(filepath.Join("learning", learningScopeKey(cfg), name))
+}
+
+func learningEnvironmentStatePath(cfg *config.BotConfig, name string) string {
+	return paths.ResolveConfig(filepath.Join(
+		"learning",
+		learningScopeKey(cfg),
+		"environments",
+		learningEnvironmentScopeKey(cfg),
+		name,
+	))
 }
