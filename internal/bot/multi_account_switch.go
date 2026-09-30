@@ -447,6 +447,9 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) (retErr erro
 				Str("account_label", next.Label).
 				Str("player_tag", next.PlayerTag).
 				Msg("multi-account switch verified and activated")
+			if b.OnAccountChanged != nil {
+				b.OnAccountChanged(b.cfg.Account.PlayerTag, next.ID, next.Label)
+			}
 
 			if schedulerErr != nil {
 				b.logger.Error().Err(schedulerErr).
