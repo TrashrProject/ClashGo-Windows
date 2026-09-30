@@ -1569,6 +1569,10 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 		// in that path, so without this watcher a.bot would stay non-nil and the
 		// frontend would keep showing "Bot en cours" after automation ended.
 		go a.watchBotRuntime(b)
+
+		// Windows-only physical emergency stop. The non-Windows implementation
+		// is a no-op so this call remains portable.
+		go a.watchEmergencyStopKey(bootCtx, b)
 	}(bootCtx)
 
 	return BotStatus{Running: true, Message: "Initialisation du bot démarrée"}
