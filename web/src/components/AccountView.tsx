@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetControlServiceConfig, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetMultiAccountConfig, GetMultiAccountStatus, GetMultiAccountSwitchCalibration, GetPlayerProfile, GetStrategies, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, ResolveMultiAccountRecovery, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, SaveMultiAccountConfig, SetBetaControlServiceURL, UndoMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetControlServiceConfig, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetMultiAccountConfig, GetMultiAccountFarmStats, GetMultiAccountStatus, GetMultiAccountSwitchCalibration, GetPlayerProfile, GetStrategies, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, ResolveMultiAccountRecovery, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, SaveMultiAccountConfig, SetBetaControlServiceURL, UndoMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
 import MultiAccountCalibration from './MultiAccountCalibration';
 
@@ -56,6 +56,22 @@ type MultiAccountRuntimeStatusView = {
   recovery_required?: boolean;
   recovery_target_account_id?: string;
   switch_in_flight?: boolean;
+};
+
+
+type MultiAccountFarmStatsView = {
+  account_id: string;
+  label?: string;
+  player_tag?: string;
+  attacks: number;
+  gold: number;
+  elixir: number;
+  dark_elixir: number;
+  routine_ms: number;
+  gold_per_hour: number;
+  elixir_per_hour: number;
+  dark_elixir_per_hour: number;
+  last_attack?: string;
 };
 
 
@@ -417,7 +433,8 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       GetMultiAccountStatus().catch(() => null),
       GetMultiAccountSwitchCalibration().catch(() => ''),
       GetStrategies().catch(() => []),
-    ]).then(([cfg, status, calibration, strategies]) => {
+      GetMultiAccountFarmStats().catch(() => []),
+    ]).then(([cfg, status, calibration, strategies, farmStats]) => {
       if (!active) return;
       const value = (cfg || {}) as MultiAccountConfigView;
       setMultiAccount({
@@ -429,6 +446,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       setMultiAccountStatus(status ? status as MultiAccountRuntimeStatusView : null);
       setMultiAccountCalibrated(calibrationCoversAccounts(calibration, Array.isArray(value.accounts) ? value.accounts : []));
       setMultiAccountStrategies(Array.isArray(strategies) ? strategies.map(String) : []);
+      setMultiAccountFarmStats(Array.isArray(farmStats) ? farmStats as MultiAccountFarmStatsView[] : []);
     }).catch(() => {
       // Multi-account is optional; leave the single-account UI unaffected.
     });
@@ -458,6 +476,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [multiAccountCalibrated, setMultiAccountCalibrated] = React.useState(false);
   const [multiAccountStatus, setMultiAccountStatus] = React.useState<MultiAccountRuntimeStatusView | null>(null);
   const [multiAccountStrategies, setMultiAccountStrategies] = React.useState<string[]>([]);
+  const [multiAccountFarmStats, setMultiAccountFarmStats] = React.useState<MultiAccountFarmStatsView[]>([]);
   const [multiAccountRecoveryBusy, setMultiAccountRecoveryBusy] = React.useState(false);
 
   React.useEffect(() => {
@@ -466,8 +485,14 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
 
     const refresh = async () => {
       try {
-        const status = await GetMultiAccountStatus();
-        if (!cancelled) setMultiAccountStatus(status as MultiAccountRuntimeStatusView);
+        const [status, farmStats] = await Promise.all([
+          GetMultiAccountStatus(),
+          GetMultiAccountFarmStats().catch(() => []),
+        ]);
+        if (!cancelled) {
+          setMultiAccountStatus(status as MultiAccountRuntimeStatusView);
+          setMultiAccountFarmStats(Array.isArray(farmStats) ? farmStats as MultiAccountFarmStatsView[] : []);
+        }
       } catch {
         // Runtime status is best-effort while the Wails bridge starts.
       }
@@ -1791,6 +1816,31 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     </button>
                   </div>
                 </div>
+                {(() => {
+                  const farm = multiAccountFarmStats.find(item => item.account_id === account.id);
+                  if (!farm || farm.attacks <= 0) return null;
+                  return (
+                    <div className="mt-3 flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-wider">
+                      <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-zinc-500">
+                        {farm.attacks} attaques
+                      </span>
+                      <span className="rounded-full bg-amber-500/10 px-2.5 py-1 text-amber-600 dark:text-amber-400">
+                        Or · {Math.round(farm.gold).toLocaleString('fr-FR')}
+                      </span>
+                      <span className="rounded-full bg-fuchsia-500/10 px-2.5 py-1 text-fuchsia-600 dark:text-fuchsia-400">
+                        Élixir · {Math.round(farm.elixir).toLocaleString('fr-FR')}
+                      </span>
+                      <span className="rounded-full bg-violet-500/10 px-2.5 py-1 text-violet-600 dark:text-violet-400">
+                        DE · {Math.round(farm.dark_elixir).toLocaleString('fr-FR')}
+                      </span>
+                      {farm.routine_ms > 0 && (
+                        <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-600 dark:text-emerald-400">
+                          Or/h · {Math.round(farm.gold_per_hour).toLocaleString('fr-FR')}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             ))}
             {multiAccount.accounts.length === 0 && (
