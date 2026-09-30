@@ -28,6 +28,8 @@ func testOutcome(edge string, stars, destruction int) ContextualOutcome {
 		DarkElixirStolen: 6000,
 		CycleDurationMS: 90000,
 		FullRoutineDurationMS: 105000,
+		SearchDurationMS: 15000,
+		SearchSkips: 2,
 		DeploySuccess: true,
 		ReturnHomeSuccess: true,
 		SafeDeployment: true,
@@ -173,5 +175,89 @@ func TestAdaptiveColdStartAlwaysResolvesLegalEdge(t *testing.T) {
 	}
 	if normalizeLearningEdge(rec.Edge) == "" {
 		t.Fatalf("cold-start edge is invalid: %q", rec.Edge)
+	}
+}
+
+
+func seedFarmTargetHistory(t *testing.T, e *ContextualEngine) {
+	t.Helper()
+	for i := 0; i < 8; i++ {
+		o := testOutcome("TopRight", 1, 60)
+		o.Context.Strategy = "valk_spam"
+		o.Context.TownHall = 17
+		o.Context.TargetGold = 800000
+		o.Context.TargetElixir = 800000
+		o.Context.TargetDE = 8000
+		o.GoldStolen = 700000
+		o.ElixirStolen = 700000
+		o.DarkElixirStolen = 6000
+		o.SearchDurationMS = 15000
+		o.SearchSkips = 2
+		o.FullRoutineDurationMS = 105000
+		if _, err := e.Observe(o); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRecommendTargetRejectsWeakConfiguredTargetEarly(t *testing.T) {
+	e, _ := NewContextualEngine("")
+	seedFarmTargetHistory(t, e)
+
+	rules := TargetRules{MinGold: 600000, MinElixir: 600000, MinDarkElixir: 0, SearchEnabled: true}
+	target := Target{Gold: 600000, Elixir: 600000, DarkElixir: 0}
+	legacy := EvaluateTarget(target, rules)
+	if !legacy.Accept {
+		t.Fatal("test setup requires legacy acceptance")
+	}
+
+	rec := e.RecommendTarget("valk_spam", 17, target, rules, legacy, 5*time.Second, 1, true)
+	if !rec.Apply {
+		t.Fatalf("expected V3 recommendation: %+v", rec)
+	}
+	if rec.Accept {
+		t.Fatalf("weak early target should be skipped for better farm throughput: %+v", rec)
+	}
+	if rec.PredictedFarmRate >= rec.BaselineFarmRate {
+		t.Fatalf("test setup expected target below baseline: %+v", rec)
+	}
+}
+
+func TestRecommendTargetAcceptsNearThresholdAfterSearchCost(t *testing.T) {
+	e, _ := NewContextualEngine("")
+	seedFarmTargetHistory(t, e)
+
+	rules := TargetRules{
+		MinGold: 800000,
+		MinElixir: 800000,
+		MinDarkElixir: 9000,
+		SearchEnabled: true,
+	}
+	target := Target{Gold: 700000, Elixir: 700000, DarkElixir: 8000}
+	legacy := EvaluateTarget(target, rules)
+	if legacy.Accept {
+		t.Fatal("test setup requires legacy rejection")
+	}
+
+	rec := e.RecommendTarget("valk_spam", 17, target, rules, legacy, 40*time.Second, 8, true)
+	if !rec.Apply || !rec.Accept {
+		t.Fatalf("near-threshold target should be accepted after costly search: %+v", rec)
+	}
+}
+
+func TestRecommendTargetSafetyModeNeverAddsAggressiveReject(t *testing.T) {
+	e, _ := NewContextualEngine("")
+	seedFarmTargetHistory(t, e)
+
+	rules := TargetRules{MinGold: 600000, MinElixir: 600000, SearchEnabled: true}
+	target := Target{Gold: 600000, Elixir: 600000}
+	legacy := EvaluateTarget(target, rules)
+	if !legacy.Accept {
+		t.Fatal("test setup requires legacy acceptance")
+	}
+
+	rec := e.RecommendTarget("valk_spam", 17, target, rules, legacy, 5*time.Second, 1, false)
+	if !rec.Accept {
+		t.Fatalf("safety pacing must not create extra search pressure: %+v", rec)
 	}
 }
