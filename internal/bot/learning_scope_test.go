@@ -37,6 +37,23 @@ func TestLearningScopeStableForSameAccountAcrossDeviceDetails(t *testing.T) {
 	}
 }
 
+func TestVillageEnvironmentScopeSeparatesGeometryForSameAccount(t *testing.T) {
+	a := config.DefaultConfig()
+	b := config.DefaultConfig()
+	a.Account.PlayerTag = "#SAME1"
+	b.Account.PlayerTag = "#SAME1"
+	b.Device.Width = 1920
+	b.Device.Height = 1080
+	b.Device.DPI = 240
+
+	if learningScopeKey(a) != learningScopeKey(b) {
+		t.Fatal("same account should share account learning namespace")
+	}
+	if learningEnvironmentScopeKey(a) == learningEnvironmentScopeKey(b) {
+		t.Fatal("different geometry should use different village-memory environment scope")
+	}
+}
+
 func TestAnonymousLearningScopeSeparatesDifferentEnvironments(t *testing.T) {
 	a := config.DefaultConfig()
 	b := config.DefaultConfig()
