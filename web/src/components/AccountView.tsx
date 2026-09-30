@@ -58,6 +58,31 @@ type MultiAccountRuntimeStatusView = {
   switch_in_flight?: boolean;
 };
 
+
+const calibrationCoversAccounts = (raw: unknown, accounts: ManagedAccount[]): boolean => {
+  const text = String(raw || '').trim();
+  if (!text) return false;
+  try {
+    const parsed = JSON.parse(text) as {
+      width?: number;
+      height?: number;
+      settings_button?: unknown;
+      supercell_id_button?: unknown;
+      switch_account_button?: unknown;
+      account_slots?: Record<string, unknown>;
+    };
+    if (!parsed.width || !parsed.height || !parsed.settings_button || !parsed.supercell_id_button || !parsed.switch_account_button) {
+      return false;
+    }
+    const slots = parsed.account_slots || {};
+    return accounts
+      .filter(account => account.enabled)
+      .every(account => Number(account.switch_slot || 0) > 0 && Boolean(slots[String(account.switch_slot)]));
+  } catch {
+    return false;
+  }
+};
+
 type FarmUnit = { name: string; count: number; housing: number };
 type FarmProfile = {
   town_hall: number;
@@ -395,7 +420,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
         accounts: Array.isArray(value.accounts) ? value.accounts : [],
       });
       setMultiAccountStatus(status ? status as MultiAccountRuntimeStatusView : null);
-      setMultiAccountCalibrated(Boolean(String(calibration || '').trim()));
+      setMultiAccountCalibrated(calibrationCoversAccounts(calibration, Array.isArray(value.accounts) ? value.accounts : []));
       setMultiAccountStrategies(Array.isArray(strategies) ? strategies.map(String) : []);
     }).catch(() => {
       // Multi-account is optional; leave the single-account UI unaffected.
@@ -1048,8 +1073,13 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
         })),
       };
       await SaveMultiAccountConfig(JSON.stringify(payload));
-      const refreshed = await GetMultiAccountConfig();
+      const [refreshed, calibration] = await Promise.all([
+        GetMultiAccountConfig(),
+        GetMultiAccountSwitchCalibration().catch(() => ''),
+      ]);
       const value = (refreshed || payload) as MultiAccountConfigView;
+      const calibrationReady = calibrationCoversAccounts(calibration, Array.isArray(value.accounts) ? value.accounts : []);
+      setMultiAccountCalibrated(calibrationReady);
       setMultiAccount({
         enabled: Boolean(value.enabled),
         active_account_id: value.active_account_id || '',
@@ -1060,9 +1090,9 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       if (active?.player_tag) onAccountChanged(active.player_tag);
       setMultiAccountMessage(
         value.enabled
-          ? (multiAccountCalibrated
+          ? (calibrationReady
               ? 'Multi-comptes enregistré. La rotation automatique est prête.'
-              : 'Multi-comptes enregistré. Il reste à calibrer le sélecteur Supercell ID avant la rotation automatique.')
+              : 'Multi-comptes enregistré. La calibration doit couvrir tous les slots activés avant la rotation automatique.')
           : 'Configuration multi-comptes enregistrée.'
       );
     } catch (e) {
