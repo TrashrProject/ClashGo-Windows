@@ -33,6 +33,7 @@ type Executor struct {
 	armyGuardEnabled bool
 	logger        zerolog.Logger
 	classify      func(gocv.Mat) (game.GameState, int)
+	frameProvider func(time.Duration) (gocv.Mat, error)
 	tappedSiegeXs map[int]bool
 	templates     map[string]gocv.Mat
 	// Shared, session-owned loot recognizer. The Bot owns its lifecycle;
@@ -404,6 +405,19 @@ func (e *Executor) Close() {
 
 func (e *Executor) SetClassifier(fn func(gocv.Mat) (game.GameState, int)) {
 	e.classify = fn
+}
+
+// SetFrameProvider routes runtime screenshots through the bot's single-owner
+// FrameBroker. Tests/standalone tools may leave it nil and use direct capture.
+func (e *Executor) SetFrameProvider(fn func(time.Duration) (gocv.Mat, error)) {
+	e.frameProvider = fn
+}
+
+func (e *Executor) captureFrame(timeout time.Duration) (gocv.Mat, error) {
+	if e.frameProvider != nil {
+		return e.frameProvider(timeout)
+	}
+	return e.client.CaptureToMat()
 }
 
 // SetLootRecognizer injects the Bot's session-owned recognizer. Executor does
