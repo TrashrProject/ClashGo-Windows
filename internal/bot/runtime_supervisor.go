@@ -7,8 +7,14 @@ import (
 )
 
 const (
-	runtimeSupervisorTick        = 3 * time.Second
-	runtimeCaptureStaleThreshold = 18 * time.Second
+	runtimeSupervisorTick = 3 * time.Second
+
+	// ADB calls use a 30 s client timeout in production. The old 18 s stale
+	// threshold could launch emulator recovery while a capture was still
+	// legitimately blocked inside that timeout, creating competing ADB work
+	// against an already stressed BlueStacks instance. Wait beyond the ADB
+	// timeout before declaring the capture pipeline dead.
+	runtimeCaptureStaleThreshold = 40 * time.Second
 )
 
 func (b *Bot) observeRuntimeState(state game.GameState, at time.Time) {
