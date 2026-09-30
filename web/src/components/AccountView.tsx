@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetControlServiceConfig, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetMultiAccountConfig, GetMultiAccountStatus, GetMultiAccountSwitchCalibration, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, ResolveMultiAccountRecovery, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, SaveMultiAccountConfig, SetBetaControlServiceURL, UndoMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetControlServiceConfig, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetMultiAccountConfig, GetMultiAccountStatus, GetMultiAccountSwitchCalibration, GetPlayerProfile, GetStrategies, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, ResolveMultiAccountRecovery, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, SaveMultiAccountConfig, SetBetaControlServiceURL, UndoMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
 import MultiAccountCalibration from './MultiAccountCalibration';
 
@@ -384,7 +384,8 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       GetMultiAccountConfig(),
       GetMultiAccountStatus().catch(() => null),
       GetMultiAccountSwitchCalibration().catch(() => ''),
-    ]).then(([cfg, status, calibration]) => {
+      GetStrategies().catch(() => []),
+    ]).then(([cfg, status, calibration, strategies]) => {
       if (!active) return;
       const value = (cfg || {}) as MultiAccountConfigView;
       setMultiAccount({
@@ -395,6 +396,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
       });
       setMultiAccountStatus(status ? status as MultiAccountRuntimeStatusView : null);
       setMultiAccountCalibrated(Boolean(String(calibration || '').trim()));
+      setMultiAccountStrategies(Array.isArray(strategies) ? strategies.map(String) : []);
     }).catch(() => {
       // Multi-account is optional; leave the single-account UI unaffected.
     });
@@ -423,6 +425,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [multiAccountError, setMultiAccountError] = React.useState('');
   const [multiAccountCalibrated, setMultiAccountCalibrated] = React.useState(false);
   const [multiAccountStatus, setMultiAccountStatus] = React.useState<MultiAccountRuntimeStatusView | null>(null);
+  const [multiAccountStrategies, setMultiAccountStrategies] = React.useState<string[]>([]);
   const [multiAccountRecoveryBusy, setMultiAccountRecoveryBusy] = React.useState(false);
 
   React.useEffect(() => {
@@ -1621,7 +1624,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     : 'border-zinc-100 dark:border-zinc-800')
                 }
               >
-                <div className="grid gap-3 lg:grid-cols-[44px_1.2fr_1.3fr_90px_90px_120px_auto] lg:items-end">
+                <div className="grid gap-3 lg:grid-cols-[44px_1.05fr_1.15fr_76px_76px_100px_1.2fr_auto] lg:items-end">
                   <label className="flex h-10 items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-700">
                     <input
                       type="checkbox"
@@ -1687,6 +1690,21 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                       className="mt-1 h-10 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 text-xs font-bold outline-none"
                       title="0 = valeur par défaut"
                     />
+                  </label>
+                  <label>
+                    <span className="text-[8px] font-black uppercase tracking-widest text-zinc-400">Stratégie</span>
+                    <select
+                      value={account.strategy_file || ''}
+                      disabled={automationActive || multiAccountBusy}
+                      onChange={(e) => updateMultiAccount(index, { strategy_file: e.target.value })}
+                      className="mt-1 h-10 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2 text-[10px] font-bold outline-none"
+                      title="Vide = stratégie actuellement configurée au moment du switch"
+                    >
+                      <option value="">Stratégie globale</option>
+                      {multiAccountStrategies.map(name => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
                   </label>
                   <div className="flex gap-2">
                     <div
