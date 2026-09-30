@@ -152,6 +152,9 @@ type AttackConfig struct {
 	StallTimerSeconds   int      `json:"stall_timer_seconds"`
 	LootExitEnabled     bool     `json:"loot_exit_enabled"`
 	LootExitPercent     int      `json:"loot_exit_percent"`
+	// DryRun analyzes accepted targets and writes a visual deployment preview,
+	// but never deploys troops. The search loop continues with Next.
+	DryRun              bool     `json:"dry_run"`
 	// EndAtStars ends a completed deployment once the live battle outcome has
 	// reached N stars (1..3) and the Surrender/End Battle button is verified.
 	// 0 disables the rule. Destruction-based exit remains strategy-controlled.
@@ -365,6 +368,7 @@ func DefaultConfig() *BotConfig {
 			StallTimerSeconds:        10,
 			LootExitEnabled:          false,
 			LootExitPercent:          100,
+			DryRun:                   false,
 			EndAtStars:               0,
 			MinSecondsBetweenAttacks: 30,
 			Farm: FarmConfig{
