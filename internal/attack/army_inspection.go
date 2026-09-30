@@ -150,11 +150,11 @@ func writeArmyInspectionSnapshot(s ArmyInspectionSnapshot) {
 }
 
 func (e *Executor) persistArmyInspectionSnapshot(s ArmyInspectionSnapshot) {
-	writeArmyInspectionSnapshot(s)
-	if e == nil || strings.TrimSpace(e.armyInspectionPath) == "" {
+	if e != nil && strings.TrimSpace(e.armyInspectionPath) != "" {
+		writeArmyInspectionSnapshotAtPath(s, e.armyInspectionPath)
 		return
 	}
-	writeArmyInspectionSnapshotAtPath(s, e.armyInspectionPath)
+	writeArmyInspectionSnapshot(s)
 }
 
 func writeArmyInspection(slots []*TrackedSlot, counts []TroopCount, profile *config.FarmProfile) {
