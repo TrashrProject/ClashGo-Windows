@@ -489,3 +489,35 @@ func TestManagerAmbiguousSwitchRequiresManualRecovery(t *testing.T) {
 		t.Fatalf("reloaded recovery required=%v target=%q want true/b", required, target)
 	}
 }
+
+
+func TestManagerAmbiguousSwitchPausesImmediatelyAndPersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multi.json")
+	m, err := NewManager(path, testConfig(), "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.BeginSwitch("b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.MarkSwitchAmbiguous("b", fmt.Errorf("loading transition timeout")); err != nil {
+		t.Fatal(err)
+	}
+	required, target := m.RecoveryStatus()
+	if !required || target != "b" {
+		t.Fatalf("recovery required=%v target=%q want true/b", required, target)
+	}
+	st := m.State()
+	if st.LastError == "" {
+		t.Fatal("ambiguous switch should persist an actionable error")
+	}
+
+	reloaded, err := NewManager(path, testConfig(), "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	required, target = reloaded.RecoveryStatus()
+	if !required || target != "b" {
+		t.Fatalf("reloaded recovery required=%v target=%q want true/b", required, target)
+	}
+}
