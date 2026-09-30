@@ -481,6 +481,92 @@ const Dashboard: React.FC<DashboardProps> = React.memo(({
         </section>
       )}
 
+      {activityPage === 'summary' && (
+        <section className={`rounded-[2.5rem] border shadow-premium dark:shadow-none overflow-hidden ${
+          stats.ui_safety_hold
+            ? 'border-rose-500/30 bg-rose-500/5'
+            : (stats.health_score ?? 100) < 60
+              ? 'border-amber-500/30 bg-amber-500/5'
+              : 'border-zinc-100/70 dark:border-zinc-800/70 bg-white dark:bg-zinc-900'
+        }`}>
+          <div className="px-6 py-5 flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5">
+            <div className="min-w-0">
+              <div className="flex items-center gap-3">
+                <div className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
+                  stats.ui_safety_hold
+                    ? 'bg-rose-500/10 text-rose-500'
+                    : (stats.health_score ?? 100) < 60
+                      ? 'bg-amber-500/10 text-amber-500'
+                      : 'bg-emerald-500/10 text-emerald-500'
+                }`}>
+                  <span className="material-symbols-outlined">health_metrics</span>
+                </div>
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">Santé du runtime</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <h3 className="text-xl font-black text-zinc-950 dark:text-white">
+                      {stats.health_score ?? 100}/100
+                    </h3>
+                    <span className="px-2.5 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[9px] font-black uppercase tracking-widest text-zinc-500">
+                      {stats.runtime_health_mode || 'healthy'}
+                    </span>
+                    {stats.ui_safety_hold && (
+                      <span className="px-2.5 py-1 rounded-full bg-rose-500/10 text-[9px] font-black uppercase tracking-widest text-rose-500">
+                        Safe mode UI
+                      </span>
+                    )}
+                    {stats.collector_circuit_open && (
+                      <span className="px-2.5 py-1 rounded-full bg-amber-500/10 text-[9px] font-black uppercase tracking-widest text-amber-500">
+                        Collecteurs isolés
+                      </span>
+                    )}
+                    {stats.wall_circuit_open && (
+                      <span className="px-2.5 py-1 rounded-full bg-amber-500/10 text-[9px] font-black uppercase tracking-widest text-amber-500">
+                        Murs isolés
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 rounded-2xl bg-zinc-50 dark:bg-zinc-950/50 border border-zinc-100 dark:border-zinc-800 px-4 py-3">
+                <div className="text-xs font-black text-zinc-800 dark:text-zinc-200">
+                  {stats.health_diagnosis || 'Aucune anomalie majeure détectée'}
+                </div>
+                <div className="mt-1 text-[11px] font-semibold leading-5 text-zinc-500">
+                  {stats.health_suggestion || 'Aucune action requise.'}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 w-full lg:w-auto lg:min-w-[520px]">
+              {[
+                ['ADB', stats.adb_health_score],
+                ['Capture', stats.capture_health_score],
+                ['Vision', stats.vision_health_score],
+                ['Interface', stats.ui_health_score],
+                ['Recovery', stats.recovery_health_score],
+              ].map(([label, raw]) => {
+                const value = Number(raw ?? 100);
+                return (
+                  <div key={String(label)} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/50 px-3 py-3">
+                    <div className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-400">{String(label)}</div>
+                    <div className={`mt-1 text-lg font-black tabular-nums ${value < 40 ? 'text-rose-500' : value < 70 ? 'text-amber-500' : 'text-emerald-500'}`}>
+                      {value}/100
+                    </div>
+                    <div className="mt-2 h-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${value < 40 ? 'bg-rose-500' : value < 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                        style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Compact activity feed: high-level actions only, not raw diagnostics. */}
       <section className={(activityPage === 'summary' ? '' : 'hidden ') + "bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-zinc-100/70 dark:border-zinc-800/70 shadow-premium dark:shadow-none overflow-hidden"}>
         <div className="px-6 py-5 flex items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-800/70">
