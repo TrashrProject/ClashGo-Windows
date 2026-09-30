@@ -8,6 +8,7 @@ const (
 	PhaseIdle RuntimePhase = iota
 	PhaseAttackNavigation
 	PhaseSearching
+	PhasePlanning
 	PhaseDeploying
 	PhaseBattle
 	PhaseParsingResult
@@ -22,6 +23,8 @@ func (p RuntimePhase) String() string {
 		return "AttackNavigation"
 	case PhaseSearching:
 		return "Searching"
+	case PhasePlanning:
+		return "Planning"
 	case PhaseDeploying:
 		return "Deploying"
 	case PhaseBattle:
