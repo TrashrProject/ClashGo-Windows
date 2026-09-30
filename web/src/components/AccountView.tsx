@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { InterfaceLevel } from '../types';
-import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetControlServiceConfig, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetMultiAccountConfig, GetMultiAccountSwitchCalibration, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, SaveMultiAccountConfig, SetBetaControlServiceURL, UndoMemberSettings } from '../../wailsjs/go/main/App';
+import { ActivateLicense, ApplyMemberPreset, ApplySavedMemberPreset, CheckForUpdate, ClearAccount, DeactivateLicense, DeleteMemberPreset, GetAccountConfig, GetAppVersion, GetCachedPlayerProfile, GetControlServiceConfig, GetConfig, GetCurrentArmy, GetLicensePolicy, GetLicenseState, GetMemberInterfaceLevel, GetMemberPresets, GetMemberSettings, GetMultiAccountConfig, GetMultiAccountStatus, GetMultiAccountSwitchCalibration, GetPlayerProfile, HasPreviousMemberSettings, GetUpdateStatus, GetVillageResources, InstallAndRestart, RefreshLicense, SaveAccountConfig, SaveMemberPreset, SaveMemberSettings, SaveMultiAccountConfig, SetBetaControlServiceURL, UndoMemberSettings } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime';
 
 type Unit = { name: string; level: number; maxLevel: number; village: string };
@@ -39,6 +39,19 @@ type MultiAccountConfigView = {
   active_account_id?: string;
   default_attacks_per_turn: number;
   accounts: ManagedAccount[];
+};
+
+type MultiAccountRuntimeStatusView = {
+  enabled: boolean;
+  active_account_id?: string;
+  active_account_label?: string;
+  attacks_this_turn: number;
+  next_account_id?: string;
+  next_account_label?: string;
+  rotation_due: boolean;
+  total_switches: number;
+  last_switch_at?: string;
+  last_error?: string;
 };
 
 type FarmUnit = { name: string; count: number; housing: number };
@@ -402,6 +415,28 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [multiAccountMessage, setMultiAccountMessage] = React.useState('');
   const [multiAccountError, setMultiAccountError] = React.useState('');
   const [multiAccountCalibrated, setMultiAccountCalibrated] = React.useState(false);
+  const [multiAccountStatus, setMultiAccountStatus] = React.useState<MultiAccountRuntimeStatusView | null>(null);
+
+  React.useEffect(() => {
+    if (memberPage !== 'account') return;
+    let cancelled = false;
+
+    const refresh = async () => {
+      try {
+        const status = await GetMultiAccountStatus();
+        if (!cancelled) setMultiAccountStatus(status as MultiAccountRuntimeStatusView);
+      } catch {
+        // Runtime status is best-effort while the Wails bridge starts.
+      }
+    };
+
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), automationActive ? 2000 : 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [memberPage, automationActive]);
 
   const refreshLicense = React.useCallback(async () => {
     try {
@@ -1467,6 +1502,29 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               <p className="mt-1 text-xs font-semibold text-zinc-500">
                 Sans calibration, ClashGO n’effectuera aucun clic de changement de compte : la rotation sera simplement différée.
               </p>
+              {multiAccountStatus && (
+                <div className="mt-3 flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-wider">
+                  <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-zinc-500">
+                    Actif · {multiAccountStatus.active_account_label || multiAccountStatus.active_account_id || '—'}
+                  </span>
+                  <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-zinc-500">
+                    Tour · {multiAccountStatus.attacks_this_turn || 0} attaques
+                  </span>
+                  <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-zinc-500">
+                    Switchs · {multiAccountStatus.total_switches || 0}
+                  </span>
+                  {multiAccountStatus.rotation_due && (
+                    <span className="rounded-full bg-sky-500/10 px-2.5 py-1 text-sky-500">
+                      Prochain · {multiAccountStatus.next_account_label || multiAccountStatus.next_account_id || '—'}
+                    </span>
+                  )}
+                </div>
+              )}
+              {multiAccountStatus?.last_error && (
+                <div className="mt-3 rounded-xl bg-amber-500/10 px-3 py-2 text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                  Dernier switch différé : {multiAccountStatus.last_error}
+                </div>
+              )}
             </div>
           </div>
 
