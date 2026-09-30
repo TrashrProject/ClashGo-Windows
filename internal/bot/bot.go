@@ -2002,6 +2002,10 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	var stratName string = "Unknown"
 	var targetEdge string = "Unknown"
 	var deploySide string = "Unknown"
+	searchStrategyName := filepath.Base(b.cfg.Attack.StrategyFile)
+	if searchStrat, searchStratErr := strategy.ParseYAML(b.cfg.Attack.StrategyFile); searchStratErr == nil && strings.TrimSpace(searchStrat.Name) != "" {
+		searchStrategyName = searchStrat.Name
+	}
 
 	searchStart := time.Now()
 	attackStartedAt := time.Time{}
@@ -2064,15 +2068,52 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			b.logger.Warn().Err(lootErr).Msg("loot read failed; treating target conservatively")
 		}
 
-		decision := intelligence.EvaluateTarget(intelligence.Target{
+		target := intelligence.Target{
 			Gold: loot.Gold, Elixir: loot.Elixir, DarkElixir: loot.DarkElixir,
-		}, intelligence.TargetRules{
+		}
+		rules := intelligence.TargetRules{
 			MinGold:       b.cfg.Search.MinLootGold,
 			MinElixir:     b.cfg.Search.MinLootElixir,
 			MinDarkElixir: b.cfg.Search.MinLootDarkElixir,
 			DarkOverride:  b.cfg.Search.AttackIfDarkElixirGT,
 			SearchEnabled: b.cfg.Search.Enabled,
-		})
+		}
+		decision := intelligence.EvaluateTarget(target, rules)
+
+		// V3 learns the value of continuing matchmaking versus attacking this
+		// concrete base. No extra screenshot is requested: it consumes the loot
+		// OCR already read from the current broker frame and historical outcomes.
+		if b.contextual != nil && lootErr == nil {
+			allowAggressiveReject := !b.safePacingForced() &&
+				b.client.Health().ConsecutiveFails == 0 &&
+				!b.recoveryInFlight.Load()
+			farmDecision := b.contextual.RecommendTarget(
+				searchStrategyName,
+				b.cfg.Attack.Farm.TownHall,
+				target,
+				rules,
+				decision,
+				time.Since(searchStart),
+				sequenceSkips,
+				allowAggressiveReject,
+			)
+			if farmDecision.Apply && farmDecision.Accept != decision.Accept {
+				b.logger.Info().
+					Bool("legacy_accept", decision.Accept).
+					Bool("v3_accept", farmDecision.Accept).
+					Float64("predicted_farm_rate", farmDecision.PredictedFarmRate).
+					Float64("baseline_farm_rate", farmDecision.BaselineFarmRate).
+					Float64("capture_efficiency", farmDecision.CaptureEfficiency).
+					Int("samples", farmDecision.Samples).
+					Int("skips", sequenceSkips).
+					Str("reason", farmDecision.Reason).
+					Msg("Intelligence V3 overrode target decision for farm throughput")
+				decision.Accept = farmDecision.Accept
+				decision.Reason = farmDecision.Reason
+			} else if farmDecision.Apply {
+				decision.Reason = farmDecision.Reason
+			}
+		}
 
 		if b.telemetry != nil {
 			if decision.Accept {
@@ -3801,6 +3842,8 @@ func contextualOutcomeFromReport(rep AttackReport, townHall, recoveryCount, blue
 		DarkElixirStolen: rep.DarkElixirStolen,
 		CycleDurationMS: rep.CycleDurationMS,
 		FullRoutineDurationMS: rep.FullRoutineDurationMS,
+		SearchDurationMS: rep.SearchDurationMS,
+		SearchSkips: rep.SearchSkips,
 		DeploySuccess: rep.DeploySuccess,
 		ReturnHomeSuccess: rep.ReturnHomeSuccess,
 		SafeDeployment: rep.RedZoneValid && rep.HUDSafe,
