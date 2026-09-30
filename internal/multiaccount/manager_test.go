@@ -378,3 +378,78 @@ func TestManagerRecoveryResolutionRejectsDisabledAccount(t *testing.T) {
 		t.Fatal("expected disabled account recovery confirmation to fail")
 	}
 }
+
+
+func TestManagerResolveRecoveryClearsInterruptedJournal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multi.json")
+	cfg := testConfig()
+	m, err := NewManager(path, cfg, "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.BeginSwitch("b"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a process stop after navigation began but before MainVillage
+	// verification. The prepared journal must block unattended rotation.
+	restarted, err := NewManager(path, cfg, "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	required, target := restarted.RecoveryStatus()
+	if !required || target != "b" {
+		t.Fatalf("recovery status required=%v target=%q want true/b", required, target)
+	}
+	if restarted.Enabled() {
+		t.Fatal("multi-account rotation must stay disabled while identity is unresolved")
+	}
+
+	if err := restarted.ResolveRecovery("b"); err != nil {
+		t.Fatal(err)
+	}
+	required, target = restarted.RecoveryStatus()
+	if required || target != "" {
+		t.Fatalf("recovery not cleared: required=%v target=%q", required, target)
+	}
+	active, ok := restarted.Active()
+	if !ok || active.ID != "b" {
+		t.Fatalf("active=%+v ok=%v want b/true", active, ok)
+	}
+
+	// The journal must be gone durably; another restart must not re-enter
+	// recovery-required mode.
+	again, err := NewManager(path, cfg, "#BBB")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if required, target := again.RecoveryStatus(); required || target != "" {
+		t.Fatalf("recovery resurrected after confirmation: required=%v target=%q", required, target)
+	}
+	active, ok = again.Active()
+	if !ok || active.ID != "b" {
+		t.Fatalf("active after restart=%+v ok=%v want b/true", active, ok)
+	}
+}
+
+func TestManagerResolveRecoveryRejectsDisabledAccount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multi.json")
+	cfg := testConfig()
+	m, err := NewManager(path, cfg, "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.BeginSwitch("b"); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewManager(path, cfg, "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.ResolveRecovery("c"); err == nil {
+		t.Fatal("expected disabled account confirmation to fail")
+	}
+	if required, _ := restarted.RecoveryStatus(); !required {
+		t.Fatal("failed confirmation must keep recovery guard active")
+	}
+}
