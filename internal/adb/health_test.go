@@ -52,3 +52,28 @@ func TestClientHealthConcurrentSnapshots(t *testing.T) {
 		t.Fatalf("total events=%d want 20", got.CapturesTotal+got.ErrorsTotal)
 	}
 }
+
+
+func TestCaptureGapForFailures(t *testing.T) {
+	base := 180 * time.Millisecond
+	cases := []struct {
+		fails int
+		want  time.Duration
+	}{
+		{fails: 0, want: 180 * time.Millisecond},
+		{fails: 1, want: 360 * time.Millisecond},
+		{fails: 2, want: 720 * time.Millisecond},
+		{fails: 3, want: 1440 * time.Millisecond},
+		{fails: 4, want: 1440 * time.Millisecond},
+		{fails: 20, want: 1440 * time.Millisecond},
+		{fails: -1, want: 180 * time.Millisecond},
+	}
+	for _, tc := range cases {
+		if got := captureGapForFailures(base, tc.fails); got != tc.want {
+			t.Fatalf("fails=%d gap=%v want %v", tc.fails, got, tc.want)
+		}
+	}
+	if got := captureGapForFailures(0, 3); got != 0 {
+		t.Fatalf("zero base gap=%v want 0", got)
+	}
+}
