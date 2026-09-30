@@ -690,6 +690,56 @@ func TestMemberRuntimeStateArchiveAndRestore(t *testing.T) {
 	}
 }
 
+func TestMemberRuntimeStateArchivesLearningDirectory(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLASHGO_CONFIG_DIR", dir)
+	a := testLicensedApp(t, "CGO-LEARN1-LEARN2-LEARN3-LEARN4")
+
+	rel := filepath.Join("learning", "scope-a", "adaptive_learning.json")
+	shared := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(shared), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte(`{"version":1,"profiles":{"x":{"Mode":"shadow"}}}`)
+	if err := os.WriteFile(shared, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.archiveMemberRuntimeState(true); err != nil {
+		t.Fatalf("archive learning directory failed: %v", err)
+	}
+	if _, err := os.Stat(shared); !os.IsNotExist(err) {
+		t.Fatalf("shared learning state should be cleared, err=%v", err)
+	}
+
+	archived := filepath.Join(a.memberRuntimeStateDir(), rel)
+	got, err := os.ReadFile(archived)
+	if err != nil {
+		t.Fatalf("archived learning state missing: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("archived learning=%s want=%s", got, want)
+	}
+
+	// Simulate another member's state in the shared learning folder.
+	if err := os.MkdirAll(filepath.Dir(shared), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(shared, []byte(`{"other":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.restoreMemberRuntimeState(false); err != nil {
+		t.Fatalf("restore learning directory failed: %v", err)
+	}
+	got, err = os.ReadFile(shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("restored learning=%s want=%s", got, want)
+	}
+}
+
 func TestNewLicenseRuntimeStateNeverInheritsSharedFiles(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLASHGO_CONFIG_DIR", dir)
