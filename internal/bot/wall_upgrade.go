@@ -130,6 +130,10 @@ type WallUpgradeHooks struct {
 	// transient menu animation cannot make the wall stage disappear entirely.
 	DeepSearch bool
 
+	// PreferredWallAttempt is the previously learned number of upward swipes
+	// from the deterministic menu bottom to the Wall row. -1 means unknown.
+	PreferredWallAttempt int
+
 	// VerifyUpgradeProgress is called immediately after a claimed wall upgrade.
 	// Production uses a cheap batched resource-spend watchdog. Returning false
 	// aborts the current loop so a false-success UI path cannot repeat forever.
@@ -152,15 +156,23 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 		upgradesLearned   int
 		retryableFailure  bool
 		terminalReason    string
+		persistedWallAttempt = -1
 	)
 
 	if b.villageMemory != nil {
 		if known, ok := b.villageMemory.KnownEntity(wallMemoryID, 24*time.Hour, 0.72); ok {
+			if known.Level > 0 {
+				persistedWallAttempt = known.Level - 1
+				if persistedWallAttempt > 12 {
+					persistedWallAttempt = 12
+				}
+			}
 			b.logger.Info().
 				Int("x", known.Position.X).
 				Int("y", known.Position.Y).
+				Int("scroll_attempt", persistedWallAttempt).
 				Float64("confidence", known.Confidence).
-				Msg("shadow village memory has a known Wall menu position")
+				Msg("persistent village memory loaded Wall menu hint")
 		}
 	}
 
@@ -176,9 +188,15 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 				lastWallConf = conf
 			}
 			if xOK && yOK && b.villageMemory != nil {
+				attemptLevel := 0
+				if attempt, ok := data["attempt"].(int); ok {
+					attemptLevel = attempt + 1 // Level=0 remains the "unknown" sentinel.
+					persistedWallAttempt = attempt
+				}
 				_ = b.villageMemory.UpsertEntity(intelligence.VillageEntity{
 					ID: wallMemoryID,
 					Kind: "wall_menu_entry",
+					Level: attemptLevel,
 					Position: intelligence.VillagePoint{X: x, Y: y},
 					Confidence: lastWallConf,
 					LastSeen: time.Now(),
@@ -320,6 +338,7 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) bool {
 			Dismiss:               b.dismissSelection,
 			StopCheck:             func() bool { return b.ctx.Err() != nil },
 			DeepSearch:            attempts > 1,
+			PreferredWallAttempt: persistedWallAttempt,
 			VerifyUpgradeProgress: verifyProgress,
 			OnStep:                observe,
 		})
@@ -446,8 +465,12 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 	// Once a wall row has been found, remember how many upward menu swipes
 	// were required from the deterministic bottom position. Subsequent wall
 	// upgrades can jump straight back near that row and validate it with one
-	// capture instead of repeating the full search.
-	preferredWallAttempt := -1
+	// capture instead of repeating the full search. Production may seed the
+	// first iteration from persistent VillageMemory.
+	preferredWallAttempt := h.PreferredWallAttempt
+	if preferredWallAttempt < 0 || preferredWallAttempt > 12 {
+		preferredWallAttempt = -1
+	}
 
 	for upgradeCount := 1; ; upgradeCount++ {
 		// Stop check: the loop is otherwise unbounded (it only exits
