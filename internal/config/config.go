@@ -66,6 +66,8 @@ type ManagedAccount struct {
 	Enabled           bool   `json:"enabled"`
 	SwitchSlot        int    `json:"switch_slot,omitempty"`
 	MaxAttacksPerTurn int    `json:"max_attacks_per_turn,omitempty"`
+	TownHall          int    `json:"town_hall,omitempty"`
+	StrategyFile      string `json:"strategy_file,omitempty"`
 }
 
 type MultiAccountConfig struct {
