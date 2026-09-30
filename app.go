@@ -4293,6 +4293,88 @@ func (a *App) GetMultiAccountConfig() config.MultiAccountConfig {
 	return cfg.Account.MultiAccount
 }
 
+type MultiAccountFarmStats struct {
+	AccountID     string  `json:"account_id"`
+	Label         string  `json:"label,omitempty"`
+	PlayerTag     string  `json:"player_tag,omitempty"`
+	Attacks       int     `json:"attacks"`
+	Gold          int64   `json:"gold"`
+	Elixir        int64   `json:"elixir"`
+	DarkElixir    int64   `json:"dark_elixir"`
+	RoutineMS     int64   `json:"routine_ms"`
+	GoldPerHour   float64 `json:"gold_per_hour"`
+	ElixirPerHour float64 `json:"elixir_per_hour"`
+	DEPerHour     float64 `json:"dark_elixir_per_hour"`
+	LastAttack    string  `json:"last_attack,omitempty"`
+}
+
+func (a *App) GetMultiAccountFarmStats() []MultiAccountFarmStats {
+	cfg := config.LoadOrDefault("config.json")
+	accounts := cfg.Account.MultiAccount.Accounts
+	if len(accounts) == 0 {
+		return []MultiAccountFarmStats{}
+	}
+
+	stats := make([]MultiAccountFarmStats, len(accounts))
+	byID := make(map[string]int, len(accounts))
+	byTag := make(map[string]int, len(accounts))
+	for i, account := range accounts {
+		tag := strings.ToUpper(strings.TrimSpace(account.PlayerTag))
+		if tag != "" && !strings.HasPrefix(tag, "#") {
+			tag = "#" + tag
+		}
+		stats[i] = MultiAccountFarmStats{
+			AccountID: account.ID,
+			Label:     account.Label,
+			PlayerTag: tag,
+		}
+		byID[account.ID] = i
+		if tag != "" {
+			byTag[tag] = i
+		}
+	}
+
+	for _, report := range a.GetAttackHistory() {
+		idx, ok := byID[strings.TrimSpace(report.AccountID)]
+		if !ok {
+			tag := strings.ToUpper(strings.TrimSpace(report.PlayerTag))
+			if tag != "" && !strings.HasPrefix(tag, "#") {
+				tag = "#" + tag
+			}
+			idx, ok = byTag[tag]
+		}
+		if !ok {
+			continue
+		}
+
+		row := &stats[idx]
+		row.Attacks++
+		row.Gold += int64(report.GoldStolen + report.BonusGold)
+		row.Elixir += int64(report.ElixirStolen + report.BonusElixir)
+		row.DarkElixir += int64(report.DarkElixirStolen + report.BonusDE)
+		if report.FullRoutineDurationMS > 0 {
+			row.RoutineMS += report.FullRoutineDurationMS
+		}
+		if row.LastAttack == "" {
+			row.LastAttack = report.Timestamp
+		}
+	}
+
+	for i := range stats {
+		if stats[i].RoutineMS <= 0 {
+			continue
+		}
+		hours := float64(stats[i].RoutineMS) / 3_600_000
+		if hours <= 0 {
+			continue
+		}
+		stats[i].GoldPerHour = float64(stats[i].Gold) / hours
+		stats[i].ElixirPerHour = float64(stats[i].Elixir) / hours
+		stats[i].DEPerHour = float64(stats[i].DarkElixir) / hours
+	}
+	return stats
+}
+
 func (a *App) GetMultiAccountStatus() bot.MultiAccountRuntimeStatus {
 	a.mu.Lock()
 	b := a.bot
