@@ -109,6 +109,7 @@ type Executor struct {
 	// is only allowed after deployment has been verified complete.
 	earlyExitAllowed bool
 
+	OnPlanReady  func(duration time.Duration, edge string)
 	OnPhaseStart func(phase string, edge string)
 	OnUnitDeploy func(unit string, slotX int, slotY int)
 
