@@ -207,6 +207,11 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) error {
 		return fmt.Errorf("ADB health is not clean enough for an account switch")
 	}
 
+	prepared, err := b.prepareManagedAccount(next)
+	if err != nil {
+		return fmt.Errorf("target account preflight failed: %w", err)
+	}
+
 	c, err := loadMultiAccountSwitchCalibration()
 	if err != nil {
 		return err
@@ -281,11 +286,13 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) error {
 			continue
 		}
 		if state == game.StateMainVillage {
-			if err := b.activateManagedAccount(next); err != nil {
-				return err
-			}
+			activationErr := b.applyPreparedManagedAccount(prepared, next)
+			// At this point the physical Supercell switch is already proven by a
+			// loading transition + MainVillage return. The scheduler MUST advance
+			// even if a later disk persistence step is degraded, otherwise the next
+			// cycle would believe the previous account is still active.
 			if err := b.multiAccount.MarkSwitched(next.ID); err != nil {
-				return err
+				return fmt.Errorf("physical switch succeeded but scheduler state failed: %w", err)
 			}
 			b.wallUpgradePending.Store(b.cfg.Upgrade.UpgradeWalls)
 			b.logger.Info().
@@ -293,6 +300,9 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) error {
 				Str("account_label", next.Label).
 				Str("player_tag", next.PlayerTag).
 				Msg("multi-account switch verified and activated")
+			if activationErr != nil {
+				return activationErr
+			}
 			return nil
 		}
 		switch state {
@@ -307,108 +317,124 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) error {
 	return fmt.Errorf("new account did not reach MainVillage within switch timeout")
 }
 
-func (b *Bot) activateManagedAccount(next config.ManagedAccount) error {
+type preparedManagedAccount struct {
+	cfg           config.BotConfig
+	adaptive      *intelligence.AdaptiveEngine
+	contextual    *intelligence.ContextualEngine
+	villageMemory *intelligence.VillageMemory
+	armySlot      int
+}
+
+func (b *Bot) prepareManagedAccount(next config.ManagedAccount) (*preparedManagedAccount, error) {
 	if b == nil || b.cfg == nil {
-		return fmt.Errorf("bot configuration unavailable")
+		return nil, fmt.Errorf("bot configuration unavailable")
 	}
-	oldTag := b.cfg.Account.PlayerTag
-	oldID := b.cfg.Account.MultiAccount.ActiveAccountID
-	oldTownHall := b.cfg.Attack.Farm.TownHall
-	oldStrategy := b.cfg.Attack.StrategyFile
+	target := *b.cfg
 
 	tag := strings.ToUpper(strings.TrimSpace(next.PlayerTag))
-	if tag != "" && !strings.HasPrefix(tag, "#") {
+	if tag == "" {
+		return nil, fmt.Errorf("account %q has no player tag", next.ID)
+	}
+	if !strings.HasPrefix(tag, "#") {
 		tag = "#" + tag
 	}
-	b.cfg.Account.PlayerTag = tag
-	b.cfg.Account.MultiAccount.ActiveAccountID = next.ID
+	target.Account.PlayerTag = tag
+	target.Account.MultiAccount.ActiveAccountID = next.ID
 
-	if next.TownHall >= 8 && next.TownHall <= 18 {
-		if _, ok := b.cfg.Attack.Farm.Profiles[strconv.Itoa(next.TownHall)]; ok {
-			b.cfg.Attack.Farm.TownHall = next.TownHall
-			b.cfg.Attack.Farm.Enabled = true
+	if next.TownHall != 0 {
+		if next.TownHall < 8 || next.TownHall > 18 {
+			return nil, fmt.Errorf("unsupported town hall %d", next.TownHall)
 		}
+		if _, ok := target.Attack.Farm.Profiles[strconv.Itoa(next.TownHall)]; !ok {
+			return nil, fmt.Errorf("farm profile TH%d is unavailable", next.TownHall)
+		}
+		target.Attack.Farm.TownHall = next.TownHall
+		target.Attack.Farm.Enabled = true
 	}
+
 	if raw := strings.TrimSpace(next.StrategyFile); raw != "" {
 		name := filepath.Base(raw)
 		candidate := paths.Resolve(filepath.Join("strategies", name))
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			b.cfg.Attack.StrategyFile = candidate
-		} else {
-			b.cfg.Account.PlayerTag = oldTag
-			b.cfg.Account.MultiAccount.ActiveAccountID = oldID
-			b.cfg.Attack.Farm.TownHall = oldTownHall
-			b.cfg.Attack.StrategyFile = oldStrategy
-			return fmt.Errorf("strategy %q for account %q is unavailable", name, next.ID)
+		if info, err := os.Stat(candidate); err != nil || info.IsDir() {
+			return nil, fmt.Errorf("strategy %q for account %q is unavailable", name, next.ID)
 		}
+		target.Attack.StrategyFile = candidate
 	}
 
-	if err := config.Save("config.json", b.cfg); err != nil {
-		b.cfg.Account.PlayerTag = oldTag
-		b.cfg.Account.MultiAccount.ActiveAccountID = oldID
-		b.cfg.Attack.Farm.TownHall = oldTownHall
-		b.cfg.Attack.StrategyFile = oldStrategy
-		return fmt.Errorf("persist active multi-account profile: %w", err)
-	}
-
-	if err := b.rebindAccountIntelligence(); err != nil {
-		return err
-	}
-	if strat, err := strategy.ParseYAML(b.cfg.Attack.StrategyFile); err == nil {
-		b.armySlot = strat.SelectedArmySlot()
-	}
-	return nil
-}
-
-func (b *Bot) rebindAccountIntelligence() error {
-	if b == nil || b.cfg == nil {
-		return fmt.Errorf("bot configuration unavailable")
+	strat, err := strategy.ParseYAML(target.Attack.StrategyFile)
+	if err != nil {
+		return nil, fmt.Errorf("strategy preflight: %w", err)
 	}
 
 	emulatorKind := "adb"
-	if b.cfg.Device.BlueStacksInstance != "" ||
-		strings.Contains(strings.ToLower(b.cfg.Device.DeviceID), "localhost") {
+	if target.Device.BlueStacksInstance != "" ||
+		strings.Contains(strings.ToLower(target.Device.DeviceID), "localhost") {
 		emulatorKind = "bluestacks"
 	}
-
 	adaptive, err := intelligence.NewAdaptiveEngine(
-		learningAccountStatePath(b.cfg, "adaptive_learning.json"),
+		learningAccountStatePath(&target, "adaptive_learning.json"),
 		intelligence.EnvironmentFingerprint{
 			OS:           runtime.GOOS,
 			Emulator:     emulatorKind,
-			DeviceID:     b.cfg.Device.DeviceID,
-			Width:        b.cfg.Device.Width,
-			Height:       b.cfg.Device.Height,
-			DPI:          b.cfg.Device.DPI,
-			Strategy:     filepath.Base(b.cfg.Attack.StrategyFile),
-			TownHall:     b.cfg.Attack.Farm.TownHall,
-			AccountScope: learningScopeKey(b.cfg),
+			DeviceID:     target.Device.DeviceID,
+			Width:        target.Device.Width,
+			Height:       target.Device.Height,
+			DPI:          target.Device.DPI,
+			Strategy:     filepath.Base(target.Attack.StrategyFile),
+			TownHall:     target.Attack.Farm.TownHall,
+			AccountScope: learningScopeKey(&target),
 		},
 	)
 	if err != nil {
-		return fmt.Errorf("load adaptive intelligence for account: %w", err)
+		return nil, fmt.Errorf("load adaptive intelligence: %w", err)
 	}
 	contextual, err := intelligence.NewContextualEngine(
-		learningAccountStatePath(b.cfg, "contextual_learning_v3.json"),
+		learningAccountStatePath(&target, "contextual_learning_v3.json"),
 	)
 	if err != nil {
-		return fmt.Errorf("load contextual intelligence for account: %w", err)
+		return nil, fmt.Errorf("load contextual intelligence: %w", err)
 	}
 	villageMemory, err := intelligence.NewVillageMemory(
-		learningEnvironmentStatePath(b.cfg, "village_model.json"),
+		learningEnvironmentStatePath(&target, "village_model.json"),
 	)
 	if err != nil {
-		return fmt.Errorf("load village memory for account: %w", err)
+		return nil, fmt.Errorf("load village memory: %w", err)
 	}
 
-	b.adaptive = adaptive
-	b.contextual = contextual
-	b.villageMemory = villageMemory
+	return &preparedManagedAccount{
+		cfg:           target,
+		adaptive:      adaptive,
+		contextual:    contextual,
+		villageMemory: villageMemory,
+		armySlot:      strat.SelectedArmySlot(),
+	}, nil
+}
+
+func (b *Bot) applyPreparedManagedAccount(prepared *preparedManagedAccount, next config.ManagedAccount) error {
+	if b == nil || b.cfg == nil || prepared == nil {
+		return fmt.Errorf("prepared account runtime unavailable")
+	}
+
+	// Copy into the existing config object instead of replacing b.cfg. The
+	// attack executor holds a pointer to b.cfg.Attack; preserving the parent
+	// object address keeps that pointer valid while applying the new profile.
+	*b.cfg = prepared.cfg
+	b.adaptive = prepared.adaptive
+	b.contextual = prepared.contextual
+	b.villageMemory = prepared.villageMemory
+	b.armySlot = prepared.armySlot
 
 	b.logger.Info().
 		Str("account_scope", learningScopeKey(b.cfg)).
-		Int("experiences", contextual.TotalSamples()).
-		Int("known_entities", len(villageMemory.Snapshot().Entities)).
-		Msg("account-specific intelligence rebound")
+		Int("experiences", prepared.contextual.TotalSamples()).
+		Int("known_entities", len(prepared.villageMemory.Snapshot().Entities)).
+		Msg("account-specific intelligence rebound atomically")
+
+	if err := config.Save("config.json", b.cfg); err != nil {
+		// The physical switch and in-memory isolation are already correct.
+		// Surface persistence degradation but do NOT roll back to the previous
+		// account/AI, which would cross-contaminate the newly active account.
+		return fmt.Errorf("account switched but config persistence failed: %w", err)
+	}
 	return nil
 }
