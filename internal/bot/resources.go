@@ -3,6 +3,7 @@ package bot
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Ducky705/ClashGO/internal/game"
@@ -44,27 +45,40 @@ func (b *Bot) maybeScanVillageResources(screen gocv.Mat) {
 		}
 	}
 
-	path := paths.ResolveConfig("village_resources.json")
 	data, _ := json.MarshalIndent(snap, "", "  ")
-	_ = os.WriteFile(path, data, 0600)
 
-	historyPath := paths.ResolveConfig("village_resource_history.json")
-	var history []game.VillageResourceSnapshot
-	if old, err := os.ReadFile(historyPath); err == nil {
-		_ = json.Unmarshal(old, &history)
+	// Keep the legacy global snapshot for single-account compatibility while
+	// always maintaining an account-scoped copy. Multi-account UI reads only
+	// the scoped file, so a freshly switched account can never inherit another
+	// village's balances while waiting for its first HUD scan.
+	_ = os.WriteFile(paths.ResolveConfig("village_resources.json"), data, 0600)
+	accountPath := AccountVillageResourcesPath(b.cfg)
+	if err := os.MkdirAll(filepath.Dir(accountPath), 0o755); err == nil {
+		_ = os.WriteFile(accountPath, data, 0600)
 	}
 
-	// Avoid duplicate rows when the HUD did not change. We still refresh the
-	// current snapshot timestamp, but the trend history only records changes.
-	if len(history) == 0 ||
-		history[len(history)-1].Gold != snap.Gold ||
-		history[len(history)-1].Elixir != snap.Elixir ||
-		history[len(history)-1].DarkElixir != snap.DarkElixir {
-		history = append(history, snap)
-		if len(history) > 1000 {
-			history = history[len(history)-1000:]
+	writeHistory := func(historyPath string) {
+		var history []game.VillageResourceSnapshot
+		if old, err := os.ReadFile(historyPath); err == nil {
+			_ = json.Unmarshal(old, &history)
 		}
-		histData, _ := json.MarshalIndent(history, "", "  ")
-		_ = os.WriteFile(historyPath, histData, 0600)
+
+		// Avoid duplicate rows when the HUD did not change. We still refresh the
+		// current snapshot timestamp, but the trend history only records changes.
+		if len(history) == 0 ||
+			history[len(history)-1].Gold != snap.Gold ||
+			history[len(history)-1].Elixir != snap.Elixir ||
+			history[len(history)-1].DarkElixir != snap.DarkElixir {
+			history = append(history, snap)
+			if len(history) > 1000 {
+				history = history[len(history)-1000:]
+			}
+			histData, _ := json.MarshalIndent(history, "", "  ")
+			if err := os.MkdirAll(filepath.Dir(historyPath), 0o755); err == nil {
+				_ = os.WriteFile(historyPath, histData, 0600)
+			}
+		}
 	}
+	writeHistory(paths.ResolveConfig("village_resource_history.json"))
+	writeHistory(AccountVillageResourceHistoryPath(b.cfg))
 }
