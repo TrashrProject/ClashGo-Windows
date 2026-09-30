@@ -4231,6 +4231,141 @@ func (a *App) SetSimpleMode(enabled bool) error {
 
 // SaveAccountConfig stores only the player's tag. The Clash API credential
 // lives on the ClashGO account service, never in the distributed EXE.
+func (a *App) GetMultiAccountConfig() config.MultiAccountConfig {
+	cfg := config.LoadOrDefault("config.json")
+	return cfg.Account.MultiAccount
+}
+
+func (a *App) GetMultiAccountStatus() bot.MultiAccountRuntimeStatus {
+	a.mu.Lock()
+	b := a.bot
+	a.mu.Unlock()
+	if b != nil {
+		return b.MultiAccountStatus()
+	}
+	cfg := config.LoadOrDefault("config.json")
+	return bot.MultiAccountRuntimeStatus{
+		Enabled:         cfg.Account.MultiAccount.Enabled,
+		ActiveAccountID: cfg.Account.MultiAccount.ActiveAccountID,
+	}
+}
+
+func (a *App) GetMultiAccountCalibration() (bot.MultiAccountSwitchCalibration, error) {
+	return bot.LoadMultiAccountSwitchCalibration()
+}
+
+func (a *App) SaveMultiAccountCalibration(raw string) error {
+	if a.botSessionActiveOrStarting() {
+		return fmt.Errorf("stop ClashGO before changing multi-account calibration")
+	}
+	var calibration bot.MultiAccountSwitchCalibration
+	if err := json.Unmarshal([]byte(raw), &calibration); err != nil {
+		return fmt.Errorf("invalid multi-account calibration: %w", err)
+	}
+	return bot.SaveMultiAccountSwitchCalibration(calibration)
+}
+
+func (a *App) SaveMultiAccountConfig(raw string) (config.MultiAccountConfig, error) {
+	if a.botSessionActiveOrStarting() {
+		return config.MultiAccountConfig{}, fmt.Errorf("stop ClashGO before changing multi-account profiles")
+	}
+
+	var next config.MultiAccountConfig
+	if err := json.Unmarshal([]byte(raw), &next); err != nil {
+		return config.MultiAccountConfig{}, fmt.Errorf("invalid multi-account configuration: %w", err)
+	}
+	if next.DefaultAttacksTurn <= 0 {
+		next.DefaultAttacksTurn = 10
+	}
+	if next.DefaultAttacksTurn > 500 {
+		return config.MultiAccountConfig{}, fmt.Errorf("default attacks per turn must be between 1 and 500")
+	}
+	if len(next.Accounts) > 20 {
+		return config.MultiAccountConfig{}, fmt.Errorf("multi-account supports at most 20 profiles")
+	}
+
+	seenID := map[string]bool{}
+	seenTag := map[string]bool{}
+	seenSlot := map[int]bool{}
+	enabled := 0
+	for i := range next.Accounts {
+		acct := &next.Accounts[i]
+		acct.ID = strings.TrimSpace(acct.ID)
+		acct.Label = strings.TrimSpace(acct.Label)
+		if acct.ID == "" {
+			acct.ID = fmt.Sprintf("account-%d", i+1)
+		}
+		if seenID[acct.ID] {
+			return config.MultiAccountConfig{}, fmt.Errorf("duplicate multi-account id %q", acct.ID)
+		}
+		seenID[acct.ID] = true
+
+		tag, err := normalizePlayerTag(acct.PlayerTag)
+		if err != nil {
+			return config.MultiAccountConfig{}, fmt.Errorf("account %q: %w", acct.Label, err)
+		}
+		acct.PlayerTag = tag
+		if seenTag[tag] {
+			return config.MultiAccountConfig{}, fmt.Errorf("duplicate player tag %s", tag)
+		}
+		seenTag[tag] = true
+
+		if acct.MaxAttacksPerTurn < 0 || acct.MaxAttacksPerTurn > 500 {
+			return config.MultiAccountConfig{}, fmt.Errorf("account %q attacks per turn must be between 0 and 500", acct.Label)
+		}
+		if acct.TownHall != 0 && (acct.TownHall < 8 || acct.TownHall > 18) {
+			return config.MultiAccountConfig{}, fmt.Errorf("account %q town hall must be between 8 and 18", acct.Label)
+		}
+		if rawStrategy := strings.TrimSpace(acct.StrategyFile); rawStrategy != "" {
+			name := filepath.Base(filepath.Clean(rawStrategy))
+			ext := strings.ToLower(filepath.Ext(name))
+			if ext != ".yaml" && ext != ".csv" {
+				return config.MultiAccountConfig{}, fmt.Errorf("account %q has unsupported strategy %q", acct.Label, name)
+			}
+			candidate := paths.Resolve(filepath.Join("strategies", name))
+			if info, err := os.Stat(candidate); err != nil || info.IsDir() {
+				return config.MultiAccountConfig{}, fmt.Errorf("account %q strategy %q was not found", acct.Label, name)
+			}
+			acct.StrategyFile = name
+		}
+		if acct.Enabled {
+			enabled++
+			if acct.SwitchSlot <= 0 || acct.SwitchSlot > 20 {
+				return config.MultiAccountConfig{}, fmt.Errorf("account %q requires a switch slot between 1 and 20", acct.Label)
+			}
+			if seenSlot[acct.SwitchSlot] {
+				return config.MultiAccountConfig{}, fmt.Errorf("switch slot %d is assigned to more than one account", acct.SwitchSlot)
+			}
+			seenSlot[acct.SwitchSlot] = true
+		}
+	}
+	if next.Enabled && enabled < 2 {
+		return config.MultiAccountConfig{}, fmt.Errorf("enable at least two accounts for multi-account rotation")
+	}
+
+	cfg := config.LoadOrDefault("config.json")
+	currentTag := strings.ToUpper(strings.TrimSpace(cfg.Account.PlayerTag))
+	matchedCurrent := ""
+	for _, acct := range next.Accounts {
+		if acct.Enabled && strings.EqualFold(strings.TrimSpace(acct.PlayerTag), currentTag) {
+			matchedCurrent = acct.ID
+			break
+		}
+	}
+	if next.Enabled && matchedCurrent == "" {
+		return config.MultiAccountConfig{}, fmt.Errorf("the currently linked player tag must be one of the enabled multi-account profiles")
+	}
+	if matchedCurrent != "" {
+		next.ActiveAccountID = matchedCurrent
+	}
+
+	cfg.Account.MultiAccount = next
+	if err := config.Save("config.json", cfg); err != nil {
+		return config.MultiAccountConfig{}, err
+	}
+	return next, nil
+}
+
 func (a *App) SaveAccountConfig(playerTag string) error {
 	if a.botSessionActiveOrStarting() {
 		return fmt.Errorf("stop ClashGO before changing the linked Clash account")
