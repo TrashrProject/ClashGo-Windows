@@ -21,6 +21,70 @@ type RedZone struct {
 	Boundary []image.Point
 }
 
+
+// boundarySamples extracts sparse boundary points from the accepted red-zone
+// rectangle. Scanning only inside that rectangle avoids unrelated red UI
+// elements while preserving irregular village geometry.
+func boundarySamples(mask gocv.Mat, rect image.Rectangle) (left, right, top, bottom []image.Point) {
+	if mask.Empty() || rect.Empty() {
+		return nil, nil, nil, nil
+	}
+	w, h := mask.Cols(), mask.Rows()
+	x0, x1 := rect.Min.X, rect.Max.X
+	y0, y1 := rect.Min.Y, rect.Max.Y
+	if x0 < 0 { x0 = 0 }
+	if y0 < 0 { y0 = 0 }
+	if x1 > w { x1 = w }
+	if y1 > h { y1 = h }
+	if x1 <= x0 || y1 <= y0 {
+		return nil, nil, nil, nil
+	}
+
+	const sampleStep = 8
+	for y := y0; y < y1; y += sampleStep {
+		lx, rx := -1, -1
+		for x := x0; x < x1; x++ {
+			if mask.GetUCharAt(y, x) == 0 {
+				continue
+			}
+			if lx < 0 { lx = x }
+			rx = x
+		}
+		if lx >= 0 {
+			left = append(left, image.Pt(lx, y))
+			right = append(right, image.Pt(rx, y))
+		}
+	}
+	for x := x0; x < x1; x += sampleStep {
+		ty, by := -1, -1
+		for y := y0; y < y1; y++ {
+			if mask.GetUCharAt(y, x) == 0 {
+				continue
+			}
+			if ty < 0 { ty = y }
+			by = y
+		}
+		if ty >= 0 {
+			top = append(top, image.Pt(x, ty))
+			bottom = append(bottom, image.Pt(x, by))
+		}
+	}
+	return left, right, top, bottom
+}
+
+func redZoneFromRect(mask gocv.Mat, rect image.Rectangle, contours int) RedZone {
+	left, right, top, bottom := boundarySamples(mask, rect)
+	return RedZone{
+		BBox:           rect,
+		Valid:          true,
+		Contours:       contours,
+		LeftBoundary:   left,
+		RightBoundary:  right,
+		TopBoundary:    top,
+		BottomBoundary: bottom,
+	}
+}
+
 // RedLineDetector finds the red deployment boundary on screen.
 type RedLineDetector struct {
 	logger zerolog.Logger
