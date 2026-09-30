@@ -199,6 +199,20 @@ func (m *Manager) Active() (config.ManagedAccount, bool) {
 	return *a, true
 }
 
+func (m *Manager) Account(accountID string) (config.ManagedAccount, bool) {
+	if m == nil {
+		return config.ManagedAccount{}, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a := m.accountByIDLocked(strings.TrimSpace(accountID))
+	if a == nil || !a.Enabled {
+		return config.ManagedAccount{}, false
+	}
+	return *a, true
+}
+
+
 func (m *Manager) ObserveAttack() error {
 	if m == nil {
 		return nil
@@ -359,6 +373,39 @@ func (m *Manager) RecoveryStatus() (bool, string) {
 	defer m.mu.Unlock()
 	return m.state.RecoveryRequired, m.state.RecoveryTargetAccountID
 }
+
+func (m *Manager) ResolveRecovery(accountID string) error {
+	if m == nil {
+		return fmt.Errorf("multi-account manager unavailable")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	accountID = strings.TrimSpace(accountID)
+	a := m.accountByIDLocked(accountID)
+	if a == nil || !a.Enabled {
+		return fmt.Errorf("unknown or disabled multi-account profile %q", accountID)
+	}
+	if !m.state.RecoveryRequired {
+		return fmt.Errorf("multi-account recovery is not required")
+	}
+
+	now := time.Now()
+	m.state.ActiveAccountID = a.ID
+	m.state.AttacksThisTurn = 0
+	m.state.RecoveryRequired = false
+	m.state.RecoveryTargetAccountID = ""
+	m.state.ConsecutiveSwitchFailures = 0
+	m.state.LastError = ""
+	m.state.UpdatedAt = now
+	if err := m.saveLocked(); err != nil {
+		return err
+	}
+	// Clear the ambiguous journal only after the manually confirmed active
+	// account has been persisted. If removal fails, the next boot pauses again
+	// rather than trusting an uncertain state.
+	return m.removeSwitchJournalLocked()
+}
+
 
 func (m *Manager) MarkSwitched(accountID string) error {
 	if m == nil {
