@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Ducky705/ClashGO/internal/adb"
 	"github.com/Ducky705/ClashGO/internal/attack"
 	"github.com/Ducky705/ClashGO/internal/bot"
 	"github.com/Ducky705/ClashGO/internal/config"
@@ -30,6 +32,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/rs/zerolog/log"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"gocv.io/x/gocv"
 )
 
 func gracefulStopReached(history []bot.AttackReport, sequenceStartUnix int64) bool {
@@ -4252,6 +4255,62 @@ func (a *App) GetMultiAccountStatus() bot.MultiAccountRuntimeStatus {
 
 func (a *App) GetMultiAccountCalibration() (bot.MultiAccountSwitchCalibration, error) {
 	return bot.LoadMultiAccountSwitchCalibration()
+}
+
+type MultiAccountCalibrationFrame struct {
+	DataURL string `json:"data_url"`
+	Width   int    `json:"width"`
+	Height  int    `json:"height"`
+}
+
+func (a *App) CaptureMultiAccountCalibrationFrame() (MultiAccountCalibrationFrame, error) {
+	if a.botSessionActiveOrStarting() {
+		return MultiAccountCalibrationFrame{}, fmt.Errorf("stop ClashGO before capturing multi-account calibration")
+	}
+	cfg := config.LoadOrDefault("config.json")
+	client := adb.NewClient(
+		adb.WithHost(cfg.Device.ADBHost),
+		adb.WithPort(cfg.Device.ADBPort),
+		adb.WithTimeout(30*time.Second),
+		adb.WithBlueStacksInstance(cfg.Device.BlueStacksInstance),
+	)
+	client.DeviceID = strings.TrimSpace(cfg.Device.DeviceID)
+	defer client.Close()
+
+	if client.DeviceID == "" {
+		if err := client.AutoDetectDevice(); err != nil {
+			return MultiAccountCalibrationFrame{}, fmt.Errorf("detect BlueStacks device: %w", err)
+		}
+	}
+	if err := client.EnsureConnected(); err != nil {
+		return MultiAccountCalibrationFrame{}, fmt.Errorf("connect BlueStacks for calibration: %w", err)
+	}
+	frame, err := client.CaptureToMat()
+	if err != nil {
+		return MultiAccountCalibrationFrame{}, fmt.Errorf("capture BlueStacks calibration frame: %w", err)
+	}
+	defer frame.Close()
+	if frame.Empty() || frame.Cols() < 2 || frame.Rows() < 2 {
+		return MultiAccountCalibrationFrame{}, fmt.Errorf("BlueStacks returned an empty calibration frame")
+	}
+
+	dir := paths.ResolveConfig("multi_account")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return MultiAccountCalibrationFrame{}, err
+	}
+	preview := filepath.Join(dir, "calibration_preview.png")
+	if ok := gocv.IMWrite(preview, frame); !ok {
+		return MultiAccountCalibrationFrame{}, fmt.Errorf("could not encode calibration preview")
+	}
+	data, err := os.ReadFile(preview)
+	if err != nil {
+		return MultiAccountCalibrationFrame{}, err
+	}
+	return MultiAccountCalibrationFrame{
+		DataURL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(data),
+		Width:   frame.Cols(),
+		Height:  frame.Rows(),
+	}, nil
 }
 
 func (a *App) GetMultiAccountSwitchCalibration() (string, error) {
