@@ -285,8 +285,23 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) (retErr erro
 	switchMayHaveOccurred := false
 	journalPhysical := false
 	defer func() {
-		if journalPrepared && !switchMayHaveOccurred && b != nil && b.multiAccount != nil {
+		if b == nil || b.multiAccount == nil {
+			return
+		}
+		if journalPrepared && !switchMayHaveOccurred {
 			_ = b.multiAccount.AbortPreparedSwitch(next.ID)
+			return
+		}
+		if retErr != nil && switchMayHaveOccurred && !journalPhysical {
+			// After the account-slot tap we can no longer prove which Clash
+			// account is active. Persist that ambiguity immediately, not only on
+			// the next process restart, and pause before another attack can begin.
+			_ = b.multiAccount.MarkSwitchAmbiguous(next.ID, retErr)
+			b.paused.Store(true)
+			b.logger.Error().
+				Err(retErr).
+				Str("target_account_id", next.ID).
+				Msg("account identity became ambiguous during switch; automation paused")
 		}
 	}()
 	if b == nil || b.multiAccount == nil {
