@@ -1,8 +1,10 @@
 package multiaccount
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Ducky705/ClashGO/internal/config"
 )
@@ -122,5 +124,51 @@ func TestManagerDoesNotKeepDisabledActiveAccount(t *testing.T) {
 	}
 	if active.ID != "a" {
 		t.Fatalf("active=%q want a after disabling b", active.ID)
+	}
+}
+
+
+func TestManagerDisabledPreviousActiveReconcilesToEnabled(t *testing.T) {
+	cfg := testConfig()
+	m, err := NewManager("", cfg, "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.MarkSwitched("b"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg.Accounts[1].Enabled = false
+	cfg.Accounts[2].Enabled = true
+	if err := m.UpdateConfig(cfg, "#AAA"); err != nil {
+		t.Fatal(err)
+	}
+	active, ok := m.Active()
+	if !ok {
+		t.Fatal("expected enabled active account after reconciliation")
+	}
+	if !active.Enabled || active.ID == "b" {
+		t.Fatalf("disabled account remained active: %+v", active)
+	}
+}
+
+func TestManagerFailedSwitchUsesBackoff(t *testing.T) {
+	m, err := NewManager("", testConfig(), "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.MarkSwitchFailed(fmt.Errorf("temporary failure")); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	allowed, remaining := m.SwitchAttemptAllowed(now)
+	if allowed || remaining <= 0 {
+		t.Fatalf("expected switch backoff, allowed=%v remaining=%s", allowed, remaining)
+	}
+
+	allowed, remaining = m.SwitchAttemptAllowed(now.Add(31 * time.Second))
+	if !allowed || remaining != 0 {
+		t.Fatalf("expected first backoff to expire, allowed=%v remaining=%s", allowed, remaining)
 	}
 }
