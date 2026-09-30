@@ -872,6 +872,66 @@ func (sm *SlotManager) GetEventTroops(strategyUnitNames []string) []*TrackedSlot
 	return result
 }
 
+// RefreshActivePositions remaps only undeployed cards to the currently
+// visible troop-bar centers. It is deliberately conservative: the update is
+// applied only when the number of detected live cards exactly matches the
+// number of tracked undeployed cards. That prevents a transient animation or
+// partially-hidden card from corrupting identities.
+//
+// This is called from the single post-deploy checkpoint, so bar compaction is
+// corrected without adding a second screenshot/OCR pass.
+func (sm *SlotManager) RefreshActivePositions(screen gocv.Mat) bool {
+	if sm == nil || screen.Empty() {
+		return false
+	}
+
+	activeXs := sm.detectActiveSlots(screen)
+	if len(activeXs) == 0 {
+		return false
+	}
+
+	remaining := make([]*TrackedSlot, 0, len(sm.slots))
+	for _, slot := range sm.slots {
+		if slot.State == SlotDeployed || slot.State == SlotFailed || slot.IsEmpty {
+			continue
+		}
+		remaining = append(remaining, slot)
+	}
+	if len(activeXs) != len(remaining) {
+		sm.logger.Debug().
+			Int("detected", len(activeXs)).
+			Int("tracked_remaining", len(remaining)).
+			Msg("troop-bar compaction refresh skipped; card counts differ")
+		return false
+	}
+
+	sort.Slice(remaining, func(i, j int) bool { return remaining[i].X < remaining[j].X })
+	sort.Ints(activeXs)
+
+	changed := false
+	for i, slot := range remaining {
+		if slot.X != activeXs[i] {
+			slot.X = activeXs[i]
+			slot.Y = sm.slotY
+			changed = true
+		}
+	}
+	if !changed {
+		return false
+	}
+
+	sm.xIndex = make(map[int]*TrackedSlot, len(sm.slots))
+	for _, slot := range sm.slots {
+		sm.xIndex[slot.X] = slot
+	}
+
+	sm.logger.Debug().
+		Ints("active_xs", activeXs).
+		Int("remaining", len(remaining)).
+		Msg("troop-bar card positions refreshed after compaction")
+	return true
+}
+
 // RecordAttempt records a deployment attempt for a slot.
 func (sm *SlotManager) RecordAttempt(unitName string, success bool) {
 	slot := sm.GetSlot(unitName)
