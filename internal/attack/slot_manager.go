@@ -885,9 +885,6 @@ func (sm *SlotManager) RefreshAfterSlotConsumed(screen gocv.Mat, consumed *Track
 		return false
 	}
 	activeXs := sm.detectActiveSlots(screen)
-	if len(activeXs) == 0 {
-		return false
-	}
 
 	remaining := make([]*TrackedSlot, 0, len(sm.slots))
 	for _, slot := range sm.slots {
