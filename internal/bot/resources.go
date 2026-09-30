@@ -47,14 +47,15 @@ func (b *Bot) maybeScanVillageResources(screen gocv.Mat) {
 
 	data, _ := json.MarshalIndent(snap, "", "  ")
 
-	// Keep the legacy global snapshot for single-account compatibility while
-	// always maintaining an account-scoped copy. Multi-account UI reads only
-	// the scoped file, so a freshly switched account can never inherit another
-	// village's balances while waiting for its first HUD scan.
-	_ = os.WriteFile(paths.ResolveConfig("village_resources.json"), data, 0600)
+	// Multi-account sessions write only to the PlayerTag scope. The legacy
+	// global files remain single-account-only so their trend history can never
+	// become a mixture of several villages.
 	accountPath := AccountVillageResourcesPath(b.cfg)
 	if err := os.MkdirAll(filepath.Dir(accountPath), 0o755); err == nil {
 		_ = os.WriteFile(accountPath, data, 0600)
+	}
+	if !b.cfg.Account.MultiAccount.Enabled {
+		_ = os.WriteFile(paths.ResolveConfig("village_resources.json"), data, 0600)
 	}
 
 	writeHistory := func(historyPath string) {
@@ -79,6 +80,8 @@ func (b *Bot) maybeScanVillageResources(screen gocv.Mat) {
 			}
 		}
 	}
-	writeHistory(paths.ResolveConfig("village_resource_history.json"))
+	if !b.cfg.Account.MultiAccount.Enabled {
+		writeHistory(paths.ResolveConfig("village_resource_history.json"))
+	}
 	writeHistory(AccountVillageResourceHistoryPath(b.cfg))
 }
