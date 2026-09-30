@@ -475,15 +475,13 @@ type preparedManagedAccount struct {
 	armySlot      int
 }
 
-func (b *Bot) prepareManagedAccount(next config.ManagedAccount) (*preparedManagedAccount, error) {
-	if b == nil || b.cfg == nil {
-		return nil, fmt.Errorf("bot configuration unavailable")
+func applyManagedAccountConfig(target *config.BotConfig, next config.ManagedAccount) error {
+	if target == nil {
+		return fmt.Errorf("target bot configuration unavailable")
 	}
-	target := *b.cfg
-
 	tag := strings.ToUpper(strings.TrimSpace(next.PlayerTag))
 	if tag == "" {
-		return nil, fmt.Errorf("account %q has no player tag", next.ID)
+		return fmt.Errorf("account %q has no player tag", next.ID)
 	}
 	if !strings.HasPrefix(tag, "#") {
 		tag = "#" + tag
@@ -493,10 +491,10 @@ func (b *Bot) prepareManagedAccount(next config.ManagedAccount) (*preparedManage
 
 	if next.TownHall != 0 {
 		if next.TownHall < 8 || next.TownHall > 18 {
-			return nil, fmt.Errorf("unsupported town hall %d", next.TownHall)
+			return fmt.Errorf("unsupported town hall %d", next.TownHall)
 		}
 		if _, ok := target.Attack.Farm.Profiles[strconv.Itoa(next.TownHall)]; !ok {
-			return nil, fmt.Errorf("farm profile TH%d is unavailable", next.TownHall)
+			return fmt.Errorf("farm profile TH%d is unavailable", next.TownHall)
 		}
 		target.Attack.Farm.TownHall = next.TownHall
 		target.Attack.Farm.Enabled = true
@@ -506,9 +504,20 @@ func (b *Bot) prepareManagedAccount(next config.ManagedAccount) (*preparedManage
 		name := filepath.Base(raw)
 		candidate := paths.Resolve(filepath.Join("strategies", name))
 		if info, err := os.Stat(candidate); err != nil || info.IsDir() {
-			return nil, fmt.Errorf("strategy %q for account %q is unavailable", name, next.ID)
+			return fmt.Errorf("strategy %q for account %q is unavailable", name, next.ID)
 		}
 		target.Attack.StrategyFile = candidate
+	}
+	return nil
+}
+
+func (b *Bot) prepareManagedAccount(next config.ManagedAccount) (*preparedManagedAccount, error) {
+	if b == nil || b.cfg == nil {
+		return nil, fmt.Errorf("bot configuration unavailable")
+	}
+	target := *b.cfg
+	if err := applyManagedAccountConfig(&target, next); err != nil {
+		return nil, err
 	}
 
 	strat, err := strategy.ParseYAML(target.Attack.StrategyFile)
