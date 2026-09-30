@@ -374,6 +374,37 @@ func (m *Manager) RecoveryStatus() (bool, string) {
 	return m.state.RecoveryRequired, m.state.RecoveryTargetAccountID
 }
 
+func (m *Manager) ResolveRecovery(accountID string) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	account := m.accountByIDLocked(accountID)
+	if account == nil || !account.Enabled {
+		return fmt.Errorf("unknown or disabled multi-account profile %q", accountID)
+	}
+
+	now := time.Now()
+	if m.state.ActiveAccountID != accountID {
+		m.state.AttacksThisTurn = 0
+	}
+	m.state.ActiveAccountID = accountID
+	m.state.RecoveryRequired = false
+	m.state.RecoveryTargetAccountID = ""
+	m.state.ConsecutiveSwitchFailures = 0
+	m.state.LastError = ""
+	m.state.UpdatedAt = now
+
+	// Persist the resolved identity first. If journal removal subsequently
+	// fails, the next startup remains fail-closed rather than losing evidence.
+	if err := m.saveLocked(); err != nil {
+		return err
+	}
+	return m.removeSwitchJournalLocked()
+}
+
 func (m *Manager) RequireRecovery(accountID string, err error) error {
 	if m == nil {
 		return nil
