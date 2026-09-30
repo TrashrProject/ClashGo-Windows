@@ -3,7 +3,9 @@ package bot
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -91,4 +93,40 @@ func multiAccountStatePath(cfg *config.BotConfig) string {
 
 func accountAttackHistoryPath(cfg *config.BotConfig) string {
 	return learningAccountStatePath(cfg, "attack_history.json")
+}
+
+
+// ResolveMultiAccountActivePlayerTag returns the PlayerTag associated with the
+// scheduler's last durably verified active account. The scheduler state is
+// written only after a physical Supercell-ID switch has completed its loading
+// transition and returned to MainVillage, so it is safer at process restart
+// than an older per-license single-account snapshot.
+func ResolveMultiAccountActivePlayerTag(cfg *config.BotConfig) (string, bool) {
+	if cfg == nil || !cfg.Account.MultiAccount.Enabled {
+		return "", false
+	}
+	data, err := os.ReadFile(multiAccountStatePath(cfg))
+	if err != nil {
+		return "", false
+	}
+	var state struct {
+		ActiveAccountID string `json:"active_account_id"`
+	}
+	if json.Unmarshal(data, &state) != nil || strings.TrimSpace(state.ActiveAccountID) == "" {
+		return "", false
+	}
+	for _, account := range cfg.Account.MultiAccount.Accounts {
+		if !account.Enabled || account.ID != state.ActiveAccountID {
+			continue
+		}
+		tag := strings.ToUpper(strings.TrimSpace(account.PlayerTag))
+		if tag == "" {
+			return "", false
+		}
+		if !strings.HasPrefix(tag, "#") {
+			tag = "#" + tag
+		}
+		return tag, true
+	}
+	return "", false
 }
