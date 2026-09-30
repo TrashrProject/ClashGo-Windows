@@ -551,6 +551,14 @@ func (a *App) StartBot(gold, elixir, dark int, upgradeWalls bool, searchEnabled 
 		runtime.EventsEmit(a.ctx, "bot_started", map[string]interface{}{
 			"message": "Bot is running.",
 		})
+
+		// Two lightweight supervisors share the bot's own lifetime:
+		//  - End key = immediate user emergency stop on Windows.
+		//  - Done watcher = cleans up sessions that stop themselves because a
+		//    runtime/raid limit was reached, so the UI cannot remain stuck on
+		//    "Running" after the bot has already cancelled its context.
+		go a.watchEmergencyStopKey(bootCtx, b)
+		go a.watchAutomaticBotStop(b)
 	}(bootCtx)
 
 	return BotStatus{Running: true, Message: "Bot initialization started in background"}
@@ -563,6 +571,83 @@ func (a *App) clearStartStateLocked() {
 	a.bot = nil
 	a.cancel = nil
 	a.botCtx = nil
+}
+
+// watchAutomaticBotStop finalizes sessions that terminate themselves (for
+// example max attacks or max runtime). Manual StopBot detaches a.bot before
+// cancelling, so the identity check makes this watcher a no-op for manual
+// shutdown and prevents double teardown.
+func (a *App) watchAutomaticBotStop(b *bot.Bot) {
+	<-b.Done()
+
+	a.mu.Lock()
+	if a.bot != b {
+		a.mu.Unlock()
+		return
+	}
+	current := b.Stats()
+	a.lastStats = mergeStats(a.lastStats, current)
+	a.bot = nil
+	a.cancel = nil
+	a.botCtx = nil
+	a.stopping = true
+	a.mu.Unlock()
+
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "bot_stopped", map[string]interface{}{
+			"message": "Bot session finished automatically.",
+		})
+		runtime.EventsEmit(a.ctx, "stats_updated", a.GetStats())
+	}
+
+	go func() {
+		defer func() {
+			a.mu.Lock()
+			a.stopping = false
+			a.mu.Unlock()
+			if r := recover(); r != nil {
+				log.Error().Interface("panic", r).Msg("recovered panic during automatic bot teardown")
+			}
+		}()
+		b.Stop()
+		a.saveStats()
+		a.cachedHistoryMu.Lock()
+		a.cachedHistory = nil
+		a.cachedHistoryMu.Unlock()
+	}()
+}
+
+// watchEmergencyStopKey mirrors ClashCore's immediate End-key stop on
+// Windows. The key is edge-triggered so holding End cannot repeatedly call
+// StopBot. It intentionally lives at the App layer: StopBot updates the UI
+// state and performs the same safe asynchronous teardown as the normal button.
+func (a *App) watchEmergencyStopKey(ctx context.Context, b *bot.Bot) {
+	if goruntime.GOOS != "windows" {
+		return
+	}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	wasPressed := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pressed := endKeyPressed()
+			if pressed && !wasPressed {
+				a.mu.Lock()
+				active := a.bot == b
+				a.mu.Unlock()
+				if active {
+					log.Warn().Msg("End key pressed; stopping bot immediately")
+					_ = a.StopBot()
+				}
+				return
+			}
+			wasPressed = pressed
+		}
+	}
 }
 
 // StopBot stops the bot instantly.
