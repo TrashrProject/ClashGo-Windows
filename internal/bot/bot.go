@@ -1795,6 +1795,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	b.setRuntimePhase(PhaseAttackNavigation)
 	defer b.setRuntimePhase(PhaseIdle)
 	sequenceRecoveryStart := b.recoveryAttempts.Load()
+	sequenceBlueStacksRestartStart := b.blueStacksRestarts.Load()
 	b.seqStartedAtUnix.Store(time.Now().Unix())
 	defer b.seqStartedAtUnix.Store(0)
 	defer b.seqRunning.Store(false)
@@ -2488,7 +2489,11 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	rep.ReturnHomeDurationMS = returnHomeDur.Milliseconds()
 	rep.ReturnHomeSuccess = returnedHome
 	rep.FullRoutineDurationMS = time.Since(sequenceStartedAt).Milliseconds()
-	b.recordAttackSoak(rep, b.recoveryAttempts.Load()-sequenceRecoveryStart)
+	b.recordAttackSoak(
+		rep,
+		b.recoveryAttempts.Load()-sequenceRecoveryStart,
+		b.blueStacksRestarts.Load()-sequenceBlueStacksRestartStart,
+	)
 
 	b.historyMu.Lock()
 	if len(b.historyCache) > 0 && b.historyCache[0].Timestamp == rep.Timestamp {
