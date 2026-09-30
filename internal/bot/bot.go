@@ -61,6 +61,7 @@ type Bot struct {
 	captureDone chan struct{}
 	frameBroker *FrameBroker
 	brokerActive atomic.Bool
+	frameSeq     atomic.Uint64
 	logger      zerolog.Logger
 
 	attackCount atomic.Int32
