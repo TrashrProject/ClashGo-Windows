@@ -411,6 +411,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		}
 
 		tapExec := NewTapExecutor(e.client, e.cal, e.logger)
+	tapExec.SetFrameProvider(e.frameProvider)
 		tapExec.StartDeployBudget()
 		// Candidate deploy lines MUST all stay on the SAME verified outside
 		// side of the live red boundary. The previous implementation rotated
@@ -827,6 +828,7 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 
 	// 6. Initialize tap executor
 	tapExec := NewTapExecutor(e.client, e.cal, e.logger)
+	tapExec.SetFrameProvider(e.frameProvider)
 	// Give deployers a unit-name -> slot lookup (used to pair Amount:"All"
 	// spells with their live OCR counts).
 	tapExec.SetSlotResolver(slotMgr.GetSlot)
