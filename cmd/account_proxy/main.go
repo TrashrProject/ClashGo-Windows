@@ -20,8 +20,9 @@ import (
 )
 
 type limiterState struct {
-	mu      sync.Mutex
-	entries map[string]*clientWindow
+	mu        sync.Mutex
+	entries   map[string]*clientWindow
+	lastSweep time.Time
 }
 
 type clientWindow struct {
@@ -408,6 +409,19 @@ func (l *limiterState) allow(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
+
+	// Keep the per-IP limiter bounded during long-lived/public runs. A scan
+	// from many source addresses must not grow this map forever.
+	if l.lastSweep.IsZero() || now.Sub(l.lastSweep) >= 5*time.Minute {
+		cutoff := now.Add(-2 * time.Minute)
+		for k, entry := range l.entries {
+			if entry == nil || entry.start.Before(cutoff) {
+				delete(l.entries, k)
+			}
+		}
+		l.lastSweep = now
+	}
+
 	w := l.entries[key]
 	if w == nil || now.Sub(w.start) >= time.Minute {
 		l.entries[key] = &clientWindow{start: now, count: 1}
@@ -497,7 +511,9 @@ func main() {
 
 	addr := strings.TrimSpace(os.Getenv("CLASHGO_ACCOUNT_LISTEN"))
 	if addr == "" {
-		addr = ":8787"
+		// Local fallback must not expose the control plane to the LAN by default.
+		// Operators can still explicitly bind 0.0.0.0 through the environment.
+		addr = "127.0.0.1:8787"
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -1532,7 +1548,10 @@ func main() {
 		Addr:              addr,
 		Handler:           corsMiddleware(mux, webOrigin),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      20 * time.Second,
 		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    32 << 10,
 	}
 
 	log.Printf("ClashGO account service listening on %s", addr)
