@@ -10,8 +10,8 @@ func TestAttackSoakRequiresThreeCleanAttacks(t *testing.T) {
 	b := &Bot{logger: zerolog.Nop()}
 	clean := AttackReport{DeploySuccess: true, ReturnHomeSuccess: true, ParsedResults: true}
 
-	b.recordAttackSoak(clean, 0)
-	b.recordAttackSoak(clean, 0)
+	b.recordAttackSoak(clean, 0, 0)
+	b.recordAttackSoak(clean, 0, 0)
 	if b.soakValidated.Load() {
 		t.Fatal("soak validated before third clean attack")
 	}
@@ -19,7 +19,7 @@ func TestAttackSoakRequiresThreeCleanAttacks(t *testing.T) {
 		t.Fatalf("streak=%d, want 2", got)
 	}
 
-	b.recordAttackSoak(clean, 0)
+	b.recordAttackSoak(clean, 0, 0)
 	if !b.soakValidated.Load() {
 		t.Fatal("soak not validated on third clean attack")
 	}
@@ -28,10 +28,25 @@ func TestAttackSoakRequiresThreeCleanAttacks(t *testing.T) {
 func TestAttackSoakResetsOnRecovery(t *testing.T) {
 	b := &Bot{logger: zerolog.Nop()}
 	clean := AttackReport{DeploySuccess: true, ReturnHomeSuccess: true, ParsedResults: true}
-	b.recordAttackSoak(clean, 0)
-	b.recordAttackSoak(clean, 0)
-	b.recordAttackSoak(clean, 1)
+	b.recordAttackSoak(clean, 0, 0)
+	b.recordAttackSoak(clean, 0, 0)
+	b.recordAttackSoak(clean, 1, 0)
 	if got := b.cleanAttackStreak.Load(); got != 0 {
 		t.Fatalf("streak=%d, want reset to 0", got)
+	}
+}
+
+
+func TestAttackSoakResetsOnBlueStacksRestart(t *testing.T) {
+	b := &Bot{logger: zerolog.Nop()}
+	clean := AttackReport{DeploySuccess: true, ReturnHomeSuccess: true, ParsedResults: true}
+	b.recordAttackSoak(clean, 0, 0)
+	b.recordAttackSoak(clean, 0, 0)
+	b.recordAttackSoak(clean, 0, 1)
+	if got := b.cleanAttackStreak.Load(); got != 0 {
+		t.Fatalf("streak=%d, want reset to 0 after BlueStacks restart", got)
+	}
+	if b.soakValidated.Load() {
+		t.Fatal("soak validated despite BlueStacks restart")
 	}
 }
