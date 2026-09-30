@@ -1528,26 +1528,6 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               <p className="mt-1 text-xs font-semibold text-zinc-500">
                 Sans calibration, ClashGO n’effectuera aucun clic de changement de compte : la rotation sera simplement différée.
               </p>
-              {multiAccountStatus?.enabled && (
-                <div className="mt-3 flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-wider">
-                  <span className="rounded-full bg-zinc-950/5 dark:bg-white/5 px-2.5 py-1 text-zinc-500">
-                    Tour : {multiAccountStatus.attacks_this_turn || 0} attaque(s)
-                  </span>
-                  <span className="rounded-full bg-zinc-950/5 dark:bg-white/5 px-2.5 py-1 text-zinc-500">
-                    Switches : {multiAccountStatus.total_switches || 0}
-                  </span>
-                  {multiAccountStatus.rotation_due && (
-                    <span className="rounded-full bg-sky-500/10 px-2.5 py-1 text-sky-500">
-                      Prochain : {multiAccountStatus.next_account_label || multiAccountStatus.next_account_id || 'compte suivant'}
-                    </span>
-                  )}
-                </div>
-              )}
-              {multiAccountStatus?.last_error && (
-                <div className="mt-2 text-[10px] font-bold text-amber-600 dark:text-amber-400">
-                  Dernier switch différé : {multiAccountStatus.last_error}
-                </div>
-              )}
               {multiAccountStatus && (
                 <div className="mt-3 flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-wider">
                   <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-zinc-500">
@@ -1559,14 +1539,47 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                   <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-zinc-500">
                     Switchs · {multiAccountStatus.total_switches || 0}
                   </span>
-                  {multiAccountStatus.rotation_due && (
+                  {multiAccountStatus.switch_in_flight && (
+                    <span className="rounded-full bg-violet-500/10 px-2.5 py-1 text-violet-500">
+                      Changement en cours
+                    </span>
+                  )}
+                  {multiAccountStatus.rotation_due && !multiAccountStatus.recovery_required && (
                     <span className="rounded-full bg-sky-500/10 px-2.5 py-1 text-sky-500">
                       Prochain · {multiAccountStatus.next_account_label || multiAccountStatus.next_account_id || '—'}
                     </span>
                   )}
                 </div>
               )}
-              {multiAccountStatus?.last_error && (
+
+              {multiAccountStatus?.recovery_required && (
+                <div className="mt-3 rounded-2xl border border-rose-500/20 bg-rose-500/10 p-3">
+                  <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+                    <span className="material-symbols-outlined text-base">emergency_home</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest">
+                      Vérification du compte requise
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[11px] font-semibold leading-relaxed text-zinc-600 dark:text-zinc-300">
+                    Un changement de compte a été interrompu avant confirmation. ClashGO a bloqué le farm pour éviter d’utiliser l’IA, les remparts ou l’historique du mauvais compte. Regarde quel village est réellement affiché dans BlueStacks puis confirme-le ci-dessous.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {multiAccount.accounts.filter(account => account.enabled).map(account => (
+                      <button
+                        key={account.id}
+                        type="button"
+                        disabled={multiAccountRecoveryBusy || !automationActive}
+                        onClick={() => void confirmMultiAccountRecovery(account)}
+                        className="rounded-xl border border-rose-500/20 bg-white/70 dark:bg-zinc-950/50 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-rose-600 dark:text-rose-400 disabled:opacity-40"
+                      >
+                        Confirmer · {account.label || account.player_tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {multiAccountStatus?.last_error && !multiAccountStatus.recovery_required && (
                 <div className="mt-3 rounded-xl bg-amber-500/10 px-3 py-2 text-[10px] font-bold text-amber-600 dark:text-amber-400">
                   Dernier switch différé : {multiAccountStatus.last_error}
                 </div>
