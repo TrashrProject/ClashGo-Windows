@@ -887,19 +887,19 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	// 8. Collect strategy unit names
 	strategyNames := GetStrategyUnitNames(s)
 
-	// 9. Execute each phase
+	// 9. Execute the prebuilt plan through one deployment scheduler. A whole
+	// card transaction (select -> settle -> deploy -> one bounded verify) is
+	// atomic from the scheduler's point of view, so no second action can steal
+	// the selected troop/spell between taps.
+	scheduler := NewDeployScheduler(e.logger)
 	for _, plan := range plans {
-		// Hard deploy-time stop: if the budget ran out mid-plan, abandon
-		// the remaining phases instead of tapping into the battle timer.
-		// The leftover slots are reported as undeployed so the attack
-		// report shows the partial failure instead of a phantom success.
 		if tapExec.DeployBudgetExhausted() {
 			remaining := len(slotMgr.GetUndeployedSlots())
 			e.logger.Warn().
 				Str("phase", plan.Phase.Name).
 				Dur("budget", DeployBudget).
 				Int("undeployed", remaining).
-				Msg("deploy budget exhausted before phases completed; stopping deploy (battle-timer guard)")
+				Msg("deploy budget exhausted before phases completed; stopping deploy")
 			return remaining, fmt.Errorf("deploy budget exhausted (%s); %d slots undeployed", DeployBudget, remaining)
 		}
 
@@ -908,162 +908,96 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 			e.OnPhaseStart(plan.Phase.Name, targetEdge)
 		}
 
-		// Deploy spells. Thread the live OCR counts + slot resolver so
-		// Amount:"All" spells tap exactly the count the army carries
-		// instead of a hardcoded 5 (the valk EQ army carries e.g. 4 EQs
-		// on one card; the edrag rush carries 11 rage on another).
 		spellDeployer := NewSpellDeployerWithCounts(tapExec, pCfg, formulaPtr, w, h, countMap, e.logger)
 		spellDeployer.SetCounter(troopCounter, slotMgr.GetBarY())
-		for _, up := range ResolveSpellTargets(plan) {
-			if up.Slot == nil {
+		for _, planned := range ResolveSpellTargets(plan) {
+			if planned.Slot == nil {
 				continue
 			}
-			e.logger.Debug().
-				Str("unit", up.Unit.Name).
-				Int("x", up.Slot.X).
-				Msg("deploying spell")
-
-			if e.OnUnitDeploy != nil {
-				e.OnUnitDeploy(up.Unit.Name, up.Slot.X, slotMgr.GetSlotY())
-			}
-
-			tapExec.TapSlot(up.Slot, 8)
-			// 150ms is the empirically-required CoC slot-selection
-			// animation floor (matches deploySingleHero's settle on
-			// heroes). The previous 35ms was too fast: the bot
-			// frequently "selected" the ED slot but CoC was still
-			// mid-animation from the prior phase, so taps fired on
-			// the OLD unit type instead of ED. Live data:
-			// auto_edrag_rush showed zero EDs on the field after
-			// the deploy despite the bot reporting "all units
-			// successfully deployed". Same fix applies to Spells +
-			// Siege (they share the 35ms gap and the same bug).
-			tapExec.HumanSleep(150, 30)
-
-			success := spellDeployer.DeploySpell(up.Unit, up.Slot, targetEdge, plan.Phase.Pattern)
-			if success {
-				slotMgr.MarkDeployed(strings.ToLower(up.Unit.Name))
-				// Post-deploy verify: live-OCR the card count and re-fire
-				// any spells that didn't drop (same reconcile philosophy as
-				// the troop path). Best-effort — a failed OCR just logs.
-				// 4 rounds: each round fires only the unconfirmed remainder,
-				// and the internal no-progress stop aborts early when OCR
-				// reads the same count twice — so more headroom only helps
-				// genuinely draining multi-charge cards, never the spent-
-				// card loop (live: 1-charge rage re-fired for the old 2-
-				// round budget while OCR read "1" every time).
-				if extra, confirmed := spellDeployer.VerifyAndReconcile(up.Unit, up.Slot, targetEdge, plan.Phase.Pattern, 1); extra > 0 {
-					e.logger.Debug().
-						Str("unit", up.Unit.Name).
-						Int("extra_fired", extra).
-						Bool("confirmed_empty", confirmed).
-						Msg("spell reconcile fired extra spells")
+			up := planned
+			scheduler.Run("spell:"+up.Unit.Name, func() {
+				if e.OnUnitDeploy != nil {
+					e.OnUnitDeploy(up.Unit.Name, up.Slot.X, slotMgr.GetSlotY())
 				}
-			}
+				tapExec.TapSlot(up.Slot, 8)
+				// Keep the empirically safe card-selection settle; removing this
+				// saves little but can deploy the previously-selected card.
+				tapExec.HumanSleep(150, 30)
+				if spellDeployer.DeploySpell(up.Unit, up.Slot, targetEdge, plan.Phase.Pattern) {
+					slotMgr.MarkDeployed(strings.ToLower(up.Unit.Name))
+					// Exactly one targeted confirmation. No multi-round OCR loop on
+					// the normal path.
+					if extra, confirmed := spellDeployer.VerifyAndReconcile(up.Unit, up.Slot, targetEdge, plan.Phase.Pattern, 1); extra > 0 {
+						e.logger.Debug().
+							Str("unit", up.Unit.Name).
+							Int("extra_fired", extra).
+							Bool("confirmed_empty", confirmed).
+							Msg("spell recovery top-up")
+					}
+				}
+			})
 		}
 
-		// Deploy troops
 		heroMgr := NewHeroManager(tapExec, slotMgr, pCfg, targetEdge, w, h, formulaPtr, troopCounter, e.logger)
-		// Bridge: when HeroManager's resolveHeroTarget fires for the
-		// Dragon Duke, route the event through Executor.OnDukePick so a
-		// single observer (live bot's NDJSON writer, debug_test's
-		// recorder) sees BOTH the legacy adjacent-corner random pick and
-		// the new "follow the chosen edge" behavior. chosen == target in
-		// the new path — Duke falls through to the chosen edge with a
-		// random point along it.
 		heroMgr.OnDukeDeployed = func(target string) {
 			if e.OnDukePick != nil {
 				e.OnDukePick(target, target)
 			}
 		}
-		for _, up := range ResolveTroopTargets(plan) {
-			if up.Slot == nil {
+
+		for _, planned := range ResolveTroopTargets(plan) {
+			if planned.Slot == nil {
 				continue
 			}
-			e.logger.Debug().
-				Str("unit", up.Unit.Name).
-				Int("x", up.Slot.X).
-				Msg("deploying troop")
-
-			if e.OnUnitDeploy != nil {
-				e.OnUnitDeploy(up.Unit.Name, up.Slot.X, slotMgr.GetSlotY())
-			}
-
-			tapExec.TapSlot(up.Slot, 8)
-			// 150ms is the empirically-required CoC slot-selection
-			// animation floor (matches deploySingleHero's settle on
-			// heroes). The previous 35ms was too fast: the bot
-			// frequently "selected" the ED slot but CoC was still
-			// mid-animation from the prior phase, so taps fired on
-			// the OLD unit type instead of ED. Live data:
-			// auto_edrag_rush showed zero EDs on the field after
-			// the deploy despite the bot reporting "all units
-			// successfully deployed". Same fix applies to Spells +
-			// Siege (they share the 35ms gap and the same bug).
-			tapExec.HumanSleep(150, 30)
-
-			detectedCount := GetCountForSlot(troopCounts, up.Slot.X)
-			heroMgr.DeployTroops(up.Unit, up.Slot, plan.Phase.Pattern, plan.Phase.Offset, plan.Phase.Pattern, deployScreen, detectedCount)
+			up := planned
+			scheduler.Run("troop:"+up.Unit.Name, func() {
+				if e.OnUnitDeploy != nil {
+					e.OnUnitDeploy(up.Unit.Name, up.Slot.X, slotMgr.GetSlotY())
+				}
+				tapExec.TapSlot(up.Slot, 8)
+				tapExec.HumanSleep(150, 30)
+				detectedCount := GetCountForSlot(troopCounts, up.Slot.X)
+				heroMgr.DeployTroops(
+					up.Unit,
+					up.Slot,
+					plan.Phase.Pattern,
+					plan.Phase.Offset,
+					plan.Phase.Pattern,
+					deployScreen,
+					detectedCount,
+				)
+			})
 		}
 
-		// Deploy siege
-		for _, up := range ResolveSiegeTargets(plan) {
-			if up.Slot == nil {
+		for _, planned := range ResolveSiegeTargets(plan) {
+			if planned.Slot == nil {
 				continue
 			}
-			e.logger.Debug().
-				Str("unit", up.Unit.Name).
-				Int("x", up.Slot.X).
-				Msg("deploying siege")
-
-			if e.OnUnitDeploy != nil {
-				e.OnUnitDeploy(up.Unit.Name, up.Slot.X, slotMgr.GetSlotY())
-			}
-
-			tapExec.TapSlot(up.Slot, 8)
-			// 150ms is the empirically-required CoC slot-selection
-			// animation floor (matches deploySingleHero's settle on
-			// heroes). The previous 35ms was too fast: the bot
-			// frequently "selected" the ED slot but CoC was still
-			// mid-animation from the prior phase, so taps fired on
-			// the OLD unit type instead of ED. Live data:
-			// auto_edrag_rush showed zero EDs on the field after
-			// the deploy despite the bot reporting "all units
-			// successfully deployed". Same fix applies to Spells +
-			// Siege (they share the 35ms gap and the same bug).
-			tapExec.HumanSleep(150, 30)
-
-			heroMgr.DeploySiege(up.Unit, up.Slot)
+			up := planned
+			scheduler.Run("siege:"+up.Unit.Name, func() {
+				if e.OnUnitDeploy != nil {
+					e.OnUnitDeploy(up.Unit.Name, up.Slot.X, slotMgr.GetSlotY())
+				}
+				tapExec.TapSlot(up.Slot, 8)
+				tapExec.HumanSleep(150, 30)
+				heroMgr.DeploySiege(up.Unit, up.Slot)
+			})
 		}
 
-		// Deploy heroes
 		if strings.Contains(plan.Phase.Name, "Heroes") {
 			heroUnits := make([]strategy.Unit, 0)
 			for _, up := range ResolveHeroTargets(plan) {
 				heroUnits = append(heroUnits, up.Unit)
 			}
 			if len(heroUnits) > 0 {
-				heroMgr.DeployHeroes(heroUnits, deployScreen)
+				scheduler.Run("heroes:"+plan.Phase.Name, func() {
+					heroMgr.DeployHeroes(heroUnits, deployScreen)
+				})
 			}
 		}
 
-		// Phase delay defaults tightened: Heroes/Siege used to sit at
-		// 500ms post-phase, which compounded with each hero's 800ms settle
-		// inside hero_manager.go to produce a >1.5s wall-clock gap between
-		// heroes (visibly bot-paced).
-		//
-		// USER YAML WINS. The previous override unconditionally clamped
-		// to 100ms regardless of the strategy's `delay_after_ms`, which
-		// made the field useless for Heroes/Siege. New rule: only fall
-		// back when the YAML value is unset (0); any explicit YAML value
-		// (including small ones like 50ms) is preserved.
-		//
-		// Overall cap is maxPhaseDelay. Anything above gets WARN-logged
-		// so authors can spot unintentional bloat. The cap is high
-		// enough for spells (which legitimately need a long settle for
-		// the multi-tap flow to register).
 		const heroSiegeDefault = 50 * time.Millisecond
-		const interPhaseMin = 50 * time.Millisecond // Safety floor so YAML values like delay_after_ms: 10 do not bypass the inter-phase settle window — CoC needs ~50ms minimum between phases to register the new troop bar state.
+		const interPhaseMin = 50 * time.Millisecond
 		const maxPhaseDelay = 200 * time.Millisecond
 		pDelay := time.Duration(plan.Phase.DelayAfterMS) * time.Millisecond
 		isHeroOrSiege := strings.Contains(plan.Phase.Name, "Heroes") || strings.Contains(plan.Phase.Name, "Siege")
@@ -1078,12 +1012,19 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 				Str("phase", plan.Phase.Name).
 				Dur("requested", pDelay).
 				Dur("clamped_to", maxPhaseDelay).
-				Msg("phase delay_after_ms exceeds cap; clamping to keep attack human-paced")
+				Msg("phase delay exceeds cap; clamping")
 			pDelay = maxPhaseDelay
 		}
 		if pDelay > 0 {
 			time.Sleep(pDelay)
 		}
+	}
+
+	if ops, scheduledFor := scheduler.Stats(); ops > 0 {
+		e.logger.Info().
+			Uint64("scheduled_actions", ops).
+			Dur("scheduler_total", scheduledFor).
+			Msg("deployment scheduler completed prepared actions")
 	}
 
 	// 10. Recovery-only sweep. On the normal path every planned card has
