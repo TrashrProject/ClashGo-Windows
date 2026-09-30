@@ -40,6 +40,10 @@ type AutomationConfig struct {
 
 	// AutoProfileSync keeps account data fresh without manual Sync clicks.
 	AutoProfileSync bool `json:"auto_profile_sync"`
+
+	// MaxRunMinutes stops an unattended session cleanly after the requested
+	// amount of wall-clock time. 0 keeps the historical unlimited behavior.
+	MaxRunMinutes int `json:"max_run_minutes"`
 }
 
 type AccountConfig struct {
@@ -198,6 +202,10 @@ type SearchConfig struct {
 	MinLootGold          int  `json:"min_loot_gold"`
 	MinLootElixir        int  `json:"min_loot_elixir"`
 	MinLootDarkElixir    int  `json:"min_loot_de"`
+
+	// SaveAcceptedBaseScreenshots stores the exact opponent frame that passed
+	// the configured loot thresholds, before any troop is deployed.
+	SaveAcceptedBaseScreenshots bool `json:"save_accepted_base_screenshots"`
 }
 
 type DebugConfig struct {
@@ -290,16 +298,17 @@ func DefaultConfig() *BotConfig {
 			},
 		},
 		Search: SearchConfig{
-			Enabled:              true,
-			MinTrophies:          0,
-			MaxTrophies:          3000,
-			MinTownHall:          7,
-			MaxTownHall:          13,
-			SkipMaxTH:            false,
-			AttackIfDarkElixirGT: 0,
-			MinLootGold:          750000,
-			MinLootElixir:        750000,
-			MinLootDarkElixir:    2000,
+			Enabled:                     true,
+			MinTrophies:                 0,
+			MaxTrophies:                 3000,
+			MinTownHall:                 7,
+			MaxTownHall:                 13,
+			SkipMaxTH:                   false,
+			AttackIfDarkElixirGT:        0,
+			MinLootGold:                 750000,
+			MinLootElixir:               750000,
+			MinLootDarkElixir:           2000,
+			SaveAcceptedBaseScreenshots: true,
 		},
 		Upgrade: UpgradeConfig{
 			UpgradeWalls: false,
@@ -323,6 +332,7 @@ func DefaultConfig() *BotConfig {
 			AutoArmyGuard:         true,
 			AutoResourceTracking:  true,
 			AutoProfileSync:       true,
+			MaxRunMinutes:         0,
 		},
 	}
 }
