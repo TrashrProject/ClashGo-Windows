@@ -7,7 +7,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func TestContourAwareDeployLineFollowsBoundary(t *testing.T) {
+func TestContourAwareDeployLineFollowsGeneratedBoundary(t *testing.T) {
 	zone := RedZone{
 		Valid: true,
 		BBox:  image.Rect(200, 150, 660, 560),
@@ -15,12 +15,12 @@ func TestContourAwareDeployLineFollowsBoundary(t *testing.T) {
 	// Irregular left boundary: x moves inward as y increases.
 	for y := 170; y <= 540; y += 10 {
 		x := 220 + (y-170)/10
-		zone.Boundary = append(zone.Boundary, image.Pt(x, y))
-		zone.Boundary = append(zone.Boundary, image.Pt(640, y))
+		zone.LeftBoundary = append(zone.LeftBoundary, image.Pt(x, y))
+		zone.RightBoundary = append(zone.RightBoundary, image.Pt(640, y))
 	}
 	for x := 220; x <= 640; x += 10 {
-		zone.Boundary = append(zone.Boundary, image.Pt(x, 160))
-		zone.Boundary = append(zone.Boundary, image.Pt(x, 550))
+		zone.TopBoundary = append(zone.TopBoundary, image.Pt(x, 160))
+		zone.BottomBoundary = append(zone.BottomBoundary, image.Pt(x, 550))
 	}
 
 	calc := NewDeployLineCalculator(zerolog.Nop())
