@@ -381,8 +381,8 @@ func (e *ContextualEngine) RecommendTarget(
 		return rec
 	}
 
-	var efficiencySum, rateSum float64
-	var efficiencyN, rateN int
+	var efficiencySum, rateSum, stolenSum float64
+	var efficiencyN, rateN, stolenN int
 	var attackOnlySum, nextStepSum int64
 	var attackOnlyN, nextStepN int
 	for _, o := range samples {
@@ -391,6 +391,10 @@ func (e *ContextualEngine) RecommendTarget(
 		if available > 0 {
 			efficiencySum += clamp(stolen/available, 0, 1.15)
 			efficiencyN++
+		}
+		if stolen > 0 {
+			stolenSum += stolen
+			stolenN++
 		}
 		if rate := FarmResourcesPerHour(o); rate > 0 {
 			rateSum += rate
@@ -417,7 +421,7 @@ func (e *ContextualEngine) RecommendTarget(
 		}
 	}
 
-	if efficiencyN == 0 || attackOnlyN == 0 || rateN == 0 {
+	if efficiencyN == 0 || attackOnlyN == 0 || rateN == 0 || stolenN == 0 {
 		rec.Samples = len(samples)
 		rec.Reason = "farm history lacks timing/loot evidence"
 		return rec
@@ -448,16 +452,20 @@ func (e *ContextualEngine) RecommendTarget(
 	}
 	predictedRate := predictedLoot * 3600000 / float64(acceptCycleMS)
 
-	// Continuing search costs another observed matchmaking step. Its value is
-	// modeled by the rate this bot has actually sustained on this strategy.
-	// As elapsed search grows, accepting a merely-good target becomes rational.
-	futureCycleMS := acceptCycleMS + nextMS
-	futureExpectedLoot := baselineRate * float64(futureCycleMS) / 3600000
-	// Only the incremental post-search attack can earn that future loot; using
-	// a mild 0.92 discount avoids endless skipping for a theoretical perfect
-	// next base that may never appear.
-	continueValue := futureExpectedLoot * 0.92
-	acceptValue := predictedLoot
+	// Compare against the bot's own average realized loot if it spends one
+	// more matchmaking step. The elapsed search is already sunk time and is
+	// present in BOTH options. Therefore the continue-search rate naturally
+	// falls as the current search gets longer, making V3 progressively less
+	// picky instead of trapping itself in endless skipping.
+	avgRealizedLoot := stolenSum / float64(stolenN)
+	continueCycleMS := searchElapsed.Milliseconds() + nextMS + attackMS
+	if continueCycleMS < 1000 {
+		continueCycleMS = 1000
+	}
+	continueRate := avgRealizedLoot * 3600000 / float64(continueCycleMS)
+	// Small optimism discount: the next opponent is unknown, so it should not
+	// beat a concrete current target unless history gives it a real advantage.
+	continueRate *= 0.92
 
 	rec.Apply = true
 	rec.Samples = len(samples)
@@ -478,7 +486,7 @@ func (e *ContextualEngine) RecommendTarget(
 		if rules.MinDarkElixir > 0 && target.DarkElixir >= rules.MinDarkElixir {
 			nearConfigured = true
 		}
-		if nearConfigured && (acceptValue >= continueValue || predictedRate >= baselineRate*0.96 || skips >= 12) {
+		if nearConfigured && (predictedRate >= continueRate || predictedRate >= baselineRate*0.96 || skips >= 12) {
 			rec.Accept = true
 			rec.Reason = "V3 accepts near-threshold target: expected loot/time beats another search"
 			return rec
@@ -498,7 +506,7 @@ func (e *ContextualEngine) RecommendTarget(
 	// is far below this strategy's normal throughput. Do not reject once search
 	// is already long, because repeated Next cycles cost time and ADB pressure.
 	if skips < 10 && searchElapsed < 45*time.Second &&
-		predictedRate < baselineRate*0.72 && acceptValue < continueValue*0.80 {
+		predictedRate < baselineRate*0.72 && predictedRate < continueRate*0.80 {
 		rec.Accept = false
 		rec.Reason = "V3 rejects low-throughput target: another search is expected to farm more per hour"
 		return rec
