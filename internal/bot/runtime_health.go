@@ -272,6 +272,63 @@ func (b *Bot) runWallUpgradeWithCircuit(gc *game.GameContext) bool {
 
 // applyRuntimeHealthPolicy converts the passive health score into bounded,
 // reversible protection. It never interrupts an active attack.
+type RuntimeDiagnosis struct {
+	Cause      string `json:"cause"`
+	Suggestion string `json:"suggestion"`
+}
+
+func (b *Bot) DiagnoseRuntime(h RuntimeHealthSnapshot) RuntimeDiagnosis {
+	if b == nil {
+		return RuntimeDiagnosis{Cause: "runtime unavailable", Suggestion: "restart ClashGO"}
+	}
+	if b.uiSafetyHold.Load() {
+		return RuntimeDiagnosis{
+			Cause: "interface Clash of Clans non reconnue de façon répétée",
+			Suggestion: "vérifier la version du jeu et la calibration puis relancer l’automatisation",
+		}
+	}
+	if h.ADB <= 40 {
+		return RuntimeDiagnosis{Cause: "connexion ADB instable", Suggestion: "laisser ClashGO récupérer BlueStacks ou redémarrer l’instance"}
+	}
+	if h.Capture <= 40 {
+		return RuntimeDiagnosis{Cause: "captures BlueStacks trop lentes ou bloquées", Suggestion: "réduire la charge BlueStacks et vérifier l’instance ADB"}
+	}
+	if h.Vision <= 50 {
+		return RuntimeDiagnosis{Cause: "repères visuels peu fiables", Suggestion: "recalibrer l’interface ou mettre à jour les templates"}
+	}
+	if h.UI <= 50 {
+		return RuntimeDiagnosis{Cause: "interface bloquée ou état UI inconnu", Suggestion: "laisser le superviseur récupérer le jeu; si cela persiste, recalibrer"}
+	}
+	if h.Recovery <= 50 {
+		return RuntimeDiagnosis{Cause: "récupérations automatiques répétées", Suggestion: "contrôler BlueStacks, ADB et la stabilité de la machine"}
+	}
+	if b.collectorCircuitOpen() || b.wallCircuitOpen() {
+		return RuntimeDiagnosis{Cause: "une fonction secondaire a été isolée par son circuit breaker", Suggestion: "le farm continue; vérifier les logs avant de réactiver la fonction"}
+	}
+	return RuntimeDiagnosis{Cause: "aucune anomalie majeure détectée", Suggestion: "aucune action requise"}
+}
+
+func (b *Bot) recordUIDriftIncident(now time.Time) bool {
+	if b == nil {
+		return false
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	b.uiDriftMu.Lock()
+	defer b.uiDriftMu.Unlock()
+	if b.uiDriftWindowStart.IsZero() || now.Sub(b.uiDriftWindowStart) > 10*time.Minute {
+		b.uiDriftWindowStart = now
+		b.uiDriftIncidents = 0
+	}
+	b.uiDriftIncidents++
+	if b.uiDriftIncidents < 3 {
+		return false
+	}
+	b.uiSafetyHold.Store(true)
+	return true
+}
+
 func (b *Bot) applyRuntimeHealthPolicy(now time.Time) {
 	if b == nil || b.ctx.Err() != nil {
 		return
