@@ -807,6 +807,9 @@ func (b *Bot) checkStuck(gc *game.GameContext) {
 }
 
 func (b *Bot) restartGame() {
+	if b.seqRunning.Load() {
+		b.resetAttackSoak("runtime_restart")
+	}
 	if !b.restartInFlight.CompareAndSwap(false, true) {
 		b.logger.Debug().Msg("restart already in progress; suppressing duplicate request")
 		return
@@ -882,6 +885,7 @@ func (b *Bot) safePacingForced() bool {
 }
 
 func (b *Bot) recoverEmulator() {
+	b.resetAttackSoak("device_recovery")
 	if !b.recoveryInFlight.CompareAndSwap(false, true) {
 		b.logger.Debug().Msg("device recovery already in progress; suppressing duplicate request")
 		return
@@ -1774,6 +1778,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	}
 	b.setRuntimePhase(PhaseAttackNavigation)
 	defer b.setRuntimePhase(PhaseIdle)
+	sequenceRecoveryStart := b.recoveryAttempts.Load()
 	b.seqStartedAtUnix.Store(time.Now().Unix())
 	defer b.seqStartedAtUnix.Store(0)
 	defer b.seqRunning.Store(false)
@@ -2465,6 +2470,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	rep.ReturnHomeDurationMS = returnHomeDur.Milliseconds()
 	rep.ReturnHomeSuccess = returnedHome
 	rep.FullRoutineDurationMS = time.Since(sequenceStartedAt).Milliseconds()
+	b.recordAttackSoak(rep, b.recoveryAttempts.Load()-sequenceRecoveryStart)
 
 	b.historyMu.Lock()
 	if len(b.historyCache) > 0 && b.historyCache[0].Timestamp == rep.Timestamp {
@@ -3710,6 +3716,8 @@ func (b *Bot) Stats() BotStats {
 		RecoveryAttempts:   b.recoveryAttempts.Load(),
 		RecoverySuccesses:  b.recoverySuccesses.Load(),
 		BlueStacksRestarts: b.blueStacksRestarts.Load(),
+		CleanAttackStreak:  b.cleanAttackStreak.Load(),
+		AttackSoakValidated: b.soakValidated.Load(),
 		GoldPerHour:        goldPerHour,
 		ElixirPerHour:      elixirPerHour,
 		DEPerHour:          dePerHour,
@@ -3781,9 +3789,11 @@ type BotStats struct {
 
 	CPUCores float64 `json:"cpu_cores"`
 
-	RecoveryAttempts   int32 `json:"recovery_attempts"`
-	RecoverySuccesses  int32 `json:"recovery_successes"`
-	BlueStacksRestarts int32 `json:"bluestacks_restarts"`
+	RecoveryAttempts    int32 `json:"recovery_attempts"`
+	RecoverySuccesses   int32 `json:"recovery_successes"`
+	BlueStacksRestarts  int32 `json:"bluestacks_restarts"`
+	CleanAttackStreak   int32 `json:"clean_attack_streak"`
+	AttackSoakValidated bool  `json:"attack_soak_validated"`
 
 	GoldPerHour      float64 `json:"gold_per_hour"`
 	ElixirPerHour    float64 `json:"elixir_per_hour"`
