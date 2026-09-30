@@ -232,12 +232,10 @@ func (b *Bot) ResolveMultiAccountRecovery(accountID string) (config.ManagedAccou
 	}
 
 	b.wallUpgradePending.Store(b.cfg.Upgrade.UpgradeWalls)
-	b.paused.Store(false)
-	b.recordActivity()
 	b.logger.Info().
 		Str("account_id", account.ID).
 		Str("account_label", account.Label).
 		Str("player_tag", account.PlayerTag).
-		Msg("multi-account recovery resolved; account intelligence rebound")
+		Msg("multi-account recovery resolved; account intelligence rebound; automation remains paused")
 	return account, nil
 }
