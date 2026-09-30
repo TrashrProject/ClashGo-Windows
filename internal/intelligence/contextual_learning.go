@@ -61,6 +61,8 @@ type ContextualOutcome struct {
 	DarkElixirStolen     int           `json:"dark_elixir_stolen"`
 	CycleDurationMS      int64         `json:"cycle_duration_ms"`
 	FullRoutineDurationMS int64        `json:"full_routine_duration_ms"`
+	SearchDurationMS      int64        `json:"search_duration_ms"`
+	SearchSkips           int          `json:"search_skips"`
 	DeploySuccess        bool          `json:"deploy_success"`
 	ReturnHomeSuccess    bool          `json:"return_home_success"`
 	SafeDeployment       bool          `json:"safe_deployment"`
@@ -207,6 +209,18 @@ type EdgeRecommendation struct {
 	ProfileScope    string  `json:"profile_scope"`
 }
 
+type FarmTargetRecommendation struct {
+	Apply             bool    `json:"apply"`
+	Accept            bool    `json:"accept"`
+	PredictedFarmRate float64 `json:"predicted_farm_rate"`
+	BaselineFarmRate  float64 `json:"baseline_farm_rate"`
+	CaptureEfficiency float64 `json:"capture_efficiency"`
+	ExpectedAttackMS  int64   `json:"expected_attack_ms"`
+	ExpectedNextMS    int64   `json:"expected_next_ms"`
+	Samples           int     `json:"samples"`
+	Reason            string  `json:"reason"`
+}
+
 func NewContextualEngine(path string) (*ContextualEngine, error) {
 	e := &ContextualEngine{
 		path: path,
@@ -317,6 +331,182 @@ func (e *ContextualEngine) updateProfileLocked(key, edge string, reward float64,
 		stat.CleanStreak++
 	}
 	stat.LastSeen = o.At
+}
+
+func (e *ContextualEngine) RecommendTarget(
+	strategy string,
+	townHall int,
+	target Target,
+	rules TargetRules,
+	legacy TargetDecision,
+	searchElapsed time.Duration,
+	skips int,
+	allowAggressiveReject bool,
+) FarmTargetRecommendation {
+	rec := FarmTargetRecommendation{Accept: legacy.Accept, Reason: "legacy target rules"}
+	if e == nil || !rules.SearchEnabled {
+		return rec
+	}
+
+	// DarkOverride is an explicit user rule and remains a hard accept.
+	if rules.DarkOverride > 0 && target.DarkElixir >= rules.DarkOverride {
+		rec.Reason = "explicit dark elixir override"
+		return rec
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	strategy = strings.ToLower(strings.TrimSpace(strategy))
+	var samples []ContextualOutcome
+	for i := len(e.state.Experiences) - 1; i >= 0 && len(samples) < 80; i-- {
+		o := e.state.Experiences[i]
+		if normalizeLearningEdge(o.Edge) == "" || !o.DeploySuccess || !o.ReturnHomeSuccess {
+			continue
+		}
+		if strategy != "" && strings.ToLower(strings.TrimSpace(o.Context.Strategy)) != strategy {
+			continue
+		}
+		if townHall > 0 && o.Context.TownHall > 0 && o.Context.TownHall != townHall {
+			continue
+		}
+		if o.Context.TargetGold <= 0 && o.Context.TargetElixir <= 0 && o.Context.TargetDE <= 0 {
+			continue
+		}
+		samples = append(samples, o)
+	}
+	if len(samples) < 6 {
+		rec.Samples = len(samples)
+		rec.Reason = "insufficient farm history; using configured thresholds"
+		return rec
+	}
+
+	var efficiencySum, rateSum float64
+	var efficiencyN, rateN int
+	var attackOnlySum, nextStepSum int64
+	var attackOnlyN, nextStepN int
+	for _, o := range samples {
+		available := weightedFarmResources(o.Context.TargetGold, o.Context.TargetElixir, o.Context.TargetDE)
+		stolen := weightedFarmResources(o.GoldStolen, o.ElixirStolen, o.DarkElixirStolen)
+		if available > 0 {
+			efficiencySum += clamp(stolen/available, 0, 1.15)
+			efficiencyN++
+		}
+		if rate := FarmResourcesPerHour(o); rate > 0 {
+			rateSum += rate
+			rateN++
+		}
+		routine := o.FullRoutineDurationMS
+		if routine <= 0 {
+			routine = o.CycleDurationMS
+		}
+		if routine > 0 {
+			attackOnly := routine - o.SearchDurationMS
+			if attackOnly > 0 {
+				attackOnlySum += attackOnly
+				attackOnlyN++
+			}
+		}
+		if o.SearchDurationMS > 0 {
+			steps := o.SearchSkips + 1
+			if steps < 1 {
+				steps = 1
+			}
+			nextStepSum += o.SearchDurationMS / int64(steps)
+			nextStepN++
+		}
+	}
+
+	if efficiencyN == 0 || attackOnlyN == 0 || rateN == 0 {
+		rec.Samples = len(samples)
+		rec.Reason = "farm history lacks timing/loot evidence"
+		return rec
+	}
+
+	efficiency := efficiencySum / float64(efficiencyN)
+	// Keep prediction conservative. We want actual farming evidence to earn
+	// aggressive decisions rather than assuming perfect loot extraction.
+	efficiency = clamp(efficiency, 0.20, 1.0)
+	baselineRate := rateSum / float64(rateN)
+	attackMS := attackOnlySum / int64(attackOnlyN)
+	nextMS := int64(2500)
+	if nextStepN > 0 {
+		nextMS = nextStepSum / int64(nextStepN)
+	}
+	if nextMS < 1200 {
+		nextMS = 1200
+	}
+	if nextMS > 15000 {
+		nextMS = 15000
+	}
+
+	availableNow := weightedFarmResources(target.Gold, target.Elixir, target.DarkElixir)
+	predictedLoot := availableNow * efficiency
+	acceptCycleMS := searchElapsed.Milliseconds() + attackMS
+	if acceptCycleMS < 1000 {
+		acceptCycleMS = 1000
+	}
+	predictedRate := predictedLoot * 3600000 / float64(acceptCycleMS)
+
+	// Continuing search costs another observed matchmaking step. Its value is
+	// modeled by the rate this bot has actually sustained on this strategy.
+	// As elapsed search grows, accepting a merely-good target becomes rational.
+	futureCycleMS := acceptCycleMS + nextMS
+	futureExpectedLoot := baselineRate * float64(futureCycleMS) / 3600000
+	// Only the incremental post-search attack can earn that future loot; using
+	// a mild 0.92 discount avoids endless skipping for a theoretical perfect
+	// next base that may never appear.
+	continueValue := futureExpectedLoot * 0.92
+	acceptValue := predictedLoot
+
+	rec.Apply = true
+	rec.Samples = len(samples)
+	rec.PredictedFarmRate = predictedRate
+	rec.BaselineFarmRate = baselineRate
+	rec.CaptureEfficiency = efficiency
+	rec.ExpectedAttackMS = attackMS
+	rec.ExpectedNextMS = nextMS
+	rec.Accept = legacy.Accept
+
+	if !legacy.Accept {
+		// Never tunnel below absurd loot values. V3 may relax user thresholds,
+		// but only for a target that is at least 70% of the configured combined
+		// gold/elixir floor or is meaningfully rich in DE.
+		configuredGE := maxIntLearning(rules.MinGold, 0) + maxIntLearning(rules.MinElixir, 0)
+		currentGE := maxIntLearning(target.Gold, 0) + maxIntLearning(target.Elixir, 0)
+		nearConfigured := configuredGE <= 0 || float64(currentGE) >= float64(configuredGE)*0.70
+		if rules.MinDarkElixir > 0 && target.DarkElixir >= rules.MinDarkElixir {
+			nearConfigured = true
+		}
+		if nearConfigured && (acceptValue >= continueValue || predictedRate >= baselineRate*0.96 || skips >= 12) {
+			rec.Accept = true
+			rec.Reason = "V3 accepts near-threshold target: expected loot/time beats another search"
+			return rec
+		}
+		rec.Accept = false
+		rec.Reason = "V3 keeps searching: below thresholds and expected farm rate is weak"
+		return rec
+	}
+
+	if !allowAggressiveReject {
+		rec.Accept = true
+		rec.Reason = "safety pacing active; keeping configured acceptance to reduce search pressure"
+		return rec
+	}
+
+	// A configured-acceptable target can still be wasteful if history shows it
+	// is far below this strategy's normal throughput. Do not reject once search
+	// is already long, because repeated Next cycles cost time and ADB pressure.
+	if skips < 10 && searchElapsed < 45*time.Second &&
+		predictedRate < baselineRate*0.72 && acceptValue < continueValue*0.80 {
+		rec.Accept = false
+		rec.Reason = "V3 rejects low-throughput target: another search is expected to farm more per hour"
+		return rec
+	}
+
+	rec.Accept = true
+	rec.Reason = "V3 accepts target: predicted farm throughput is competitive"
+	return rec
 }
 
 func (e *ContextualEngine) RecommendEdge(ctx AttackContext, current string, candidates []string, allowExplore bool) EdgeRecommendation {
