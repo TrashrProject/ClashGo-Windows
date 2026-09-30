@@ -81,6 +81,8 @@ type Bot struct {
 	recoveryAttempts  atomic.Int32
 	recoverySuccesses atomic.Int32
 	blueStacksRestarts atomic.Int32
+	cleanAttackStreak   atomic.Int32
+	soakValidated       atomic.Bool
 	returnHomeCount     atomic.Int64
 	returnHomeMicros    atomic.Int64
 	lastReturnHomeUS    atomic.Int64
