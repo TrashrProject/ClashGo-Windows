@@ -3994,14 +3994,14 @@ type MultiAccountRuntimeStatus struct {
 	SwitchInFlight     bool      `json:"switch_in_flight"`
 }
 
-func (b *Bot) MultiAccountStatus() MultiAccountRuntimeStatus {
-	if b == nil || b.multiAccount == nil {
+func multiAccountRuntimeStatusFromManager(mgr *multiaccount.Manager, switchInFlight bool) MultiAccountRuntimeStatus {
+	if mgr == nil {
 		return MultiAccountRuntimeStatus{}
 	}
-	st := b.multiAccount.State()
-	recoveryRequired, recoveryTarget := b.multiAccount.RecoveryStatus()
+	st := mgr.State()
+	recoveryRequired, recoveryTarget := mgr.RecoveryStatus()
 	out := MultiAccountRuntimeStatus{
-		Enabled:          b.multiAccount.Enabled(),
+		Enabled:          mgr.Enabled(),
 		ActiveAccountID:  st.ActiveAccountID,
 		AttacksThisTurn:  st.AttacksThisTurn,
 		TotalSwitches:    st.TotalSwitches,
@@ -4009,12 +4009,12 @@ func (b *Bot) MultiAccountStatus() MultiAccountRuntimeStatus {
 		LastError:        st.LastError,
 		RecoveryRequired: recoveryRequired,
 		RecoveryTargetID: recoveryTarget,
-		SwitchInFlight:   b.multiAccountSwitchInFlight.Load(),
+		SwitchInFlight:   switchInFlight,
 	}
-	if active, ok := b.multiAccount.Active(); ok {
+	if active, ok := mgr.Active(); ok {
 		out.ActiveAccountLabel = active.Label
 	}
-	if next, due := b.multiAccount.NextDue(); due {
+	if next, due := mgr.NextDue(); due {
 		out.RotationDue = true
 		out.NextAccountID = next.ID
 		out.NextAccountLabel = next.Label
@@ -4022,57 +4022,30 @@ func (b *Bot) MultiAccountStatus() MultiAccountRuntimeStatus {
 	return out
 }
 
-func (b *Bot) ConfirmMultiAccountRecovery(accountID string) error {
-	if b == nil || b.multiAccount == nil {
-		return fmt.Errorf("multi-account scheduler unavailable")
+func LoadMultiAccountRuntimeStatus(cfg *config.BotConfig) MultiAccountRuntimeStatus {
+	if cfg == nil {
+		return MultiAccountRuntimeStatus{}
 	}
-	if !b.paused.Load() {
-		return fmt.Errorf("automation must be paused before resolving account recovery")
-	}
-	if b.seqRunning.Load() || b.multiAccountSwitchInFlight.Load() {
-		return fmt.Errorf("wait for the current automation action to finish")
-	}
-	if b.recoveryInFlight.Load() || b.restartInFlight.Load() {
-		return fmt.Errorf("runtime recovery is active")
-	}
-	recoveryRequired, _ := b.multiAccount.RecoveryStatus()
-	if !recoveryRequired {
-		return fmt.Errorf("multi-account recovery is not required")
-	}
-	account, ok := b.multiAccount.Account(accountID)
-	if !ok {
-		return fmt.Errorf("account %q is not an enabled multi-account profile", accountID)
-	}
-
-	state, err := b.accountState(2 * time.Second)
+	mgr, err := multiaccount.NewManager(
+		multiAccountStatePath(cfg),
+		cfg.Account.MultiAccount,
+		cfg.Account.PlayerTag,
+	)
 	if err != nil {
-		return fmt.Errorf("verify recovery village: %w", err)
+		return MultiAccountRuntimeStatus{
+			Enabled:   false,
+			LastError: err.Error(),
+		}
 	}
-	if state != game.StateMainVillage {
-		return fmt.Errorf("confirm the account only from MainVillage, got %s", state.String())
-	}
-
-	prepared, err := b.prepareManagedAccount(account)
-	if err != nil {
-		return fmt.Errorf("prepare confirmed account: %w", err)
-	}
-	if err := b.applyPreparedManagedAccount(prepared, account); err != nil {
-		return fmt.Errorf("apply confirmed account: %w", err)
-	}
-	if err := b.multiAccount.ResolveRecovery(account.ID); err != nil {
-		return fmt.Errorf("persist recovery resolution: %w", err)
-	}
-	b.wallUpgradePending.Store(b.cfg.Upgrade.UpgradeWalls)
-	b.paused.Store(false)
-	b.recordActivity()
-	b.logger.Info().
-		Str("account_id", account.ID).
-		Str("account_label", account.Label).
-		Str("player_tag", account.PlayerTag).
-		Msg("multi-account recovery resolved manually; automation resumed")
-	return nil
+	return multiAccountRuntimeStatusFromManager(mgr, false)
 }
 
+func (b *Bot) MultiAccountStatus() MultiAccountRuntimeStatus {
+	if b == nil || b.multiAccount == nil {
+		return MultiAccountRuntimeStatus{}
+	}
+	return multiAccountRuntimeStatusFromManager(b.multiAccount, b.multiAccountSwitchInFlight.Load())
+}
 
 func (b *Bot) Health() game.SystemHealth {
 	return game.SystemHealth{
