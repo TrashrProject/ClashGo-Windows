@@ -147,6 +147,11 @@ type WallUpgradeHooks struct {
 	// aborts the current loop so a false-success UI path cannot repeat forever.
 	VerifyUpgradeProgress func() bool
 
+	// PreferredResource returns "gold" or "elixir" from the latest verified
+	// village snapshot. Rect-driven flows try the fuller storage first, then
+	// automatically fall back to the other currency when unaffordable.
+	PreferredResource func() string
+
 	// OnStep is the optional phase-boundary instrumentation hook.
 	OnStep func(step string, data map[string]any)
 }
@@ -388,6 +393,12 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) (completed bool) {
 			DeepSearch:            attempts > 1,
 			PreferredWallAttempt: persistedWallAttempt,
 			VerifyUpgradeProgress: verifyProgress,
+			PreferredResource: func() string {
+				if resourceBaseline.GoldValid && resourceBaseline.ElixirValid && resourceBaseline.Elixir > resourceBaseline.Gold {
+					return "elixir"
+				}
+				return "gold"
+			},
 			OnStep:                observe,
 		})
 
@@ -864,6 +875,10 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 				{rect: goldBtn, name: "gold"},
 				{rect: elixirBtn, name: "elixir"},
 			}
+			if h.PreferredResource != nil && h.PreferredResource() == "elixir" {
+				buttons[0], buttons[1] = buttons[1], buttons[0]
+			}
+			h.step("wall_resource_preference", map[string]any{"first": buttons[0].name})
 			for _, btn := range buttons {
 				bcx, bcy := btn.rect.Center()
 				h.step("asset_driven_tap_upgrade", map[string]any{
@@ -1127,6 +1142,10 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 				{rect: goldBtn.ImageRect(), name: "gold"},
 				{rect: elixirBtn.ImageRect(), name: "elixir"},
 			}
+			if h.PreferredResource != nil && h.PreferredResource() == "elixir" {
+				buttons[0], buttons[1] = buttons[1], buttons[0]
+			}
+			h.step("wall_resource_preference", map[string]any{"first": buttons[0].name})
 			for _, btn := range buttons {
 				cx := btn.rect.Min.X + btn.rect.Dx()/2
 				cy := btn.rect.Min.Y + btn.rect.Dy()/2
