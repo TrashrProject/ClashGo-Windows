@@ -23,14 +23,15 @@ const (
 )
 
 type EnvironmentFingerprint struct {
-	OS       string
-	Emulator string
-	DeviceID string
-	Width    int
-	Height   int
-	DPI      int
-	Strategy string
-	TownHall int
+	OS           string
+	Emulator     string
+	DeviceID     string
+	Width        int
+	Height       int
+	DPI          int
+	Strategy     string
+	TownHall     int
+	AccountScope string
 }
 
 func (f EnvironmentFingerprint) Key() string {
@@ -39,6 +40,7 @@ func (f EnvironmentFingerprint) Key() string {
 		strings.ToLower(strings.TrimSpace(f.Emulator)),
 		strings.ToLower(strings.TrimSpace(f.DeviceID)),
 		strings.TrimSpace(f.Strategy),
+		strings.TrimSpace(f.AccountScope),
 		itoa(f.Width), itoa(f.Height), itoa(f.DPI), itoa(f.TownHall),
 	}, "|")
 	sum := sha256.Sum256([]byte(raw))
