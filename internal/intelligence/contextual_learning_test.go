@@ -26,6 +26,8 @@ func testOutcome(edge string, stars, destruction int) ContextualOutcome {
 		GoldStolen: 700000,
 		ElixirStolen: 700000,
 		DarkElixirStolen: 6000,
+		CycleDurationMS: 90000,
+		FullRoutineDurationMS: 105000,
 		DeploySuccess: true,
 		ReturnHomeSuccess: true,
 		SafeDeployment: true,
@@ -34,17 +36,38 @@ func testOutcome(edge string, stars, destruction int) ContextualOutcome {
 	}
 }
 
-func TestContextualRewardPrefersBetterBattle(t *testing.T) {
-	one := testOutcome("TopLeft", 1, 55)
-	three := testOutcome("TopLeft", 3, 100)
-	if RewardForContextualOutcome(three) <= RewardForContextualOutcome(one) {
-		t.Fatalf("3-star reward must beat 1-star reward")
+func TestContextualRewardOptimizesFarmThroughputNotStars(t *testing.T) {
+	fastLoot := testOutcome("TopLeft", 1, 55)
+	fastLoot.GoldStolen = 900000
+	fastLoot.ElixirStolen = 900000
+	fastLoot.DarkElixirStolen = 8000
+	fastLoot.FullRoutineDurationMS = 75000
+
+	slowStars := testOutcome("TopLeft", 3, 100)
+	slowStars.GoldStolen = 450000
+	slowStars.ElixirStolen = 450000
+	slowStars.DarkElixirStolen = 3000
+	slowStars.FullRoutineDurationMS = 180000
+
+	if RewardForContextualOutcome(fastLoot) <= RewardForContextualOutcome(slowStars) {
+		t.Fatalf("faster higher-loot 1-star farm must beat slower lower-loot 3-star attack")
 	}
 
-	crash := three
+	crash := fastLoot
 	crash.BlueStacksRestart = 1
-	if RewardForContextualOutcome(crash) >= RewardForContextualOutcome(one) {
-		t.Fatalf("BlueStacks restart must heavily penalize otherwise good outcome")
+	if RewardForContextualOutcome(crash) >= RewardForContextualOutcome(slowStars) {
+		t.Fatalf("BlueStacks restart must heavily penalize otherwise excellent farm throughput")
+	}
+}
+
+func TestFarmResourcesPerHourRewardsFasterCycle(t *testing.T) {
+	fast := testOutcome("TopLeft", 0, 0)
+	slow := fast
+	fast.FullRoutineDurationMS = 60000
+	slow.FullRoutineDurationMS = 120000
+
+	if FarmResourcesPerHour(fast) <= FarmResourcesPerHour(slow) {
+		t.Fatalf("faster cycle must produce a higher farm rate")
 	}
 }
 
