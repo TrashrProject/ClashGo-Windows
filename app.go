@@ -633,6 +633,8 @@ func (a *App) watchEmergencyStopKey(ctx context.Context, b *bot.Bot) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-b.Done():
+			return
 		case <-ticker.C:
 			pressed := endKeyPressed()
 			if pressed && !wasPressed {
