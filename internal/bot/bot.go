@@ -512,6 +512,20 @@ func (b *Bot) recordActivity() {
 // hangs / dialogs / out-of-game screens without requiring user intervention.
 func (b *Bot) checkStuck(gc *game.GameContext) {
 
+	// Optional unattended wall-clock limit. This is checked from the capture
+	// loop so it also applies while Clash is idle at the village between raids.
+	if maxRun := b.cfg.Automation.MaxRunMinutes; maxRun > 0 {
+		limit := time.Duration(maxRun) * time.Minute
+		if time.Since(b.startedAt) >= limit {
+			b.logger.Info().
+				Dur("uptime", time.Since(b.startedAt)).
+				Dur("limit", limit).
+				Msg("configured unattended runtime reached; stopping bot cleanly")
+			b.cancel()
+			return
+		}
+	}
+
 	if gc.ReadHealth().ConsecutiveFails >= 10 {
 		b.logger.Error().
 			Int("consecutive_fails", gc.ReadHealth().ConsecutiveFails).
@@ -1600,6 +1614,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 
 		if meetsReq {
 			b.logger.Info().Msg("loot requirements met, starting attack!")
+			b.saveAcceptedBaseScreenshot(screen, loot.Gold, loot.Elixir, loot.DarkElixir)
 			b.attackExec.SetInitialLoot(loot.Gold, loot.Elixir, loot.DarkElixir)
 			if strat, err := strategy.ParseYAML(b.cfg.Attack.StrategyFile); err == nil {
 				stratName = strat.Name
@@ -2773,6 +2788,41 @@ func (b *Bot) waitForBattleState(timeout time.Duration) bool {
 
 	b.logger.Warn().Dur("timeout", timeout).Msg("timed out waiting for battle")
 	return false
+}
+
+// saveAcceptedBaseScreenshot persists the exact battle frame that passed the
+// search thresholds. It runs before deployment so the image remains useful for
+// debugging threshold/OCR decisions and for reviewing which bases the bot took.
+func (b *Bot) saveAcceptedBaseScreenshot(screen gocv.Mat, gold, elixir, darkElixir int) {
+	if !b.cfg.Search.SaveAcceptedBaseScreenshots || screen.Empty() {
+		return
+	}
+
+	dir := paths.ResolveConfig("output/accepted_bases")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		b.logger.Warn().Err(err).Str("dir", dir).Msg("could not create accepted-base screenshot directory")
+		return
+	}
+
+	name := fmt.Sprintf(
+		"accepted_%s_G%d_E%d_DE%d.png",
+		time.Now().Format("20060102_150405.000"),
+		gold,
+		elixir,
+		darkElixir,
+	)
+	path := filepath.Join(dir, name)
+	if ok := gocv.IMWrite(path, screen); !ok {
+		b.logger.Warn().Str("path", path).Msg("failed to save accepted-base screenshot")
+		return
+	}
+
+	b.logger.Info().
+		Str("path", path).
+		Int("gold", gold).
+		Int("elixir", elixir).
+		Int("de", darkElixir).
+		Msg("accepted-base screenshot saved")
 }
 
 func (b *Bot) deployTroops(screen gocv.Mat) (int, error) {
