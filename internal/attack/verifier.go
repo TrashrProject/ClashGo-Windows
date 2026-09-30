@@ -27,6 +27,16 @@ func DefaultVerifyConfig() VerifyConfig {
 	}
 }
 
+// FastVerifyConfig is the farming happy-path verifier: one fresh checkpoint,
+// then one corrective redeploy pass if something is visibly left behind.
+func FastVerifyConfig() VerifyConfig {
+	cfg := DefaultVerifyConfig()
+	cfg.MaxRetryAttempts = 1
+	cfg.RetryDelay = 220 * time.Millisecond
+	cfg.SettleWait = 160 * time.Millisecond
+	return cfg
+}
+
 // Verifier handles post-deployment verification.
 type Verifier struct {
 	executor     *TapExecutor
