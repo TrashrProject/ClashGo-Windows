@@ -623,6 +623,13 @@ func (b *Bot) captureLoop() {
 				continue
 			}
 
+			if b.seqRunning.Load() {
+				// FrameBroker already owns a clone of this frame. During an active
+				// attack, do not enqueue the same Mat into the idle UI processor.
+				screen.Close()
+				continue
+			}
+
 			select {
 			case frames <- frame{mat: screen, err: err, dur: dur}:
 			default:
