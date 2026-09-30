@@ -49,6 +49,10 @@ type AutomationConfig struct {
 	// amount of wall-clock time. 0 keeps the historical unlimited behavior.
 	MaxRunMinutes int `json:"max_run_minutes"`
 
+	// EmergencyStopHotkey supports "ctrl+shift+end" (default), "end", or "off".
+	// The safer chord avoids accidental stops when End is used in another app.
+	EmergencyStopHotkey string `json:"emergency_stop_hotkey"`
+
 	// AutoCollectors periodically taps verified resource bubbles while the bot
 	// is idle on the main village. It never runs during search/deploy/battle.
 	AutoCollectors bool `json:"auto_collectors"`
@@ -410,6 +414,7 @@ func DefaultConfig() *BotConfig {
 			AutoResourceTracking:   true,
 			AutoProfileSync:        true,
 			MaxRunMinutes:          0,
+			EmergencyStopHotkey:    "ctrl+shift+end",
 			AutoCollectors:         false,
 			CollectorInterval:      Duration{10 * time.Minute},
 			PrivacyMaskUsername:    true,
