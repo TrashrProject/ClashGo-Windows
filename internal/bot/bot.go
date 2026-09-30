@@ -1887,63 +1887,11 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	searchStart := time.Now()
 	attackStartedAt := time.Time{}
 	sequenceSkips := 0
-	selectSearchPace := func() searchPacing {
-		if b.safePacingForced() {
-			return chooseSearchPacing(adb.Health{ConsecutiveFails: 1})
-		}
-		tm := telemetry.Snapshot{}
-		if b.telemetry != nil {
-			tm = b.telemetry.Snapshot()
-		}
-		return chooseSearchPacingWithReliability(
-			b.client.Health(),
-			tm.NextTransitions,
-			tm.NextFirstPassRate,
-		)
-	}
-	searchPace := selectSearchPace()
-	if b.telemetry != nil {
-		b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{"mode": searchPace.Mode, "reason": "search_start"})
-	}
-	updateSearchPace := func() {
-		if b.safePacingForced() {
-			next := chooseSearchPacing(adb.Health{ConsecutiveFails: 1})
-			if b.telemetry != nil && next.Mode != searchPace.Mode {
-				b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
-					"from": searchPace.Mode,
-					"mode": next.Mode,
-					"reason": "safety_governor",
-				})
-			}
-			searchPace = next
-			return
-		}
-		health := b.client.Health()
-		tm := telemetry.Snapshot{}
-		if b.telemetry != nil {
-			tm = b.telemetry.Snapshot()
-		}
-		next := chooseSearchPacingWithReliability(health, tm.NextTransitions, tm.NextFirstPassRate)
-		if b.telemetry != nil && next.Mode != searchPace.Mode {
-			b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
-				"from": searchPace.Mode,
-				"mode": next.Mode,
-				"avg_capture_ms": health.AvgCaptureMs,
-				"fast_capture_ms": health.FastCaptureMs,
-				"fails": health.ConsecutiveFails,
-				"next_transitions": tm.NextTransitions,
-				"next_first_pass_rate": tm.NextFirstPassRate,
-			})
-		}
-		searchPace = next
-	}
-	consecutiveNextFailures := 0
-	skipsSinceRest := 0
-	searchLoopDelay := 500 * time.Millisecond
+
+	// Xingchen-style search loop: one authoritative capture per cycle,
+	// one decision, one transition action. No multi-probe Next verifier and
+	// no adaptive capture bursts around the most fragile BlueStacks phase.
 	for {
-		// Stop check: a user Stop must abort the search loop even
-		// though CaptureToMat below would silently reconnect a closed
-		// transport and keep searching forever.
 		select {
 		case <-b.ctx.Done():
 			b.logger.Info().Msg("search loop cancelled by stop, abandoning attack sequence")
@@ -1952,22 +1900,25 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		}
 
 		if time.Since(searchStart) > 5*time.Minute {
-			b.logger.Error().Msg("searching/skipping bases took too long (stuck in clouds?), restarting game...")
+			b.logger.Error().Msg("search exceeded five minutes; restarting game")
 			b.restartGame()
 			return
 		}
 
-		if searchLoopDelay > 0 {
-			time.Sleep(searchLoopDelay)
+		if !b.sleepResponsive(800 * time.Millisecond) {
+			return
 		}
-		// Normal polling remains conservative. A confirmed Next transition
-		// already paid PostTransitionPause below, so that one following capture
-		// can run immediately without stacking another redundant 500ms wait.
-		searchLoopDelay = 500 * time.Millisecond
 
 		screen, err := b.client.CaptureToMat()
 		if err != nil {
-			b.logger.Warn().Err(err).Msg("search capture failed; supervisor will recover if heartbeat stalls")
+			b.logger.Warn().Err(err).Msg("search capture failed")
+			if !b.sleepResponsive(1200 * time.Millisecond) {
+				return
+			}
+			continue
+		}
+		if screen.Empty() {
+			screen.Close()
 			continue
 		}
 		b.captureHeartbeat.Store(time.Now().UnixNano())
@@ -1975,104 +1926,42 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		state, _ := b.classify(screen)
 		if state != game.StateBattle {
 			if state == game.StateSearchMap || state == game.StateLoading {
-				b.logger.Debug().Str("state", state.String()).Msg("still searching (clouds)")
-				screen.Close()
-				continue
+				b.logger.Debug().Str("state", state.String()).Msg("matchmaking in progress")
+			} else {
+				b.logger.Debug().Str("state", state.String()).Msg("waiting for searchable base")
+				if isTransientRuntimeState(state) {
+					b.dismissInterruptions()
+				}
 			}
-			b.logger.Debug().Str("state", state.String()).Msg("searching area")
-
-			b.dismissInterruptionState(state)
 			screen.Close()
 			continue
 		}
 
-		b.logger.Debug().Msg("base found, reading loot")
+		b.logger.Info().Msg("base found; reading loot")
 		scanStarted := time.Now()
-		loot, err := lootRec.ReadAvailableLoot(screen)
+		loot, lootErr := lootRec.ReadAvailableLoot(screen)
 		targetScanUS := time.Since(scanStarted).Microseconds()
-		if err != nil {
-			b.logger.Warn().Err(err).Msg("failed to read loot")
-			b.DumpDiagnostics("loot_read_failed", screen, map[string]interface{}{
-				"error": err.Error(),
-			})
+		if lootErr != nil {
+			b.logger.Warn().Err(lootErr).Msg("loot read failed; treating target conservatively")
 		}
 
-		baseRules := intelligence.TargetRules{
-			MinGold: b.cfg.Search.MinLootGold,
-			MinElixir: b.cfg.Search.MinLootElixir,
-			MinDarkElixir: b.cfg.Search.MinLootDarkElixir,
-			DarkOverride: b.cfg.Search.AttackIfDarkElixirGT,
-			SearchEnabled: b.cfg.Search.Enabled,
-		}
-		effectiveRules, adaptivePercent := intelligence.AdaptTargetRules(baseRules, sequenceSkips, intelligence.AdaptiveSearchPolicy{
-			Enabled: b.cfg.Search.AdaptiveSearch,
-			StartAfterSkips: b.cfg.Search.AdaptiveStartAfterSkips,
-			StepEverySkips: b.cfg.Search.AdaptiveStepEverySkips,
-			StepPercent: b.cfg.Search.AdaptiveStepPercent,
-			FloorPercent: b.cfg.Search.AdaptiveFloorPercent,
-		})
 		decision := intelligence.EvaluateTarget(intelligence.Target{
 			Gold: loot.Gold, Elixir: loot.Elixir, DarkElixir: loot.DarkElixir,
-		}, effectiveRules)
+		}, intelligence.TargetRules{
+			MinGold:       b.cfg.Search.MinLootGold,
+			MinElixir:     b.cfg.Search.MinLootElixir,
+			MinDarkElixir: b.cfg.Search.MinLootDarkElixir,
+			DarkOverride:  b.cfg.Search.AttackIfDarkElixirGT,
+			SearchEnabled: b.cfg.Search.Enabled,
+		})
 
-		if decision.Accept && b.cfg.Automation.AutoArmyGuard {
-			armySnapshot, guardErr := b.attackExec.InspectArmyGuard(screen)
-			switch {
-			case guardErr != nil:
-				// Detection failure is never treated as proof of a bad army.
-				// Keep farming and surface the diagnostic instead of creating
-				// a false reject loop.
-				b.logger.Warn().Err(guardErr).Msg("army guard unavailable; failing open for this target")
-				if b.telemetry != nil {
-					b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
-						"kind": "army_guard_unavailable",
-						"error": guardErr.Error(),
-					})
-				}
-			case armySnapshot.Uncertain:
-				b.logger.Warn().
-					Strs("warnings", armySnapshot.Warnings).
-					Msg("army guard uncertain; allowing target")
-				if b.telemetry != nil {
-					b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
-						"kind": "army_guard_uncertain",
-						"warnings": armySnapshot.Warnings,
-					})
-				}
-			case !armySnapshot.Ready:
-				// No troop has been deployed yet. Convert the otherwise-good
-				// target into a normal search rejection so the proven Next
-				// transition path handles it without spending an attack.
-				decision.Accept = false
-				decision.Reason = "army composition does not match farm profile"
-				decision.Flags = append(decision.Flags, "army_guard")
-				b.logger.Warn().
-					Strs("warnings", armySnapshot.Warnings).
-					Msg("army guard rejected target before deployment")
-				if b.telemetry != nil {
-					b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
-						"kind": "army_guard_rejected_target",
-						"warnings": armySnapshot.Warnings,
-					})
-				}
-			default:
-				b.logger.Debug().Msg("army guard confirmed farm composition")
-			}
-		}
-		if adaptivePercent < 100 && b.telemetry != nil {
-			b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
-				"mode": "AdaptiveSearch",
-				"reason": "long_skip_streak",
-				"skips": sequenceSkips,
-				"threshold_percent": adaptivePercent,
-				"min_gold": effectiveRules.MinGold,
-				"min_elixir": effectiveRules.MinElixir,
-				"min_de": effectiveRules.MinDarkElixir,
-			})
-		}
 		if b.telemetry != nil {
 			if decision.Accept {
-				b.telemetry.Emit(telemetry.EventTargetFound, map[string]any{"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir, "score": decision.Score, "accept": true, "reason": decision.Reason, "scan_us": targetScanUS})
+				b.telemetry.Emit(telemetry.EventTargetFound, map[string]any{
+					"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir,
+					"score": decision.Score, "accept": true, "reason": decision.Reason,
+					"scan_us": targetScanUS,
+				})
 			} else {
 				b.telemetry.RecordRejectedTarget(
 					loot.Gold, loot.Elixir, loot.DarkElixir, decision.Score, targetScanUS,
@@ -2087,34 +1976,36 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 			acceptedTargetElixir = loot.Elixir
 			acceptedTargetDE = loot.DarkElixir
 			acceptedTargetScore = decision.Score
+
 			b.logger.Info().
 				Int("score", decision.Score).
 				Int("gold", loot.Gold).
 				Int("elixir", loot.Elixir).
 				Int("de", loot.DarkElixir).
 				Msg("target accepted — attacking")
+
 			if b.telemetry != nil {
-				b.telemetry.Emit(telemetry.EventAttackStarted, map[string]any{"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir, "search_ms": attackStartedAt.Sub(searchStart).Milliseconds(), "skips": sequenceSkips})
+				b.telemetry.Emit(telemetry.EventAttackStarted, map[string]any{
+					"gold": loot.Gold, "elixir": loot.Elixir, "de": loot.DarkElixir,
+					"search_ms": attackStartedAt.Sub(searchStart).Milliseconds(),
+					"skips": sequenceSkips,
+				})
 			}
+
 			b.attackExec.SetInitialLoot(loot.Gold, loot.Elixir, loot.DarkElixir)
 			b.setRuntimePhase(PhaseDeploying)
 			deployStarted := time.Now()
-			if strat, err := strategy.ParseYAML(b.cfg.Attack.StrategyFile); err == nil {
+
+			if strat, stratErr := strategy.ParseYAML(b.cfg.Attack.StrategyFile); stratErr == nil {
 				stratName = strat.Name
 				targetEdge = strat.TargetEdge
 				remainingUndeployed, deployErr = b.deployParsedStrategy(screen, strat)
 			} else {
-				deployErr = err
-				b.logger.Warn().Err(err).Str("path", b.cfg.Attack.StrategyFile).Msg("could not load strategy")
+				deployErr = stratErr
+				b.logger.Warn().Err(stratErr).Str("path", b.cfg.Attack.StrategyFile).Msg("could not load strategy")
 			}
 			deployDurationMS = time.Since(deployStarted).Milliseconds()
-			if b.telemetry != nil && deployDurationMS >= 90_000 {
-				b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
-					"kind": "slow_deployment",
-					"duration_ms": deployDurationMS,
-					"remaining": remainingUndeployed,
-				})
-			}
+
 			if resolved := b.attackExec.LastResolvedEdge(); resolved != "" {
 				targetEdge = resolved
 			}
@@ -2122,6 +2013,7 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				deploySide = side
 			}
 			b.attackExec.SetEarlyExitAllowed(deployErr == nil && remainingUndeployed == 0)
+
 			if deployErr != nil || remainingUndeployed > 0 {
 				if b.telemetry != nil {
 					b.telemetry.WriteIncident("deployment_failed")
@@ -2129,223 +2021,56 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 				b.logger.Warn().
 					Err(deployErr).
 					Int("remaining", remainingUndeployed).
-					Msg("deployment not complete; keeping battle active and recording diagnostics")
-				failScreen, err := b.client.CaptureToMat()
-				if err == nil {
-					b.DumpDiagnostics("deployment_failed", failScreen, map[string]interface{}{
-						"error":      fmt.Sprintf("%v", deployErr),
-						"remaining":  remainingUndeployed,
-						"stratName":  stratName,
-						"targetEdge": targetEdge,
-					})
-					failScreen.Close()
-				}
-			} else {
-				b.logger.Info().Msg("all live deployable troop slots verified empty")
+					Msg("deployment incomplete; battle remains active")
 			}
+
 			b.setRuntimePhase(PhaseBattle)
 			screen.Close()
 			break
 		}
 
-		b.logger.Debug().
-			Int("score", decision.Score).
-			Str("reason", decision.Reason).
-			Msg("target rejected")
+		sequenceSkips++
+		b.skipsCount.Add(1)
+		b.logger.Info().
+			Int("skip", sequenceSkips).
+			Int("gold", loot.Gold).
+			Int("elixir", loot.Elixir).
+			Int("de", loot.DarkElixir).
+			Msg("target rejected — requesting next base")
 
-		// BlueStacks stability guard: changing opponents endlessly at full
-		// speed can put sustained pressure on HD-Player.exe. Rest briefly
-		// every few successful skips instead of hammering Next/capture forever.
-		if skipsSinceRest >= searchPace.StabilityRestEvery {
-			b.logger.Debug().
-				Int("skips", skipsSinceRest).
-				Dur("rest", searchPace.StabilityRest).
-				Msg("matchmaking stability pause")
-			time.Sleep(searchPace.StabilityRest)
-			skipsSinceRest = 0
-			updateSearchPace()
-		}
-
-		// NEXT is handled as a state transition, not as a blind tap.
-		// A successful ADB tap only means Android received the event; it does
-		// NOT mean Clash accepted it. We click once, then wait until clouds /
-		// loading / Unknown proves that matchmaking actually advanced.
-		clickNextFresh := func() bool {
-			fresh, capErr := b.client.CaptureToMat()
-			if capErr != nil || fresh.Empty() {
-				if !fresh.Empty() { fresh.Close() }
-				return false
-			}
-			defer fresh.Close()
-
-			x, y, ok := b.locateRememberedButton("Next", fresh)
-			if !ok {
-				x, y, ok = b.locateNextButtonColor(fresh)
-				if ok {
-					b.rememberUIAnchor("Next", image.Pt(x, y))
-				}
-			}
-			if ok {
-				b.logger.Debug().Int("x", x).Int("y", y).Msg("Next button freshly verified; precision clicking")
-				if err := b.client.TapFast(x, y, 0.6); err == nil {
-					b.recordActivity()
-					return true
-				}
-			}
-			return false
-		}
-
-		// Use the already-live frame first.
-		nextCycleStarted := time.Now()
+		// Use the frame already in memory. Only if the button cannot be found
+		// do we allow one evidence-gated retry. This prevents the old
+		// capture->tap->capture->verify->capture retry burst.
 		nextClicked := false
-		nextRetryUsed := false
-		nextVerifyProbes := 0
-		transitionStarted := time.Time{}
-		nextX, nextY, nextOK := b.locateRememberedButton("Next", screen)
-		if !nextOK {
-			nextX, nextY, nextOK = b.locateNextButtonColor(screen)
-			if nextOK {
-				b.rememberUIAnchor("Next", image.Pt(nextX, nextY))
-			}
-		}
-		if nextOK {
-			b.logger.Debug().Int("x", nextX).Int("y", nextY).Msg("Next button verified; precision clicking detected center")
-			if err := b.client.TapFast(nextX, nextY, 0.6); err == nil {
+		if x, y, ok := b.locateNextButtonColor(screen); ok {
+			if err := b.client.TapRandomized(x, y); err == nil {
 				b.recordActivity()
 				nextClicked = true
-				transitionStarted = time.Now()
 			}
 		}
 		screen.Close()
 
 		if !nextClicked {
-			nextClicked = clickNextFresh()
-			if nextClicked {
-				transitionStarted = time.Now()
-			}
+			nextClicked = b.waitAndClickButton("btn_next", "Next Match", 1800*time.Millisecond)
 		}
-
-		transitioned := false
-		if nextClicked {
-			// Shorten verification only after this exact runtime has accumulated
-			// enough reliable first-pass transitions. We never add taps here; a
-			// weak sample or ADB pressure restores the proven 650/550ms timings.
-			nextVerifyPace := nextVerificationPacing{InitialWait: 650 * time.Millisecond, ProbeGap: 550 * time.Millisecond, Mode: "Safe"}
-			if b.telemetry != nil {
-				tm := b.telemetry.Snapshot()
-				nextVerifyPace = chooseNextVerificationPacing(b.client.Health(), tm.NextTransitions, tm.NextFirstPassRate)
-			}
-			time.Sleep(nextVerifyPace.InitialWait)
-			for verify := 0; verify < 3 && !transitioned; verify++ {
-				nextVerifyProbes++
-				probe, capErr := b.client.CaptureToMat()
-				if capErr == nil && !probe.Empty() {
-					st, _ := b.classify(probe)
-					probe.Close()
-					if st == game.StateSearchMap || st == game.StateLoading || st == game.StateUnknown {
-						transitioned = true
-						break
-					}
-				} else if !probe.Empty() {
-					probe.Close()
-				}
-				if verify < 2 {
-					time.Sleep(nextVerifyPace.ProbeGap)
-				}
-			}
-		}
-
-		// If Clash ignored the first tap, reacquire the button and try ONCE.
-		// This replaces the situation where the bot looked "lost" until the
-		// user manually clicked Next, while also preventing rapid tap spam.
-		if !transitioned {
-			nextRetryUsed = true
-			b.logger.Warn().Msg("Next tap did not start matchmaking; reacquiring button for one controlled retry")
-			time.Sleep(450 * time.Millisecond)
-			if clickNextFresh() {
-				transitionStarted = time.Now()
-				time.Sleep(700 * time.Millisecond)
-				for verify := 0; verify < 3 && !transitioned; verify++ {
-					nextVerifyProbes++
-					probe, capErr := b.client.CaptureToMat()
-					if capErr == nil && !probe.Empty() {
-						st, _ := b.classify(probe)
-						probe.Close()
-						if st == game.StateSearchMap || st == game.StateLoading || st == game.StateUnknown {
-							transitioned = true
-							break
-						}
-					} else if !probe.Empty() {
-						probe.Close()
-					}
-					if verify < 2 {
-						time.Sleep(600 * time.Millisecond)
-					}
-				}
-			}
-		}
-
-		if transitioned {
-			consecutiveNextFailures = 0
-			skipsSinceRest++
-			b.skipsCount.Add(1)
-			sequenceSkips++
-			if b.telemetry != nil {
-				transitionUS := int64(0)
-				if !nextCycleStarted.IsZero() {
-					transitionUS = time.Since(nextCycleStarted).Microseconds()
-				} else if !transitionStarted.IsZero() {
-					transitionUS = time.Since(transitionStarted).Microseconds()
-				}
-				b.telemetry.Emit(telemetry.EventTargetSkipped, map[string]any{
-					"sequence_skips": sequenceSkips,
-					"transition_us": transitionUS,
-					"retry_used": nextRetryUsed,
-					"verify_probes": nextVerifyProbes,
-					"first_pass": !nextRetryUsed,
-				})
-				if transitionUS >= 3_000_000 {
-					b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
-						"kind": "slow_next_transition",
-						"duration_ms": transitionUS / 1000,
-						"sequence_skips": sequenceSkips,
-					})
-				}
-			}
-			// Do not flush stats/history or emit Wails events for every skipped
-			// base. Stats are atomic and the UI polls them every 2s; keeping disk
-			// I/O and IPC off the matchmaking hot path makes repeated Next cycles
-			// materially cheaper without changing any farming decision.
-			b.logger.Debug().Msg("matchmaking transition confirmed")
-			updateSearchPace()
-			time.Sleep(searchPace.PostTransitionPause)
-			searchLoopDelay = 0
-			continue
-		}
-
-		// Never fall back to repeated blind coordinates. If two verified
-		// attempts fail, back off. After 3 consecutive failures restart only
-		// Clash (not BlueStacks) to recover a wedged matchmaking UI.
-		consecutiveNextFailures++
-		b.logger.Warn().
-			Int("failures", consecutiveNextFailures).
-			Msg("Next transition not confirmed; backing off instead of spamming taps")
-
-		if consecutiveNextFailures >= 3 {
+		if !nextClicked {
+			b.logger.Error().Msg("Next button not visually confirmed; restarting game instead of blind tapping")
 			b.forceSafePacing("next_unresponsive", 2*time.Minute)
-			if b.telemetry != nil {
-				b.telemetry.Emit(telemetry.EventAnomaly, map[string]any{
-					"kind": "next_unresponsive",
-					"failures": consecutiveNextFailures,
-				})
-				b.telemetry.WriteIncident("next_unresponsive")
-			}
-			b.logger.Error().Msg("Next remained unresponsive after controlled retries; restarting Clash and forcing Safe pacing")
 			b.restartGame()
 			return
 		}
 
-		time.Sleep(1200 * time.Millisecond)
+		if b.telemetry != nil {
+			b.telemetry.Emit(telemetry.EventTargetSkipped, map[string]any{
+				"sequence_skips": sequenceSkips,
+			})
+		}
+
+		// Xingchen-style transition settle: do not poll repeatedly while
+		// BlueStacks is animating clouds / loading the next opponent.
+		if !b.sleepResponsive(1400 * time.Millisecond) {
+			return
+		}
 	}
 
 	if deployErr != nil || remainingUndeployed > 0 {
