@@ -2586,9 +2586,22 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 		sessionID = b.telemetry.SessionID()
 	}
 
+	activeAccountID := ""
+	activePlayerTag := strings.ToUpper(strings.TrimSpace(b.cfg.Account.PlayerTag))
+	if b.multiAccount != nil {
+		if active, ok := b.multiAccount.Active(); ok {
+			activeAccountID = active.ID
+			if strings.TrimSpace(active.PlayerTag) != "" {
+				activePlayerTag = strings.ToUpper(strings.TrimSpace(active.PlayerTag))
+			}
+		}
+	}
+
 	rep := AttackReport{
 		Timestamp:        time.Now().Format(time.RFC3339),
 		SessionID:        sessionID,
+		AccountID:        activeAccountID,
+		PlayerTag:        activePlayerTag,
 		Strategy:         stratName,
 		TargetEdge:       targetEdge,
 		DeploySide:       deploySide,
@@ -2680,6 +2693,23 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	b.historyMu.Unlock()
 	if histBytes, err := json.MarshalIndent(history, "", "  "); err == nil {
 		_ = AsyncWriteFileSoon(paths.ResolveConfig("attack_history.json"), histBytes, 0644)
+	}
+
+	// Multi-account sessions retain the global history for the dashboard while
+	// also writing an account-scoped history used for account-specific analysis.
+	if strings.TrimSpace(rep.PlayerTag) != "" {
+		accountPath := accountAttackHistoryPath(b.cfg)
+		var accountHistory []AttackReport
+		if data, err := os.ReadFile(accountPath); err == nil {
+			_ = json.Unmarshal(data, &accountHistory)
+		}
+		accountHistory = append([]AttackReport{rep}, accountHistory...)
+		if len(accountHistory) > 500 {
+			accountHistory = accountHistory[:500]
+		}
+		if data, err := json.MarshalIndent(accountHistory, "", "  "); err == nil {
+			_ = AsyncWriteFileSoon(accountPath, data, 0644)
+		}
 	}
 
 	// Notify the UI after historyCache is updated. Wails mirrors this cache
@@ -4208,6 +4238,8 @@ type BotStats struct {
 type AttackReport struct {
 	Timestamp        string `json:"timestamp"`
 	SessionID        string `json:"session_id,omitempty"`
+	AccountID        string `json:"account_id,omitempty"`
+	PlayerTag        string `json:"player_tag,omitempty"`
 	Strategy         string `json:"strategy"`
 	TargetEdge       string `json:"target_edge"`
 	DeploySide       string `json:"deploy_side"`
