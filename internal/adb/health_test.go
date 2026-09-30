@@ -120,3 +120,28 @@ func TestHealthTapRouteCounters(t *testing.T) {
 		t.Fatalf("legacy_taps_total=%d want 2", h.LegacyTapsTotal)
 	}
 }
+
+
+func TestCaptureGapForFailures(t *testing.T) {
+	base := 750 * time.Millisecond
+	cases := []struct {
+		fails int
+		want  time.Duration
+	}{
+		{fails: 0, want: 750 * time.Millisecond},
+		{fails: 1, want: 1500 * time.Millisecond},
+		{fails: 2, want: 3 * time.Second},
+		{fails: 3, want: 6 * time.Second},
+		{fails: 4, want: 6 * time.Second},
+		{fails: 20, want: 6 * time.Second},
+		{fails: -1, want: 750 * time.Millisecond},
+	}
+	for _, tc := range cases {
+		if got := captureGapForFailures(base, tc.fails); got != tc.want {
+			t.Fatalf("fails=%d gap=%v want %v", tc.fails, got, tc.want)
+		}
+	}
+	if got := captureGapForFailures(0, 3); got != 0 {
+		t.Fatalf("zero base gap=%v want 0", got)
+	}
+}
