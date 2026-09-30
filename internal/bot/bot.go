@@ -3877,6 +3877,43 @@ func (b *Bot) QuickDeploy() error {
 	return nil
 }
 
+type MultiAccountRuntimeStatus struct {
+	Enabled            bool      `json:"enabled"`
+	ActiveAccountID    string    `json:"active_account_id,omitempty"`
+	ActiveAccountLabel string    `json:"active_account_label,omitempty"`
+	AttacksThisTurn    int       `json:"attacks_this_turn"`
+	NextAccountID      string    `json:"next_account_id,omitempty"`
+	NextAccountLabel   string    `json:"next_account_label,omitempty"`
+	RotationDue        bool      `json:"rotation_due"`
+	TotalSwitches      int       `json:"total_switches"`
+	LastSwitchAt       time.Time `json:"last_switch_at,omitempty"`
+	LastError          string    `json:"last_error,omitempty"`
+}
+
+func (b *Bot) MultiAccountStatus() MultiAccountRuntimeStatus {
+	if b == nil || b.multiAccount == nil {
+		return MultiAccountRuntimeStatus{}
+	}
+	st := b.multiAccount.State()
+	out := MultiAccountRuntimeStatus{
+		Enabled:         b.multiAccount.Enabled(),
+		ActiveAccountID: st.ActiveAccountID,
+		AttacksThisTurn: st.AttacksThisTurn,
+		TotalSwitches:   st.TotalSwitches,
+		LastSwitchAt:    st.LastSwitchAt,
+		LastError:       st.LastError,
+	}
+	if active, ok := b.multiAccount.Active(); ok {
+		out.ActiveAccountLabel = active.Label
+	}
+	if next, due := b.multiAccount.NextDue(); due {
+		out.RotationDue = true
+		out.NextAccountID = next.ID
+		out.NextAccountLabel = next.Label
+	}
+	return out
+}
+
 func (b *Bot) Health() game.SystemHealth {
 	return game.SystemHealth{
 		ADBConnected:     b.client.IsConnected(),
