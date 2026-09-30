@@ -905,8 +905,8 @@ func (sm *SlotManager) RefreshAfterSlotConsumed(screen gocv.Mat, consumed *Track
 		slot.X = activeXs[i]
 		slot.Y = sm.slotY
 	}
-	sm.xIndex = make(map[int]*TrackedSlot, len(sm.slots))
-	for _, slot := range sm.slots {
+	sm.xIndex = make(map[int]*TrackedSlot, len(remaining))
+	for _, slot := range remaining {
 		sm.xIndex[slot.X] = slot
 	}
 
@@ -965,8 +965,8 @@ func (sm *SlotManager) RefreshActivePositions(screen gocv.Mat) bool {
 		return false
 	}
 
-	sm.xIndex = make(map[int]*TrackedSlot, len(sm.slots))
-	for _, slot := range sm.slots {
+	sm.xIndex = make(map[int]*TrackedSlot, len(remaining))
+	for _, slot := range remaining {
 		sm.xIndex[slot.X] = slot
 	}
 
