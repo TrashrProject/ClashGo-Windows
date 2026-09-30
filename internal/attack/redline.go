@@ -15,6 +15,10 @@ type RedZone struct {
 	BBox     image.Rectangle
 	Valid    bool
 	Contours int
+	// Boundary contains a detached copy of the detected red-line contour.
+	// It survives after OpenCV contour objects are released and lets the
+	// deploy-line calculator follow irregular bases instead of using only BBox.
+	Boundary []image.Point
 }
 
 // RedLineDetector finds the red deployment boundary on screen.
@@ -49,8 +53,9 @@ func (r *RedLineDetector) Detect(screen gocv.Mat, uiCutoff int) RedZone {
 	}
 
 	type bbox struct {
-		rect image.Rectangle
-		area float64
+		rect   image.Rectangle
+		area   float64
+		points []image.Point
 	}
 	var boxes []bbox
 
@@ -61,7 +66,11 @@ func (r *RedLineDetector) Detect(screen gocv.Mat, uiCutoff int) RedZone {
 			continue
 		}
 		rect := gocv.BoundingRect(cnt)
-		boxes = append(boxes, bbox{rect: rect, area: area})
+		pts := make([]image.Point, 0, cnt.Size())
+		for j := 0; j < cnt.Size(); j++ {
+			pts = append(pts, cnt.At(j))
+		}
+		boxes = append(boxes, bbox{rect: rect, area: area, points: pts})
 	}
 
 	if len(boxes) == 0 {
@@ -99,6 +108,7 @@ func (r *RedLineDetector) Detect(screen gocv.Mat, uiCutoff int) RedZone {
 			BBox:     rect,
 			Valid:    true,
 			Contours: contours.Size(),
+			Boundary: append([]image.Point(nil), b.points...),
 		}
 	}
 
@@ -126,10 +136,15 @@ func (r *RedLineDetector) Detect(screen gocv.Mat, uiCutoff int) RedZone {
 			Int("w", combined.Dx()).Int("h", combined.Dy()).
 			Msg("red zone detected (combined contours)")
 
+		boundary := make([]image.Point, 0)
+		for _, b := range boxes {
+			boundary = append(boundary, b.points...)
+		}
 		return RedZone{
 			BBox:     combined,
 			Valid:    true,
 			Contours: contours.Size(),
+			Boundary: boundary,
 		}
 	}
 
