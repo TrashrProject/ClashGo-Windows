@@ -32,12 +32,18 @@ func NewFrameBroker() *FrameBroker {
 	return &FrameBroker{notify: make(chan struct{})}
 }
 
+// brokerMatUsable must check Closed before Empty. GoCV's Empty() calls into
+// OpenCV and crashes natively when invoked on the zero-value Mat (nil C handle).
+func brokerMatUsable(m gocv.Mat) bool {
+	return !m.Closed() && !m.Empty()
+}
+
 func (b *FrameBroker) Publish(frame gocv.Mat, at time.Time) {
-	if frame.Empty() {
+	if !brokerMatUsable(frame) {
 		return
 	}
 	clone := frame.Clone()
-	if clone.Empty() {
+	if !brokerMatUsable(clone) {
 		clone.Close()
 		return
 	}
@@ -57,7 +63,7 @@ func (b *FrameBroker) Publish(frame gocv.Mat, at time.Time) {
 	close(oldNotify)
 	b.mu.Unlock()
 
-	if !old.Empty() {
+	if !old.Closed() {
 		old.Close()
 	}
 	b.published.Add(1)
@@ -66,7 +72,7 @@ func (b *FrameBroker) Publish(frame gocv.Mat, at time.Time) {
 func (b *FrameBroker) Snapshot(maxAge time.Duration) (gocv.Mat, time.Time, uint64, bool) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if b.closed || b.frame.Empty() {
+	if b.closed || !brokerMatUsable(b.frame) {
 		return gocv.NewMat(), time.Time{}, 0, false
 	}
 	if maxAge > 0 && time.Since(b.at) > maxAge {
@@ -94,7 +100,7 @@ func (b *FrameBroker) WaitAfter(ctx context.Context, afterSeq uint64, timeout, m
 			b.mu.RUnlock()
 			return gocv.NewMat(), time.Time{}, 0, errors.New("frame broker closed")
 		}
-		if b.seq > afterSeq && !b.frame.Empty() && (maxAge <= 0 || time.Since(b.at) <= maxAge) {
+		if b.seq > afterSeq && brokerMatUsable(b.frame) && (maxAge <= 0 || time.Since(b.at) <= maxAge) {
 			mat := b.frame.Clone()
 			at := b.at
 			seq := b.seq
@@ -131,7 +137,7 @@ func (b *FrameBroker) Close() {
 	b.notify = make(chan struct{})
 	b.mu.Unlock()
 
-	if !old.Empty() {
+	if !old.Closed() {
 		old.Close()
 	}
 }
