@@ -102,6 +102,13 @@ func (b *Bot) runtimeSupervisorLoop() {
 				continue
 			}
 
+			if state == game.StateUnknown && b.recordUIDriftIncident(now) {
+				b.logger.Error().
+					Dur("state_age", now.Sub(time.Unix(0, since))).
+					Msg("runtime supervisor: repeated unknown UI detected; entering safe mode instead of blind restarts")
+				b.runtimeStateSince.Store(now.UnixNano())
+				continue
+			}
 			b.logger.Warn().
 				Str("state", state.String()).
 				Str("phase", RuntimePhase(b.runtimePhase.Load()).String()).
