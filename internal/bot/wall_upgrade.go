@@ -214,7 +214,7 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) {
 
 		case "wall_text_not_found", "tap_builder_failed", "not_in_main_village",
 			"aborted_capture_defensive", "scroll_failed", "scroll_up_failed",
-			"upgrade_screen_capture_failed", "upgrade_not_found":
+			"upgrade_screen_capture_failed", "upgrade_not_found", "upgrade_progress_unverified":
 			terminalReason = step
 			retryableFailure = true
 			if b.villageMemory != nil {
@@ -240,35 +240,104 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) {
 			return game.VillageResourceSnapshot{}
 		}
 		screen, err := b.runtimeFrameFresh(2 * time.Second)
-		if err != nil || screen.Empty() {
-			if !screen.Empty() {
-				screen.Close()
-			}
+		if err != nil {
+			return game.VillageResourceSnapshot{}
+		}
+		if screen.Empty() {
+			screen.Close()
 			return game.VillageResourceSnapshot{}
 		}
 		defer screen.Close()
 		return b.resourceReader.Read(screen)
 	}
+	resourcesSpent := func(before, after game.VillageResourceSnapshot) (bool, bool) {
+		if !before.Valid || !after.Valid {
+			return false, false
+		}
+		goldComparable := before.GoldValid && after.GoldValid
+		elixirComparable := before.ElixirValid && after.ElixirValid
+		if !goldComparable && !elixirComparable {
+			return false, false
+		}
+		spent := (goldComparable && after.Gold < before.Gold) ||
+			(elixirComparable && after.Elixir < before.Elixir)
+		return spent, true
+	}
 
 	stageStarted := time.Now()
-	before := readResources()
 	attempts := 0
+	resourceVerified := false
 	for attempts < 2 {
 		attempts++
 		retryableFailure = false
 		terminalReason = ""
+		runStartUpgrades := upgradesLearned
+		resourceBaseline := readResources()
+		claimsSinceCheck := 0
+
+		verifyProgress := func() bool {
+			claimsSinceCheck++
+			// Batch the watchdog: one resource OCR every two claimed upgrades.
+			// This is cheap enough to stop false-success loops quickly without
+			// adding an expensive capture after every single wall.
+			if claimsSinceCheck < 2 {
+				return true
+			}
+			claimsSinceCheck = 0
+			now := readResources()
+			spent, comparable := resourcesSpent(resourceBaseline, now)
+			if !comparable {
+				if now.Valid {
+					resourceBaseline = now
+				}
+				return true
+			}
+			if spent {
+				resourceVerified = true
+				resourceBaseline = now
+				return true
+			}
+			retryableFailure = true
+			terminalReason = "resource_progress_unverified"
+			b.logger.Warn().
+				Int("before_gold", resourceBaseline.Gold).
+				Int("after_gold", now.Gold).
+				Int("before_elixir", resourceBaseline.Elixir).
+				Int("after_elixir", now.Elixir).
+				Msg("two wall upgrades were reported but no resource spend was observed; aborting fast loop")
+			return false
+		}
 
 		RunWallUpgradeLoop(&WallUpgradeHooks{
-			Logger:    b.logger,
-			Client:    b.client,
-			Cal:       b.cal,
-			Templates: b.templates,
-			Classify:  b.classify,
-			Dismiss:   b.dismissSelection,
-			StopCheck: func() bool { return b.ctx.Err() != nil },
-			DeepSearch: attempts > 1,
-			OnStep:    observe,
+			Logger:                b.logger,
+			Client:                b.client,
+			Cal:                   b.cal,
+			Templates:             b.templates,
+			Classify:              b.classify,
+			Dismiss:               b.dismissSelection,
+			StopCheck:             func() bool { return b.ctx.Err() != nil },
+			DeepSearch:            attempts > 1,
+			VerifyUpgradeProgress: verifyProgress,
+			OnStep:                observe,
 		})
+
+		// Catch a single claimed upgrade as well: the batched watchdog above
+		// fires every two, so compare once at the run boundary when needed.
+		claimedThisRun := upgradesLearned - runStartUpgrades
+		if claimedThisRun > 0 && !retryableFailure {
+			afterRun := readResources()
+			if spent, comparable := resourcesSpent(resourceBaseline, afterRun); comparable {
+				if spent {
+					resourceVerified = true
+				} else if claimsSinceCheck > 0 {
+					retryableFailure = true
+					terminalReason = "resource_spend_unverified"
+					b.logger.Warn().
+						Int("claimed_upgrades", claimedThisRun).
+						Msg("wall upgrade was claimed but final resource spend could not be verified")
+				}
+			}
+		}
 
 		if b.ctx.Err() != nil || !retryableFailure {
 			break
@@ -276,31 +345,10 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) {
 		b.logger.Warn().
 			Str("reason", terminalReason).
 			Int("attempt", attempts).
-			Msg("wall stage hit a transient failure; running one bounded deep retry")
+			Msg("wall stage hit a transient/unverified result; running one bounded deep retry")
 		b.dismissSelection()
 		if !b.sleepResponsive(650 * time.Millisecond) {
 			break
-		}
-	}
-
-	// Cheap end-to-end verification: if the loop reported one or more wall
-	// upgrades, at least gold OR elixir should have decreased. This costs only
-	// one extra post-stage capture, not one capture per wall. If OCR is valid
-	// and neither resource moved, surface the discrepancy instead of silently
-	// pretending the wall stage succeeded.
-	after := readResources()
-	resourceVerified := false
-	if upgradesLearned > 0 && before.Valid && after.Valid {
-		goldSpent := before.GoldValid && after.GoldValid && after.Gold < before.Gold
-		elixirSpent := before.ElixirValid && after.ElixirValid && after.Elixir < before.Elixir
-		resourceVerified = goldSpent || elixirSpent
-		if !resourceVerified {
-			b.logger.Warn().
-				Int("before_gold", before.Gold).
-				Int("after_gold", after.Gold).
-				Int("before_elixir", before.Elixir).
-				Int("after_elixir", after.Elixir).
-				Msg("wall loop reported upgrades but village resources did not decrease; review wall calibration")
 		}
 	}
 
