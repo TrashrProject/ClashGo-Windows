@@ -3715,6 +3715,11 @@ type MemberAutomationProfile struct {
 	StallTimerSeconds   int                           `json:"stall_timer_seconds"`
 	LootExitEnabled     bool                          `json:"loot_exit_enabled"`
 	LootExitPercent     int                           `json:"loot_exit_percent"`
+	EndAtStars          int                           `json:"end_at_stars"`
+	AutoCollectors      bool                          `json:"auto_collectors"`
+	CollectorMinutes    int                           `json:"collector_minutes"`
+	PrivacyMaskUsername bool                          `json:"privacy_mask_username"`
+	SaveAcceptedBases   bool                          `json:"save_accepted_bases"`
 	FarmEnabled         bool                          `json:"farm_enabled"`
 	FarmTownHall        int                           `json:"farm_town_hall"`
 	FarmProfiles        map[string]config.FarmProfile `json:"farm_profiles,omitempty"`
@@ -3734,9 +3739,14 @@ func memberAutomationFromConfig(cfg *config.BotConfig) MemberAutomationProfile {
 		UpgradeWalls:      cfg.Upgrade.UpgradeWalls,
 		StrategyFile:      filepath.Base(cfg.Attack.StrategyFile),
 		StallTimerSeconds: cfg.Attack.StallTimerSeconds,
-		LootExitEnabled:   cfg.Attack.LootExitEnabled,
-		LootExitPercent:   cfg.Attack.LootExitPercent,
-		FarmEnabled:       cfg.Attack.Farm.Enabled,
+		LootExitEnabled:     cfg.Attack.LootExitEnabled,
+		LootExitPercent:     cfg.Attack.LootExitPercent,
+		EndAtStars:          cfg.Attack.EndAtStars,
+		AutoCollectors:      cfg.Automation.AutoCollectors,
+		CollectorMinutes:    int(cfg.Automation.CollectorInterval.Duration / time.Minute),
+		PrivacyMaskUsername: cfg.Automation.PrivacyMaskUsername,
+		SaveAcceptedBases:   cfg.Search.SaveAcceptedBaseScreenshots,
+		FarmEnabled:         cfg.Attack.Farm.Enabled,
 		FarmTownHall:      cfg.Attack.Farm.TownHall,
 		FarmProfiles:      map[string]config.FarmProfile{},
 	}
@@ -3753,6 +3763,13 @@ func sanitizeMemberAutomationProfile(profile MemberAutomationProfile) MemberAuto
 	profile.MinLootDarkElixir = max(0, min(maxLootThreshold, profile.MinLootDarkElixir))
 	profile.StallTimerSeconds = max(0, min(600, profile.StallTimerSeconds))
 	profile.LootExitPercent = max(0, min(100, profile.LootExitPercent))
+	profile.EndAtStars = max(0, min(3, profile.EndAtStars))
+	if profile.CollectorMinutes <= 0 {
+		profile.CollectorMinutes = 10
+	}
+	if profile.CollectorMinutes > 1440 {
+		profile.CollectorMinutes = 1440
+	}
 	if profile.FarmTownHall < 8 || profile.FarmTownHall > 18 {
 		profile.FarmTownHall = 18
 	}
@@ -3779,6 +3796,11 @@ func applyMemberAutomationToConfig(cfg *config.BotConfig, profile MemberAutomati
 	cfg.Attack.StallTimerSeconds = profile.StallTimerSeconds
 	cfg.Attack.LootExitEnabled = profile.LootExitEnabled
 	cfg.Attack.LootExitPercent = profile.LootExitPercent
+	cfg.Attack.EndAtStars = profile.EndAtStars
+	cfg.Automation.AutoCollectors = profile.AutoCollectors
+	cfg.Automation.CollectorInterval = config.Duration{Duration: time.Duration(profile.CollectorMinutes) * time.Minute}
+	cfg.Automation.PrivacyMaskUsername = profile.PrivacyMaskUsername
+	cfg.Search.SaveAcceptedBaseScreenshots = profile.SaveAcceptedBases
 
 	if profile.StrategyFile != "" {
 		candidate := paths.Resolve(filepath.Join("strategies", filepath.Base(profile.StrategyFile)))
@@ -5258,6 +5280,50 @@ func (a *App) SaveConfig(minGold, minElixir, minDE int, upgradeWalls bool, strat
 	}
 
 	// Apply live only after both durable copies succeeded.
+	if a.bot != nil {
+		a.bot.UpdateConfig(cfg)
+	}
+	return nil
+}
+
+// SaveClashCoreFeatures persists the optional ClashCore-inspired automation
+// features without changing the stable SaveConfig IPC signature.
+func (a *App) SaveClashCoreFeatures(autoCollectors bool, collectorMinutes int, privacyMaskUsername bool, saveAcceptedBases bool, endAtStars int) error {
+	if a.testSessionRestorePending() {
+		return fmt.Errorf("session test active: wait for it to finish before changing automation")
+	}
+	if collectorMinutes <= 0 || collectorMinutes > 1440 {
+		return fmt.Errorf("collector interval must be between 1 and 1440 minutes")
+	}
+	if endAtStars < 0 || endAtStars > 3 {
+		return fmt.Errorf("star target must be between 0 and 3")
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	cfg := config.LoadOrDefault("config.json")
+	cfg.Automation.AutoCollectors = autoCollectors
+	cfg.Automation.CollectorInterval = config.Duration{Duration: time.Duration(collectorMinutes) * time.Minute}
+	cfg.Automation.PrivacyMaskUsername = privacyMaskUsername
+	cfg.Search.SaveAcceptedBaseScreenshots = saveAcceptedBases
+	cfg.Attack.EndAtStars = endAtStars
+
+	automationPath := a.memberAutomationPath()
+	oldAutomation, hadOldAutomation := loadMemberAutomationFile(automationPath)
+	if err := a.persistMemberAutomation(cfg); err != nil {
+		return err
+	}
+	if err := config.Save("config.json", cfg); err != nil {
+		if hadOldAutomation {
+			_ = saveMemberAutomationFile(automationPath, oldAutomation)
+		} else if automationPath != "" {
+			_ = os.Remove(automationPath)
+			_ = os.Remove(automationPath + ".bak")
+			_ = os.Remove(automationPath + ".tmp")
+		}
+		return err
+	}
 	if a.bot != nil {
 		a.bot.UpdateConfig(cfg)
 	}
