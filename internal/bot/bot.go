@@ -610,14 +610,18 @@ func (b *Bot) Stop() {
 	}
 
 	// Cut ADB first so no further taps/captures can leave the process after
-	// Cancel. Wait for the capture loop and active sequence to leave their
-	// OpenCV code before releasing native matrices.
+	// Cancel. When Start() was refused before broker startup (for example an
+	// unresolved multi-account identity), there is no capture goroutine to
+	// wait for; skipping that wait avoids a fake 3-second teardown stall.
+	captureWasStarted := b.brokerActive.Load()
 	b.client.Close()
 
-	select {
-	case <-b.captureDone:
-	case <-time.After(3 * time.Second):
-		b.logger.Warn().Msg("capture loop did not stop within teardown window; keeping shared templates alive")
+	if captureWasStarted {
+		select {
+		case <-b.captureDone:
+		case <-time.After(3 * time.Second):
+			b.logger.Warn().Msg("capture loop did not stop within teardown window; keeping shared templates alive")
+		}
 	}
 
 	deadline := time.Now().Add(3 * time.Second)
@@ -625,11 +629,13 @@ func (b *Bot) Stop() {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	captureStopped := false
-	select {
-	case <-b.captureDone:
-		captureStopped = true
-	default:
+	captureStopped := !captureWasStarted
+	if captureWasStarted {
+		select {
+		case <-b.captureDone:
+			captureStopped = true
+		default:
+		}
 	}
 	if captureStopped && b.frameBroker != nil {
 		b.frameBroker.Close()
