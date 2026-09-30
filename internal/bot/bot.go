@@ -900,6 +900,21 @@ func (b *Bot) recordWatchdogIncident(kind string, state game.GameState, stuck ti
 // one place doing nothing for too long, we cycle the game to recover from
 // hangs / dialogs / out-of-game screens without requiring user intervention.
 func (b *Bot) checkStuck(gc *game.GameContext) {
+	// Preserve the base branch's unattended wall-clock session limit. This is
+	// checked from the capture loop, so it also applies while Clash is idle at
+	// the village between raids and while no attack sequence is active.
+	if maxRun := b.cfg.Automation.MaxRunMinutes; maxRun > 0 {
+		limit := time.Duration(maxRun) * time.Minute
+		if time.Since(b.startedAt) >= limit {
+			b.logger.Info().
+				Dur("uptime", time.Since(b.startedAt)).
+				Dur("limit", limit).
+				Msg("configured unattended runtime reached; stopping bot cleanly")
+			b.cancel()
+			return
+		}
+	}
+
 	lastAction, lastSequenceStart := b.watchdogTimes()
 
 	if gc.ReadHealth().ConsecutiveFails >= 10 {
