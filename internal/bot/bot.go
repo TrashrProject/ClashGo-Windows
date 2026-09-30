@@ -3019,7 +3019,7 @@ func (b *Bot) selectArmySlot() bool {
 	tapX, tapY := b.cal.ScaleRef(430, cardY)
 
 	b.logger.Debug().Int("army_slot", slot).Int("x", tapX).Int("y", tapY).Msg("selecting saved army recipe card")
-	if err := b.client.TapRandomized(tapX, tapY); err != nil {
+	if err := b.client.TapFast(tapX, tapY, 1.2); err != nil {
 		b.logger.Warn().Err(err).Msg("army recipe card tap failed")
 		return false
 	}
