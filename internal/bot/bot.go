@@ -1982,6 +1982,27 @@ func (b *Bot) executeAttackSequence(gc *game.GameContext) {
 	var cooldownDurationMS int64
 	var preparationDurationMS int64
 
+	// If ClashGO stopped during an account switch after the slot tap but
+	// before the target village was verified, the physical account identity is
+	// unknown. Never attack in that state: pausing is safer than contaminating
+	// another account's IA, history, walls or farm profile.
+	if b.multiAccount != nil {
+		if recoveryRequired, targetID := b.multiAccount.RecoveryStatus(); recoveryRequired {
+			b.paused.Store(true)
+			b.logger.Error().
+				Str("target_account_id", targetID).
+				Msg("multi-account recovery required; automation paused before attack")
+			if b.telemetry != nil {
+				b.telemetry.Emit(telemetry.EventSpeedProfile, map[string]any{
+					"mode": "Paused",
+					"reason": "multi_account_recovery_required",
+					"target_account_id": targetID,
+				})
+			}
+			return
+		}
+	}
+
 	// A failed post-battle wall pass is never forgotten. Retry it once the bot
 	// is safely back on the Main Village, before spending time on another
 	// matchmaking cycle. Failure here does not deadlock farming: the pending
@@ -3931,6 +3952,9 @@ type MultiAccountRuntimeStatus struct {
 	TotalSwitches      int       `json:"total_switches"`
 	LastSwitchAt       time.Time `json:"last_switch_at,omitempty"`
 	LastError          string    `json:"last_error,omitempty"`
+	RecoveryRequired   bool      `json:"recovery_required"`
+	RecoveryTargetID   string    `json:"recovery_target_account_id,omitempty"`
+	SwitchInFlight     bool      `json:"switch_in_flight"`
 }
 
 func (b *Bot) MultiAccountStatus() MultiAccountRuntimeStatus {
@@ -3938,13 +3962,17 @@ func (b *Bot) MultiAccountStatus() MultiAccountRuntimeStatus {
 		return MultiAccountRuntimeStatus{}
 	}
 	st := b.multiAccount.State()
+	recoveryRequired, recoveryTarget := b.multiAccount.RecoveryStatus()
 	out := MultiAccountRuntimeStatus{
-		Enabled:         b.multiAccount.Enabled(),
-		ActiveAccountID: st.ActiveAccountID,
-		AttacksThisTurn: st.AttacksThisTurn,
-		TotalSwitches:   st.TotalSwitches,
-		LastSwitchAt:    st.LastSwitchAt,
-		LastError:       st.LastError,
+		Enabled:          b.multiAccount.Enabled(),
+		ActiveAccountID:  st.ActiveAccountID,
+		AttacksThisTurn:  st.AttacksThisTurn,
+		TotalSwitches:    st.TotalSwitches,
+		LastSwitchAt:     st.LastSwitchAt,
+		LastError:        st.LastError,
+		RecoveryRequired: recoveryRequired,
+		RecoveryTargetID: recoveryTarget,
+		SwitchInFlight:   b.multiAccountSwitchInFlight.Load(),
 	}
 	if active, ok := b.multiAccount.Active(); ok {
 		out.ActiveAccountLabel = active.Label
