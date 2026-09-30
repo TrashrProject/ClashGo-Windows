@@ -63,3 +63,17 @@ func TestAccountVisualHashDetectsLargeSceneChange(t *testing.T) {
 		t.Fatalf("opposite gradients produced identical visual hashes: %016x", a)
 	}
 }
+
+
+func TestAccountSceneStableDistanceThreshold(t *testing.T) {
+	base := uint64(0xAAAAAAAAAAAAAAAA)
+	near := base ^ uint64(0b1111)
+	far := base ^ uint64(0b111111111)
+
+	if got := accountSceneStableDistance(base, near); got != 4 {
+		t.Fatalf("near distance=%d want 4", got)
+	}
+	if got := accountSceneStableDistance(base, far); got != 9 {
+		t.Fatalf("far distance=%d want 9", got)
+	}
+}
