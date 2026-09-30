@@ -123,6 +123,14 @@ func (b *Bot) calibratedAccountCenter(c multiAccountSwitchCalibration, r multiAc
 	if !r.valid(c.Width, c.Height) {
 		return 0, 0, fmt.Errorf("invalid calibrated account rectangle")
 	}
+	calAspect := float64(c.Width) / float64(c.Height)
+	currentAspect := float64(b.cal.PhysicalW) / float64(b.cal.PhysicalH)
+	if math.Abs(currentAspect-calAspect)/calAspect > 0.025 {
+		return 0, 0, fmt.Errorf(
+			"BlueStacks aspect ratio changed since multi-account calibration (%dx%d -> %dx%d); recalibrate before switching",
+			c.Width, c.Height, b.cal.PhysicalW, b.cal.PhysicalH,
+		)
+	}
 	x := float64(r.X1+r.X2) * 0.5
 	y := float64(r.Y1+r.Y2) * 0.5
 	sx := float64(b.cal.PhysicalW) / float64(c.Width)
@@ -353,7 +361,8 @@ func (b *Bot) switchMultiAccountIfReady(next config.ManagedAccount) (retErr erro
 		_ = b.client.Back()
 		return fmt.Errorf("Supercell ID panel visual transition was not confirmed (distance=%d)", distance)
 	}
-	if state, err := b.accountState(2 * time.Second); err != nil || state == game.StateMainVillage {
+	if state, err := b.accountState(2 * time.Second); err != nil ||
+		state == game.StateMainVillage || state == game.StateSettings {
 		_ = b.client.Back()
 		return fmt.Errorf("Supercell ID panel was not confirmed")
 	}
