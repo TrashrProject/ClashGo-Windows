@@ -28,6 +28,7 @@ const xingchenCompatibleAttackFlow = true
 // the matching formula.json (loaded as <stem>_formula.json next to the
 // YAML). Pass "" to skip formula lookup entirely.
 func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat, strategyPath string) (int, error) {
+	analysisStarted := time.Now()
 	w, h := screen.Cols(), screen.Rows()
 	targetEdge := s.TargetEdge
 
@@ -90,7 +91,9 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	// intended attack side if needed, then freeze that fresh frame for the
 	// generic deployment planner.
 	uiCutoff := int(float64(h) * 0.85) // above troop bar
+	cameraStarted := time.Now()
 	deployScreen, cameraFrameOwned, redZone := e.normalizeBattlefieldCamera(screen, targetEdge, uiCutoff)
+	cameraMS := time.Since(cameraStarted).Milliseconds()
 	defer func() {
 		if cameraFrameOwned && !deployScreen.Empty() {
 			deployScreen.Close()
@@ -278,16 +281,20 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 		deployLine = pinnedLine
 	}
 
-	// 4. Initialize SlotManager
+	// 4. Initialize SlotManager — exactly once on the normalized frame.
+	slotStarted := time.Now()
 	slotMgr := NewSlotManager(deployScreen, pCfg, w, h, mBarY, e.templates, e.classify, e.logger)
+	slotMS := time.Since(slotStarted).Milliseconds()
 	if len(slotMgr.GetAllSlots()) == 0 {
 		return 0, fmt.Errorf("no active slots detected")
 	}
 
-	// 5. Detect troop counts
+	// 5. Detect troop counts once. No pre-deploy rescan loop.
+	countStarted := time.Now()
 	troopCounter := NewTroopCounter(pCfg.Width, pCfg.Height, e.logger)
 	defer troopCounter.Close()
 	troopCounts := troopCounter.DetectCounts(deployScreen, slotMgr.GetAllSlots(), mBarY)
+	countMS := time.Since(countStarted).Milliseconds()
 	countMap := GetAllCounts(troopCounts)
 	farmProfile, farmControlled := e.cfg.Farm.ActiveProfile()
 	if farmControlled {
@@ -841,9 +848,38 @@ func (e *Executor) DeployDynamicV2(s *strategy.DynamicStrategy, screen gocv.Mat,
 	// battle had already ended because no wall-clock bound existed.
 	tapExec.StartDeployBudget()
 
-	// 7. Plan phases
+	// 7. Build the complete immutable plan before the first deploy tap.
 	planner := NewDeployPlanner(slotMgr, pCfg, targetEdge, w, h, e.logger)
-	plans := planner.PlanDeployment(s)
+	prepared := planner.Prepare(s)
+	plans := prepared.Phases
+	analysisMS := time.Since(analysisStarted).Milliseconds()
+
+	planLog := e.logger.Info().
+		Int64("analysis_ms", analysisMS).
+		Int64("camera_ms", cameraMS).
+		Int64("slot_ms", slotMS).
+		Int64("count_ms", countMS).
+		Int64("planner_ms", prepared.BuiltIn.Milliseconds()).
+		Int("slots", len(slotMgr.GetAllSlots())).
+		Int("resolved_units", prepared.ResolvedUnits).
+		Str("target_edge", targetEdge).
+		Bool("red_zone_valid", redZone.Valid)
+	if len(prepared.MissingUnits) > 0 {
+		planLog = planLog.Strs("missing_units", prepared.MissingUnits)
+	}
+	planLog.Msg("attack plan ready")
+
+	// Planning should normally be only a few seconds. Do not abort a valid
+	// attack solely because a slow machine exceeded the target; surface the
+	// exact timing instead so the hot path can be tuned without blind delays.
+	if analysisMS > 5000 {
+		e.logger.Warn().
+			Int64("analysis_ms", analysisMS).
+			Int64("camera_ms", cameraMS).
+			Int64("slot_ms", slotMS).
+			Int64("count_ms", countMS).
+			Msg("attack preparation exceeded 5s target")
+	}
 
 	// 8. Collect strategy unit names
 	strategyNames := GetStrategyUnitNames(s)
