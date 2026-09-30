@@ -24,6 +24,7 @@ jobs:
           go test ./internal/config
           go test ./internal/telemetry
           go test ./internal/intelligence
+          go test ./internal/multiaccount
           go test ./internal/licensing
           go test ./internal/support
           go test ./internal/updater
