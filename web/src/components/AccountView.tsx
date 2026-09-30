@@ -419,7 +419,6 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [multiAccountMessage, setMultiAccountMessage] = React.useState('');
   const [multiAccountError, setMultiAccountError] = React.useState('');
   const [multiAccountCalibrated, setMultiAccountCalibrated] = React.useState(false);
-  const [multiAccountStatus, setMultiAccountStatus] = React.useState<MultiAccountRuntimeStatus | null>(null);
   const [multiAccountStatus, setMultiAccountStatus] = React.useState<MultiAccountRuntimeStatusView | null>(null);
 
   React.useEffect(() => {
@@ -429,7 +428,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     const refresh = async () => {
       try {
         const status = await GetMultiAccountStatus();
-        if (!cancelled) setMultiAccountStatus(status as MultiAccountRuntimeStatusViewView);
+        if (!cancelled) setMultiAccountStatus(status as MultiAccountRuntimeStatusView);
       } catch {
         // Runtime status is best-effort while the Wails bridge starts.
       }
