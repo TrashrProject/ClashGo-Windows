@@ -4,9 +4,11 @@ package main
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/Ducky705/ClashGO/internal/bot"
+	"github.com/Ducky705/ClashGO/internal/config"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sys/windows"
 )
@@ -16,11 +18,28 @@ var (
 	emergencyGetAsyncKeyState = emergencyUser32.NewProc("GetAsyncKeyState")
 )
 
-const emergencyVKEnd = 0x23
+const (
+	emergencyVKEnd     = 0x23
+	emergencyVKControl = 0x11
+	emergencyVKShift   = 0x10
+)
 
-func emergencyEndPressed() bool {
-	state, _, _ := emergencyGetAsyncKeyState.Call(emergencyVKEnd)
+func emergencyKeyDown(vk uintptr) bool {
+	state, _, _ := emergencyGetAsyncKeyState.Call(vk)
 	return state&0x8000 != 0
+}
+
+func emergencyStopPressed(binding string) bool {
+	switch strings.ToLower(strings.TrimSpace(binding)) {
+	case "off", "disabled", "none":
+		return false
+	case "end":
+		return emergencyKeyDown(emergencyVKEnd)
+	default:
+		return emergencyKeyDown(emergencyVKControl) &&
+			emergencyKeyDown(emergencyVKShift) &&
+			emergencyKeyDown(emergencyVKEnd)
+	}
 }
 
 // watchEmergencyStopKey gives unattended Windows sessions a physical kill
@@ -34,7 +53,8 @@ func (a *App) watchEmergencyStopKey(ctx context.Context, b *bot.Bot) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
-	wasPressed := emergencyEndPressed()
+	binding := config.LoadOrDefault("config.json").Automation.EmergencyStopHotkey
+	wasPressed := emergencyStopPressed(binding)
 	for {
 		select {
 		case <-ctx.Done():
@@ -42,13 +62,13 @@ func (a *App) watchEmergencyStopKey(ctx context.Context, b *bot.Bot) {
 		case <-b.Done():
 			return
 		case <-ticker.C:
-			pressed := emergencyEndPressed()
+			pressed := emergencyStopPressed(binding)
 			if pressed && !wasPressed {
 				a.mu.Lock()
 				active := a.bot == b
 				a.mu.Unlock()
 				if active {
-					log.Warn().Msg("End key pressed; stopping ClashGO immediately")
+					log.Warn().Str("hotkey", binding).Msg("emergency stop hotkey pressed; stopping ClashGO immediately")
 					_ = a.StopBot()
 				}
 				return
