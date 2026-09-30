@@ -41,6 +41,19 @@ type MultiAccountConfigView = {
   accounts: ManagedAccount[];
 };
 
+type MultiAccountRuntimeStatus = {
+  enabled: boolean;
+  active_account_id?: string;
+  active_account_label?: string;
+  attacks_this_turn: number;
+  next_account_id?: string;
+  next_account_label?: string;
+  rotation_due: boolean;
+  total_switches: number;
+  last_switch_at?: string;
+  last_error?: string;
+};
+
 type MultiAccountRuntimeStatusView = {
   enabled: boolean;
   active_account_id?: string;
@@ -378,8 +391,9 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
     let active = true;
     void Promise.all([
       GetMultiAccountConfig(),
+      GetMultiAccountStatus().catch(() => null),
       GetMultiAccountSwitchCalibration().catch(() => ''),
-    ]).then(([cfg, calibration]) => {
+    ]).then(([cfg, status, calibration]) => {
       if (!active) return;
       const value = (cfg || {}) as MultiAccountConfigView;
       setMultiAccount({
@@ -388,12 +402,30 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
         default_attacks_per_turn: Math.max(1, Number(value.default_attacks_per_turn || 10)),
         accounts: Array.isArray(value.accounts) ? value.accounts : [],
       });
+      setMultiAccountStatus(status ? status as MultiAccountRuntimeStatus : null);
       setMultiAccountCalibrated(Boolean(String(calibration || '').trim()));
     }).catch(() => {
       // Multi-account is optional; leave the single-account UI unaffected.
     });
     return () => { active = false; };
   }, [memberPage]);
+
+  React.useEffect(() => {
+    if (memberPage !== 'account') return;
+    let active = true;
+    const refreshStatus = async () => {
+      try {
+        const status = await GetMultiAccountStatus();
+        if (active) setMultiAccountStatus(status as MultiAccountRuntimeStatus);
+      } catch {}
+    };
+    void refreshStatus();
+    const id = window.setInterval(refreshStatus, 3000);
+    return () => {
+      active = false;
+      window.clearInterval(id);
+    };
+  }, [memberPage, automationActive]);
   const [confirmDeactivate, setConfirmDeactivate] = React.useState(false);
   const [supportCodeCopied, setSupportCodeCopied] = React.useState(false);
   const [supportSummaryCopied, setSupportSummaryCopied] = React.useState(false);
@@ -415,6 +447,7 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
   const [multiAccountMessage, setMultiAccountMessage] = React.useState('');
   const [multiAccountError, setMultiAccountError] = React.useState('');
   const [multiAccountCalibrated, setMultiAccountCalibrated] = React.useState(false);
+  const [multiAccountStatus, setMultiAccountStatus] = React.useState<MultiAccountRuntimeStatus | null>(null);
   const [multiAccountStatus, setMultiAccountStatus] = React.useState<MultiAccountRuntimeStatusView | null>(null);
 
   React.useEffect(() => {
@@ -1502,6 +1535,26 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
               <p className="mt-1 text-xs font-semibold text-zinc-500">
                 Sans calibration, ClashGO n’effectuera aucun clic de changement de compte : la rotation sera simplement différée.
               </p>
+              {multiAccountStatus?.enabled && (
+                <div className="mt-3 flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-wider">
+                  <span className="rounded-full bg-zinc-950/5 dark:bg-white/5 px-2.5 py-1 text-zinc-500">
+                    Tour : {multiAccountStatus.attacks_this_turn || 0} attaque(s)
+                  </span>
+                  <span className="rounded-full bg-zinc-950/5 dark:bg-white/5 px-2.5 py-1 text-zinc-500">
+                    Switches : {multiAccountStatus.total_switches || 0}
+                  </span>
+                  {multiAccountStatus.rotation_due && (
+                    <span className="rounded-full bg-sky-500/10 px-2.5 py-1 text-sky-500">
+                      Prochain : {multiAccountStatus.next_account_label || multiAccountStatus.next_account_id || 'compte suivant'}
+                    </span>
+                  )}
+                </div>
+              )}
+              {multiAccountStatus?.last_error && (
+                <div className="mt-2 text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                  Dernier switch différé : {multiAccountStatus.last_error}
+                </div>
+              )}
               {multiAccountStatus && (
                 <div className="mt-3 flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-wider">
                   <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-zinc-500">
@@ -1607,19 +1660,17 @@ const AccountView: React.FC<AccountViewProps> = React.memo(({
                     />
                   </label>
                   <div className="flex gap-2">
-                    <button
-                      type="button"
-                      disabled={automationActive || multiAccountBusy}
-                      onClick={() => setMultiAccount(current => ({ ...current, active_account_id: account.id }))}
+                    <div
                       className={
-                        'h-10 rounded-xl px-3 text-[9px] font-black uppercase tracking-wider ' +
+                        'flex h-10 items-center rounded-xl px-3 text-[9px] font-black uppercase tracking-wider ' +
                         (multiAccount.active_account_id === account.id
                           ? 'bg-sky-500 text-white'
-                          : 'border border-zinc-200 dark:border-zinc-700 text-zinc-500')
+                          : 'border border-zinc-200 dark:border-zinc-700 text-zinc-400')
                       }
+                      title={multiAccount.active_account_id === account.id ? 'Compte actuellement chargé' : 'Compte de la rotation'}
                     >
-                      {multiAccount.active_account_id === account.id ? 'Actif' : 'Choisir'}
-                    </button>
+                      {multiAccount.active_account_id === account.id ? 'Actuel' : 'Rotation'}
+                    </div>
                     <button
                       type="button"
                       disabled={automationActive || multiAccountBusy}
