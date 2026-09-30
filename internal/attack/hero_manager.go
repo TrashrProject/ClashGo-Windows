@@ -417,7 +417,7 @@ func (hm *HeroManager) DeployTroops(
 	preCount := detectedCount
 	preVisualEmpty := false
 	if preCount <= 0 {
-		preCount, preVisualEmpty = hm.liveCountAndEmpty(slot)
+		preCount, preVisualEmpty = hm.liveCountAndEmpty(slot, false)
 	}
 	if preVisualEmpty && preCount <= 0 {
 		hm.logger.Info().
@@ -471,7 +471,7 @@ func (hm *HeroManager) DeployTroops(
 		}
 		hm.executor.HumanSleep(reconcileSettleMs, 30)
 
-		live, visualEmpty := hm.liveCountAndEmpty(slot)
+		live, visualEmpty := hm.liveCountAndEmpty(slot, true)
 		if live <= 0 && visualEmpty {
 			hm.slotManager.MarkDeployed(unitName)
 			hm.logger.Info().
@@ -644,7 +644,7 @@ func (hm *HeroManager) deploySiegeFromFormula(unit strategy.Unit, slot *TrackedS
 // liveCountAndEmpty is a thin shim to the shared captureSlotLiveCount
 // helper in live_count.go. Kept as a method to keep call-site code
 // readable inside HeroManager.DeployTroops's reconcile loop.
-func (hm *HeroManager) liveCountAndEmpty(slot *TrackedSlot) (int, bool) {
+func (hm *HeroManager) liveCountAndEmpty(slot *TrackedSlot, postDeploy bool) (int, bool) {
 	if hm == nil || hm.executor == nil || hm.slotManager == nil || slot == nil {
 		return 0, false
 	}
@@ -657,9 +657,13 @@ func (hm *HeroManager) liveCountAndEmpty(slot *TrackedSlot) (int, bool) {
 	}
 	defer screen.Close()
 
-	// Reuse this same post-deploy frame to follow CoC's compacting troop bar.
-	// This is structural only: no portrait template pass and no extra capture.
-	_ = hm.slotManager.RefreshPositions(screen)
+	// Reuse the same checkpoint frame to follow CoC's compacting troop bar.
+	// No portrait scan and no second capture are needed.
+	if postDeploy {
+		_ = hm.slotManager.RefreshPositionsAfterDeployment(screen, slot)
+	} else {
+		_ = hm.slotManager.RefreshPositions(screen)
+	}
 
 	count := 0
 	if hm.troopCounter != nil && hm.troopCounter.HasDigitTemplates() {
