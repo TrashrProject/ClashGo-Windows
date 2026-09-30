@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -130,12 +131,30 @@ func buildArmyInspection(slots []*TrackedSlot, counts []TroopCount, profile *con
 	return s
 }
 
-func writeArmyInspectionSnapshot(s ArmyInspectionSnapshot) {
+func writeArmyInspectionSnapshotAtPath(s ArmyInspectionSnapshot, path string) {
+	if strings.TrimSpace(path) == "" {
+		return
+	}
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(paths.ResolveConfig("current_army.json"), data, 0o600)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(path, data, 0o600)
+}
+
+func writeArmyInspectionSnapshot(s ArmyInspectionSnapshot) {
+	writeArmyInspectionSnapshotAtPath(s, paths.ResolveConfig("current_army.json"))
+}
+
+func (e *Executor) persistArmyInspectionSnapshot(s ArmyInspectionSnapshot) {
+	writeArmyInspectionSnapshot(s)
+	if e == nil || strings.TrimSpace(e.armyInspectionPath) == "" {
+		return
+	}
+	writeArmyInspectionSnapshotAtPath(s, e.armyInspectionPath)
 }
 
 func writeArmyInspection(slots []*TrackedSlot, counts []TroopCount, profile *config.FarmProfile) {
