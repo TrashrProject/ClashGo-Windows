@@ -34,6 +34,7 @@ type Executor struct {
 	logger        zerolog.Logger
 	classify      func(gocv.Mat) (game.GameState, int)
 	frameProvider func(time.Duration) (gocv.Mat, error)
+	armyInspectionPath string
 	tappedSiegeXs map[int]bool
 	templates     map[string]gocv.Mat
 	// Shared, session-owned loot recognizer. The Bot owns its lifecycle;
@@ -471,6 +472,13 @@ func (e *Executor) SetFrameProvider(fn func(time.Duration) (gocv.Mat, error)) {
 	e.frameProvider = fn
 }
 
+func (e *Executor) SetArmyInspectionPath(path string) {
+	if e == nil {
+		return
+	}
+	e.armyInspectionPath = strings.TrimSpace(path)
+}
+
 func (e *Executor) captureFrame(timeout time.Duration) (gocv.Mat, error) {
 	if e.frameProvider != nil {
 		return e.frameProvider(timeout)
@@ -544,7 +552,7 @@ func (e *Executor) InspectArmyGuard(screen gocv.Mat) (ArmyInspectionSnapshot, er
 	counts := counter.DetectCounts(screen, slots, slotMgr.GetBarY())
 
 	snapshot = buildArmyInspection(slots, counts, &profile)
-	writeArmyInspectionSnapshot(snapshot)
+	e.persistArmyInspectionSnapshot(snapshot)
 	return snapshot, nil
 }
 
