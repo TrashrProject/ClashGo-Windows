@@ -30,6 +30,7 @@ func testOutcome(edge string, stars, destruction int) ContextualOutcome {
 		FullRoutineDurationMS: 105000,
 		SearchDurationMS: 15000,
 		SearchSkips: 2,
+		BattleDurationMS: 90000,
 		DeploySuccess: true,
 		ReturnHomeSuccess: true,
 		SafeDeployment: true,
@@ -259,5 +260,36 @@ func TestRecommendTargetSafetyModeNeverAddsAggressiveReject(t *testing.T) {
 	rec := e.RecommendTarget("valk_spam", 17, target, rules, legacy, 5*time.Second, 1, false)
 	if !rec.Accept {
 		t.Fatalf("safety pacing must not create extra search pressure: %+v", rec)
+	}
+}
+
+
+func TestRecommendFarmExitLearnsConservativeThreshold(t *testing.T) {
+	e, _ := NewContextualEngine("")
+	seedFarmTargetHistory(t, e)
+
+	rec := e.RecommendFarmExit("valk_spam", 17)
+	if !rec.Enabled {
+		t.Fatalf("expected learned farm exit: %+v", rec)
+	}
+	if rec.MinLootPercent < 55 || rec.MinLootPercent > 90 {
+		t.Fatalf("unsafe learned loot threshold: %+v", rec)
+	}
+	if rec.StallSeconds < 5 || rec.StallSeconds > 30 {
+		t.Fatalf("unsafe learned stall duration: %+v", rec)
+	}
+	if rec.Samples < 6 {
+		t.Fatalf("farm exit enabled without enough evidence: %+v", rec)
+	}
+}
+
+func TestRecommendFarmExitNeedsEnoughHistory(t *testing.T) {
+	e, _ := NewContextualEngine("")
+	for i := 0; i < 5; i++ {
+		_, _ = e.Observe(testOutcome("TopRight", 1, 60))
+	}
+	rec := e.RecommendFarmExit("valk_spam", 17)
+	if rec.Enabled {
+		t.Fatalf("farm exit must stay disabled during cold start: %+v", rec)
 	}
 }
