@@ -743,19 +743,18 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 		}
 		h.step("wall_clicked", nil)
 
-		// 5. Wait for map camera to focus on the selected wall and the
-		// upgrade menu to appear.
-		//
-		// CoC's wall-tap animation pipeline:
-		//   - camera pan to selected wall: ~1s (varies with distance)
-		//   - zoom-in on the wall: ~0.5s
-		//   - bottom upgrade-tray slide-in: ~0.5-1s
-		// On BlueStacks + a fresh wall selection, total is 2-4s depending
-		// on lag. The 2.5s baseline below covers the typical case; the
-		// retry loop after captures+re-matches adds up to 3 more seconds
-		// of headroom for slow pans without permanently slowing down the
-		// fast path on a quick UI response.
-		time.Sleep(2500 * time.Millisecond)
+		// 5. Wait for the selected-wall tray using visual evidence instead of
+		// burning a fixed 2.5 seconds on every wall. A fast render can proceed
+		// after the first successful probe; a slow render keeps a bounded
+		// fallback window and then continues through the existing resilient flow.
+		trayTimeout := 2200 * time.Millisecond
+		if h.DeepSearch {
+			trayTimeout = 3200 * time.Millisecond
+		}
+		if !waitForWallUpgradeTray(h, trayTimeout) {
+			h.Logger.Warn().Dur("timeout", trayTimeout).Msg("wall upgrade tray readiness not confirmed; continuing with fallback flow")
+			h.step("wall_tray_readiness_timeout", map[string]any{"timeout_ms": trayTimeout.Milliseconds()})
+		}
 
 		// 6. Choose flow: asset-driven (preferred), probe-and-discard,
 		// or template-matching fallback.
@@ -1531,6 +1530,53 @@ func RunWallUpgradeLoop(h *WallUpgradeHooks) {
 	}
 
 	h.step("sequence_end", nil)
+}
+
+func waitForWallUpgradeTray(h *WallUpgradeHooks, timeout time.Duration) bool {
+	if h == nil || h.Client == nil || h.Cal == nil || h.Templates == nil {
+		return false
+	}
+	tpl, ok := h.Templates.Get("btn_upgrade_wall")
+	if !ok || tpl.Empty() {
+		// The asset-driven path can still work without this template. Keep a
+		// short conservative settle rather than turning a missing diagnostic
+		// template into a hard failure.
+		time.Sleep(1200 * time.Millisecond)
+		return false
+	}
+
+	if timeout <= 0 {
+		timeout = 2200 * time.Millisecond
+	}
+	deadline := time.Now().Add(timeout)
+	time.Sleep(350 * time.Millisecond)
+	attempt := 0
+	for {
+		attempt++
+		screen, err := h.Client.CaptureToMat()
+		if err == nil && !screen.Empty() {
+			bottomROI := image.Rect(0, int(390*h.Cal.ScaleY), screen.Cols(), screen.Rows())
+			matches, _ := vision.MatchMultiScaleROICached(
+				screen, tpl, "btn_upgrade_wall",
+				0.3, 1.5, 20, 0.52, bottomROI,
+			)
+			screen.Close()
+			if len(matches) > 0 {
+				h.step("wall_tray_ready", map[string]any{
+					"attempt": attempt,
+					"conf":    matches[0].Confidence,
+				})
+				return true
+			}
+		} else if err == nil {
+			screen.Close()
+		}
+
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(180 * time.Millisecond)
+	}
 }
 
 // waitForMainVillage polls the classifier (if provided) until the screen
