@@ -128,6 +128,100 @@ func (b *Bot) saveAcceptedBaseScreenshot(screen gocv.Mat, gold, elixir, darkElix
 	}
 }
 
+func prunePNGDir(dir string, keep int) {
+	if keep <= 0 {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	type agedFile struct {
+		path string
+		when time.Time
+	}
+	files := make([]agedFile, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".png" {
+			continue
+		}
+		if info, statErr := entry.Info(); statErr == nil {
+			files = append(files, agedFile{path: filepath.Join(dir, entry.Name()), when: info.ModTime()})
+		}
+	}
+	if len(files) <= keep {
+		return
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].when.Before(files[j].when) })
+	for _, old := range files[:len(files)-keep] {
+		_ = os.Remove(old.path)
+	}
+}
+
+func nearLootThreshold(value, threshold, withinPercent int) bool {
+	if threshold <= 0 || value >= threshold {
+		return false
+	}
+	if withinPercent <= 0 {
+		withinPercent = 10
+	}
+	if withinPercent > 50 {
+		withinPercent = 50
+	}
+	floor := threshold * (100 - withinPercent) / 100
+	return value >= floor
+}
+
+// maybeSaveNearMissBaseScreenshot samples only rejected targets that were
+// genuinely close to at least one configured threshold. This gives debugging
+// evidence without turning every matchmaking skip into disk I/O.
+func (b *Bot) maybeSaveNearMissBaseScreenshot(screen gocv.Mat, gold, elixir, darkElixir, score, ordinal int) {
+	if b == nil || b.cfg == nil || screen.Empty() || !b.cfg.Search.SaveNearMissBaseScreenshots {
+		return
+	}
+	every := b.cfg.Search.NearMissSampleEvery
+	if every <= 0 {
+		every = 20
+	}
+	if ordinal <= 0 || ordinal%every != 0 {
+		return
+	}
+	within := b.cfg.Search.NearMissWithinPercent
+	if !nearLootThreshold(gold, b.cfg.Search.MinLootGold, within) &&
+		!nearLootThreshold(elixir, b.cfg.Search.MinLootElixir, within) &&
+		!nearLootThreshold(darkElixir, b.cfg.Search.MinLootDarkElixir, within) {
+		return
+	}
+
+	dir := paths.ResolveConfig("output/near_miss_bases")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	name := fmt.Sprintf(
+		"near_miss_%s_G%d_E%d_DE%d_S%d.png",
+		time.Now().Format("20060102_150405.000"),
+		gold, elixir, darkElixir, score,
+	)
+	path := filepath.Join(dir, name)
+	persisted := b.screenshotForPersistence(screen)
+	if persisted.Empty() {
+		persisted.Close()
+		return
+	}
+	defer persisted.Close()
+	if ok := gocv.IMWrite(path, persisted); !ok {
+		return
+	}
+	prunePNGDir(dir, 100)
+	b.logger.Debug().
+		Str("path", path).
+		Int("gold", gold).
+		Int("elixir", elixir).
+		Int("de", darkElixir).
+		Int("score", score).
+		Msg("saved sampled near-miss target")
+}
+
 type collectorTarget struct {
 	kind string
 	point image.Point
