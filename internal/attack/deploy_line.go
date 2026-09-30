@@ -169,18 +169,26 @@ func (d *DeployLineCalculator) Calculate(
 
 // pickSide selects edge with most free space.
 func (d *DeployLineCalculator) pickSide(freeSpace map[string]int, prefer string) string {
-
-	if prefer != "" && freeSpace[prefer] > 0 {
+	const preferredSafeSpace = 60
+	if prefer != "" && freeSpace[prefer] >= preferredSafeSpace {
 		return prefer
 	}
 
 	best := "left"
-	bestSpace := 0
+	bestSpace := -1
 	for side, space := range freeSpace {
 		if space > bestSpace {
 			bestSpace = space
 			best = side
 		}
+	}
+	if prefer != "" && best != prefer {
+		d.logger.Info().
+			Str("preferred_side", prefer).
+			Int("preferred_space", freeSpace[prefer]).
+			Str("selected_side", best).
+			Int("selected_space", bestSpace).
+			Msg("preferred attack side too cramped; using safer red-zone side")
 	}
 	return best
 }
