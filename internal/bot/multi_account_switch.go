@@ -502,6 +502,20 @@ func (b *Bot) ResolveMultiAccountRecovery(accountID string) (config.ManagedAccou
 	return account, nil
 }
 
+func (b *Bot) ConfirmMultiAccountRecovery(accountID string) error {
+	account, err := b.ResolveMultiAccountRecovery(accountID)
+	if err != nil {
+		return err
+	}
+	b.paused.Store(false)
+	b.recordActivity()
+	b.logger.Info().
+		Str("account_id", account.ID).
+		Str("player_tag", account.PlayerTag).
+		Msg("multi-account recovery confirmed; automation resumed")
+	return nil
+}
+
 type preparedManagedAccount struct {
 	cfg           config.BotConfig
 	adaptive      *intelligence.AdaptiveEngine
