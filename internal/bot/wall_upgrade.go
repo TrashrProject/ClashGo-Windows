@@ -11,6 +11,7 @@ import (
 	"gocv.io/x/gocv"
 
 	"github.com/Ducky705/ClashGO/internal/game"
+	"github.com/Ducky705/ClashGO/internal/intelligence"
 	"github.com/Ducky705/ClashGO/internal/paths"
 	"github.com/Ducky705/ClashGO/internal/vision"
 )
@@ -134,6 +135,85 @@ type WallUpgradeHooks struct {
 // Bot's dependencies. The diagnostic tool at cmd/test_wall_upgrade
 // calls runWallUpgradeLoop directly with a hand-built hooks struct.
 func (b *Bot) UpgradeWalls(gc *game.GameContext) {
+	const wallMemoryID = "builder_menu_wall_entry"
+	var (
+		lastSearchAttempt float64
+		lastWallConf      float64
+		upgradesLearned   int
+	)
+
+	if b.villageMemory != nil {
+		if known, ok := b.villageMemory.KnownEntity(wallMemoryID, 24*time.Hour, 0.72); ok {
+			b.logger.Info().
+				Int("x", known.Position.X).
+				Int("y", known.Position.Y).
+				Float64("confidence", known.Confidence).
+				Msg("shadow village memory has a known Wall menu position")
+		}
+	}
+
+	observe := func(step string, data map[string]any) {
+		switch step {
+		case "wall_text_found":
+			x, xOK := data["x"].(int)
+			y, yOK := data["y"].(int)
+			if attempt, ok := data["attempt"].(int); ok {
+				lastSearchAttempt = float64(attempt)
+			}
+			if conf, ok := data["conf"].(float64); ok {
+				lastWallConf = conf
+			}
+			if xOK && yOK && b.villageMemory != nil {
+				_ = b.villageMemory.UpsertEntity(intelligence.VillageEntity{
+					ID: wallMemoryID,
+					Kind: "wall_menu_entry",
+					Position: intelligence.VillagePoint{X: x, Y: y},
+					Confidence: lastWallConf,
+					LastSeen: time.Now(),
+				})
+			}
+
+		case "upgrade_success":
+			upgradesLearned++
+			if b.villageMemory != nil {
+				_ = b.villageMemory.MarkEntityResult(wallMemoryID, true)
+			}
+			if b.adaptive != nil {
+				reward := 75.0
+				_, _ = b.adaptive.Observe(intelligence.LearningOutcome{
+					Domain: "wall_upgrade",
+					Parameters: map[string]float64{
+						"wall_search_attempt": lastSearchAttempt,
+						"builder_open_settle_ms": 1500,
+					},
+					Clean: true,
+					DeploySuccess: true,
+					ReturnHomeSuccess: true,
+					SafeDeployment: true,
+					ParsedResults: true,
+					RewardOverride: &reward,
+				})
+			}
+
+		case "wall_text_not_found", "tap_builder_failed":
+			if b.villageMemory != nil {
+				_ = b.villageMemory.MarkEntityResult(wallMemoryID, false)
+			}
+			if b.adaptive != nil {
+				reward := -35.0
+				_, _ = b.adaptive.Observe(intelligence.LearningOutcome{
+					Domain: "wall_upgrade",
+					Parameters: map[string]float64{
+						"wall_search_attempt": lastSearchAttempt,
+						"builder_open_settle_ms": 1500,
+					},
+					DeploySuccess: false,
+					RewardOverride: &reward,
+				})
+			}
+		}
+	}
+
 	RunWallUpgradeLoop(&WallUpgradeHooks{
 		Logger:    b.logger,
 		Client:    b.client,
@@ -141,10 +221,14 @@ func (b *Bot) UpgradeWalls(gc *game.GameContext) {
 		Templates: b.templates,
 		Classify:  b.classify,
 		Dismiss:   b.dismissSelection,
-		// StopCheck lets a user Stop interrupt the otherwise-unbounded
-		// wall-upgrade loop at its next iteration boundary.
 		StopCheck: func() bool { return b.ctx.Err() != nil },
+		OnStep:    observe,
 	})
+
+	b.logger.Info().
+		Int("learned_wall_upgrades", upgradesLearned).
+		Float64("last_wall_confidence", lastWallConf).
+		Msg("wall-upgrade shadow learning cycle complete")
 }
 
 // RunWallUpgradeLoop drives the wall-upgrade sequence with explicit deps
