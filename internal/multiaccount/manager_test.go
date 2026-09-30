@@ -219,3 +219,99 @@ func TestPhysicalFailureStillCreatesBackoff(t *testing.T) {
 		t.Fatalf("physical failure must create backoff: allowed=%v remaining=%s", allowed, remaining)
 	}
 }
+
+
+func TestPreparedSwitchJournalRequiresRecoveryAfterRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multi.json")
+	m, err := NewManager(path, testConfig(), "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.BeginSwitch("b"); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := NewManager(path, testConfig(), "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	required, target := reloaded.RecoveryStatus()
+	if !required || target != "b" {
+		t.Fatalf("recovery=%v target=%q want true/b", required, target)
+	}
+	if reloaded.Enabled() {
+		t.Fatal("rotation must be disabled while account identity is unresolved")
+	}
+	if _, due := reloaded.NextDue(); due {
+		t.Fatal("no rotation may be scheduled while recovery is required")
+	}
+}
+
+func TestPhysicalSwitchJournalRecoversTargetAfterRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multi.json")
+	m, err := NewManager(path, testConfig(), "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.BeginSwitch("b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.MarkPhysicalSwitch("b"); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := NewManager(path, testConfig(), "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	required, target := reloaded.RecoveryStatus()
+	if required {
+		t.Fatalf("verified physical switch must not require manual recovery: target=%q", target)
+	}
+	active, ok := reloaded.Active()
+	if !ok || active.ID != "b" {
+		t.Fatalf("active=%+v ok=%v want b/true", active, ok)
+	}
+	if target != "b" {
+		t.Fatalf("recovery target=%q want b for boot self-heal", target)
+	}
+}
+
+func TestResolveRecoveryClearsJournalAndRestoresRotation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "multi.json")
+	m, err := NewManager(path, testConfig(), "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.BeginSwitch("b"); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := NewManager(path, testConfig(), "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reloaded.ResolveRecovery("a"); err != nil {
+		t.Fatal(err)
+	}
+	required, target := reloaded.RecoveryStatus()
+	if required || target != "" {
+		t.Fatalf("recovery not cleared: required=%v target=%q", required, target)
+	}
+	active, ok := reloaded.Active()
+	if !ok || active.ID != "a" {
+		t.Fatalf("active=%+v ok=%v want a/true", active, ok)
+	}
+	if !reloaded.Enabled() {
+		t.Fatal("multi-account rotation should resume after explicit recovery resolution")
+	}
+
+	again, err := NewManager(path, testConfig(), "#AAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	required, target = again.RecoveryStatus()
+	if required || target != "" {
+		t.Fatalf("recovery journal survived explicit resolution: required=%v target=%q", required, target)
+	}
+}
