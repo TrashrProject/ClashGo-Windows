@@ -1,4 +1,4 @@
-# Prebuilt OCI image: server deployment does not require local build tools.
+# Prebuilt OCI image; deploys from the registry with persistent volumes.
 # Local deployment of three independent diagnostic pilots (no gameplay automation).
 x-pilot-base: &pilot-base
   image: ghcr.io/trashrproject/clashgo-windows:${GUARDIAN_IMAGE_TAG:-main}
@@ -21,7 +21,7 @@ x-pilot-base: &pilot-base
 services:
   guardian:
     image: ghcr.io/trashrproject/clashgo-windows:${GUARDIAN_IMAGE_TAG:-main}
-  pull_policy: always
+    pull_policy: always
     restart: unless-stopped
     environment:
       GUARDIAN_PASSWORD: ${GUARDIAN_PASSWORD:?Set GUARDIAN_PASSWORD}
