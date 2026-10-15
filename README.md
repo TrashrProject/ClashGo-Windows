@@ -132,6 +132,8 @@ Le port HTTP reste lié à `127.0.0.1` **sur le serveur**. Pour y accéder depui
 Les vérifications de santé ne sont pas une IA réparatrice universelle : elles servent à détecter les blocages et à établir un diagnostic fiable, avant des réparations ciblées et testées.
 
 
+Pour preparer un hebergement depuis un telephone, consulter [le guide Railway](deploy/RAILWAY.md) : quatre services independants et quatre volumes persistants, avec facturation et autorisations a verifier avant de deployer.
+
 ## Organisation
 `reqngo/core.py` : moteur SQLite indépendant. `reqngo/server.py` : API web et superviseur. `reqngo/static/index.html` : dashboard. `tests/` : scénarios automatisés.
 
