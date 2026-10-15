@@ -16,6 +16,16 @@ class TelemetryTests(unittest.TestCase):
         self.db.close()
         self.temp.cleanup()
 
+    def test_stale_alert_issued_once_and_other_agents_continue(self):
+        self.db.heartbeat("pilot_01")
+        self.db.heartbeat("pilot_02")
+        self.now[0] += 190
+        self.db.heartbeat("pilot_02")
+        self.assertEqual(self.db.check_stale(), {"alerts_created": 1})
+        self.assertEqual(self.db.check_stale(), {"alerts_created": 0})
+        self.assertEqual(self.db.snapshot()["summary"]["connected"], 1)
+        self.assertEqual(self.db.snapshot()["events"][0]["code"], "worker_unreachable")
+
     def test_heartbeat_and_stale_detection(self):
         self.db.heartbeat("pilot_01", version="0_1")
         self.assertEqual(self.db.snapshot()["summary"]["connected"], 1)
