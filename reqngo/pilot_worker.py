@@ -17,6 +17,8 @@ from urllib.request import Request, urlopen
 
 from reqngo.health import update_worker_heartbeat
 
+from reqngo.health import update_worker_heartbeat
+
 
 def validate_endpoint(url: str, private_docker: bool = False) -> str:
     parsed = urlparse(url)
@@ -131,6 +133,7 @@ class Pilot:
 
     def step(self):
         status = self.check()
+        update_worker_heartbeat(self.workdir.parent / "worker_heartbeat.txt")
         # Reports are durable even when the central service is temporarily unreachable.
         try:
             self.outbox.flush(self.report)
