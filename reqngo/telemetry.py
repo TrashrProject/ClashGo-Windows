@@ -121,6 +121,22 @@ class TelemetryStore:
             """)
         return {"ok": True, "duplicate": False}
 
+    def check_stale(self, stale_after=180):
+        """Record at most one alert per missed heartbeat window; never touch a worker."""
+        if type(stale_after) is not int or not 30 <= stale_after <= 3600:
+            raise ValueError("Seuil de surveillance invalide.")
+        with self.lock:
+            stale = [(row["agent_id"], row["last_seen"]) for row in self.db.execute(
+                "SELECT agent_id,last_seen FROM agents WHERE last_seen<?",
+                (self.clock() - stale_after,))]
+        created = 0
+        for agent_id, last_seen in stale:
+            event_key = "stale_" + agent_id + "_" + str(int(last_seen))
+            result = self.report(agent_id, event_key, "worker_unreachable", "warning",
+                                 metadata={"component": "heartbeat_monitor"})
+            created += int(not result["duplicate"])
+        return {"alerts_created": created}
+
     def snapshot(self, stale_after=180, limit=100):
         if type(stale_after) is not int or not 30 <= stale_after <= 3600:
             raise ValueError("Seuil de surveillance invalide.")
