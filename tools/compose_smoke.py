@@ -45,7 +45,7 @@ def main():
                 last_problem = "Workers connected; expected initial recovery events"
             else:
                 last_problem = "Still waiting for three worker heartbeats"
-        except (HTTPError, URLError, ValueError, TimeoutError) as exc:
+        except (HTTPError, URLError, ValueError, TimeoutError, OSError) as exc:
             last_problem = type(exc).__name__
         time.sleep(2)
     print("ERROR: Docker smoke test timeout:", last_problem, file=sys.stderr)
