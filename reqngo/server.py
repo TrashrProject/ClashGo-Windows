@@ -18,10 +18,13 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
 from reqngo.core import Guardian
+from reqngo.telemetry import TelemetryStore
+from reqngo.telemetry_api import router_for
 
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.getenv("GUARDIAN_DATA_DIR", BASE.parent / "data"))
 engine = Guardian(DATA / "guardian.sqlite3")
+telemetry = TelemetryStore(DATA / "telemetry.sqlite3")
 stop = threading.Event()
 security = HTTPBasic()
 
@@ -71,10 +74,12 @@ async def lifespan(app):
         stop.set()
         worker.join(timeout=5)
         engine.close()
+        telemetry.close()
 
 
 app = FastAPI(title="REQ N GO Guardian", docs_url=None, redoc_url=None,
               openapi_url=None, lifespan=lifespan)
+app.include_router(router_for(telemetry, guard))
 
 
 @app.middleware("http")
