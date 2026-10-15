@@ -132,8 +132,36 @@ Le port HTTP reste lié à `127.0.0.1` **sur le serveur**. Pour y accéder depui
 Les vérifications de santé ne sont pas une IA réparatrice universelle : elles servent à détecter les blocages et à établir un diagnostic fiable, avant des réparations ciblées et testées.
 
 
+## V5 : préparation cloud sans ordinateur personnel
+
+**Cette étape prépare le déploiement, mais ne loue ni ne démarre de serveur cloud.** Le dépôt contient désormais :
+
+- `GET /health/live` : vérifie que le processus web répond, sans exposer de données.
+- `GET /health/ready` : vérifie l'accès aux deux bases SQLite, sans exposer de données.
+- Une sonde locale par pilote qui détecte si sa propre boucle n'a plus progressé.
+- `compose.yaml` : construction et test des 4 conteneurs à partir du code.
+- `compose.cloud.yaml` : même topologie, mais téléchargement d'une image versionnée depuis GitHub Container Registry (GHCR).
+- `.github/workflows/guardian-image.yml` : après fusion dans `main`, tests puis publication des images `main` et `sha-<commit>` si les permissions GitHub le permettent.
+- `tools/compose_smoke.py` : test d'intégration des 3 pilotes contre le vrai serveur dans GitHub Actions, **sans connexion au jeu**.
+
+### Quand un serveur sera connecté
+
+L'hébergeur devra disposer de Docker Compose (un hébergement de service web simple ne suffit pas forcément), d'un stockage persistant pour **quatre volumes**, et d'une entrée sécurisée HTTPS/VPN. Dans les secrets de l'hébergeur, définir `GUARDIAN_PASSWORD` (au moins 16 caractères) et `GUARDIAN_AGENT_TOKEN` (au moins 32 caractères), différents et aléatoires.
+
+```bash
+docker compose -f compose.cloud.yaml pull
+docker compose -f compose.cloud.yaml up -d
+docker compose -f compose.cloud.yaml ps
+```
+
+**Ne pas exposer directement le port 8765.** Il reste lié à localhost dans les configurations fournies. L'accès depuis un iPhone exigera une passerelle HTTPS authentifiée ou un VPN. Une image GHCR n'est téléchargeable sans identifiants que si sa visibilité et les droits d'accès le permettent. Épingler `GUARDIAN_IMAGE_TAG=sha-<commit>` pour une mise en production vérifiable plutôt que d'utiliser systématiquement `main`.
+
+Les sondes Docker marquent un conteneur `unhealthy` sans automatiquement le relancer si son processus reste vivant. Le redémarrage sur sortie de processus est assuré par `restart: unless-stopped`. Un opérateur de remédiation ultérieur devra valider les actions, conserver un historique, appliquer des limites de fréquence et permettre un retour arrière.
+
+**Statut réel :** aucun serveur 24 h/24 ni domaine n'est encore connecté ; il n'existe aucune connexion à Clash of Clans ou à des émulateurs, aucune fonction d'IA capable de modifier seule le code. Les profils de comptes restent des simulations de gestion.
+
 ## Organisation
 `reqngo/core.py` : moteur SQLite indépendant. `reqngo/server.py` : API web et superviseur. `reqngo/static/index.html` : dashboard. `tests/` : scénarios automatisés.
 
 ## État
-V1 pilote : **pas de comptes réels, pas d'émulateur, pas de cloud et pas d'IA capable de modifier le code seule**.
+Pilote cloud V5 : **pas de comptes réels, pas d'émulateur, pas de cloud et pas d'IA capable de modifier le code seule**.
