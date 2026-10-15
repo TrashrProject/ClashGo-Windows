@@ -8,6 +8,8 @@ import threading
 import time
 from pathlib import Path
 
+from reqngo.triage import classify, more_severe
+
 _AGENT = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 _CODE = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
 _TRACE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
@@ -40,6 +42,17 @@ class TelemetryStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_diagnostic_events_time
                     ON diagnostic_events(recorded_at DESC);
+                CREATE TABLE IF NOT EXISTS diagnostic_cases (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id TEXT NOT NULL, profile_id INTEGER,
+                    code TEXT NOT NULL, severity TEXT NOT NULL,
+                    category TEXT NOT NULL, summary TEXT NOT NULL,
+                    recommended_action TEXT NOT NULL,
+                    status TEXT NOT NULL, occurrences INTEGER NOT NULL DEFAULT 1,
+                    first_seen REAL NOT NULL, last_seen REAL NOT NULL, verified_at REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_cases_status
+                    ON diagnostic_cases(status, last_seen DESC);
             """)
 
     def close(self):
@@ -90,6 +103,8 @@ class TelemetryStore:
                     status=excluded.status, version=excluded.version,
                     last_seen=excluded.last_seen
             """, (agent_id, status, version, at))
+            # A new heartbeat proves connectivity, not the health of other components.
+            self._verify_case(agent_id, None, "worker_unreachable", at)
         return {"ok": True, "agent_id": agent_id, "server_time": at}
 
     def report(self, agent_id, event_key, code, level="error", profile_id=None, metadata=None):
@@ -102,6 +117,10 @@ class TelemetryStore:
             raise ValueError("Niveau inconnu.")
         profile_id = self._profile(profile_id)
         metadata = self._metadata(metadata)
+        if code == "probe_success":
+            restored = metadata.get("error_type")
+            if level != "info" or not isinstance(restored, str) or not _CODE.fullmatch(restored) or restored == "probe_success":
+                raise ValueError("Une verification exige un code source structure et un niveau info.")
         at = self.clock()
         with self.lock, self.db:
             old = self.db.execute("SELECT agent_id FROM diagnostic_events WHERE event_key=?", (event_key,)).fetchone()
@@ -114,12 +133,46 @@ class TelemetryStore:
                 VALUES (?,?,?,?,?,?,?)
             """, (event_key, agent_id, profile_id, code, level,
                   json.dumps(metadata, ensure_ascii=False, sort_keys=True), at))
+            if code == "probe_success":
+                self._verify_case(agent_id, profile_id, metadata["error_type"], at)
+            elif level in ("warning", "error", "critical"):
+                self._record_case(agent_id, profile_id, code, level, at)
             self.db.execute("""
                 DELETE FROM diagnostic_events WHERE id NOT IN (
                     SELECT id FROM diagnostic_events ORDER BY id DESC LIMIT 2000
                 )
             """)
         return {"ok": True, "duplicate": False}
+
+    def _record_case(self, agent_id, profile_id, code, level, at):
+        diagnosis = classify(code, level)
+        existing = self.db.execute(
+            "SELECT id,severity FROM diagnostic_cases "
+            "WHERE agent_id=? AND profile_id IS ? AND code=? AND status='open' "
+            "ORDER BY id DESC LIMIT 1", (agent_id, profile_id, code)
+        ).fetchone()
+        if existing:
+            self.db.execute(
+                "UPDATE diagnostic_cases SET occurrences=occurrences+1, "
+                "last_seen=?,severity=? WHERE id=?",
+                (at, more_severe(existing["severity"], diagnosis["severity"]), existing["id"])
+            )
+        else:
+            self.db.execute(
+                "INSERT INTO diagnostic_cases "
+                "(agent_id,profile_id,code,severity,category,summary,recommended_action,"
+                "status,first_seen,last_seen) VALUES (?,?,?,?,?,?,?,'open',?,?)",
+                (agent_id, profile_id, code, diagnosis["severity"], diagnosis["category"],
+                 diagnosis["summary"], diagnosis["recommended_action"], at, at)
+            )
+
+    def _verify_case(self, agent_id, profile_id, code, at):
+        """Close only a specifically observed recovery, never guess based on elapsed time."""
+        self.db.execute(
+            "UPDATE diagnostic_cases SET status='verified',verified_at=? "
+            "WHERE agent_id=? AND profile_id IS ? AND code=? AND status='open'",
+            (at, agent_id, profile_id, code)
+        )
 
     def check_stale(self, stale_after=180):
         """Record at most one alert per missed heartbeat window; never touch a worker."""
@@ -148,12 +201,21 @@ class TelemetryStore:
             events = [dict(row) for row in self.db.execute(
                 "SELECT id,agent_id,profile_id,code,level,metadata,recorded_at "
                 "FROM diagnostic_events ORDER BY id DESC LIMIT ?", (limit,))]
+            cases = [dict(row) for row in self.db.execute(
+                "SELECT * FROM diagnostic_cases ORDER BY "
+                "CASE WHEN status='open' THEN 0 ELSE 1 END, last_seen DESC LIMIT ?",
+                (limit,)
+            )]
+            open_cases = self.db.execute(
+                "SELECT COUNT(*) FROM diagnostic_cases WHERE status='open'"
+            ).fetchone()[0]
         for agent in agents:
             agent["connection"] = "stale" if now - agent["last_seen"] > stale_after else agent["status"]
         for event in events:
             event["metadata"] = json.loads(event["metadata"])
-        return {"agents": agents, "events": events,
+        return {"agents": agents, "events": events, "cases": cases,
                 "summary": {"connected": sum(a["connection"] != "stale" for a in agents),
                             "stale": sum(a["connection"] == "stale" for a in agents),
-                            "recorded_events": len(events), "server_time": now},
+                            "recorded_events": len(events), "open_cases": open_cases,
+                            "server_time": now},
                 "scope": "test-workers-only"}

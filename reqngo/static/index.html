@@ -65,6 +65,8 @@ label{font-size:12px;color:var(--muted);display:block;margin:0 0 5px}.field{marg
 <p style="margin-top:12px">Statut des services de test connectés. Aucun contrôle du jeu.</p>
 <div id="telemetry-summary" class="sub">Chargement…</div>
 <div id="telemetry-agents" style="margin-top:10px"></div>
+<h2 style="margin-top:18px">Incidents à vérifier <span id="cases-count" class="sub"></span></h2>
+<div id="telemetry-cases"></div>
 <h2 style="margin-top:18px">Derniers événements techniques</h2><div id="telemetry-events"></div>
 <a href="/api/telemetry/export" download style="display:inline-block;margin-top:12px">Exporter les diagnostics</a>
 </details></section>
@@ -152,6 +154,17 @@ var info=await api("/api/telemetry/state");
 var sum=info.summary||{};
 document.getElementById("telemetry-summary").textContent=
 (sum.connected||0)+" service(s) connecté(s) · "+(sum.stale||0)+" sans nouvelles";
+var cases=document.getElementById("telemetry-cases");cases.replaceChildren();
+document.getElementById("cases-count").textContent="("+(sum.open_cases||0)+")";
+var openCases=(info.cases||[]).filter(function(c){return c.status==="open";});
+if(!openCases.length){cases.appendChild(node("div","entry","Aucun diagnostic en attente."));}
+openCases.slice(0,6).forEach(function(c){
+var panel=node("div","entry");
+panel.appendChild(node("strong","",c.category+" · "+c.agent_id+(c.profile_id?" / ACC_"+String(c.profile_id).padStart(2,"0"):"")));
+panel.appendChild(node("div","sub",c.summary+" · "+c.occurrences+" occurrence(s)"));
+panel.appendChild(node("div","sub","À vérifier : "+c.recommended_action));
+cases.appendChild(panel);
+});
 var agents=document.getElementById("telemetry-agents");agents.replaceChildren();
 if(!info.agents.length){agents.appendChild(node("div","entry","Aucun service distant configuré pour le moment."));}
 info.agents.forEach(function(a){
