@@ -1,0 +1,13 @@
+services:
+  guardian:
+    build: .
+    restart: unless-stopped
+    environment:
+      GUARDIAN_PASSWORD: ${GUARDIAN_PASSWORD:?Set GUARDIAN_PASSWORD}
+      GUARDIAN_DATA_DIR: /data
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - guardian-data:/data
+volumes:
+  guardian-data:
