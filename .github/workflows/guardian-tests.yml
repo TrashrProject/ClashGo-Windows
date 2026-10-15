@@ -31,6 +31,11 @@ jobs:
           docker compose -f compose.cloud.yaml config --quiet
       - name: Compile modules
         run: python -m compileall -q reqngo tools
+      - name: Validate cloud Compose topology without deploying
+        env:
+          GUARDIAN_PASSWORD: github-ci-password-not-used-for-login
+          GUARDIAN_AGENT_TOKEN: github-ci-token-not-used-in-deployment-123
+        run: docker compose -f compose.cloud.yaml config --quiet
       - name: Run four real Docker processes
         env:
           GUARDIAN_PASSWORD: ci-only-passphrase-not-for-production
