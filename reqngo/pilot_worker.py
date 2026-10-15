@@ -18,13 +18,15 @@ from urllib.request import Request, urlopen
 from reqngo.health import update_worker_heartbeat
 
 
-def validate_endpoint(url: str, private_docker: bool = False) -> str:
+def validate_endpoint(url: str, private_docker: bool = False, private_railway: bool = False) -> str:
     parsed = urlparse(url)
     local = parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "localhost")
     docker = (private_docker and parsed.scheme == "http" and parsed.hostname == "guardian"
               and parsed.port == 8765)
+    railway = (private_railway and parsed.scheme == "http"
+               and parsed.hostname == "guardian.railway.internal" and parsed.port == 8765)
     secure = parsed.scheme == "https" and bool(parsed.hostname)
-    if not (local or docker or secure) or parsed.username or parsed.password or parsed.path not in ("", "/"):
+    if not (local or docker or railway or secure) or parsed.username or parsed.password or parsed.path not in ("", "/"):
         raise ValueError("Adresse Guardian invalide : utiliser HTTPS, localhost ou reseau Docker prive.")
     return url.rstrip("/")
 
@@ -153,7 +155,8 @@ def main(argv=None):
     if len(token) < 32:
         parser.error("GUARDIAN_AGENT_TOKEN requis (32 caracteres minimum)")
     url = validate_endpoint(os.environ.get("GUARDIAN_URL", "http://127.0.0.1:8765"),
-                            os.environ.get("GUARDIAN_PRIVATE_DOCKER") == "1")
+                            os.environ.get("GUARDIAN_PRIVATE_DOCKER") == "1",
+                            os.environ.get("GUARDIAN_PRIVATE_RAILWAY") == "1")
     base = Path(os.environ.get("PILOT_DATA_DIR", "./data/" + args.id))
     base.mkdir(parents=True, exist_ok=True)
     outbox = Outbox(base / "outbox.sqlite3")
