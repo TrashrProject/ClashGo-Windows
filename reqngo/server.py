@@ -18,6 +18,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
 from reqngo.core import Guardian
+from reqngo.health import guardian_ready
 from reqngo.telemetry import TelemetryStore
 from reqngo.telemetry_api import router_for
 
@@ -97,6 +98,19 @@ async def security_headers(request: Request, call_next):
         "connect-src 'self'; object-src 'none'; frame-ancestors 'none'"
     )
     return response
+
+
+@app.get("/health/live")
+def live():
+    # Minimal response safe for load balancer probes; not evidence of worker health.
+    return {"status": "alive"}
+
+
+@app.get("/health/ready")
+def ready():
+    if not guardian_ready(engine, telemetry):
+        raise HTTPException(status_code=503, detail="not_ready")
+    return {"status": "ready"}
 
 
 @app.get("/")

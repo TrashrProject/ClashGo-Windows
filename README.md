@@ -100,6 +100,38 @@ La suite `python -m unittest discover -s tests -v` inclut un essai d'intégratio
 
 **Limites :** les pilotes n'effectuent aucune demande de troupes ; les 50 profils restent fictifs, aucune VM cloud n'est déployée et aucune IA externe ne modifie le code automatiquement.
 
+## V5 : préparation au cloud sans PC personnel
+
+Cette version reste un **outil de supervision de trois pilotes techniques**. Elle ne contient pas de bot Clash of Clans ni de connexion aux comptes.
+
+### Fiabilité supplémentaire
+
+- `GET /health/live` : vérifie que l'API répond, sans informations sensibles.
+- `GET /health/ready` : vérifie que les deux bases SQLite du serveur sont accessibles ; renvoie HTTP 503 sinon.
+- Chaque pilote met à jour un signal de vie local toutes les 30 secondes, **même si le serveur central est momentanément indisponible**.
+- Docker Compose vérifie séparément Guardian et chaque pilote. Un conteneur signalé `unhealthy` ne redémarre **pas automatiquement** avec Docker Compose ; `restart: unless-stopped` redémarre seulement les processus qui se terminent.
+- `tools/compose_smoke.py` vérifie en CI que les **trois vrais processus Docker** démarrent, transmettent leur état et rapportent leurs réparations **simulées**.
+- Après fusion dans `main`, le workflow `.github/workflows/guardian-image.yml` peut fabriquer et publier une image OCI versionnée dans GitHub Container Registry, sans ordinateur local.
+
+### Hébergement sur un serveur cloud
+
+Le fichier `compose.cloud.yaml` emploie l'image construite sur GitHub au lieu de compiler sur la machine cible. Un hébergeur **compatible Docker Compose, volumes persistants et connexion sécurisée** est nécessaire. GitHub ne fait pas tourner ce programme 24 h/24.
+
+Sur un serveur Docker correctement configuré, avec `GUARDIAN_PASSWORD` et `GUARDIAN_AGENT_TOKEN` distincts (32 caractères aléatoires recommandés chacun), les commandes sont :
+
+```bash
+docker compose -f compose.cloud.yaml pull
+docker compose -f compose.cloud.yaml up -d
+docker compose -f compose.cloud.yaml ps
+```
+
+La publication de l'image ne garantit pas sa visibilité publique : il peut être nécessaire d'accorder au serveur un accès GitHub Container Registry avant le premier `pull`. Fixer `GUARDIAN_IMAGE_TAG=sha-<commit complet>` permet de déployer une version déterminée plutôt que `main`. Ne jamais stocker les secrets dans GitHub, dans le dépôt ou dans des captures partagées. Stocker les données dans les volumes et prévoir une sauvegarde chiffrée.
+
+Le port HTTP reste lié à `127.0.0.1` **sur le serveur**. Pour y accéder depuis un téléphone, déployer **un VPN ou un accès HTTPS avec authentification**. Ne pas ouvrir directement le port 8765 sur Internet. Aucune infrastructure cloud n'a été provisionnée au moment de cette modification.
+
+Les vérifications de santé ne sont pas une IA réparatrice universelle : elles servent à détecter les blocages et à établir un diagnostic fiable, avant des réparations ciblées et testées.
+
+
 ## Organisation
 `reqngo/core.py` : moteur SQLite indépendant. `reqngo/server.py` : API web et superviseur. `reqngo/static/index.html` : dashboard. `tests/` : scénarios automatisés.
 
