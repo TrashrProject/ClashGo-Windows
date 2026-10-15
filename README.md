@@ -33,6 +33,33 @@ Le service n'est **pas encore déployé**. Pour un hébergement 24/7, fournir un
 - Cette branche remplace le code applicatif dans un arbre Git propre. Le projet de farming d'origine est conservé dans `archive/clashgo-before-reqngo-20261015`.
 - Les automatisations de gameplay peuvent enfreindre les conditions de Supercell et entraîner le bannissement de comptes.
 
+
+## Nouveauté V2 : diagnostics à distance (pilote)
+
+Un service de test externe peut envoyer un **heartbeat** et des incidents structurés au serveur. Les données persistent dans `/data/telemetry.sqlite3` ; un agent sans nouvelles depuis trois minutes est signalé comme déconnecté.
+
+- Tableau de bord : ouvrir **Incidents**, puis **Diagnostics distants** (section repliable).
+- Export : `GET /api/telemetry/export` nécessite la connexion administrateur.
+- Émission : `POST /api/telemetry/heartbeat` et `POST /api/telemetry/report` nécessitent l'en-tête `Authorization: Bearer <GUARDIAN_AGENT_TOKEN>`.
+- Démarrage : définir `GUARDIAN_AGENT_TOKEN` avec une valeur aléatoire de **32 caractères minimum** dans l'environnement du serveur **et** de l'agent.
+- Exemple d'agent : `python tools/demo_diagnostic_worker.py --once --demo-error` (variables `GUARDIAN_URL`, `GUARDIAN_AGENT_TOKEN` et éventuellement `GUARDIAN_AGENT_ID`).
+
+Sur Windows PowerShell, créer un jeton local avec `python -c "import secrets; print(secrets.token_urlsafe(36))"`, puis le stocker dans des variables d'environnement/secrets d'hébergement ; **jamais dans GitHub ni dans le code**. Pour une machine distante, utiliser HTTPS vérifié ou un VPN. L'exemple refuse HTTP hors localhost. Le jeton d'ingestion est partagé entre agents de test : ne pas l'utiliser comme système d'identité multi-tenant en production.
+
+Exemple d'événement autorisé :
+
+```json
+{"agent_id":"pilot_01","event_key":"evt_123","code":"worker_timeout",
+ "level":"warning","profile_id":3,
+ "metadata":{"component":"session","retry_count":1}}
+```
+
+Les diagnostics n'acceptent pas de logs libres, mots de passe, emails, captures d'écran ou autres pièces jointes : seules quelques données techniques structurées sont autorisées, afin de minimiser les risques de fuite. Les événements sont plafonnés à 2 000 entrées. Les appels répétés avec la même clé d'événement sont idempotents.
+
+**Limites :** ce module ne contrôle ni Clash of Clans ni des émulateurs, ne redémarre pas les machines distantes et ne donne pas automatiquement accès à ChatGPT aux données du serveur. Ce dernier point nécessite un connecteur autorisé. L'auto-réparation actuelle concerne toujours uniquement les scénarios simulés.
+
+Tests automatisés GitHub Actions : `.github/workflows/guardian-tests.yml`.
+
 ## Organisation
 `reqngo/core.py` : moteur SQLite indépendant. `reqngo/server.py` : API web et superviseur. `reqngo/static/index.html` : dashboard. `tests/` : scénarios automatisés.
 
