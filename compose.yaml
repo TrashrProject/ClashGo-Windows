@@ -1,13 +1,48 @@
+# Local deployment of three independent diagnostic pilots (no gameplay automation).
+x-pilot-base: &pilot-base
+  build: .
+  restart: unless-stopped
+  depends_on:
+    - guardian
+  environment:
+    GUARDIAN_URL: http://guardian:8765
+    GUARDIAN_PRIVATE_DOCKER: "1"
+    GUARDIAN_AGENT_TOKEN: ${GUARDIAN_AGENT_TOKEN:?Set GUARDIAN_AGENT_TOKEN}
+    PILOT_DATA_DIR: /data
+
 services:
   guardian:
     build: .
     restart: unless-stopped
     environment:
       GUARDIAN_PASSWORD: ${GUARDIAN_PASSWORD:?Set GUARDIAN_PASSWORD}
+      GUARDIAN_AGENT_TOKEN: ${GUARDIAN_AGENT_TOKEN:?Set GUARDIAN_AGENT_TOKEN}
       GUARDIAN_DATA_DIR: /data
     ports:
       - "127.0.0.1:8765:8765"
     volumes:
       - guardian-data:/data
+
+  pilot01:
+    <<: *pilot-base
+    command: ["python", "-m", "reqngo.pilot_worker", "--id", "pilot_01", "--profile", "1"]
+    volumes:
+      - pilot01-data:/data
+
+  pilot02:
+    <<: *pilot-base
+    command: ["python", "-m", "reqngo.pilot_worker", "--id", "pilot_02", "--profile", "2"]
+    volumes:
+      - pilot02-data:/data
+
+  pilot03:
+    <<: *pilot-base
+    command: ["python", "-m", "reqngo.pilot_worker", "--id", "pilot_03", "--profile", "3"]
+    volumes:
+      - pilot03-data:/data
+
 volumes:
   guardian-data:
+  pilot01-data:
+  pilot02-data:
+  pilot03-data:
