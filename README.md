@@ -134,6 +134,18 @@ Les vérifications de santé ne sont pas une IA réparatrice universelle : elles
 
 Pour preparer un hebergement depuis un telephone, consulter [le guide Railway](deploy/RAILWAY.md) : quatre services independants et quatre volumes persistants, avec facturation et autorisations a verifier avant de deployer.
 
+## V6 : fiabilisation gratuite (GitHub Actions)
+
+Sans payer d'hebergement, nous pouvons encore tester et corriger le code dans GitHub :
+
+- **Controle general** : reste configure a 600 secondes (10 minutes) pour les profils fictifs et leurs reprises de simulation.
+- **Surveillance distante** : un second controle des heartbeats tourne **toutes les 30 secondes** lorsque le serveur fonctionne. Avec le seuil de 180 secondes sans heartbeat, l'alerte arrive generalement sous 180–210 secondes si le processus Guardian reste actif.
+- **Isolation** : si le controle des profils locaux echoue, celui des pilotes continue (et inversement) ; les erreurs de diagnostic sont limitees a leur categorie technique.
+- **Rapport automatique de CI** : le test Docker des trois pilotes produit `artifacts/guardian-smoke.json`. GitHub Actions conserve ce rapport durant 7 jours, accessible dans les artefacts du workflow de test. Le fichier est genere avec une liste **strictement autorisee** de statuts et de compteurs : aucun mot de passe, jeton, capture d'ecran, log complet ou information de compte de jeu.
+- **Tests de securite** : la suite verifie que les erreurs non fiables et les faux champs secrets ne peuvent pas se retrouver dans le rapport.
+
+**Important :** GitHub Actions execute ponctuellement les tests, mais n'heberge pas Guardian en continu. Les scans toutes les 30 secondes et 10 minutes ne sont actifs que lorsque Guardian tourne effectivement sur une machine. Aucune depense cloud n'est engagee par cette etape.
+
 ## Organisation
 `reqngo/core.py` : moteur SQLite indépendant. `reqngo/server.py` : API web et superviseur. `reqngo/static/index.html` : dashboard. `tests/` : scénarios automatisés.
 
