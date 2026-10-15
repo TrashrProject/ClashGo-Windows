@@ -1,4 +1,6 @@
 FROM python:3.12-slim
+LABEL org.opencontainers.image.source="https://github.com/TrashrProject/ClashGo-Windows"
+LABEL org.opencontainers.image.description="REQ N GO AI Guardian test monitoring"
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
