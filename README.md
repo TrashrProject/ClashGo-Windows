@@ -60,6 +60,24 @@ Les diagnostics n'acceptent pas de logs libres, mots de passe, emails, captures 
 
 Tests automatisés GitHub Actions : `.github/workflows/guardian-tests.yml`.
 
+## V3 : triage et vérification des incidents distants
+
+La surveillance classe les événements techniques des services **pilotes** et consolide les répétitions dans un même dossier : service concerné, profil, gravité, nombre d'occurrences et action **conseillée**. Les erreurs non reconnues sont placées en revue plutôt que de déclencher des commandes hasardeuses.
+
+- Dans **Incidents > Diagnostics distants**, les dossiers ouverts apparaissent sans ajouter d'écran principal.
+- Un nouveau heartbeat marque uniquement une **perte de connexion** comme rétablie ; il ne prétend pas résoudre les autres erreurs.
+- Pour une erreur technique réellement retestée avec succès, l'agent peut envoyer un événement `probe_success` avec `level="info"`, le même `profile_id` et `metadata.error_type` contenant le code précis de l'erreur.
+- Un dossier n'est alors marqué `verified` que sur la base du **signal de succès de l'agent de test**. Ce n'est pas une validation indépendante par ChatGPT.
+- Les diagnostics et leur classement restent déterministes : **aucun modèle d'IA externe et aucune correction automatique de code ne sont activés** à ce stade.
+
+Exemple d'un succès de vérification remonté par un agent autorisé :
+
+```json
+{"agent_id":"pilot_01","event_key":"evt_probe_456","code":"probe_success",
+ "level":"info","profile_id":3,
+ "metadata":{"error_type":"worker_timeout","component":"test_worker"}}
+```
+
 ## Organisation
 `reqngo/core.py` : moteur SQLite indépendant. `reqngo/server.py` : API web et superviseur. `reqngo/static/index.html` : dashboard. `tests/` : scénarios automatisés.
 
