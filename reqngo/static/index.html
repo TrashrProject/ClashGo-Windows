@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>REQ N GO — AI Guardian</title>
+<style>
+:root{color-scheme:dark;--bg:#0d1015;--panel:#171b22;--line:#30353e;--txt:#f1f3f5;--muted:#9ba4b0;--red:#b5424a;--ok:#71bf99;--warning:#e8be79}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}
+.shell{max-width:1160px;margin:0 auto;padding:26px 28px 70px}.top{display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid var(--line);padding-bottom:24px}
+.brand{font-size:22px;font-weight:800;letter-spacing:.02em}.brand span{color:#db646a}.sub{font-size:13px;color:var(--muted)}
+.eyebrow{text-transform:uppercase;letter-spacing:.16em;color:var(--muted);font-size:10px;font-weight:800;margin-bottom:3px}
+.pill{padding:6px 10px;border:1px solid #40594d;border-radius:99px;color:var(--ok);font-size:12px;font-weight:700;white-space:nowrap}
+nav{display:flex;gap:4px;margin:24px 0;border-bottom:1px solid var(--line);overflow:auto}
+nav button{border:0;background:transparent;color:var(--muted);padding:12px 17px;border-bottom:2px solid transparent;font-weight:700;cursor:pointer;white-space:nowrap}
+nav button[aria-selected=true]{color:var(--txt);border-color:var(--red)}h1{font-size:23px;margin:8px 0}h2{font-size:16px;margin:0 0 14px}
+p{color:var(--muted);margin:0 0 14px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin:22px 0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:19px}.stat .n{font-size:29px;font-weight:760;margin-top:6px}
+.label{font-size:12px;color:var(--muted)}.section{display:none}.section.active{display:block}
+.twocol{display:grid;grid-template-columns:1fr 1fr;gap:15px}.line{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.line:first-of-type{border-top:0}.state{font-weight:650}.ok{color:var(--ok)}.error{color:var(--red)}
+button.action{background:#262d37;border:1px solid #434a53;color:var(--txt);border-radius:7px;padding:8px 13px;cursor:pointer;font:inherit}
+button.primary{background:var(--red);border-color:var(--red)}button:disabled{opacity:.45;cursor:not-allowed}
+input,select{background:#0e1319;color:var(--txt);border:1px solid #434a53;border-radius:7px;padding:9px;font:inherit;width:100%}
+label{font-size:12px;color:var(--muted);display:block;margin:0 0 5px}.field{margin:0 0 13px}
+.toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;margin:0 0 12px}
+.toolbar input{max-width:300px}.scroll{max-height:480px;overflow:auto}.account{display:grid;grid-template-columns:100px 1fr auto;align-items:center;gap:10px;padding:11px 3px;border-top:1px solid var(--line)}
+.account:first-of-type{border-top:0}.incident{padding:14px 0;border-top:1px solid var(--line)}.incident .meta,.entry{font-size:12px;color:var(--muted)}.entry{padding:8px 0;border-top:1px solid var(--line)}
+.actions{display:flex;gap:8px;flex-wrap:wrap}.note{border-left:3px solid var(--warning);padding:11px 13px;background:#25231e;color:#ecd8ae;border-radius:5px;font-size:12px;margin-top:16px}
+.alert{color:var(--warning);margin:12px 0;min-height:24px;font-size:13px}footer{margin:38px 0 0;color:var(--muted);font-size:11px}
+@media(max-width:780px){.shell{padding:18px 15px 48px}.grid{grid-template-columns:repeat(2,1fr)}.twocol{grid-template-columns:1fr}.brand{font-size:19px}nav button{padding:10px}.account{grid-template-columns:75px 1fr auto}.top{align-items:flex-start}.pill{white-space:normal}}
+</style>
+</head>
+<body>
+<div class="shell">
+<header class="top"><div><div class="eyebrow">Supervision de comptes · Prototype</div><div class="brand">REQ N GO <span>Manager</span></div><div class="sub">AI Guardian · Suivi et récupération des incidents</div></div><div class="pill">● Mode simulation</div></header>
+<nav aria-label="Sections">
+<button data-tab="home" aria-selected="true">Vue d'ensemble</button>
+<button data-tab="accounts" aria-selected="false">Comptes</button>
+<button data-tab="incidents" aria-selected="false">Incidents</button>
+<button data-tab="settings" aria-selected="false">Paramètres</button>
+</nav>
+<div class="alert" id="message" role="status"></div>
+<section class="section active" id="home"><div class="eyebrow">Vue générale</div><h1>État du système</h1>
+<p>Les résultats ci-dessous concernent des profils fictifs, sans connexion à Clash of Clans.</p>
+<div class="grid">
+<div class="panel stat"><div class="label">Profils enregistrés</div><div class="n" id="s-total">—</div></div>
+<div class="panel stat"><div class="label">Profils surveillés</div><div class="n" id="s-monitor">—</div></div>
+<div class="panel stat"><div class="label">Profils sains</div><div class="n ok" id="s-healthy">—</div></div>
+<div class="panel stat"><div class="label">Incidents ouverts</div><div class="n" id="s-errors">—</div></div>
+</div>
+<div class="twocol">
+<div class="panel"><h2>Supervision</h2><div class="line"><span>Type</span><strong>Simulation locale</strong></div><div class="line"><span>Contrôle périodique</span><strong id="scan-every">—</strong></div><div class="line"><span>Mode pilote</span><strong id="pilot-text">—</strong></div><div class="line"><span>Dernier scan</span><strong id="last-scan">—</strong></div><button class="action" id="scan-btn">Lancer un contrôle</button></div>
+<div class="panel"><h2>Activité récente</h2><div id="activity"></div></div>
+</div>
+<div class="note">Les comptes, les reprises et les anomalies affichés sont simulés. Cette version ne se connecte à aucun jeu, émulateur ni serveur distant.</div>
+</section>
+<section class="section" id="accounts"><div class="eyebrow">Gestion</div><h1>Comptes</h1><p>Les 3 profils pilotes permettent de tester l'isolation des erreurs avant l'extension aux 50 profils.</p>
+<div class="panel">
+<div class="toolbar"><strong>Liste des 50 profils</strong><input type="search" id="search" placeholder="Rechercher un compte…" aria-label="Rechercher un compte"></div>
+<div class="scroll" id="account-list"></div>
+</div></section>
+<section class="section" id="incidents"><div class="eyebrow">Fiabilité</div><h1>Incidents</h1><p>Une panne sur un compte ne doit pas interrompre les autres.</p>
+<div class="panel"><div id="incident-list"></div></div></section>
+<section class="section" id="settings"><div class="eyebrow">Configuration</div><h1>Paramètres</h1><p>Réglages simples. Ils s'appliquent sans redémarrer le logiciel.</p>
+<div class="twocol"><div class="panel">
+<h2>Supervision</h2>
+<div class="field"><label for="interval">Intervalle de contrôle (secondes)</label><input id="interval" type="number" min="30" max="3600"></div>
+<div class="field"><label for="retry">Délai entre tentatives (secondes)</label><input id="retry" type="number" min="1" max="3600"></div>
+<div class="field"><label for="attempts">Tentatives maximales (0 à 5)</label><input id="attempts" type="number" min="0" max="5"></div>
+<div class="field"><label for="repair">Réparations simulées automatiques</label><select id="repair"><option value="true">Activées</option><option value="false">Désactivées</option></select></div>
+<div class="field"><label for="pilotmode">Portée</label><select id="pilotmode"><option value="true">3 profils pilotes uniquement</option><option value="false">Tous les profils activés</option></select></div>
+<button class="action primary" id="save">Enregistrer</button></div>
+<div class="panel"><h2>Pilotes et tests</h2>
+<div class="field"><label for="pilots">Identifiants pilotes (ex. 1,2,3)</label><input id="pilots" value="1,2,3" placeholder="1,2,3"></div><button class="action" id="save-pilots">Choisir les pilotes</button>
+<div class="line"></div>
+<h2>Simuler une panne</h2>
+<div class="field"><label for="fault-account">Compte pilote</label><input id="fault-account" type="number" min="1" max="50" value="1"></div>
+<div class="field"><label for="fault-code">Type de panne</label><select id="fault-code"><option value="session_frozen">Session figée</option><option value="network_timeout">Réseau indisponible</option><option value="worker_crash">Service arrêté</option><option value="unknown_failure">Erreur inconnue</option><option value="invalid_config">Configuration invalide</option></select></div>
+<button class="action" id="inject">Simuler l'incident</button>
+<div class="note">Aucun code réel n'est modifié par AI Guardian V1.</div>
+</div></div>
+</section>
+<footer>REQ N GO Manager · AI Guardian V1 · Supervision simulée · Aucune automatisation de gameplay</footer>
+</div>
+<script>
+(function(){
+"use strict";
+var state=null;
+var message=document.getElementById("message");
+function notify(text){message.textContent=text;window.setTimeout(function(){if(message.textContent===text)message.textContent="";},5000);}
+function node(tag,cls,text){var n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=String(text);return n;}
+function formatTime(epoch){return epoch?new Date(epoch*1000).toLocaleString("fr-FR"):"Pas encore";}
+async function api(path,method,data){
+var opts={method:method||"GET",headers:{"X-Guardian-Action":"1"}};
+if(data!==undefined){opts.headers["Content-Type"]="application/json";opts.body=JSON.stringify(data);}
+var r=await fetch(path,opts);var j=await r.json();
+if(!r.ok)throw new Error(j.detail||"Erreur de connexion ("+r.status+")");
+return j;
+}
+function update(){
+var o=state.overview,c=state.settings;
+document.getElementById("s-total").textContent=o.total;
+document.getElementById("s-monitor").textContent=o.monitored;
+document.getElementById("s-healthy").textContent=o.healthy;
+document.getElementById("s-errors").textContent=o.open_incidents;
+document.getElementById("scan-every").textContent=c.scan_interval_seconds+" s";
+document.getElementById("pilot-text").textContent=c.pilot_mode?"Activé":"Tous les profils";
+document.getElementById("last-scan").textContent=formatTime(o.last_scan);
+var activity=document.getElementById("activity");activity.replaceChildren();
+state.events.slice(0,5).forEach(function(e){activity.appendChild(node("div","entry",formatTime(e.at)+" · "+e.message));});
+document.getElementById("interval").value=c.scan_interval_seconds;
+document.getElementById("retry").value=c.retry_delay_seconds;
+document.getElementById("attempts").value=c.max_attempts;
+document.getElementById("repair").value=String(c.auto_repair);
+document.getElementById("pilotmode").value=String(c.pilot_mode);
+document.getElementById("pilots").value=state.accounts.filter(function(a){return a.pilot;}).map(function(a){return a.id;}).join(",");
+drawAccounts();drawIncidents();
+}
+function drawAccounts(){
+var target=document.getElementById("account-list");target.replaceChildren();
+var q=document.getElementById("search").value.toLowerCase().trim();
+state.accounts.filter(function(a){return !q||a.name.toLowerCase().includes(q);}).forEach(function(a){
+var line=node("div","account");line.appendChild(node("strong","",a.name));
+var status=node("span",a.status==="ok"?"ok":"error",(a.pilot?"Pilote · ":"")+(a.status==="ok"?"Disponible (simulation)":"Incident simulé"));
+line.appendChild(status);
+var button=node("button","action",a.enabled?"Suspendre":"Réactiver");
+button.addEventListener("click",function(){action("/api/accounts/"+a.id+"/enabled",{enabled:!Boolean(a.enabled)});});
+line.appendChild(button);target.appendChild(line);
+});
+}
+function drawIncidents(){
+var target=document.getElementById("incident-list");target.replaceChildren();
+if(!state.incidents.length){target.appendChild(node("p","","Aucun incident enregistré."));return;}
+state.incidents.forEach(function(i){
+var block=node("div","incident");block.appendChild(node("strong","", "ACC_"+String(i.account_id).padStart(2,"0")+" · "+i.code));
+block.appendChild(node("div","meta","État : "+i.status+" · Tentatives : "+i.attempts+" · "+formatTime(i.opened_at)));
+block.appendChild(node("div","meta",i.details));
+if(i.status!=="resolved"){var button=node("button","action","Clôturer la simulation");button.addEventListener("click",function(){action("/api/incidents/"+i.id+"/resolve");});block.appendChild(button);}
+target.appendChild(block);
+});
+}
+async function refresh(){
+try{state=await api("/api/state");update();}
+catch(e){notify("Connexion : "+e.message);}
+}
+async function action(path,payload){
+try{await api(path,"POST",payload);await refresh();notify("Modification enregistrée.");}
+catch(e){notify(e.message);}
+}
+document.querySelectorAll("nav button").forEach(function(b){b.addEventListener("click",function(){
+document.querySelectorAll("nav button").forEach(function(x){x.setAttribute("aria-selected",String(x===b));});
+document.querySelectorAll(".section").forEach(function(s){s.classList.toggle("active",s.id===b.dataset.tab);});
+});});
+document.getElementById("scan-btn").addEventListener("click",function(){action("/api/scan");});
+document.getElementById("search").addEventListener("input",function(){if(state)drawAccounts();});
+document.getElementById("save").addEventListener("click",function(){
+action("/api/settings",{
+scan_interval_seconds:Number(document.getElementById("interval").value),
+retry_delay_seconds:Number(document.getElementById("retry").value),
+max_attempts:Number(document.getElementById("attempts").value),
+auto_repair:document.getElementById("repair").value==="true",
+pilot_mode:document.getElementById("pilotmode").value==="true"
+});});
+document.getElementById("save-pilots").addEventListener("click",function(){
+var parts=document.getElementById("pilots").value.split(",").map(function(s){return s.trim();});
+if(parts.some(function(s){return !/^\d+$/.test(s);}))return notify("Entrer 1 à 3 identifiants numériques.");
+action("/api/pilots",{ids:parts.map(Number)});
+});
+document.getElementById("inject").addEventListener("click",function(){
+action("/api/demo/fault",{account_id:Number(document.getElementById("fault-account").value),code:document.getElementById("fault-code").value});
+});
+refresh();setInterval(refresh,8000);
+})();
+</script>
+</body></html>

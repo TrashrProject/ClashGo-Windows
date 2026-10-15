@@ -1,122 +1,40 @@
-# ClashGO ⚔️
+# REQ N GO Manager — AI Guardian (pilote)
 
-This is **ClashGO**, a super lightweight Clash of Clans bot written in Go.
+Nouveau socle de supervision du projet. **Ce code n'est PAS un bot de farming ni une automatisation Clash of Clans.** Il fournit un tableau de bord, 50 profils fictifs, 3 comptes pilotes, un moteur de diagnostic et des reprises simulées. La connexion au jeu et aux comptes réels n'est pas implémentée.
 
-I basically vibe-coded this in like 3 days because I wanted a bot that actually worked on my Mac (Apple Silicon). It's built from scratch using Go and OpenCV.
+## Fonctions disponibles
+- 50 profils préparés, simulation de 3 pilotes par défaut (extensible à 150 dans une version future).
+- Paramètres persistants : contrôle périodique (600 s), seuils de reprise, mode pilote.
+- Incidents isolés par profil ; panne connue simulée → tentative limitée ; panne inconnue → escalade.
+- Journaux consultables et export JSON sans identifiants ; SQLite local.
+- Tableau de bord responsive sobre ; aucune statistique fictive présentée comme réelle.
+- API sécurisée par un mot de passe et en-tête anti-CSRF pour les changements.
 
-### ⚠️ WARNING: It's Buggy
-Look, I made this fast. It's rough around the edges, probably has bugs, and might crash. Use it at your own risk.
+## Exécuter en local
+Python 3.11+ :
+\`\`\`bash
+python -m pip install -r requirements.txt
+# Configurer GUARDIAN_PASSWORD avec un secret long et unique
+python -m uvicorn reqngo.server:app --host 127.0.0.1 --port 8765
+\`\`\`
+Ouvrir http://127.0.0.1:8765 ; identifiant \`admin\` et mot de passe GUARDIAN_PASSWORD.
 
-### 🚀 Why it's cool
-- **Mac Native**: Works great on Apple Silicon.
-- **Fast**: Uses a persistent ADB connection, so screen captures and taps are instant.
-- **Lightweight**: Just a single binary, with a recent perf audit cutting battle-state CPU ~10–20% and transient RSS ~10–20 MB. See [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) for the per-change breakdown and how to verify on your machine.
-- **Customizable strategies**: Drop a YAML strategy + matching `formula.json` (per-unit deploy coords) into `assets/strategies/` and the bot deploys each unit where you want. See `assets/strategies/auto_edrag_rush.yaml` + `assets/strategies/auto_edrag_rush_formula.json` for an end-to-end example (Balloon + EDrag + Rage + Ice).
-- **Per-corner formula workflow**: `target_edge: "Random"` (the default in `auto_edrag_rush.yaml`) picks a random corner per attack. `cmd/design_attack -live -corner BR|BL|TR|TL` authors the per-corner deploy coords; per-corner overrides in `formula.corner_overrides[<CORNER>]` are used as-authored (the mirror is only a fallback). See [`docs/formula-authoring.md`](docs/formula-authoring.md) for the full walkthrough.
-- **Self-healing boot sequence**: the bot auto-dismisses the post-boot
-  splash chain ("ТАР!" tap-to-continue → castle logo → news splash)
-  instead of force-restarting in a loop, so unattended runs survive game
-  relaunches.
-- **Unattended-run resilience**: if the emulator dies mid-session the bot
-  escalates through transport reconnect → adb-server reset → BlueStacks
-  relaunch instead of spinning; a bad frame or missing asset can't crash
-  the process (panic guards + nil-template fallback); and
-  `tools/run_bot_keepalive.sh` respawns the bot ~10s after any exit so it
-  keeps farming unattended.
-- **Text-based observability**: `./tools/observe.sh` captures the emulator
-  screen, classifies it with the bot's real vision layer, and OCRs the
-  on-screen text — a terminal-only "eye view" for debugging without a
-  GUI. See [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
-- **Replayable attacks**: `make attack-record` records a deploy you perform on the emulator; `make attack-replay` re-fires that JSON on the device with classification + extras. Useful for sharing working attacks without re-engineering.
-  - **In-app updater (auto-pop)**: New releases ship through GitHub
-    Releases. When a version is published, ClashGO **pops up the update
-    window on its own** (no click needed) offering one-click
-    *Update & Restart*: it downloads the zip, verifies the SHA256
-    against `latest.json`, swaps the running app in place, and relaunches.
-    No new servers, no manual checks. "Later" silences it for the session;
-    "Skip version" silences it permanently.
+Sur Windows, lancer \`DEMARRER-SUR-WINDOWS.bat\` : il génère au premier démarrage un secret local et installe les dépendances.
 
-### 🛠️ How to use
-1. **Emulator**: Set your emulator (like BlueStacks) to **860x732** resolution and **160 DPI**.
-2. **Config**: Point `config.json` to your ADB device.
-3. **Run**:
-   - CLI: `make build-cli && ./build/bin/bot_cli`
-   - GUI: `make build-gui` and run `build/bin/ClashGO.app`
+Tests : \`python -m unittest discover -s tests -v\`.
 
-### 💾 Resource usage (estimates)
+## Hébergement
+Le service n'est **pas encore déployé**. Pour un hébergement 24/7, fournir un stockage persistant, une protection HTTPS/VPN, des sauvegardes et un superviseur de processus. Ne pas exposer directement le port 8765 sur Internet.
 
-All numbers below are **principled estimates from code analysis** (frame
-sizing, mat pool, template cache, capture-loop cadence), not live
-measurements. They assume an **Apple Silicon Mac**, **BlueStacks at
-860×732 / 160 DPI**, and the bot running at the configured capture rate.
-The recipe in [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md#how-to-verify-on-your-machine)
-validates them on your machine.
+## Politique AI Guardian
+- Détecter, isoler, journaliser puis réparer les incidents **reconnus et autorisés**, avec plafond de tentatives.
+- Si le diagnostic est incertain : aucune commande arbitraire, escalade documentée.
+- Les futures analyses IA de code devront travailler sur branches de test, avec validation et rollback ; pas d'accès aux mots de passe.
+- Cette branche remplace le code applicatif dans un arbre Git propre. Le projet de farming d'origine est conservé dans \`archive/clashgo-before-reqngo-20261015\`.
+- Les automatisations de gameplay peuvent enfreindre les conditions de Supercell et entraîner le bannissement de comptes.
 
-**Frame math (860×732, RGB):**
-- Full capture frame: `860 × 732 × 3 ≈ 1.80 MB`
-- Half-size frame (Live View JPEG encode): `430 × 366 × 3 ≈ 0.47 MB`
+## Organisation
+\`reqngo/core.py\` : moteur SQLite indépendant. \`reqngo/server.py\` : API web et superviseur. \`reqngo/static/index.html\` : dashboard. \`tests/\` : scénarios automatisés.
 
-| Scenario | ClashGO (Go) RSS | ClashGO CPU¹ | + BlueStacks RSS² | Combined RSS (est.) |
-|----------|----------------:|-------------:|------------------:|--------------------:|
-| **Idle / UI only** (1 FPS capture) | ~60–90 MB | ~1–3% (1 core) | ~800 MB–1.2 GB | ~0.9–1.3 GB |
-| **Active battle @ 15 FPS** | ~90–140 MB | ~15–25% (1 core) | ~1.0–1.5 GB | ~1.1–1.7 GB |
-
-¹ CPU is single-core; the bot is largely single-threaded per capture frame
-(classify + template match + tap). Higher FPS = proportionally more CPU.
-At 15 FPS the per-frame vision work (~7–15 ms) consumes ~15–25% of one core.
-The bot also reports **`cpu_time_sec`** — absolute CPU time since process
-start — which is the device-independent metric: it means the same on an M1 or
-an M3 Max, so you can compare efficiency across machines without normalizing
-by core count. The "% CPU" shown in the UI is derived by multiplying the
-per-core fraction (`cpu_cores`) by the host's logical core count; treat that
-number as host-relative only.
-² BlueStacks footprint is driven by the emulator + Android guest, not the
-bot. It scales with emulator window size / DPI and the guest's own memory
-pressure, not with ClashGO's FPS.
-
-**Where the bot's RAM goes:**
-- Capture + working Mats (mat pool): ~2–4 MB retained (serial capture keeps
-  only 1–2 mats per size alive).
-- `ScaledTemplateCache` (6 classifier rules × several scales): ~1–3 MB.
-- Live View base64 frame buffer (`lastFrame`): a few hundred KB.
-- Wails/WebKit GUI harness: the bulk of the idle ~60–90 MB is the embedded
-  browser, not the Go bot logic.
-
-ClashGO itself is tiny; the dominant memory cost when running is almost
-always **BlueStacks**, not the bot.
-
-### 🚢 Releasing a new version
-
-Updates are powered by GitHub Releases — no extra infrastructure.
-
-1. Bump `productVersion` in `wails.json` (e.g. `0.3.0-beta`).
-2. Commit + push, then tag it:
-
-   ```sh
-   git tag v0.3.0-beta && git push origin v0.3.0-beta
-   ```
-
-   Pushing a `v*` tag runs the **Release** workflow
-   (`.github/workflows/release.yml`), which builds the macOS zip, the
-   DMG, and `latest.json` on a fresh runner and publishes them to a
-   GitHub Release automatically. No manual upload, no secrets — the
-   workflow uses GitHub's built-in `GITHUB_TOKEN`, and the app itself
-   checks the public GitHub API unauthenticated.
-3. Existing users get an auto-popping update window within 6h (or on
-   next launch) offering one-click *Update & Restart*.
-
-Manual fallback (no CI):
-
-1. `make release VERSION=0.3.0-beta` — produces the zip, the DMG,
-   and `latest.json`.
-2. Publish a GitHub release tagged `v0.3.0-beta`, and attach:
-   - `ClashGO-v0.3.0-beta-macOS.zip`
-   - `latest.json`
-
-### 🤝 HELP WANTED (Porting to Windows)
-Right now, this is heavily tested on macOS. I'd love some help **porting/testing this for Windows**. If you're a dev and want to help me make this not-just-a-Mac-thing, open a PR or hit me up!
-
-Also, if you find bugs (you will), just open an issue.
-
-### 📄 License
-MIT. Do whatever you want with it.
+## État
+V1 pilote : **pas de comptes réels, pas d'émulateur, pas de cloud et pas d'IA capable de modifier le code seule**.

@@ -1,0 +1,18 @@
+name: AI Guardian tests
+on:
+  push:
+    branches: [main, feature/reqngo-manager-guardian]
+  pull_request:
+    branches: [main]
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Unit tests (offline simulation)
+        run: python -m unittest discover -s tests -v
+      - name: Syntax check
+        run: python -m compileall -q reqngo
