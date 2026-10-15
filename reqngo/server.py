@@ -58,6 +58,8 @@ def supervise():
             cfg = engine.settings()
             due = time.time() - cfg["last_full_scan"] >= cfg["scan_interval_seconds"]
             engine.scan(full=due)
+            if due:
+                telemetry.check_stale()
         except Exception as exc:
             # A crash in one scan must not kill the scheduler.
             print("Guardian supervisor:", type(exc).__name__, flush=True)
@@ -163,7 +165,9 @@ def fault(body: Fault, _: bool = Depends(write_guard)):
 
 @app.post("/api/scan")
 def scan(_: bool = Depends(write_guard)):
-    return engine.scan(full=True)
+    result = engine.scan(full=True)
+    result["telemetry_alerts"] = telemetry.check_stale()["alerts_created"]
+    return result
 
 
 @app.post("/api/incidents/{incident_id}/resolve")
