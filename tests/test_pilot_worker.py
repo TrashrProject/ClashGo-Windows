@@ -77,6 +77,18 @@ class PilotWorkerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_endpoint("http://guardian:8765")
         self.assertEqual(validate_endpoint("http://guardian:8765", True), "http://guardian:8765")
+        with self.assertRaises(ValueError):
+            validate_endpoint("http://guardian.railway.internal:8765")
+        self.assertEqual(
+            validate_endpoint("http://guardian.railway.internal:8765", private_railway=True),
+            "http://guardian.railway.internal:8765"
+        )
+        for dangerous in ("http://evil.railway.internal:8765",
+                          "http://guardian.railway.internal.evil.com:8765",
+                          "http://guardian.railway.internal:8888",
+                          "http://evil:secret@guardian.railway.internal:8765"):
+            with self.assertRaises(ValueError, msg=dangerous):
+                validate_endpoint(dangerous, private_railway=True)
         for url in ("http://evil.example.com", "ftp://guardian", "https://a.example.com/secret",
                     "http://attacker:pass@localhost:8765"):
             with self.assertRaises(ValueError, msg=url):
