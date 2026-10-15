@@ -26,7 +26,9 @@ jobs:
         env:
           GUARDIAN_PASSWORD: github-ci-password-not-used-for-login
           GUARDIAN_AGENT_TOKEN: github-ci-token-not-used-in-deployment-123
-        run: docker compose -f compose.yaml config --quiet
+        run: |
+          docker compose -f compose.yaml config --quiet
+          docker compose -f compose.cloud.yaml config --quiet
       - name: Compile modules
         run: python -m compileall -q reqngo tools
       - name: Run four real Docker processes
