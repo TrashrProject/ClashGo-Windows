@@ -22,5 +22,10 @@ jobs:
         run: python -m pip install -r requirements.txt httpx
       - name: Unit tests
         run: python -m unittest discover -s tests -v
+      - name: Validate three-service Compose topology
+        env:
+          GUARDIAN_PASSWORD: github-ci-password-not-used-for-login
+          GUARDIAN_AGENT_TOKEN: github-ci-token-not-used-in-deployment-123
+        run: docker compose -f compose.yaml config --quiet
       - name: Compile modules
         run: python -m compileall -q reqngo tools

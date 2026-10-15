@@ -78,6 +78,28 @@ Exemple d'un succès de vérification remonté par un agent autorisé :
  "metadata":{"error_type":"worker_timeout","component":"test_worker"}}
 ```
 
+## V4 : trois processus pilotes réellement exécutables
+
+La V4 fournit **trois processus Python indépendants**, pilot_01, pilot_02 et pilot_03, démarrables dans des conteneurs Docker distincts. Ils **ne se connectent pas au jeu**. Ils contrôlent seulement leur propre environnement technique : lecture/écriture dans un dossier dédié, émission de signaux de vie et envoi d'incidents structurés au serveur Guardian.
+
+Chaque pilote possède un volume de données et une file SQLite distincts. Si Guardian est momentanément indisponible, les événements attendent localement, puis sont réémis avec un identifiant unique ; le serveur évite les doublons. Les processus continuent indépendamment. Si le dossier de contrôle du pilote manque, il est recréé puis testé avant d'envoyer le signal de récupération. Aucun autre fichier n'est effacé et aucune commande distante n'est exécutée.
+
+### Démarrage local via Docker Compose
+
+1. Installer Docker et son module Compose sur l'ordinateur ou la VM que tu contrôles.
+2. Définir **deux secrets distincts** via l'environnement ou un fichier `.env` **non versionné** : `GUARDIAN_PASSWORD` (16 caractères min.) et `GUARDIAN_AGENT_TOKEN` (32 caractères min.). Pour générer un secret : `python -c "import secrets; print(secrets.token_urlsafe(36))"`. Ne jamais transmettre ces valeurs dans le chat, ni les publier sur GitHub.
+3. Lancer `docker compose up --build -d`.
+4. Ouvrir **http://127.0.0.1:8765**, s'identifier en tant que `admin`, puis **Incidents > Diagnostics distants**. Les trois services devraient apparaître après leur premier envoi.
+5. Voir l'état des processus : `docker compose ps`. Afficher leurs sorties techniques : `docker compose logs --tail=30 pilot01 pilot02 pilot03`. Terminer la démonstration : `docker compose down` (les volumes persistants sont conservés).
+
+Le fichier Compose ne publie l'interface Guardian **que sur localhost**. Entre conteneurs d'une même machine, les pilotes utilisent le nom réseau interne `guardian`; cette exception HTTP est explicitement limitée à ce nom et au port 8765. Pour un serveur distant, ajouter **HTTPS derrière une passerelle authentifiée ou un VPN** ; ne pas exposer directement le port Guardian. Les trois conteneurs ont `restart: unless-stopped`, qui relance un processus **s'il se termine**, mais ne garantit pas la réparation de toute panne ni le redémarrage automatique d'un conteneur seulement marqué « unhealthy ».
+
+### Vérification
+
+La suite `python -m unittest discover -s tests -v` inclut un essai d'intégration qui démarre **trois vrais sous-processus** Python contre un serveur HTTP local de test, puis vérifie les trois signaux de vie et les événements enregistrés. Les tests unitaires vérifient la restauration du dossier de travail, l'isolation et la transmission différée après coupure.
+
+**Limites :** les pilotes n'effectuent aucune demande de troupes ; les 50 profils restent fictifs, aucune VM cloud n'est déployée et aucune IA externe ne modifie le code automatiquement.
+
 ## Organisation
 `reqngo/core.py` : moteur SQLite indépendant. `reqngo/server.py` : API web et superviseur. `reqngo/static/index.html` : dashboard. `tests/` : scénarios automatisés.
 
