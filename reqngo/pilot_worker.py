@@ -15,6 +15,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from reqngo.health import update_worker_heartbeat
+
 
 def validate_endpoint(url: str, private_docker: bool = False) -> str:
     parsed = urlparse(url)
@@ -163,6 +165,8 @@ def main(argv=None):
     try:
         while True:
             state = worker.step()
+            # Shows that this worker's own event loop remains live, independently of Guardian.
+            update_worker_heartbeat(base / "worker_heartbeat.txt")
             print(args.id, "etat", state["status"], "connecte", state["connected"],
                   "evenements en attente", state["queued"], flush=True)
             if args.once:
