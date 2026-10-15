@@ -8,7 +8,6 @@ from __future__ import annotations
 import hmac
 import os
 import threading
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,6 +17,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
 from reqngo.core import Guardian
+from reqngo.supervisor import Supervisor
 from reqngo.health import guardian_ready
 from reqngo.telemetry import TelemetryStore
 from reqngo.telemetry_api import router_for
@@ -54,16 +54,15 @@ def write_guard(request: Request, _: bool = Depends(guard)):
 
 
 def supervise():
+    # Full local scan follows the configured interval (600s by default).
+    # Remote heartbeats are checked independently every 30s.
+    monitor = Supervisor(
+        engine, telemetry, telemetry_interval=30,
+        on_error=lambda component, kind: print(
+            "Guardian supervisor:", component, kind, flush=True),
+    )
     while not stop.wait(2):
-        try:
-            cfg = engine.settings()
-            due = time.time() - cfg["last_full_scan"] >= cfg["scan_interval_seconds"]
-            engine.scan(full=due)
-            if due:
-                telemetry.check_stale()
-        except Exception as exc:
-            # A crash in one scan must not kill the scheduler.
-            print("Guardian supervisor:", type(exc).__name__, flush=True)
+        monitor.tick()
 
 
 @asynccontextmanager
