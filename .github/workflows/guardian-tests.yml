@@ -38,6 +38,14 @@ jobs:
         run: |
           docker compose up --build -d
           python tools/compose_smoke.py
+      - name: Preserve sanitized pilot diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: guardian-diagnostics-${{ github.run_id }}
+          path: artifacts/guardian-smoke.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Inspect Docker logs on failure
         if: failure()
         env:
