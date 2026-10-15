@@ -4,6 +4,12 @@ x-pilot-base: &pilot-base
   restart: unless-stopped
   depends_on:
     - guardian
+  healthcheck:
+    test: ["CMD", "python", "-m", "reqngo.health", "worker"]
+    interval: 45s
+    timeout: 6s
+    retries: 3
+    start_period: 45s
   environment:
     GUARDIAN_URL: http://guardian:8765
     GUARDIAN_PRIVATE_DOCKER: "1"
@@ -20,6 +26,12 @@ services:
       GUARDIAN_DATA_DIR: /data
     ports:
       - "127.0.0.1:8765:8765"
+    healthcheck:
+      test: ["CMD", "python", "-m", "reqngo.health", "guardian"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 35s
     volumes:
       - guardian-data:/data
 
