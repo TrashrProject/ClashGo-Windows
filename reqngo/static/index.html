@@ -60,7 +60,14 @@ label{font-size:12px;color:var(--muted);display:block;margin:0 0 5px}.field{marg
 <div class="scroll" id="account-list"></div>
 </div></section>
 <section class="section" id="incidents"><div class="eyebrow">Fiabilité</div><h1>Incidents</h1><p>Une panne sur un compte ne doit pas interrompre les autres.</p>
-<div class="panel"><div id="incident-list"></div></div></section>
+<div class="panel"><div id="incident-list"></div></div>
+<details class="panel" style="margin-top:14px"><summary style="cursor:pointer;font-weight:700">Diagnostics distants <span class="sub">(optionnel)</span></summary>
+<p style="margin-top:12px">Statut des services de test connectés. Aucun contrôle du jeu.</p>
+<div id="telemetry-summary" class="sub">Chargement…</div>
+<div id="telemetry-agents" style="margin-top:10px"></div>
+<h2 style="margin-top:18px">Derniers événements techniques</h2><div id="telemetry-events"></div>
+<a href="/api/telemetry/export" download style="display:inline-block;margin-top:12px">Exporter les diagnostics</a>
+</details></section>
 <section class="section" id="settings"><div class="eyebrow">Configuration</div><h1>Paramètres</h1><p>Réglages simples. Ils s'appliquent sans redémarrer le logiciel.</p>
 <div class="twocol"><div class="panel">
 <h2>Supervision</h2>
@@ -139,8 +146,26 @@ if(i.status!=="resolved"){var button=node("button","action","Clôturer la simula
 target.appendChild(block);
 });
 }
+async function refreshRemote(){
+try {
+var info=await api("/api/telemetry/state");
+var sum=info.summary||{};
+document.getElementById("telemetry-summary").textContent=
+(sum.connected||0)+" service(s) connecté(s) · "+(sum.stale||0)+" sans nouvelles";
+var agents=document.getElementById("telemetry-agents");agents.replaceChildren();
+if(!info.agents.length){agents.appendChild(node("div","entry","Aucun service distant configuré pour le moment."));}
+info.agents.forEach(function(a){
+agents.appendChild(node("div","entry",a.agent_id+" · "+(a.connection==="stale"?"Déconnecté":a.connection)+" · Vu le "+formatTime(a.last_seen)));
+});
+var events=document.getElementById("telemetry-events");events.replaceChildren();
+if(!info.events.length){events.appendChild(node("div","entry","Aucun incident distant reçu."));}
+info.events.slice(0,12).forEach(function(e){
+events.appendChild(node("div","entry",formatTime(e.recorded_at)+" · "+e.agent_id+(e.profile_id?" / ACC_"+String(e.profile_id).padStart(2,"0"):"")+" · "+e.level+" · "+e.code));
+});
+}catch(error){document.getElementById("telemetry-summary").textContent="Diagnostics distants indisponibles : "+error.message;}
+}
 async function refresh(){
-try{state=await api("/api/state");update();}
+try{state=await api("/api/state");update();await refreshRemote();}
 catch(e){notify("Connexion : "+e.message);}
 }
 async function action(path,payload){

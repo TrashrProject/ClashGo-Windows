@@ -18,10 +18,13 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
 from reqngo.core import Guardian
+from reqngo.telemetry import TelemetryStore
+from reqngo.telemetry_api import router_for
 
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.getenv("GUARDIAN_DATA_DIR", BASE.parent / "data"))
 engine = Guardian(DATA / "guardian.sqlite3")
+telemetry = TelemetryStore(DATA / "telemetry.sqlite3")
 stop = threading.Event()
 security = HTTPBasic()
 
@@ -55,6 +58,8 @@ def supervise():
             cfg = engine.settings()
             due = time.time() - cfg["last_full_scan"] >= cfg["scan_interval_seconds"]
             engine.scan(full=due)
+            if due:
+                telemetry.check_stale()
         except Exception as exc:
             # A crash in one scan must not kill the scheduler.
             print("Guardian supervisor:", type(exc).__name__, flush=True)
@@ -71,10 +76,12 @@ async def lifespan(app):
         stop.set()
         worker.join(timeout=5)
         engine.close()
+        telemetry.close()
 
 
 app = FastAPI(title="REQ N GO Guardian", docs_url=None, redoc_url=None,
               openapi_url=None, lifespan=lifespan)
+app.include_router(router_for(telemetry, guard))
 
 
 @app.middleware("http")
@@ -158,7 +165,9 @@ def fault(body: Fault, _: bool = Depends(write_guard)):
 
 @app.post("/api/scan")
 def scan(_: bool = Depends(write_guard)):
-    return engine.scan(full=True)
+    result = engine.scan(full=True)
+    result["telemetry_alerts"] = telemetry.check_stale()["alerts_created"]
+    return result
 
 
 @app.post("/api/incidents/{incident_id}/resolve")
