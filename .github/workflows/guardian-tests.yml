@@ -29,3 +29,24 @@ jobs:
         run: docker compose -f compose.yaml config --quiet
       - name: Compile modules
         run: python -m compileall -q reqngo tools
+      - name: Run four real Docker processes
+        env:
+          GUARDIAN_PASSWORD: ci-only-passphrase-not-for-production
+          GUARDIAN_AGENT_TOKEN: ci-only-agent-token-not-for-production-123456
+        run: |
+          docker compose up --build -d
+          python tools/compose_smoke.py
+      - name: Inspect Docker logs on failure
+        if: failure()
+        env:
+          GUARDIAN_PASSWORD: ci-only-passphrase-not-for-production
+          GUARDIAN_AGENT_TOKEN: ci-only-agent-token-not-for-production-123456
+        run: |
+          docker compose ps
+          docker compose logs --tail=70 guardian pilot01 pilot02 pilot03
+      - name: Clean up Docker test
+        if: always()
+        env:
+          GUARDIAN_PASSWORD: ci-only-passphrase-not-for-production
+          GUARDIAN_AGENT_TOKEN: ci-only-agent-token-not-for-production-123456
+        run: docker compose down -v
