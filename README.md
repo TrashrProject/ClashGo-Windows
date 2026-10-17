@@ -146,6 +146,19 @@ Sans payer d'hebergement, nous pouvons encore tester et corriger le code dans Gi
 
 **Important :** GitHub Actions execute ponctuellement les tests, mais n'heberge pas Guardian en continu. Les scans toutes les 30 secondes et 10 minutes ne sont actifs que lorsque Guardian tourne effectivement sur une machine. Aucune depense cloud n'est engagee par cette etape.
 
+## V7 : chaos tests, reprises durables et analyse de pannes multiples
+
+**Aucun serveur payant ni service de jeu n'est nécessaire pour exécuter les tests.**
+
+- Les pilotes persistent maintenant leur dernier type d'incident dans une table SQLite locale. Lors d'un redémarrage, un contrôle réellement réussi peut confirmer la réparation de l'incident qui existait avant le crash.
+- Pour éviter les avalanches d'événements, une panne locale persistante ne génère pas la même alerte à chaque cycle. Les messages en attente restent durables dans l'outbox.
+- Les interruptions réseau répétées utilisent un numéro de génération de heartbeat : les reconnexions produisent de nouveaux épisodes de panne même si l'horloge système change. Les anciennes bases SQLite sont migrées sans suppression des incidents.
+- La section **Incidents > Diagnostics distants > Analyse des incidents** regroupe les alertes : plusieurs pilotes déconnectés, même signature d'erreur, panne isolée ou panne répétée. Ce sont des **hypothèses déterministes**, pas des diagnostics d'un modèle de langage.
+- Les recommandations sont en lecture seule. Il n'y a pas de commande distante, pas de déploiement automatique de code, pas de suppression de fichiers et pas d'accès à des comptes Clash of Clans.
+- `tests/test_chaos_recovery.py` couvre les pannes en parallèle, l'interruption au milieu des accusés de réception, l'état durable après crash, la migration et des incidents simultanés sur **50 profils fictifs**. `tests/test_correlation.py` vérifie l'isolation, les pannes partagées et les recommandations non dangereuses.
+
+Commande d'essai dans GitHub Actions : les workflows existants exécutent automatiquement `python -m unittest discover -s tests -v` et le test de démarrage des quatre conteneurs. Les résultats restent inspectables depuis un téléphone dans GitHub ; la supervision réelle toutes les 30 secondes nécessite toujours un serveur en fonctionnement.
+
 ## Organisation
 `reqngo/core.py` : moteur SQLite indépendant. `reqngo/server.py` : API web et superviseur. `reqngo/static/index.html` : dashboard. `tests/` : scénarios automatisés.
 

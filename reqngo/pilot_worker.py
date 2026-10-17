@@ -49,7 +49,26 @@ class Outbox:
         self.db = sqlite3.connect(str(path))
         self.db.execute("CREATE TABLE IF NOT EXISTS pending ("
                         "id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS worker_state ("
+                        "key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         self.db.commit()
+
+    def get_state(self, key, default=None):
+        row = self.db.execute(
+            "SELECT value FROM worker_state WHERE key=?", (key,)
+        ).fetchone()
+        return row[0] if row else default
+
+    def put_state(self, key, value):
+        with self.db:
+            if value is None:
+                self.db.execute("DELETE FROM worker_state WHERE key=?", (key,))
+            else:
+                self.db.execute(
+                    "INSERT INTO worker_state(key,value) VALUES(?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (key, value),
+                )
 
     def append(self, event):
         if self.count() >= 1000:
@@ -87,6 +106,18 @@ class Pilot:
         self.outbox = outbox
         self.heartbeat = heartbeat
         self.report = report
+        # Survives an unexpected restart before the recovery verification.
+        # Only technical identifiers, never secrets, are persisted locally.
+        self.last_issue = self.outbox.get_state("last_issue")
+        if self.last_issue not in (None, "invalid_config", "pilot_probe_failed"):
+            self.last_issue = None
+
+    def _remember_issue(self, issue):
+        self.outbox.put_state("last_issue", issue)
+        self.last_issue = issue
+
+    def _clear_issue(self):
+        self.outbox.put_state("last_issue", None)
         self.last_issue = None
 
     def enqueue(self, code, level, **metadata):
@@ -108,27 +139,34 @@ class Pilot:
 
     def check(self):
         if not self.workdir.is_dir():
-            # Only recreate the worker's own dedicated directory.
-            self.enqueue("invalid_config", "warning", phase="missing_workdir")
+            # The only automatic repair allowed is recreating this pilot's OWN
+            # missing work directory. Existing files are never deleted.
+            previous = self.last_issue
+            if previous != "invalid_config":
+                self.enqueue("invalid_config", "warning", phase="missing_workdir")
+                self._remember_issue("invalid_config")
             try:
                 self.workdir.mkdir(parents=True, exist_ok=True)
                 self._probe()
-                self.enqueue("probe_success", "info", error_type="invalid_config")
-                self.last_issue = None
-                return "ok"
             except OSError:
-                self.last_issue = "invalid_config"
                 return "degraded"
+            self.enqueue("probe_success", "info", error_type="invalid_config")
+            if previous == "pilot_probe_failed":
+                self.enqueue("probe_success", "info", error_type=previous)
+            self._clear_issue()
+            return "ok"
         try:
             self._probe()
         except OSError:
-            if self.last_issue != "pilot_probe_failed":
+            # If we just recreated a missing directory but could not test it,
+            # keep the original incident open until a successful probe.
+            if self.last_issue not in ("pilot_probe_failed", "invalid_config"):
                 self.enqueue("pilot_probe_failed", "error", phase="storage")
-            self.last_issue = "pilot_probe_failed"
+                self._remember_issue("pilot_probe_failed")
             return "degraded"
         if self.last_issue:
             self.enqueue("probe_success", "info", error_type=self.last_issue)
-        self.last_issue = None
+            self._clear_issue()
         return "ok"
 
     def step(self):

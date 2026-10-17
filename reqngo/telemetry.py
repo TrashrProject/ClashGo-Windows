@@ -31,7 +31,8 @@ class TelemetryStore:
             self.db.executescript("""
                 CREATE TABLE IF NOT EXISTS agents (
                     agent_id TEXT PRIMARY KEY, status TEXT NOT NULL,
-                    version TEXT NOT NULL, last_seen REAL NOT NULL
+                    version TEXT NOT NULL, last_seen REAL NOT NULL,
+                    heartbeat_seq INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS diagnostic_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,6 +55,13 @@ class TelemetryStore:
                 CREATE INDEX IF NOT EXISTS idx_cases_status
                     ON diagnostic_cases(status, last_seen DESC);
             """)
+            # Older SQLite databases predate heartbeat_seq. Preserve every
+            # existing event and case when upgrading the schema.
+            columns = {row["name"] for row in self.db.execute("PRAGMA table_info(agents)")}
+            if "heartbeat_seq" not in columns:
+                self.db.execute(
+                    "ALTER TABLE agents ADD COLUMN heartbeat_seq INTEGER NOT NULL DEFAULT 0"
+                )
 
     def close(self):
         with self.lock:
@@ -98,10 +106,12 @@ class TelemetryStore:
         at = self.clock()
         with self.lock, self.db:
             self.db.execute("""
-                INSERT INTO agents(agent_id,status,version,last_seen) VALUES(?,?,?,?)
+                INSERT INTO agents(agent_id,status,version,last_seen,heartbeat_seq)
+                VALUES(?,?,?,?,1)
                 ON CONFLICT(agent_id) DO UPDATE SET
                     status=excluded.status, version=excluded.version,
-                    last_seen=excluded.last_seen
+                    last_seen=excluded.last_seen,
+                    heartbeat_seq=agents.heartbeat_seq+1
             """, (agent_id, status, version, at))
             # A new heartbeat proves connectivity, not the health of other components.
             self._verify_case(agent_id, None, "worker_unreachable", at)
@@ -123,10 +133,10 @@ class TelemetryStore:
                 raise ValueError("Une verification exige un code source structure et un niveau info.")
         at = self.clock()
         with self.lock, self.db:
-            old = self.db.execute("SELECT agent_id FROM diagnostic_events WHERE event_key=?", (event_key,)).fetchone()
+            old = self.db.execute("SELECT agent_id,code FROM diagnostic_events WHERE event_key=?", (event_key,)).fetchone()
             if old is not None:
-                if old["agent_id"] != agent_id:
-                    raise ValueError("Identifiant deja utilise par un autre agent.")
+                if old["agent_id"] != agent_id or old["code"] != code:
+                    raise ValueError("Cle d'evenement deja attribuee a un autre diagnostic.")
                 return {"ok": True, "duplicate": True}
             self.db.execute("""
                 INSERT INTO diagnostic_events(event_key,agent_id,profile_id,code,level,metadata,recorded_at)
@@ -179,12 +189,14 @@ class TelemetryStore:
         if type(stale_after) is not int or not 30 <= stale_after <= 3600:
             raise ValueError("Seuil de surveillance invalide.")
         with self.lock:
-            stale = [(row["agent_id"], row["last_seen"]) for row in self.db.execute(
-                "SELECT agent_id,last_seen FROM agents WHERE last_seen<?",
+            stale = [(row["agent_id"], row["heartbeat_seq"]) for row in self.db.execute(
+                "SELECT agent_id,heartbeat_seq FROM agents WHERE last_seen<?",
                 (self.clock() - stale_after,))]
         created = 0
-        for agent_id, last_seen in stale:
-            event_key = "stale_" + agent_id + "_" + str(int(last_seen))
+        for agent_id, sequence in stale:
+            # Sequence changes on EVERY accepted heartbeat, even if the
+            # timestamp is unchanged: distinct outages cannot collide.
+            event_key = "stale_" + agent_id + "_" + str(sequence)
             result = self.report(agent_id, event_key, "worker_unreachable", "warning",
                                  metadata={"component": "heartbeat_monitor"})
             created += int(not result["duplicate"])
