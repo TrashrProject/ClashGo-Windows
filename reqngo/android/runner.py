@@ -129,8 +129,8 @@ class ActionRunner:
         if idx >= len(self.workflow.steps):
             return {"status": "complete", "step_index": idx}
         current = self.workflow.steps[idx]
-        if not self.device.game_running():
-            raise ExecutionBlocked("Jeu non lance sur l'appareil explicitement selectionne.")
+        if not self.device.game_running() or not self.device.game_foreground():
+            raise ExecutionBlocked("Jeu absent ou non confirme au premier plan : aucun geste.")
         if phase != "ready":
             # We cannot know whether a previous tap was delivered. Never replay it.
             try:
