@@ -210,3 +210,11 @@ Cette surveillance fonctionne avec SQLite local ou PostgreSQL partagé. Elle ne 
 Un diagnostic de charge consultable dans **Comptes > Flotte grande echelle** (et via `GET /api/fleet/capacity`) donne une alerte non-intrusive lorsque des sondes techniques attendent trop longtemps ou qu'aucun worker n'est actif. Les seuils sont documentes; il ne s'agit **pas** d'une commande d'auto-scaling.
 
 Un benchmark en CI sur une base PostgreSQL jetable mesure les latences p50/p95/p99 et le debit de sondes synthetiques sur **six workers**. Les rapports de mesure sont conserves en artefacts GitHub Actions, sans mots de passe. Cette etape ne prouve pas la capacite de faire fonctionner des milliers de sessions Android ou Clash of Clans simultanement. Voir [Guide capacite V13](docs/FLEET_CAPACITY_V13.md).
+
+## V14 — metriques par worker et inventaire Android anonyme
+
+Les workers remontent CPU, charge RAM hote et consommation RSS du processus avec `psutil`; le comptage des appareils ADB connectes est un **opt-in explicite**, limite aux serials deja lies localement au worker. Aucune adresse, identifiant d'appareil, capture ou compte ne remonte vers Guardian. Les donnees existantes et les anciens workers restent compatibles avec une migration additive SQLite/PostgreSQL.
+
+Le tableau de bord presente ces mesures et un indicateur de saturation (CPU/RAM vus par le systeme >=95 %). **Un appareil Android detecte ne signifie pas une session de jeu active et la charge hote Docker ne correspond pas necessairement aux limites d'un conteneur.** Le systeme ne fait pas d'auto-scaling et ne commande aucune action dans le jeu.
+
+Voir [Guide des mesures V14](docs/FLEET_METRICS_V14.md).

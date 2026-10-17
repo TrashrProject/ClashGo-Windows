@@ -13,6 +13,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from reqngo.fleet import _PREFIX, _KEY, _WORKER, _DEDUPE
+from reqngo.fleet_metrics import clean_metrics
 
 
 class PostgresFleetStore:
@@ -70,6 +71,14 @@ class PostgresFleetStore:
                         last_seen timestamptz NOT NULL DEFAULT clock_timestamp()
                     )
                 """)
+                for field, sql_type in (
+                    ("cpu_percent", "double precision"),
+                    ("memory_percent", "double precision"),
+                    ("process_rss_mb", "double precision"),
+                    ("android_online_devices", "integer"),
+                    ("android_bound_devices", "integer")):
+                    conn.execute("ALTER TABLE fleet_workers ADD COLUMN IF NOT EXISTS "
+                                 + field + " " + sql_type)
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS fleet_worker_incidents (
                         worker_id text PRIMARY KEY REFERENCES fleet_workers(worker_id),
@@ -181,18 +190,31 @@ class PostgresFleetStore:
             FROM expired WHERE j.id=expired.id
         """)
 
-    def heartbeat(self, worker_id: str, status: str = "ok", capacity: int = 1):
+    def heartbeat(self, worker_id: str, status: str = "ok", capacity: int = 1, *,
+                  metrics=None):
         if not isinstance(worker_id, str) or not _WORKER.fullmatch(worker_id):
             raise ValueError("Worker invalide.")
         if status not in ("ok", "busy", "degraded") or type(capacity) is not int or not 1 <= capacity <= 100:
             raise ValueError("Etat ou capacite invalide.")
+        metric = clean_metrics(metrics)
         with self.pool.connection() as conn:
             conn.execute("""
-                INSERT INTO fleet_workers(worker_id,status,capacity)
-                VALUES(%s,%s,%s)
-                ON CONFLICT (worker_id) DO UPDATE SET status=excluded.status,
-                  capacity=excluded.capacity,last_seen=clock_timestamp()
-            """, (worker_id, status, capacity))
+                INSERT INTO fleet_workers(
+                    worker_id,status,capacity,cpu_percent,memory_percent,
+                    process_rss_mb,android_online_devices,android_bound_devices)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (worker_id) DO UPDATE SET
+                    status=excluded.status,capacity=excluded.capacity,
+                    last_seen=clock_timestamp(),
+                    cpu_percent=excluded.cpu_percent,
+                    memory_percent=excluded.memory_percent,
+                    process_rss_mb=excluded.process_rss_mb,
+                    android_online_devices=excluded.android_online_devices,
+                    android_bound_devices=excluded.android_bound_devices
+            """, (worker_id, status, capacity,
+                  *(metric[name] for name in (
+                      "cpu_percent", "memory_percent", "process_rss_mb",
+                      "android_online_devices", "android_bound_devices"))))
             conn.execute("""
                 UPDATE fleet_worker_incidents
                 SET status='resolved', resolved_at=clock_timestamp()
@@ -252,7 +274,8 @@ class PostgresFleetStore:
             raise ValueError("Limite invalide.")
         with self.pool.connection() as conn:
             rows = conn.execute("""
-                SELECT worker_id,status,capacity,
+                SELECT worker_id,status,capacity,cpu_percent,memory_percent,
+                       process_rss_mb,android_online_devices,android_bound_devices,
                        EXTRACT(EPOCH FROM last_seen) AS last_seen,
                        last_seen >= clock_timestamp()- INTERVAL '180 seconds' AS connected
                 FROM fleet_workers ORDER BY last_seen DESC LIMIT %s
@@ -365,7 +388,11 @@ class PostgresFleetStore:
                 COUNT(*) AS total,
                 COALESCE(SUM(capacity) FILTER (
                     WHERE last_seen >= clock_timestamp()-INTERVAL '180 seconds'
-                ), 0) AS slots FROM fleet_workers
+                ), 0) AS slots,
+                COUNT(*) FILTER (
+                    WHERE last_seen >= clock_timestamp()-INTERVAL '180 seconds'
+                      AND (cpu_percent>=95 OR memory_percent>=95)
+                ) AS overloaded FROM fleet_workers
             """).fetchone()
             incidents = conn.execute(
                 "SELECT COUNT(*) AS n FROM fleet_worker_incidents WHERE status='open'"
@@ -379,6 +406,7 @@ class PostgresFleetStore:
         counts = {r["state"]: r["n"] for r in rows}
         return {"profiles": n["profiles"], "enabled": n["enabled"],
                 "total_workers": work["total"], "online_slots": work["slots"],
+                "overloaded_workers": work["overloaded"],
                 "open_worker_incidents": incidents,
                 "oldest_ready_wait_seconds": int(oldest),
                 "jobs": {k: counts.get(k, 0) for k in

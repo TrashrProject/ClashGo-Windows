@@ -13,6 +13,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from reqngo.fleet_metrics import clean_metrics
 
 _PREFIX = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,23}\Z")
 _KEY = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,23}-[0-9]{6,7}\Z")
@@ -76,6 +77,16 @@ class FleetStore:
                 CREATE INDEX IF NOT EXISTS fleet_profile_jobs
                   ON fleet_jobs(profile_key,id);
             """)
+            # Additive evolution for databases created by V9 through V13.
+            columns = {row["name"] for row in self.db.execute(
+                "PRAGMA table_info(fleet_workers)")}
+            for field, sql_type in (
+                ("cpu_percent", "REAL"), ("memory_percent", "REAL"),
+                ("process_rss_mb", "REAL"), ("android_online_devices", "INTEGER"),
+                ("android_bound_devices", "INTEGER")):
+                if field not in columns:
+                    self.db.execute("ALTER TABLE fleet_workers ADD COLUMN "
+                                    + field + " " + sql_type)
             # Non-destructive schema evolution for installed V9/V10 databases.
             cols = {row["name"] for row in self.db.execute("PRAGMA table_info(fleet_jobs)")}
             if "target_worker" not in cols:
@@ -182,20 +193,33 @@ class FleetStore:
             WHERE state='leased' AND lease_until<=? AND kind='health_probe'
         """, (now, now, now))
 
-    def heartbeat(self, worker_id: str, status: str = "ok", capacity: int = 1):
+    def heartbeat(self, worker_id: str, status: str = "ok", capacity: int = 1, *,
+                  metrics=None):
         if not isinstance(worker_id, str) or not _WORKER.fullmatch(worker_id):
             raise ValueError("Worker invalide.")
         if status not in ("ok", "busy", "degraded") or type(capacity) is not int or not 1 <= capacity <= 100:
             raise ValueError("Etat ou capacite invalide.")
+        metric = clean_metrics(metrics)
         with self._transaction():
             now = self.clock()
             self.db.execute("""
-                INSERT INTO fleet_workers(worker_id,status,capacity,last_seen)
-                VALUES(?,?,?,?)
+                INSERT INTO fleet_workers(
+                    worker_id,status,capacity,last_seen,cpu_percent,
+                    memory_percent,process_rss_mb,android_online_devices,
+                    android_bound_devices)
+                VALUES(?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(worker_id) DO UPDATE SET
                     status=excluded.status,capacity=excluded.capacity,
-                    last_seen=excluded.last_seen
-            """, (worker_id, status, capacity, now))
+                    last_seen=excluded.last_seen,
+                    cpu_percent=excluded.cpu_percent,
+                    memory_percent=excluded.memory_percent,
+                    process_rss_mb=excluded.process_rss_mb,
+                    android_online_devices=excluded.android_online_devices,
+                    android_bound_devices=excluded.android_bound_devices
+            """, (worker_id, status, capacity, now,
+                  *(metric[name] for name in (
+                      "cpu_percent", "memory_percent", "process_rss_mb",
+                      "android_online_devices", "android_bound_devices"))))
             self.db.execute("""
                 UPDATE fleet_worker_incidents SET status='resolved',
                     resolved_at=? WHERE worker_id=? AND status='open'
@@ -241,7 +265,9 @@ class FleetStore:
             raise ValueError("Limite invalide.")
         with self.lock:
             rows = [dict(r) for r in self.db.execute(
-                "SELECT worker_id,status,capacity,last_seen FROM fleet_workers "
+                "SELECT worker_id,status,capacity,last_seen,cpu_percent,memory_percent,"
+                "process_rss_mb,android_online_devices,android_bound_devices "
+                "FROM fleet_workers "
                 "ORDER BY last_seen DESC LIMIT ?", (limit,))]
         cutoff = self.clock() - 180
         for row in rows:
@@ -345,6 +371,10 @@ class FleetStore:
             slots = self.db.execute(
                 "SELECT COALESCE(SUM(capacity),0) FROM fleet_workers WHERE last_seen>=?",
                 (self.clock() - 180,)).fetchone()[0]
+            overloaded = self.db.execute(
+                "SELECT COUNT(*) FROM fleet_workers WHERE last_seen>=? "
+                "AND (cpu_percent>=95 OR memory_percent>=95)",
+                (self.clock() - 180,)).fetchone()[0]
             incidents = self.db.execute(
                 "SELECT COUNT(*) FROM fleet_worker_incidents WHERE status='open'"
             ).fetchone()[0]
@@ -353,6 +383,7 @@ class FleetStore:
                 "AND available_at<=?", (self.clock(),)).fetchone()[0]
         return {"profiles": total, "enabled": enabled, "online_workers": workers,
                 "total_workers": total_workers, "online_slots": slots,
+                "overloaded_workers": overloaded,
                 "open_worker_incidents": incidents,
                 "oldest_ready_wait_seconds": max(0, int(self.clock() - oldest)) if oldest is not None else 0,
                 "jobs": {key: counts.get(key, 0) for key in

@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 from reqngo.fleet import _WORKER
+from reqngo.fleet_metrics import WorkerResourceSampler
 from reqngo.android.adb import AdbError
 from reqngo.android.preflight import AndroidReadOnlyPreflight
 from reqngo.health import update_worker_heartbeat
@@ -50,7 +51,8 @@ class FleetClient:
 
 class FleetDiagnosticWorker:
     def __init__(self, send, workdir, capacity: int = 1, *,
-                 worker_id: str | None = None, android_preflight=None):
+                 worker_id: str | None = None, android_preflight=None,
+                 resource_sampler=None):
         if type(capacity) is not int or not 1 <= capacity <= 8:
             raise ValueError("Capacite de worker invalide.")
         self.send = send
@@ -58,6 +60,7 @@ class FleetDiagnosticWorker:
         self.workdir = Path(workdir)
         self.worker_id = worker_id
         self.android_preflight = android_preflight
+        self.resource_sampler = resource_sampler
 
     def _probe(self):
         """A real IO check within the dedicated worker directory, no game."""
@@ -99,8 +102,9 @@ class FleetDiagnosticWorker:
         return healthy
 
     def step(self):
+        measurements = self.resource_sampler.sample() if self.resource_sampler else {}
         self.send("/api/fleet/worker/heartbeat",
-                  {"status": "ok", "capacity": self.capacity})
+                  {"status": "ok", "capacity": self.capacity, **measurements})
         answer = self.send("/api/fleet/worker/claim",
                            {"limit": self.capacity, "capacity": self.capacity,
                             "lease_seconds": 90})
@@ -137,10 +141,14 @@ def main(argv=None):
             os.environ.get("FLEET_ANDROID_PROFILE_SERIALS_JSON", ""),
             adb_binary=os.environ.get("ADB_BINARY", "adb"),
             require_game=os.environ.get("FLEET_ANDROID_REQUIRE_GAME") == "1")
+        sampler = WorkerResourceSampler(
+            android_preflight=preflight,
+            enable_adb=os.environ.get("FLEET_MONITOR_ANDROID") == "1")
         worker = FleetDiagnosticWorker(
             client.send,
             os.environ.get("FLEET_WORKDIR", "./data/fleet-" + worker_id),
-            capacity=capacity, worker_id=worker_id, android_preflight=preflight)
+            capacity=capacity, worker_id=worker_id, android_preflight=preflight,
+            resource_sampler=sampler)
     except (ValueError, TypeError) as error:
         parser.error(str(error))
     heartbeat_file = worker.workdir / "worker_heartbeat.txt"
