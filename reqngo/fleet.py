@@ -61,6 +61,14 @@ class FleetStore:
                     capacity INTEGER NOT NULL CHECK(capacity BETWEEN 1 AND 100),
                     last_seen REAL NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS fleet_worker_incidents (
+                    worker_id TEXT PRIMARY KEY REFERENCES fleet_workers(worker_id),
+                    status TEXT NOT NULL CHECK(status IN ('open','resolved')),
+                    occurrences INTEGER NOT NULL DEFAULT 1,
+                    first_seen REAL NOT NULL,
+                    last_seen REAL NOT NULL,
+                    resolved_at REAL
+                );
                 CREATE UNIQUE INDEX IF NOT EXISTS fleet_one_open_job
                   ON fleet_jobs(profile_key) WHERE state IN ('queued','leased');
                 CREATE INDEX IF NOT EXISTS fleet_ready_jobs
@@ -180,14 +188,53 @@ class FleetStore:
         if status not in ("ok", "busy", "degraded") or type(capacity) is not int or not 1 <= capacity <= 100:
             raise ValueError("Etat ou capacite invalide.")
         with self._transaction():
+            now = self.clock()
             self.db.execute("""
                 INSERT INTO fleet_workers(worker_id,status,capacity,last_seen)
                 VALUES(?,?,?,?)
                 ON CONFLICT(worker_id) DO UPDATE SET
                     status=excluded.status,capacity=excluded.capacity,
                     last_seen=excluded.last_seen
-            """, (worker_id, status, capacity, self.clock()))
+            """, (worker_id, status, capacity, now))
+            self.db.execute("""
+                UPDATE fleet_worker_incidents SET status='resolved',
+                    resolved_at=? WHERE worker_id=? AND status='open'
+            """, (now, worker_id))
         return {"ok": True}
+
+    def scan_worker_health(self, stale_seconds: int = 180):
+        """Persist one incident per outage, without emitting repeat alerts."""
+        if type(stale_seconds) is not int or not 30 <= stale_seconds <= 3600:
+            raise ValueError("Delai de detection invalide.")
+        now = self.clock()
+        with self._transaction():
+            affected = self.db.execute("""
+                INSERT INTO fleet_worker_incidents
+                    (worker_id,status,occurrences,first_seen,last_seen,resolved_at)
+                SELECT worker_id,'open',1,?,last_seen,NULL FROM fleet_workers
+                WHERE last_seen<?
+                ON CONFLICT(worker_id) DO UPDATE SET
+                    status='open',occurrences=fleet_worker_incidents.occurrences+1,
+                    first_seen=excluded.first_seen,last_seen=excluded.last_seen,
+                    resolved_at=NULL
+                WHERE fleet_worker_incidents.status='resolved'
+            """, (now, now - stale_seconds)).rowcount
+            total = self.db.execute(
+                "SELECT COUNT(*) FROM fleet_worker_incidents WHERE status='open'"
+            ).fetchone()[0]
+        return {"new_incidents": affected, "open_incidents": total}
+
+    def worker_incidents(self, limit: int = 100):
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("Limite invalide.")
+        with self.lock:
+            rows = self.db.execute("""
+                SELECT worker_id,status,occurrences,first_seen,last_seen,resolved_at
+                FROM fleet_worker_incidents
+                ORDER BY CASE WHEN status='open' THEN 0 ELSE 1 END,
+                         first_seen DESC LIMIT ?
+            """, (limit,)).fetchall()
+        return [dict(row) for row in rows]
 
     def workers(self, limit: int = 100):
         if type(limit) is not int or not 1 <= limit <= 200:
@@ -293,7 +340,21 @@ class FleetStore:
             workers = self.db.execute(
                 "SELECT COUNT(*) FROM fleet_workers WHERE last_seen>=?",
                 (self.clock() - 180,)).fetchone()[0]
+            total_workers = self.db.execute(
+                "SELECT COUNT(*) FROM fleet_workers").fetchone()[0]
+            slots = self.db.execute(
+                "SELECT COALESCE(SUM(capacity),0) FROM fleet_workers WHERE last_seen>=?",
+                (self.clock() - 180,)).fetchone()[0]
+            incidents = self.db.execute(
+                "SELECT COUNT(*) FROM fleet_worker_incidents WHERE status='open'"
+            ).fetchone()[0]
+            oldest = self.db.execute(
+                "SELECT MIN(available_at) FROM fleet_jobs WHERE state='queued' "
+                "AND available_at<=?", (self.clock(),)).fetchone()[0]
         return {"profiles": total, "enabled": enabled, "online_workers": workers,
+                "total_workers": total_workers, "online_slots": slots,
+                "open_worker_incidents": incidents,
+                "oldest_ready_wait_seconds": max(0, int(self.clock() - oldest)) if oldest is not None else 0,
                 "jobs": {key: counts.get(key, 0) for key in
                          ("queued", "leased", "done", "needs_review")},
                 "ready_jobs": ready, "scope": "logical-test-profiles-only",

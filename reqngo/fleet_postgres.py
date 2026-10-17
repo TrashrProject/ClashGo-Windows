@@ -70,6 +70,16 @@ class PostgresFleetStore:
                         last_seen timestamptz NOT NULL DEFAULT clock_timestamp()
                     )
                 """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS fleet_worker_incidents (
+                        worker_id text PRIMARY KEY REFERENCES fleet_workers(worker_id),
+                        status text NOT NULL CHECK(status IN ('open','resolved')),
+                        occurrences integer NOT NULL DEFAULT 1,
+                        first_seen timestamptz NOT NULL DEFAULT clock_timestamp(),
+                        last_seen timestamptz NOT NULL,
+                        resolved_at timestamptz
+                    )
+                """)
         except BaseException:
             self.pool.close()
             raise
@@ -183,7 +193,59 @@ class PostgresFleetStore:
                 ON CONFLICT (worker_id) DO UPDATE SET status=excluded.status,
                   capacity=excluded.capacity,last_seen=clock_timestamp()
             """, (worker_id, status, capacity))
+            conn.execute("""
+                UPDATE fleet_worker_incidents
+                SET status='resolved', resolved_at=clock_timestamp()
+                WHERE worker_id=%s AND status='open'
+            """, (worker_id,))
         return {"ok": True}
+
+    def scan_worker_health(self, stale_seconds: int = 180):
+        """Idempotent cross-replica worker outage detection."""
+        if type(stale_seconds) is not int or not 30 <= stale_seconds <= 3600:
+            raise ValueError("Delai de detection invalide.")
+        with self.pool.connection() as conn:
+            created = conn.execute("""
+                WITH stale AS (
+                    SELECT worker_id,last_seen FROM fleet_workers
+                    WHERE last_seen < clock_timestamp() - %s * INTERVAL '1 second'
+                    FOR UPDATE
+                )
+                INSERT INTO fleet_worker_incidents
+                    (worker_id,status,occurrences,first_seen,last_seen,resolved_at)
+                SELECT worker_id,'open',1,clock_timestamp(),last_seen,NULL
+                FROM stale WHERE TRUE
+                ON CONFLICT(worker_id) DO UPDATE SET
+                    status='open',
+                    occurrences=fleet_worker_incidents.occurrences+1,
+                    first_seen=excluded.first_seen,
+                    last_seen=excluded.last_seen,
+                    resolved_at=NULL
+                WHERE fleet_worker_incidents.status='resolved'
+                RETURNING worker_id
+            """, (stale_seconds,)).fetchall()
+            total = conn.execute(
+                "SELECT COUNT(*) AS n FROM fleet_worker_incidents WHERE status='open'"
+            ).fetchone()["n"]
+        return {"new_incidents": len(created), "open_incidents": total}
+
+    def worker_incidents(self, limit: int = 100):
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("Limite invalide.")
+        with self.pool.connection() as conn:
+            rows = conn.execute("""
+                SELECT worker_id,status,occurrences,
+                    EXTRACT(EPOCH FROM first_seen) AS first_seen,
+                    EXTRACT(EPOCH FROM last_seen) AS last_seen,
+                    EXTRACT(EPOCH FROM resolved_at) AS resolved_at
+                FROM fleet_worker_incidents
+                ORDER BY CASE WHEN status='open' THEN 0 ELSE 1 END,
+                         first_seen DESC LIMIT %s
+            """, (limit,)).fetchall()
+        return [dict(r, first_seen=float(r["first_seen"]),
+                     last_seen=float(r["last_seen"]),
+                     resolved_at=float(r["resolved_at"]) if r["resolved_at"] is not None else None)
+                for r in rows]
 
     def workers(self, limit: int = 100):
         if type(limit) is not int or not 1 <= limit <= 200:
@@ -296,15 +358,32 @@ class PostgresFleetStore:
                 SELECT COUNT(*) AS n FROM fleet_jobs WHERE state='queued'
                       AND available_at<=clock_timestamp()
             """).fetchone()["n"]
-            online = conn.execute("""
-                SELECT COUNT(*) AS n FROM fleet_workers
-                WHERE last_seen >= clock_timestamp() - INTERVAL '180 seconds'
-            """).fetchone()["n"]
+            work = conn.execute("""
+                SELECT COUNT(*) FILTER (
+                    WHERE last_seen >= clock_timestamp()-INTERVAL '180 seconds'
+                ) AS online,
+                COUNT(*) AS total,
+                COALESCE(SUM(capacity) FILTER (
+                    WHERE last_seen >= clock_timestamp()-INTERVAL '180 seconds'
+                ), 0) AS slots FROM fleet_workers
+            """).fetchone()
+            incidents = conn.execute(
+                "SELECT COUNT(*) AS n FROM fleet_worker_incidents WHERE status='open'"
+            ).fetchone()["n"]
+            oldest = conn.execute("""
+                SELECT COALESCE(GREATEST(0,EXTRACT(EPOCH FROM
+                    (clock_timestamp()-MIN(available_at)))),0) AS seconds
+                FROM fleet_jobs
+                WHERE state='queued' AND available_at<=clock_timestamp()
+            """).fetchone()["seconds"]
         counts = {r["state"]: r["n"] for r in rows}
         return {"profiles": n["profiles"], "enabled": n["enabled"],
+                "total_workers": work["total"], "online_slots": work["slots"],
+                "open_worker_incidents": incidents,
+                "oldest_ready_wait_seconds": int(oldest),
                 "jobs": {k: counts.get(k, 0) for k in
                          ("queued", "leased", "done", "needs_review")},
-                "ready_jobs": ready, "online_workers": online,
+                "ready_jobs": ready, "online_workers": work["online"],
                 "scope": "logical-test-profiles-only",
                 "backend": "distributed-postgres"}
 

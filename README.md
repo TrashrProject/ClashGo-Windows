@@ -197,3 +197,10 @@ Voir [Guide V10 et limites de securite](docs/FLEET_V10.md). Aucun serveur payant
 La V11 permet d'affecter une **sonde Android de diagnostic** à un worker déterminé ; le numéro de série ADB reste dans la configuration locale du worker. La base refuse qu'un autre worker prenne cette tâche et préserve les données existantes grâce à des colonnes ajoutées sans suppression. Les sondes classiques et les trois processus pilotes V4 restent inchangés.
 
 Ce **n'est pas une automatisation de Clash of Clans** : le contrôle est limité à `adb devices` et, sur activation locale, à la présence du processus. Aucune capture ni geste tactile, ni connexion de comptes. Voir [Guide V11 : ADB et routage](docs/ANDROID_WORKER_V11.md). Sans appareil Android autorisé et connecté, la validation CI reste simulée.
+
+
+## V12 : surveillance des incidents à l'échelle d'une flotte
+
+Guardian détecte automatiquement les workers de diagnostic n'ayant pas envoyé de heartbeat depuis 180 secondes et enregistre un incident durable, sans doublons à chaque contrôle. Le retour d'un worker clôt l'incident. Le dashboard affiche en complément la capacité déclarée des workers actifs, l'âge de la file prête et les incidents récents. L'API `GET /api/fleet/incidents` est protégée et paginée par une limite stricte.
+
+Cette surveillance fonctionne avec SQLite local ou PostgreSQL partagé. Elle ne redémarre aucun compte et n'effectue aucune action dans Clash of Clans. Les contrôles sont exécutés à intervalle régulier, mais cela ne prouve pas une disponibilité cloud 24h/24 tant que le service n'est pas déployé et surveillé. Voir [Guide V12](docs/FLEET_HEALTH_V12.md).
