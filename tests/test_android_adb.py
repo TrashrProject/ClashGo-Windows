@@ -46,7 +46,7 @@ class AndroidBridgeTests(unittest.TestCase):
         screen = Screen(b"", 101, 201)
         with patch("subprocess.run", return_value=Mock(returncode=0, stdout=b"")) as run:
             bridge.tap(0.5, 0.25, screen)
-            self.assertEqual(run.call_args.args[0][-4:], ["tap", "50", "50"][-4:])
+            self.assertEqual(run.call_args.args[0][-3:], ["tap", "50", "50"])
             bridge.swipe(0, 0, 1, 1, 350, screen)
             self.assertEqual(run.call_args.args[0][-6:],
                              ["swipe", "0", "0", "100", "200", "350"])
