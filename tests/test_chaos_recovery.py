@@ -54,7 +54,7 @@ class ChaosRecoveryTests(unittest.TestCase):
         self.assertEqual(len([e for e in self.events if e["code"] == "pilot_probe_failed"]), 1)
 
     def test_non_directory_file_is_never_destroyed_and_retry_is_bounded(self):
-        self.work.parent.mkdir(parents=True)
+        self.work.parent.mkdir(parents=True, exist_ok=True)
         self.work.write_text("DO_NOT_DELETE", encoding="utf-8")
         first = self.pilot()
         for _ in range(3):
