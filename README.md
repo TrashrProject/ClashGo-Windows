@@ -1,6 +1,6 @@
 # REQ N GO Manager — AI Guardian (pilote)
 
-Nouveau socle de supervision du projet. **Ce code n'est PAS un bot de farming ni une automatisation Clash of Clans.** Il fournit un tableau de bord, 50 profils fictifs, 3 comptes pilotes, un moteur de diagnostic et des reprises simulées. La connexion au jeu et aux comptes réels n'est pas implémentée.
+Socle de supervision avec tableau de bord, 50 profils fictifs, 3 pilotes techniques et diagnostics persistants. **Le moteur de jeu complet n'est pas encore opérationnel.** Une couche Android expérimentale sait désormais communiquer avec un appareil ADB et reconnaître des écrans calibrés, mais aucun émulateur ni compte réel n'est connecté aux tests.
 
 ## Fonctions disponibles
 - 50 profils préparés, simulation de 3 pilotes par défaut (extensible à 150 dans une version future).
@@ -159,8 +159,16 @@ Sans payer d'hebergement, nous pouvons encore tester et corriger le code dans Gi
 
 Commande d'essai dans GitHub Actions : les workflows existants exécutent automatiquement `python -m unittest discover -s tests -v` et le test de démarrage des quatre conteneurs. Les résultats restent inspectables depuis un téléphone dans GitHub ; la supervision réelle toutes les 30 secondes nécessite toujours un serveur en fonctionnement.
 
+## V8 — Début du vrai moteur d'exécution Android
+
+**C'est une nouveauté distincte des scénarios AI Guardian.** La couche `reqngo/android/` implémente une connexion ADB à un appareil Android sélectionné, une capture d'écran PNG et une reconnaissance visuelle par OpenCV. Elle peut exécuter un geste de test uniquement avec une confirmation d'état avant/après et l'autorisation explicite de l'opérateur. Le journal SQLite empêche toute répétition silencieuse d'une action après crash.
+
+Les scripts sont en **lecture seule par défaut** ; le simple lancement ne clique pas dans le jeu. Les tests GitHub utilisent un faux appareil pour les commandes Android et de véritables PNG de synthèse pour la reconnaissance visuelle. Cela valide le code, **pas les interactions avec Clash of Clans**.
+
+La calibration des écrans et des gestes du jeu n'est pas encore possible sans appareil/émulateur et captures authentiques. Voir [Installation, calibration et limites](docs/ANDROID_PILOT.md). Les dépendances Android sont séparées dans `requirements-android.txt`, pour ne pas alourdir le serveur Guardian.
+
 ## Organisation
 `reqngo/core.py` : moteur SQLite indépendant. `reqngo/server.py` : API web et superviseur. `reqngo/static/index.html` : dashboard. `tests/` : scénarios automatisés.
 
 ## État
-V1 pilote : **pas de comptes réels, pas d'émulateur, pas de cloud et pas d'IA capable de modifier le code seule**.
+**Pilotage Android expérimental** : transport ADB et automate à états ajoutés, sans test sur appareil réel. Les 50 comptes fictifs de Guardian ne sont pas des comptes de jeu. Pas d'émulateur, pas de cloud, pas de réparation autonome de code sur les systèmes réels.
