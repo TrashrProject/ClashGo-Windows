@@ -146,6 +146,10 @@ class ActionRunner:
         if dry_run:
             return {"status": "dry_run", "step_index": idx, "action": current.action,
                     "before": current.before, "after": current.after}
+        # Reconfirm focus immediately before input, not only before vision
+        # matching: a user can switch apps while frames are being checked.
+        if not self.device.game_foreground():
+            raise ExecutionBlocked("Le jeu a perdu le premier plan : geste refuse.")
         # Mark possible execution BEFORE touching Android, so a crash cannot
         # trigger an automatic second request/join/leave action.
         self.journal.move(idx, "armed")
