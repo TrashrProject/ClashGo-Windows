@@ -65,17 +65,17 @@ class ResourceMetricsTests(unittest.TestCase):
         adb = Mock()
         adb.bindings = {"demo-000001": "emulator-5554"}
         adb.adb_binary = "adb"
+        psutil = Mock()
+        psutil.cpu_percent.return_value = 3
+        psutil.virtual_memory.return_value.percent = 8
+        psutil.Process.return_value.memory_info.return_value.rss = 10
         sampler = WorkerResourceSampler(
-            android_preflight=adb, enable_adb=False, psutil_module=Mock())
+            android_preflight=adb, enable_adb=False, psutil_module=psutil)
         sampler.sample()
         adb.client_class.devices.assert_not_called()
         adb.client_class.devices.side_effect = OSError("ADB unavailable")
         offline = WorkerResourceSampler(
-            android_preflight=adb, enable_adb=True, psutil_module=Mock())
-        # Configure valid psutil results so only the ADB check fails.
-        offline.psutil.cpu_percent.return_value = 3
-        offline.psutil.virtual_memory.return_value.percent = 8
-        offline.psutil.Process.return_value.memory_info.return_value.rss = 10
+            android_preflight=adb, enable_adb=True, psutil_module=psutil)
         output = offline.sample()
         self.assertIsNone(output["android_online_devices"])
         self.assertEqual(output["android_bound_devices"], 1)
