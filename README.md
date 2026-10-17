@@ -172,3 +172,11 @@ La calibration des écrans et des gestes du jeu n'est pas encore possible sans a
 
 ## État
 **Pilotage Android expérimental** : transport ADB et automate à états ajoutés, sans test sur appareil réel. Les 50 comptes fictifs de Guardian ne sont pas des comptes de jeu. Pas d'émulateur, pas de cloud, pas de réparation autonome de code sur les systèmes réels.
+
+## V9 : planificateur de flotte pour de nombreux profils logiques
+
+Une nouvelle base `fleet.sqlite3` et un module `reqngo/fleet.py` gerent des profils **fictifs**, distincts des 50 profils historiques de Guardian. Import par lots de 10 000 maximum, consultation paginee, taches de diagnostic idempotentes, baux avec jeton de confirmation et recuperation bornee apres interruption. L'interface **Comptes > Flotte grande echelle (V9 · test)** presente les compteurs et permet de creer des profils de test.
+
+La suite teste notamment 5 000 profils en base et deux connexions concurrentes. **Cela ne valide ni 5 000 appareils/connexions simultanes, ni une automatisation du jeu.** Les workers de test V4 et le pilote Android V8 ne sont pas encore relies a ce planificateur. SQLite reste un choix de prototype mono-stockage ; une migration PostgreSQL, des identities worker distinctes et des tests de charge seront indispensables pour une execution cloud distribuee.
+
+Lire [Architecture et limites de la flotte](docs/FLEET_SCALE.md). Aucun cout de serveur ni deploiement n'est declenche par ce changement.
