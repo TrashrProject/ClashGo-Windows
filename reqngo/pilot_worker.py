@@ -158,7 +158,9 @@ class Pilot:
         try:
             self._probe()
         except OSError:
-            if self.last_issue != "pilot_probe_failed":
+            # If we just recreated a missing directory but could not test it,
+            # keep the original incident open until a successful probe.
+            if self.last_issue not in ("pilot_probe_failed", "invalid_config"):
                 self.enqueue("pilot_probe_failed", "error", phase="storage")
                 self._remember_issue("pilot_probe_failed")
             return "degraded"
