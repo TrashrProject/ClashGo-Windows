@@ -22,6 +22,7 @@ from reqngo.health import guardian_ready
 from reqngo.telemetry import TelemetryStore
 from reqngo.telemetry_api import router_for
 from reqngo.fleet_factory import make_fleet
+from reqngo.fleet_monitor import FleetHealthSupervisor
 from reqngo.fleet_api import router_for as fleet_router_for
 
 BASE = Path(__file__).resolve().parent
@@ -64,8 +65,14 @@ def supervise():
         on_error=lambda component, kind: print(
             "Guardian supervisor:", component, kind, flush=True),
     )
+    fleet_monitor = FleetHealthSupervisor(
+        fleet, interval=30,
+        on_error=lambda component, kind: print(
+            "Guardian supervisor:", component, kind, flush=True),
+    )
     while not stop.wait(2):
         monitor.tick()
+        fleet_monitor.tick()
 
 
 @asynccontextmanager
