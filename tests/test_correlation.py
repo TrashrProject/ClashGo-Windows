@@ -26,7 +26,7 @@ class CorrelationTests(unittest.TestCase):
     def test_single_lost_pilot_recommends_isolation(self):
         for i in range(1, 4):
             self.db.heartbeat("pilot_0" + str(i))
-        self.now[0] += 180
+        self.now[0] += 181
         self.db.heartbeat("pilot_01")
         self.db.heartbeat("pilot_03")
         self.assertEqual(self.codes(), ["isolated_connectivity_loss"])
