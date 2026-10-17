@@ -145,6 +145,23 @@ class PostgreSQLFleetTests(unittest.TestCase):
         self.assertEqual(history[0]["occurrences"], 2)
         self.assertIsNone(history[0]["resolved_at"])
 
+    def test_worker_resource_metrics_cross_database_clients(self):
+        metrics = {"cpu_percent": 98.1, "memory_percent": 51.0,
+                   "process_rss_mb": 132.4,
+                   "android_bound_devices": 3, "android_online_devices": 2}
+        self.store.heartbeat("worker_01", "ok", 4, metrics=metrics)
+        first = self.second.workers()[0]
+        self.assertEqual(first["cpu_percent"], 98.1)
+        self.assertEqual(first["process_rss_mb"], 132.4)
+        self.assertEqual(first["android_online_devices"], 2)
+        self.assertEqual(self.second.summary()["overloaded_workers"], 1)
+        self.second.heartbeat("worker_01", "ok", 4)
+        self.assertIsNone(self.store.workers()[0]["cpu_percent"])
+        self.assertEqual(self.store.summary()["overloaded_workers"], 0)
+        with self.assertRaises(ValueError):
+            self.store.heartbeat("worker_01", metrics={
+                "cpu_percent": float("nan")})
+
     def test_capacity_and_monitoring(self):
         self.store.register_batch("test", 1, 3)
         for num in range(1, 4):
