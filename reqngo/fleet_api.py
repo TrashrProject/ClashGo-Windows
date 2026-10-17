@@ -94,6 +94,11 @@ def router_for(store: FleetStore, read_guard, write_guard):
     def summary(_: bool = Depends(read_guard)):
         return store.summary()
 
+    @router.get("/api/fleet/incidents")
+    def incidents(limit: int = Query(default=50, ge=1, le=200),
+                  _: bool = Depends(read_guard)):
+        return {"items": store.worker_incidents(limit)}
+
     @router.get("/api/fleet/workers")
     def worker_list(limit: int = Query(default=100, ge=1, le=200),
                     _: bool = Depends(read_guard)):
