@@ -150,6 +150,17 @@ class ChaosRecoveryTests(unittest.TestCase):
         finally:
             store.close()
 
+    def test_reused_event_key_with_other_code_is_rejected(self):
+        store = TelemetryStore(self.base / "collision.sqlite3")
+        try:
+            store.report("pilot_01", "immutable_event_1", "worker_timeout")
+            with self.assertRaises(ValueError):
+                store.report("pilot_01", "immutable_event_1", "unknown_failure")
+            self.assertEqual(store.snapshot()["summary"]["open_cases"], 1)
+            self.assertEqual(store.snapshot()["events"][0]["code"], "worker_timeout")
+        finally:
+            store.close()
+
     def test_legacy_db_migrates_without_losing_incidents(self):
         path = self.base / "legacy.sqlite3"
         db = sqlite3.connect(path)
