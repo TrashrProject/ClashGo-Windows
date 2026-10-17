@@ -6,7 +6,7 @@ Cette partie du dépôt est différente des anciens pilotes de simulation. Elle 
 
 ## Architecture
 
-- `reqngo/android/adb.py` : `adb devices`, `exec-out screencap -p`, `shell input tap/swipe/back` pour un **serial spécifié**, sans shell système ni exécution de commande arbitraire.
+- `reqngo/android/adb.py` : `adb devices`, `exec-out screencap -p`, `shell input tap/swipe/back` pour un **serial spécifié**, sans shell système ni exécution de commande arbitraire. Tout geste exige aussi la confirmation que le jeu est **au premier plan** ; si Android ne fournit pas de preuve, l'exécution est bloquée.
 - `reqngo/android/vision.py` : détection réelle d'états d'écran à partir de modèles PNG fournis localement ; une détection absente ou ambiguë rend `unknown` et bloque le geste.
 - `reqngo/android/runner.py` : transition `before -> after`, deux images concordantes avant puis après, journal SQLite de reprise. Aucun geste n'est automatiquement répété après un crash ambigu.
 - `reqngo/android/cli.py` : interface de contrôle explicite, en lecture seule par défaut.
