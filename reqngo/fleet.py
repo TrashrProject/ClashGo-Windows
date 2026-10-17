@@ -193,7 +193,8 @@ class FleetStore:
             WHERE state='leased' AND lease_until<=? AND kind='health_probe'
         """, (now, now, now))
 
-    def heartbeat(self, worker_id: str, status: str = "ok", capacity: int = 1, *,\n                  metrics=None):
+    def heartbeat(self, worker_id: str, status: str = "ok", capacity: int = 1, *,
+                  metrics=None):
         if not isinstance(worker_id, str) or not _WORKER.fullmatch(worker_id):
             raise ValueError("Worker invalide.")
         if status not in ("ok", "busy", "degraded") or type(capacity) is not int or not 1 <= capacity <= 100:
@@ -264,7 +265,9 @@ class FleetStore:
             raise ValueError("Limite invalide.")
         with self.lock:
             rows = [dict(r) for r in self.db.execute(
-                ""SELECT worker_id,status,capacity,last_seen,cpu_percent,memory_percent,"\n                "process_rss_mb,android_online_devices,android_bound_devices "\n                "FROM fleet_workers "
+                "SELECT worker_id,status,capacity,last_seen,cpu_percent,memory_percent,"
+                "process_rss_mb,android_online_devices,android_bound_devices "
+                "FROM fleet_workers "
                 "ORDER BY last_seen DESC LIMIT ?", (limit,))]
         cutoff = self.clock() - 180
         for row in rows:
@@ -379,7 +382,8 @@ class FleetStore:
                 "SELECT MIN(available_at) FROM fleet_jobs WHERE state='queued' "
                 "AND available_at<=?", (self.clock(),)).fetchone()[0]
         return {"profiles": total, "enabled": enabled, "online_workers": workers,
-                "total_workers": total_workers, "online_slots": slots,\n                "overloaded_workers": overloaded,
+                "total_workers": total_workers, "online_slots": slots,
+                "overloaded_workers": overloaded,
                 "open_worker_incidents": incidents,
                 "oldest_ready_wait_seconds": max(0, int(self.clock() - oldest)) if oldest is not None else 0,
                 "jobs": {key: counts.get(key, 0) for key in
