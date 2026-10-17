@@ -60,7 +60,7 @@ label{font-size:12px;color:var(--muted);display:block;margin:0 0 5px}.field{marg
 <div class="scroll" id="account-list"></div>
 </div>
 <details class="panel" style="margin-top:15px">
-<summary style="cursor:pointer;font-weight:700">Flotte grande echelle <span class="sub">(V9 · test)</span></summary>
+<summary style="cursor:pointer;font-weight:700">Flotte grande echelle <span class="sub">(V13 · test)</span></summary>
 <p style="margin-top:12px">Profils logiques uniquement, sans connexion au jeu. Les 50 profils Guardian historiques sont distincts de cette nouvelle flotte.</p>
 <div class="grid">
 <div class="stat"><div class="label">Profils de la flotte</div><div class="n" id="fleet-total">—</div></div>
@@ -73,6 +73,12 @@ label{font-size:12px;color:var(--muted);display:block;margin:0 0 5px}.field{marg
 <div class="line"><span>Capacite des workers connectes</span><strong id="fleet-slots">—</strong></div>
 <div class="line"><span>Plus ancienne sonde prete</span><strong id="fleet-queue-age">—</strong></div>
 <div class="line"><span>Incidents workers ouverts</span><strong id="fleet-incidents-count">—</strong></div>
+<div class="panel" style="margin-top:14px">
+<h2>Evaluation de capacite <span class="sub">(diagnostics uniquement)</span></h2>
+<div class="line"><span>Etat de la file</span><strong id="fleet-capacity-state">—</strong></div>
+<p id="fleet-capacity-message">Diagnostic en attente.</p>
+<div id="fleet-capacity-action" class="sub"></div>
+</div>
 <div class="twocol">
 <div><div class="field"><label for="fleet-prefix">Prefixe des profils de test</label><input id="fleet-prefix" value="test" maxlength="24"></div>
 <div class="field"><label for="fleet-start">Numero de depart</label><input id="fleet-start" type="number" min="1" max="9999999" value="1"></div>
@@ -236,6 +242,13 @@ document.getElementById("fleet-online-workers").textContent=summary.online_worke
 document.getElementById("fleet-slots").textContent=summary.online_slots||0;
 document.getElementById("fleet-queue-age").textContent=(summary.oldest_ready_wait_seconds||0)+" s";
 document.getElementById("fleet-incidents-count").textContent=summary.open_worker_incidents||0;
+var assessment=await api("/api/fleet/capacity");
+var stateLabel={"nominal":"Stable","idle_without_workers":"Au repos",
+"worker_incidents":"Incidents workers","backlog_pressure":"Pression de file",
+"no_capacity":"Aucune capacite signalee"};
+document.getElementById("fleet-capacity-state").textContent=stateLabel[assessment.state]||"Etat inconnu";
+document.getElementById("fleet-capacity-message").textContent=assessment.message;
+document.getElementById("fleet-capacity-action").textContent=assessment.suggestion;
 document.getElementById("fleet-backend").textContent=summary.backend==="distributed-postgres"?
 "PostgreSQL partage":"SQLite local";
 var page=await api("/api/fleet/profiles?offset="+fleetOffset+"&limit="+fleetSize);
