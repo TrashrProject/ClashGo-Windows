@@ -40,6 +40,29 @@ class AffinitySQLiteTests(unittest.TestCase):
         self.store.complete(android[0]["job_id"], "worker_adb",
                             android[0]["lease_token"], True)
 
+    def test_mocked_adb_preflight_completes_targeted_fleet_job(self):
+        class FakeADB:
+            @classmethod
+            def devices(cls, *, adb_binary="adb"):
+                return ["emulator-5554"]
+
+        self.store.enqueue_probe("demo-000001", "probe:end-to-end:0001",
+                                 target_worker="worker_adb", probe_mode="android")
+        lease = self.store.claim("worker_adb")[0]
+
+        def send(route, payload):
+            self.assertEqual(route, "/api/fleet/worker/complete")
+            return self.store.complete(payload["job_id"], "worker_adb",
+                                       payload["lease_token"], payload["success"])
+
+        preflight = AndroidReadOnlyPreflight({"demo-000001": "emulator-5554"},
+                                             client_class=FakeADB)
+        worker = FleetDiagnosticWorker(send, Path(self.tmp.name) / "work",
+                                       worker_id="worker_adb", android_preflight=preflight)
+        self.assertTrue(worker._process(lease))
+        self.assertEqual(self.store.summary()["jobs"]["done"], 1)
+        self.assertFalse((Path(self.tmp.name) / "work").exists())
+
     def test_android_requires_target_and_rejects_dedupe_mismatch(self):
         with self.assertRaises(ValueError):
             self.store.enqueue_probe("demo-000001", "probe:android:0001",
