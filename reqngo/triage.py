@@ -21,6 +21,9 @@ RULES = {
                        "Comparer les paramètres avec les valeurs attendues."),
     "unknown_failure": ("Inconnu", "La cause n'est pas identifiée.",
                         "Conserver les diagnostics et demander une analyse humaine."),
+    "pilot_probe_failed": ("Stockage pilote",
+                           "Le contrôle local de lecture/écriture du pilote échoue.",
+                           "Examiner le volume et les permissions de ce pilote, sans effacer de fichiers."),
 }
 _SEVERITIES = {"warning": 1, "error": 2, "critical": 3}
 
