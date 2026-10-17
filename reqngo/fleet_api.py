@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from reqngo.fleet import FleetStore, _WORKER
+from reqngo.fleet_capacity import assess_fleet_capacity
 
 
 class Batch(BaseModel):
@@ -93,6 +94,10 @@ def router_for(store: FleetStore, read_guard, write_guard):
     @router.get("/api/fleet/summary")
     def summary(_: bool = Depends(read_guard)):
         return store.summary()
+
+    @router.get("/api/fleet/capacity")
+    def capacity(_: bool = Depends(read_guard)):
+        return assess_fleet_capacity(store.summary())
 
     @router.get("/api/fleet/incidents")
     def incidents(limit: int = Query(default=50, ge=1, le=200),
