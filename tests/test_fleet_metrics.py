@@ -114,6 +114,25 @@ class ResourcePersistenceTests(unittest.TestCase):
         self.assertIsNone(self.store.workers()[0]["cpu_percent"])
         self.assertEqual(self.store.summary()["overloaded_workers"], 0)
 
+    def test_worker_legacy_schema_is_migrated_without_losing_heartbeat(self):
+        self.store.heartbeat("fleet_01", "ok", 2)
+        self.store.close()
+        with sqlite3.connect(self.path) as db:
+            db.execute("DROP TABLE fleet_workers")
+            db.execute("""CREATE TABLE fleet_workers (
+                worker_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                capacity INTEGER NOT NULL,
+                last_seen REAL NOT NULL)""")
+            db.execute("INSERT INTO fleet_workers VALUES('fleet_01','ok',2,1000)")
+        self.store = FleetStore(self.path)
+        before = self.store.workers()[0]
+        self.assertEqual(before["worker_id"], "fleet_01")
+        self.assertEqual(before["capacity"], 2)
+        self.assertIsNone(before["cpu_percent"])
+        self.store.heartbeat("fleet_01", metrics={"cpu_percent": 21.5})
+        self.assertEqual(self.store.workers()[0]["cpu_percent"], 21.5)
+
     def test_authenticated_http_rejects_untrusted_samples(self):
         app = FastAPI()
         app.include_router(router_for(self.store, lambda: True, lambda: True))
