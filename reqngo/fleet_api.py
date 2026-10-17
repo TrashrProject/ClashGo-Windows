@@ -26,6 +26,8 @@ class Probe(BaseModel):
     model_config = ConfigDict(extra="forbid")
     profile_key: str = Field(min_length=1, max_length=40)
     dedupe_key: str = Field(min_length=8, max_length=80)
+    probe_mode: str = Field(default="storage", pattern="^(storage|android)$")
+    target_worker: str | None = Field(default=None, min_length=2, max_length=64)
 
 
 class Enabled(BaseModel):
@@ -151,7 +153,9 @@ def router_for(store: FleetStore, read_guard, write_guard):
     @router.post("/api/fleet/probes")
     def enqueue(body: Probe, _: bool = Depends(write_guard)):
         try:
-            return store.enqueue_probe(body.profile_key, body.dedupe_key)
+            return store.enqueue_probe(body.profile_key, body.dedupe_key,
+                                       target_worker=body.target_worker,
+                                       probe_mode=body.probe_mode)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 

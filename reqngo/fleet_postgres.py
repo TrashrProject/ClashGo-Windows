@@ -46,6 +46,14 @@ class PostgresFleetStore:
                         updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
                     )
                 """)
+                # Existing installations acquire additive columns without data loss.
+                conn.execute("ALTER TABLE fleet_jobs ADD COLUMN IF NOT EXISTS target_worker text")
+                conn.execute("ALTER TABLE fleet_jobs ADD COLUMN IF NOT EXISTS "
+                             "probe_mode text NOT NULL DEFAULT 'storage'")
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS fleet_target_ready
+                    ON fleet_jobs(state,target_worker,available_at,id)
+                """)
                 conn.execute("""
                     CREATE UNIQUE INDEX IF NOT EXISTS fleet_one_open_job
                     ON fleet_jobs(profile_key) WHERE state IN ('queued','leased')
@@ -96,17 +104,27 @@ class PostgresFleetStore:
             if result.rowcount != 1:
                 raise ValueError("Profil introuvable.")
 
-    def enqueue_probe(self, profile_key: str, dedupe_key: str):
+    def enqueue_probe(self, profile_key: str, dedupe_key: str,
+                      target_worker: str | None = None, probe_mode: str = "storage"):
         if not isinstance(profile_key, str) or not _KEY.fullmatch(profile_key):
             raise ValueError("Identifiant de profil invalide.")
         if not isinstance(dedupe_key, str) or not _DEDUPE.fullmatch(dedupe_key):
             raise ValueError("Cle d'idempotence invalide.")
+        if probe_mode not in ("storage", "android"):
+            raise ValueError("Mode de sonde invalide.")
+        if target_worker is not None and (
+                not isinstance(target_worker, str) or not _WORKER.fullmatch(target_worker)):
+            raise ValueError("Worker cible invalide.")
+        if probe_mode == "android" and target_worker is None:
+            raise ValueError("Une sonde Android doit cibler un worker precis.")
         with self.pool.connection() as conn:
             old = conn.execute(
-                "SELECT id,profile_key FROM fleet_jobs WHERE dedupe_key=%s",
+                "SELECT id,profile_key,target_worker,probe_mode FROM fleet_jobs WHERE dedupe_key=%s",
                 (dedupe_key,)).fetchone()
             if old:
-                if old["profile_key"] != profile_key:
+                if (old["profile_key"] != profile_key
+                        or old["target_worker"] != target_worker
+                        or old["probe_mode"] != probe_mode):
                     raise ValueError("Cle d'idempotence deja utilisee.")
                 return {"job_id": old["id"], "duplicate": True}
             profile = conn.execute(
@@ -116,16 +134,18 @@ class PostgresFleetStore:
                 raise ValueError("Profil absent ou desactive.")
             # ON CONFLICT avoids aborting the transaction on a racing insert.
             job = conn.execute("""
-                INSERT INTO fleet_jobs(profile_key,kind,dedupe_key)
-                VALUES(%s,'health_probe',%s)
+                INSERT INTO fleet_jobs(profile_key,kind,dedupe_key,target_worker,probe_mode)
+                VALUES(%s,'health_probe',%s,%s,%s)
                 ON CONFLICT DO NOTHING RETURNING id
-            """, (profile_key, dedupe_key)).fetchone()
+            """, (profile_key, dedupe_key, target_worker, probe_mode)).fetchone()
             if job:
                 return {"job_id": job["id"], "duplicate": False}
             old = conn.execute(
-                "SELECT id,profile_key FROM fleet_jobs WHERE dedupe_key=%s",
+                "SELECT id,profile_key,target_worker,probe_mode FROM fleet_jobs WHERE dedupe_key=%s",
                 (dedupe_key,)).fetchone()
-            if old and old["profile_key"] == profile_key:
+            if (old and old["profile_key"] == profile_key
+                    and old["target_worker"] == target_worker
+                    and old["probe_mode"] == probe_mode):
                 return {"job_id": old["id"], "duplicate": True}
             if old:
                 raise ValueError("Cle d'idempotence deja utilisee.")
@@ -203,14 +223,16 @@ class PostgresFleetStore:
             if not available:
                 return []
             rows = conn.execute("""
-                SELECT j.id,j.profile_key,j.kind,j.attempts
+                SELECT j.id,j.profile_key,j.kind,j.attempts,
+                       j.target_worker,j.probe_mode
                 FROM fleet_jobs j
                 JOIN fleet_profiles p ON p.profile_key=j.profile_key
                 WHERE j.state='queued' AND j.available_at<=clock_timestamp()
                       AND p.enabled=true
+                      AND (j.target_worker IS NULL OR j.target_worker=%s)
                 ORDER BY j.available_at,j.id
                 LIMIT %s FOR UPDATE OF j SKIP LOCKED
-            """, (available,)).fetchall()
+            """, (worker_id, available)).fetchall()
             for job in rows:
                 token = secrets.token_urlsafe(32)
                 result = conn.execute("""
@@ -223,6 +245,8 @@ class PostgresFleetStore:
                 """, (worker_id, token, lease_seconds, job["id"])).fetchone()
                 leased.append({"job_id": job["id"], "profile_key": job["profile_key"],
                                "kind": job["kind"], "attempt": job["attempts"] + 1,
+                               "target_worker": job["target_worker"],
+                               "probe_mode": job["probe_mode"],
                                "lease_token": token, "lease_until": float(result["until"])})
         return leased
 

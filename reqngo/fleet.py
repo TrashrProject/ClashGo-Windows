@@ -68,6 +68,19 @@ class FleetStore:
                 CREATE INDEX IF NOT EXISTS fleet_profile_jobs
                   ON fleet_jobs(profile_key,id);
             """)
+            # Non-destructive schema evolution for installed V9/V10 databases.
+            cols = {row["name"] for row in self.db.execute("PRAGMA table_info(fleet_jobs)")}
+            if "target_worker" not in cols:
+                self.db.execute("ALTER TABLE fleet_jobs ADD COLUMN target_worker TEXT")
+            if "probe_mode" not in cols:
+                self.db.execute(
+                    "ALTER TABLE fleet_jobs ADD COLUMN probe_mode TEXT NOT NULL "
+                    "DEFAULT 'storage' CHECK(probe_mode IN ('storage','android'))"
+                )
+            self.db.execute(
+                "CREATE INDEX IF NOT EXISTS fleet_target_ready "
+                "ON fleet_jobs(state,target_worker,available_at,id)"
+            )
 
     @contextmanager
     def _transaction(self):
@@ -109,19 +122,29 @@ class FleetStore:
                 raise ValueError("Profil introuvable.")
         # Disabling prevents new leases; a lease already issued stays fenced.
 
-    def enqueue_probe(self, profile_key: str, dedupe_key: str):
+    def enqueue_probe(self, profile_key: str, dedupe_key: str,
+                      target_worker: str | None = None, probe_mode: str = "storage"):
         """Only a read-only diagnostic probe is allowed in the pilot queue."""
         if not isinstance(profile_key, str) or not _KEY.fullmatch(profile_key):
             raise ValueError("Identifiant de profil invalide.")
         if not isinstance(dedupe_key, str) or not _DEDUPE.fullmatch(dedupe_key):
             raise ValueError("Cle d'idempotence invalide.")
+        if probe_mode not in ("storage", "android"):
+            raise ValueError("Mode de sonde invalide.")
+        if target_worker is not None and (
+                not isinstance(target_worker, str) or not _WORKER.fullmatch(target_worker)):
+            raise ValueError("Worker cible invalide.")
+        if probe_mode == "android" and target_worker is None:
+            raise ValueError("Une sonde Android doit cibler un worker precis.")
         now = self.clock()
         with self._transaction():
             old = self.db.execute(
-                "SELECT id,profile_key FROM fleet_jobs WHERE dedupe_key=?",
+                "SELECT id,profile_key,target_worker,probe_mode FROM fleet_jobs WHERE dedupe_key=?",
                 (dedupe_key,)).fetchone()
             if old:
-                if old["profile_key"] != profile_key:
+                if (old["profile_key"] != profile_key
+                        or old["target_worker"] != target_worker
+                        or old["probe_mode"] != probe_mode):
                     raise ValueError("Cle d'idempotence deja utilisee.")
                 return {"job_id": old["id"], "duplicate": True}
             profile = self.db.execute(
@@ -132,8 +155,9 @@ class FleetStore:
             try:
                 cursor = self.db.execute(
                     "INSERT INTO fleet_jobs(profile_key,kind,dedupe_key,state,"
-                    "available_at,updated_at) VALUES (?,'health_probe',?,'queued',?,?)",
-                    (profile_key, dedupe_key, now, now))
+                    "available_at,updated_at,target_worker,probe_mode) "
+                    "VALUES (?,'health_probe',?,'queued',?,?,?,?)",
+                    (profile_key, dedupe_key, now, now, target_worker, probe_mode))
             except sqlite3.IntegrityError as exc:
                 raise ValueError("Une tache est deja en attente pour ce profil.") from exc
             return {"job_id": cursor.lastrowid, "duplicate": False}
@@ -199,12 +223,14 @@ class FleetStore:
             if not available:
                 return []
             rows = self.db.execute("""
-                SELECT j.id,j.profile_key,j.kind,j.attempts
+                SELECT j.id,j.profile_key,j.kind,j.attempts,
+                       j.target_worker,j.probe_mode
                 FROM fleet_jobs j
                 JOIN fleet_profiles p ON p.profile_key=j.profile_key
                 WHERE j.state='queued' AND j.available_at<=? AND p.enabled=1
+                  AND (j.target_worker IS NULL OR j.target_worker=?)
                 ORDER BY j.available_at,j.id LIMIT ?
-            """, (now, available)).fetchall()
+            """, (now, worker_id, available)).fetchall()
             for job in rows:
                 token = secrets.token_urlsafe(32)
                 until = now + lease_seconds
@@ -215,6 +241,8 @@ class FleetStore:
                 """, (worker_id, token, until, now, job["id"]))
                 leased.append({"job_id": job["id"], "profile_key": job["profile_key"],
                                "kind": job["kind"], "attempt": job["attempts"] + 1,
+                               "target_worker": job["target_worker"],
+                               "probe_mode": job["probe_mode"],
                                "lease_token": token, "lease_until": until})
         return leased
 

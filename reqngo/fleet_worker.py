@@ -15,6 +15,8 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 from reqngo.fleet import _WORKER
+from reqngo.android.adb import AdbError
+from reqngo.android.preflight import AndroidReadOnlyPreflight
 from reqngo.health import update_worker_heartbeat
 from reqngo.pilot_worker import validate_endpoint
 
@@ -47,12 +49,15 @@ class FleetClient:
 
 
 class FleetDiagnosticWorker:
-    def __init__(self, send, workdir, capacity: int = 1):
+    def __init__(self, send, workdir, capacity: int = 1, *,
+                 worker_id: str | None = None, android_preflight=None):
         if type(capacity) is not int or not 1 <= capacity <= 8:
             raise ValueError("Capacite de worker invalide.")
         self.send = send
         self.capacity = capacity
         self.workdir = Path(workdir)
+        self.worker_id = worker_id
+        self.android_preflight = android_preflight
 
     def _probe(self):
         """A real IO check within the dedicated worker directory, no game."""
@@ -69,11 +74,22 @@ class FleetDiagnosticWorker:
         # Fail closed on any unexpected job type: never dispatch commands.
         healthy = False
         if job.get("kind") == "health_probe":
-            try:
-                self._probe()
-                healthy = True
-            except OSError:
-                healthy = False
+            mode = job.get("probe_mode", "storage")
+            if mode == "storage":
+                try:
+                    self._probe()
+                    healthy = True
+                except OSError:
+                    healthy = False
+            elif (mode == "android" and self.android_preflight is not None
+                  and self.worker_id is not None
+                  and job.get("target_worker") == self.worker_id):
+                try:
+                    healthy = bool(self.android_preflight.check(job["profile_key"]))
+                except (AdbError, OSError, ValueError):
+                    healthy = False
+            # Unknown modes/targets fail closed to needs_review.
+
         # If acknowledgement is lost, the server lease expires. Health probes
         # are specifically designed to be safe to repeat.
         self.send("/api/fleet/worker/complete", {
@@ -117,10 +133,14 @@ def main(argv=None):
         if not 2 <= interval <= 300:
             raise ValueError("Intervalle de polling invalide.")
         client = FleetClient(url, worker_id, token)
+        preflight = AndroidReadOnlyPreflight.from_json(
+            os.environ.get("FLEET_ANDROID_PROFILE_SERIALS_JSON", ""),
+            adb_binary=os.environ.get("ADB_BINARY", "adb"),
+            require_game=os.environ.get("FLEET_ANDROID_REQUIRE_GAME") == "1")
         worker = FleetDiagnosticWorker(
             client.send,
             os.environ.get("FLEET_WORKDIR", "./data/fleet-" + worker_id),
-            capacity=capacity)
+            capacity=capacity, worker_id=worker_id, android_preflight=preflight)
     except (ValueError, TypeError) as error:
         parser.error(str(error))
     heartbeat_file = worker.workdir / "worker_heartbeat.txt"

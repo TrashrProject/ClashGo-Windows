@@ -190,3 +190,10 @@ Le tableau de bord affiche les workers de diagnostic, leur capacite et les etats
 Tests GitHub : workflow `Fleet PostgreSQL tests` en plus des tests Guardian. La capacite **5 000 profils en base** n'est pas une mesure de 5 000 sessions simultanees. Les bases Guardian et Telemetry restent locales; avant la haute disponibilite, il faudra aussi les rendre partagees.
 
 Voir [Guide V10 et limites de securite](docs/FLEET_V10.md). Aucun serveur payant n'est cree automatiquement.
+
+
+## V11 : workers Android en lecture seule (routage explicite)
+
+La V11 permet d'affecter une **sonde Android de diagnostic** à un worker déterminé ; le numéro de série ADB reste dans la configuration locale du worker. La base refuse qu'un autre worker prenne cette tâche et préserve les données existantes grâce à des colonnes ajoutées sans suppression. Les sondes classiques et les trois processus pilotes V4 restent inchangés.
+
+Ce **n'est pas une automatisation de Clash of Clans** : le contrôle est limité à `adb devices` et, sur activation locale, à la présence du processus. Aucune capture ni geste tactile, ni connexion de comptes. Voir [Guide V11 : ADB et routage](docs/ANDROID_WORKER_V11.md). Sans appareil Android autorisé et connecté, la validation CI reste simulée.
