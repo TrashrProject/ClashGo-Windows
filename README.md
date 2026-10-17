@@ -204,3 +204,9 @@ Ce **n'est pas une automatisation de Clash of Clans** : le contrôle est limité
 Guardian détecte automatiquement les workers de diagnostic n'ayant pas envoyé de heartbeat depuis 180 secondes et enregistre un incident durable, sans doublons à chaque contrôle. Le retour d'un worker clôt l'incident. Le dashboard affiche en complément la capacité déclarée des workers actifs, l'âge de la file prête et les incidents récents. L'API `GET /api/fleet/incidents` est protégée et paginée par une limite stricte.
 
 Cette surveillance fonctionne avec SQLite local ou PostgreSQL partagé. Elle ne redémarre aucun compte et n'effectue aucune action dans Clash of Clans. Les contrôles sont exécutés à intervalle régulier, mais cela ne prouve pas une disponibilité cloud 24h/24 tant que le service n'est pas déployé et surveillé. Voir [Guide V12](docs/FLEET_HEALTH_V12.md).
+
+## V13 — capacite diagnostique et benchmark multi-workers
+
+Un diagnostic de charge consultable dans **Comptes > Flotte grande echelle** (et via `GET /api/fleet/capacity`) donne une alerte non-intrusive lorsque des sondes techniques attendent trop longtemps ou qu'aucun worker n'est actif. Les seuils sont documentes; il ne s'agit **pas** d'une commande d'auto-scaling.
+
+Un benchmark en CI sur une base PostgreSQL jetable mesure les latences p50/p95/p99 et le debit de sondes synthetiques sur **six workers**. Les rapports de mesure sont conserves en artefacts GitHub Actions, sans mots de passe. Cette etape ne prouve pas la capacite de faire fonctionner des milliers de sessions Android ou Clash of Clans simultanement. Voir [Guide capacite V13](docs/FLEET_CAPACITY_V13.md).
