@@ -58,7 +58,26 @@ label{font-size:12px;color:var(--muted);display:block;margin:0 0 5px}.field{marg
 <div class="panel">
 <div class="toolbar"><strong>Liste des 50 profils</strong><input type="search" id="search" placeholder="Rechercher un compte…" aria-label="Rechercher un compte"></div>
 <div class="scroll" id="account-list"></div>
-</div></section>
+</div>
+<details class="panel" style="margin-top:15px">
+<summary style="cursor:pointer;font-weight:700">Flotte grande echelle <span class="sub">(V9 · test)</span></summary>
+<p style="margin-top:12px">Profils logiques uniquement, sans connexion au jeu. Les 50 profils Guardian historiques sont distincts de cette nouvelle flotte.</p>
+<div class="grid">
+<div class="stat"><div class="label">Profils de la flotte</div><div class="n" id="fleet-total">—</div></div>
+<div class="stat"><div class="label">Profils actives</div><div class="n" id="fleet-enabled">—</div></div>
+<div class="stat"><div class="label">Sondes en attente</div><div class="n" id="fleet-queued">—</div></div>
+<div class="stat"><div class="label">Baux en cours</div><div class="n" id="fleet-leased">—</div></div>
+</div>
+<div class="twocol">
+<div><div class="field"><label for="fleet-prefix">Prefixe des profils de test</label><input id="fleet-prefix" value="test" maxlength="24"></div>
+<div class="field"><label for="fleet-start">Numero de depart</label><input id="fleet-start" type="number" min="1" max="9999999" value="1"></div>
+<div class="field"><label for="fleet-count">Nombre a creer (maximum 10 000)</label><input id="fleet-count" type="number" min="1" max="10000" value="50"></div>
+<button class="action" id="fleet-create">Creer les profils de test</button></div>
+<div><h2>Navigation par pages</h2><div class="sub" id="fleet-summary">Chargement…</div>
+<div class="actions" style="margin-top:12px"><button class="action" id="fleet-prev">Precedent</button><button class="action" id="fleet-next">Suivant</button></div>
+<div id="fleet-list" class="scroll" style="margin-top:12px;max-height:310px"></div></div>
+</div>
+</details></section>
 <section class="section" id="incidents"><div class="eyebrow">Fiabilité</div><h1>Incidents</h1><p>Une panne sur un compte ne doit pas interrompre les autres.</p>
 <div class="panel"><div id="incident-list"></div></div>
 <details class="panel" style="margin-top:14px"><summary style="cursor:pointer;font-weight:700">Diagnostics distants <span class="sub">(optionnel)</span></summary>
@@ -92,7 +111,7 @@ label{font-size:12px;color:var(--muted);display:block;margin:0 0 5px}.field{marg
 <div class="note">Aucun code réel n'est modifié par AI Guardian V1.</div>
 </div></div>
 </section>
-<footer>REQ N GO Manager · AI Guardian V1 · Supervision simulée · Aucune automatisation de gameplay</footer>
+<footer>REQ N GO Manager · AI Guardian V9 · Supervision simulée · Aucune automatisation de gameplay</footer>
 </div>
 <script>
 (function(){
@@ -187,8 +206,29 @@ events.appendChild(node("div","entry",formatTime(e.recorded_at)+" · "+e.agent_i
 });
 }catch(error){document.getElementById("telemetry-summary").textContent="Diagnostics distants indisponibles : "+error.message;}
 }
+var fleetOffset=0;
+var fleetSize=25;
+async function refreshFleet(){
+try {
+var summary=await api("/api/fleet/summary");
+document.getElementById("fleet-total").textContent=summary.profiles;
+document.getElementById("fleet-enabled").textContent=summary.enabled;
+document.getElementById("fleet-queued").textContent=summary.jobs.queued;
+document.getElementById("fleet-leased").textContent=summary.jobs.leased;
+var page=await api("/api/fleet/profiles?offset="+fleetOffset+"&limit="+fleetSize);
+var target=document.getElementById("fleet-list");target.replaceChildren();
+page.items.forEach(function(p){target.appendChild(node("div","entry",p.profile_key+(p.enabled?" · actif":" · suspendu")));});
+if(!page.items.length)target.appendChild(node("div","entry","Aucun profil sur cette page."));
+document.getElementById("fleet-summary").textContent=
+summary.profiles+" profil(s) en base · page "+(Math.floor(fleetOffset/fleetSize)+1)+" · "+summary.jobs.needs_review+" a verifier";
+document.getElementById("fleet-prev").disabled=fleetOffset===0;
+document.getElementById("fleet-next").disabled=fleetOffset+fleetSize>=summary.profiles;
+} catch(error) {
+document.getElementById("fleet-summary").textContent="Flotte indisponible : "+error.message;
+}
+}
 async function refresh(){
-try{state=await api("/api/state");update();await refreshRemote();}
+try{state=await api("/api/state");update();await refreshRemote();await refreshFleet();}
 catch(e){notify("Connexion : "+e.message);}
 }
 async function action(path,payload){
@@ -216,6 +256,25 @@ action("/api/pilots",{ids:parts.map(Number)});
 });
 document.getElementById("inject").addEventListener("click",function(){
 action("/api/demo/fault",{account_id:Number(document.getElementById("fault-account").value),code:document.getElementById("fault-code").value});
+});
+document.getElementById("fleet-create").addEventListener("click",async function(){
+var prefix=document.getElementById("fleet-prefix").value.trim();
+var start=Number(document.getElementById("fleet-start").value);
+var count=Number(document.getElementById("fleet-count").value);
+if(!/^[A-Za-z][A-Za-z0-9_-]{0,23}$/.test(prefix)||
+!Number.isSafeInteger(start)||start<1||!Number.isSafeInteger(count)||count<1||count>10000||
+start+count>10000000)return notify("Prefixe ou plage de test invalide.");
+try{
+var result=await api("/api/fleet/profiles/batch","POST",{prefix:prefix,start:start,count:count});
+fleetOffset=0;await refreshFleet();
+notify(result.created+" profil(s) de test crees · "+result.existing+" deja presents.");
+}catch(error){notify(error.message);}
+});
+document.getElementById("fleet-prev").addEventListener("click",function(){
+fleetOffset=Math.max(0,fleetOffset-fleetSize);refreshFleet();
+});
+document.getElementById("fleet-next").addEventListener("click",function(){
+fleetOffset+=fleetSize;refreshFleet();
 });
 refresh();setInterval(refresh,8000);
 })();

@@ -21,11 +21,14 @@ from reqngo.supervisor import Supervisor
 from reqngo.health import guardian_ready
 from reqngo.telemetry import TelemetryStore
 from reqngo.telemetry_api import router_for
+from reqngo.fleet import FleetStore
+from reqngo.fleet_api import router_for as fleet_router_for
 
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.getenv("GUARDIAN_DATA_DIR", BASE.parent / "data"))
 engine = Guardian(DATA / "guardian.sqlite3")
 telemetry = TelemetryStore(DATA / "telemetry.sqlite3")
+fleet = FleetStore(DATA / "fleet.sqlite3")
 stop = threading.Event()
 security = HTTPBasic()
 
@@ -77,11 +80,13 @@ async def lifespan(app):
         worker.join(timeout=5)
         engine.close()
         telemetry.close()
+        fleet.close()
 
 
 app = FastAPI(title="REQ N GO Guardian", docs_url=None, redoc_url=None,
               openapi_url=None, lifespan=lifespan)
 app.include_router(router_for(telemetry, guard))
+app.include_router(fleet_router_for(fleet, guard, write_guard))
 
 
 @app.middleware("http")
