@@ -206,11 +206,15 @@ class PostgresFleetStore:
             raise ValueError("Delai de detection invalide.")
         with self.pool.connection() as conn:
             created = conn.execute("""
+                WITH stale AS (
+                    SELECT worker_id,last_seen FROM fleet_workers
+                    WHERE last_seen < clock_timestamp() - %s * INTERVAL '1 second'
+                    FOR UPDATE
+                )
                 INSERT INTO fleet_worker_incidents
                     (worker_id,status,occurrences,first_seen,last_seen,resolved_at)
                 SELECT worker_id,'open',1,clock_timestamp(),last_seen,NULL
-                FROM fleet_workers
-                WHERE last_seen < clock_timestamp() - %s * INTERVAL '1 second'
+                FROM stale WHERE TRUE
                 ON CONFLICT(worker_id) DO UPDATE SET
                     status='open',
                     occurrences=fleet_worker_incidents.occurrences+1,
