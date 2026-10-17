@@ -180,3 +180,13 @@ Une nouvelle base `fleet.sqlite3` et un module `reqngo/fleet.py` gerent des prof
 La suite teste notamment 5 000 profils en base et deux connexions concurrentes. **Cela ne valide ni 5 000 appareils/connexions simultanes, ni une automatisation du jeu.** Les workers de test V4 et le pilote Android V8 ne sont pas encore relies a ce planificateur. SQLite reste un choix de prototype mono-stockage ; une migration PostgreSQL, des identities worker distinctes et des tests de charge seront indispensables pour une execution cloud distribuee.
 
 Lire [Architecture et limites de la flotte](docs/FLEET_SCALE.md). Aucun cout de serveur ni deploiement n'est declenche par ce changement.
+
+## V10 : file de flotte PostgreSQL et workers de diagnostic distribues
+
+**La V10 ne pilote pas encore des comptes de jeu.** Elle introduit un backend PostgreSQL optionnel avec attribution transactionnelle de taches, protections contre les doublons, baux et horloges de base de donnees, ainsi que des workers techniques identifiables individuellement par un secret distinct.
+
+Le tableau de bord affiche les workers de diagnostic, leur capacite et les etats de file. Le fichier `compose.fleet-demo.yaml` permet de tester en local Guardian + PostgreSQL + 2 workers. Les anciens pilotes V4 restent disponibles via `compose.yaml`; le module Android V8 reste volontairement separe.
+
+Tests GitHub : workflow `Fleet PostgreSQL tests` en plus des tests Guardian. La capacite **5 000 profils en base** n'est pas une mesure de 5 000 sessions simultanees. Les bases Guardian et Telemetry restent locales; avant la haute disponibilite, il faudra aussi les rendre partagees.
+
+Voir [Guide V10 et limites de securite](docs/FLEET_V10.md). Aucun serveur payant n'est cree automatiquement.

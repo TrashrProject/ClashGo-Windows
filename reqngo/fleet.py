@@ -55,6 +55,12 @@ class FleetStore:
                     lease_token TEXT,
                     updated_at REAL NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS fleet_workers (
+                    worker_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL CHECK(status IN ('ok','busy','degraded')),
+                    capacity INTEGER NOT NULL CHECK(capacity BETWEEN 1 AND 100),
+                    last_seen REAL NOT NULL
+                );
                 CREATE UNIQUE INDEX IF NOT EXISTS fleet_one_open_job
                   ON fleet_jobs(profile_key) WHERE state IN ('queued','leased');
                 CREATE INDEX IF NOT EXISTS fleet_ready_jobs
@@ -144,7 +150,35 @@ class FleetStore:
             WHERE state='leased' AND lease_until<=? AND kind='health_probe'
         """, (now, now, now))
 
-    def claim(self, worker_id: str, limit: int = 1, lease_seconds: int = 90):
+    def heartbeat(self, worker_id: str, status: str = "ok", capacity: int = 1):
+        if not isinstance(worker_id, str) or not _WORKER.fullmatch(worker_id):
+            raise ValueError("Worker invalide.")
+        if status not in ("ok", "busy", "degraded") or type(capacity) is not int or not 1 <= capacity <= 100:
+            raise ValueError("Etat ou capacite invalide.")
+        with self._transaction():
+            self.db.execute("""
+                INSERT INTO fleet_workers(worker_id,status,capacity,last_seen)
+                VALUES(?,?,?,?)
+                ON CONFLICT(worker_id) DO UPDATE SET
+                    status=excluded.status,capacity=excluded.capacity,
+                    last_seen=excluded.last_seen
+            """, (worker_id, status, capacity, self.clock()))
+        return {"ok": True}
+
+    def workers(self, limit: int = 100):
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("Limite invalide.")
+        with self.lock:
+            rows = [dict(r) for r in self.db.execute(
+                "SELECT worker_id,status,capacity,last_seen FROM fleet_workers "
+                "ORDER BY last_seen DESC LIMIT ?", (limit,))]
+        cutoff = self.clock() - 180
+        for row in rows:
+            row["connected"] = row["last_seen"] >= cutoff
+        return rows
+
+    def claim(self, worker_id: str, limit: int = 1, lease_seconds: int = 90,
+              capacity: int = 100):
         """Lease distinct profiles atomically, safe across SQLite connections."""
         if not isinstance(worker_id, str) or not _WORKER.fullmatch(worker_id):
             raise ValueError("Worker invalide.")
@@ -152,17 +186,25 @@ class FleetStore:
             raise ValueError("Taille de lot invalide.")
         if type(lease_seconds) is not int or not 15 <= lease_seconds <= 3600:
             raise ValueError("Duree du bail invalide.")
+        if type(capacity) is not int or not 1 <= capacity <= 100:
+            raise ValueError("Capacite invalide.")
         now = self.clock()
         leased = []
         with self._transaction():
             self._reclaim_expired(now)
+            active = self.db.execute(
+                "SELECT COUNT(*) FROM fleet_jobs WHERE state='leased' "
+                "AND lease_owner=? AND lease_until>?", (worker_id, now)).fetchone()[0]
+            available = min(limit, max(0, capacity - active))
+            if not available:
+                return []
             rows = self.db.execute("""
                 SELECT j.id,j.profile_key,j.kind,j.attempts
                 FROM fleet_jobs j
                 JOIN fleet_profiles p ON p.profile_key=j.profile_key
                 WHERE j.state='queued' AND j.available_at<=? AND p.enabled=1
                 ORDER BY j.available_at,j.id LIMIT ?
-            """, (now, limit)).fetchall()
+            """, (now, available)).fetchall()
             for job in rows:
                 token = secrets.token_urlsafe(32)
                 until = now + lease_seconds
@@ -219,7 +261,11 @@ class FleetStore:
             ready = self.db.execute(
                 "SELECT COUNT(*) FROM fleet_jobs WHERE state='queued' "
                 "AND available_at<=?", (self.clock(),)).fetchone()[0]
-        return {"profiles": total, "enabled": enabled,
+        with self.lock:
+            workers = self.db.execute(
+                "SELECT COUNT(*) FROM fleet_workers WHERE last_seen>=?",
+                (self.clock() - 180,)).fetchone()[0]
+        return {"profiles": total, "enabled": enabled, "online_workers": workers,
                 "jobs": {key: counts.get(key, 0) for key in
                          ("queued", "leased", "done", "needs_review")},
                 "ready_jobs": ready, "scope": "logical-test-profiles-only",
@@ -233,6 +279,13 @@ class FleetStore:
             return [dict(row) for row in self.db.execute(
                 "SELECT profile_key,enabled,created_at FROM fleet_profiles "
                 "ORDER BY profile_key LIMIT ? OFFSET ?", (limit, offset))]
+
+    def ping(self):
+        try:
+            with self.lock:
+                return self.db.execute("SELECT 1").fetchone()[0] == 1
+        except sqlite3.Error:
+            return False
 
     def close(self):
         with self.lock:

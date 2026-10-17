@@ -68,14 +68,21 @@ label{font-size:12px;color:var(--muted);display:block;margin:0 0 5px}.field{marg
 <div class="stat"><div class="label">Sondes en attente</div><div class="n" id="fleet-queued">—</div></div>
 <div class="stat"><div class="label">Baux en cours</div><div class="n" id="fleet-leased">—</div></div>
 </div>
+<div class="line"><span>Workers connectes</span><strong id="fleet-online-workers">—</strong></div>
+<div class="line"><span>Stockage de la flotte</span><strong id="fleet-backend">—</strong></div>
 <div class="twocol">
 <div><div class="field"><label for="fleet-prefix">Prefixe des profils de test</label><input id="fleet-prefix" value="test" maxlength="24"></div>
 <div class="field"><label for="fleet-start">Numero de depart</label><input id="fleet-start" type="number" min="1" max="9999999" value="1"></div>
 <div class="field"><label for="fleet-count">Nombre a creer (maximum 10 000)</label><input id="fleet-count" type="number" min="1" max="10000" value="50"></div>
-<button class="action" id="fleet-create">Creer les profils de test</button></div>
+<button class="action" id="fleet-create">Creer les profils de test</button>
+<div class="field" style="margin-top:15px"><label for="fleet-probe-profile">Profil a diagnostiquer (test uniquement)</label>
+<input id="fleet-probe-profile" value="test-000001" maxlength="40"></div>
+<button class="action" id="fleet-probe">Ajouter une sonde technique</button></div>
 <div><h2>Navigation par pages</h2><div class="sub" id="fleet-summary">Chargement…</div>
 <div class="actions" style="margin-top:12px"><button class="action" id="fleet-prev">Precedent</button><button class="action" id="fleet-next">Suivant</button></div>
-<div id="fleet-list" class="scroll" style="margin-top:12px;max-height:310px"></div></div>
+<div id="fleet-list" class="scroll" style="margin-top:12px;max-height:310px"></div>
+<h2 style="margin-top:18px">Workers de diagnostic</h2>
+<div id="fleet-worker-list" class="scroll" style="max-height:180px"></div></div>
 </div>
 </details></section>
 <section class="section" id="incidents"><div class="eyebrow">Fiabilité</div><h1>Incidents</h1><p>Une panne sur un compte ne doit pas interrompre les autres.</p>
@@ -111,7 +118,7 @@ label{font-size:12px;color:var(--muted);display:block;margin:0 0 5px}.field{marg
 <div class="note">Aucun code réel n'est modifié par AI Guardian V1.</div>
 </div></div>
 </section>
-<footer>REQ N GO Manager · AI Guardian V9 · Supervision simulée · Aucune automatisation de gameplay</footer>
+<footer>REQ N GO Manager · AI Guardian V10 · Supervision technique · Aucune automatisation de gameplay</footer>
 </div>
 <script>
 (function(){
@@ -215,12 +222,21 @@ document.getElementById("fleet-total").textContent=summary.profiles;
 document.getElementById("fleet-enabled").textContent=summary.enabled;
 document.getElementById("fleet-queued").textContent=summary.jobs.queued;
 document.getElementById("fleet-leased").textContent=summary.jobs.leased;
+document.getElementById("fleet-online-workers").textContent=summary.online_workers||0;
+document.getElementById("fleet-backend").textContent=summary.backend==="distributed-postgres"?
+"PostgreSQL partage":"SQLite local";
 var page=await api("/api/fleet/profiles?offset="+fleetOffset+"&limit="+fleetSize);
 var target=document.getElementById("fleet-list");target.replaceChildren();
 page.items.forEach(function(p){target.appendChild(node("div","entry",p.profile_key+(p.enabled?" · actif":" · suspendu")));});
 if(!page.items.length)target.appendChild(node("div","entry","Aucun profil sur cette page."));
 document.getElementById("fleet-summary").textContent=
 summary.profiles+" profil(s) en base · page "+(Math.floor(fleetOffset/fleetSize)+1)+" · "+summary.jobs.needs_review+" a verifier";
+var workers=await api("/api/fleet/workers?limit=20");
+var workersList=document.getElementById("fleet-worker-list");workersList.replaceChildren();
+if(!workers.items.length)workersList.appendChild(node("div","entry","Aucun worker configure."));
+workers.items.forEach(function(w){workersList.appendChild(node("div","entry",
+w.worker_id+" · "+(w.connected?"Connecte":"Sans nouvelles")+
+" · capacite "+w.capacity+" · "+w.status));});
 document.getElementById("fleet-prev").disabled=fleetOffset===0;
 document.getElementById("fleet-next").disabled=fleetOffset+fleetSize>=summary.profiles;
 } catch(error) {
@@ -268,6 +284,16 @@ try{
 var result=await api("/api/fleet/profiles/batch","POST",{prefix:prefix,start:start,count:count});
 fleetOffset=0;await refreshFleet();
 notify(result.created+" profil(s) de test crees · "+result.existing+" deja presents.");
+}catch(error){notify(error.message);}
+});
+document.getElementById("fleet-probe").addEventListener("click",async function(){
+var profile=document.getElementById("fleet-probe-profile").value.trim();
+if(!/^[A-Za-z][A-Za-z0-9_-]{0,23}-[0-9]{6,7}$/.test(profile)){
+return notify("Identifiant de profil de test invalide.");}
+var key="ui-probe-"+Date.now()+"-"+Math.random().toString(36).slice(2,12);
+try{
+await api("/api/fleet/probes","POST",{profile_key:profile,dedupe_key:key});
+await refreshFleet();notify("Sonde de diagnostic mise en file.");
 }catch(error){notify(error.message);}
 });
 document.getElementById("fleet-prev").addEventListener("click",function(){
