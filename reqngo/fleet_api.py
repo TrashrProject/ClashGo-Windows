@@ -40,6 +40,11 @@ class WorkerHeartbeat(BaseModel):
     model_config = ConfigDict(extra="forbid")
     status: str = Field(pattern="^(ok|busy|degraded)$")
     capacity: int = Field(default=1, ge=1, le=8)
+    cpu_percent: float | None = Field(default=None, ge=0, le=100)
+    memory_percent: float | None = Field(default=None, ge=0, le=100)
+    process_rss_mb: float | None = Field(default=None, ge=0, le=10000000)
+    android_online_devices: int | None = Field(default=None, ge=0, le=10000)
+    android_bound_devices: int | None = Field(default=None, ge=0, le=10000)
 
 
 class WorkerClaim(BaseModel):
@@ -112,7 +117,11 @@ def router_for(store: FleetStore, read_guard, write_guard):
     @router.post("/api/fleet/worker/heartbeat")
     def worker_heartbeat(body: WorkerHeartbeat, worker_id: str = Depends(authorized_worker)):
         try:
-            return store.heartbeat(worker_id, body.status, body.capacity)
+            return store.heartbeat(
+                worker_id, body.status, body.capacity,
+                metrics={key: getattr(body, key) for key in (
+                    "cpu_percent", "memory_percent", "process_rss_mb",
+                    "android_online_devices", "android_bound_devices")})
         except ValueError as exc:
             raise HTTPException(422, str(exc))
 
