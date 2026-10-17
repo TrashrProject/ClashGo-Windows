@@ -280,6 +280,13 @@ class FleetStore:
                 "SELECT profile_key,enabled,created_at FROM fleet_profiles "
                 "ORDER BY profile_key LIMIT ? OFFSET ?", (limit, offset))]
 
+    def ping(self):
+        try:
+            with self.lock:
+                return self.db.execute("SELECT 1").fetchone()[0] == 1
+        except sqlite3.Error:
+            return False
+
     def close(self):
         with self.lock:
             self.db.close()
