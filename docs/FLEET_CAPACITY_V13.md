@@ -47,7 +47,7 @@ python -m unittest discover -s tests -v
 Pour utiliser une vraie base locale jetable sous controle de l'operateur :
 
 ```sh
-FLEET_TEST_PG_DSN="postgresql://<service-user>:<secret>@127.0.0.1:5432/fleet_ci" FLEET_BENCH_DISPOSABLE=1 python tools/fleet_load_benchmark.py --profiles 3000 --jobs 1000 --workers 6
+FLEET_TEST_PG_DSN="postgresql://<service-user>:<secret>@127.0.0.1:5432/fleet_ci" FLEET_BENCH_DISPOSABLE=1 python -m tools.fleet_load_benchmark --profiles 3000 --jobs 1000 --workers 6
 ```
 
 Il ne faut **jamais** diriger ce script vers une base en production. Le benchmark insere de nouveaux profils et jobs, sans effacer l'historique existant. Un test de longue duree demandera un banc distinct, des donnees reinitialisables, des quotas et une retention des historiques et des metriques.
