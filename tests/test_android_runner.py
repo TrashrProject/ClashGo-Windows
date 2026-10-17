@@ -20,6 +20,9 @@ class FakeDevice:
     def game_running(self):
         return self.running
 
+    def game_foreground(self):
+        return self.running
+
     def screenshot(self):
         self.shots += 1
         return Screen(b"", 100, 200)
