@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from reqngo.correlation import correlate
 from reqngo.telemetry import TelemetryStore
 
 
@@ -55,13 +56,18 @@ def router_for(store: TelemetryStore, dashboard_guard):
         except ValueError as exc:
             raise HTTPException(422, str(exc))
 
+    def analyzed_snapshot(limit=100):
+        snapshot = store.snapshot(limit=limit)
+        snapshot["analysis"] = correlate(snapshot)
+        return snapshot
+
     @router.get("/api/telemetry/state")
     def state(_: bool = Depends(dashboard_guard)):
-        return store.snapshot()
+        return analyzed_snapshot()
 
     @router.get("/api/telemetry/export")
     def export(_: bool = Depends(dashboard_guard)):
-        result = JSONResponse(content=store.snapshot(limit=200))
+        result = JSONResponse(content=analyzed_snapshot(limit=200))
         result.headers["Content-Disposition"] = 'attachment; filename="guardian-diagnostics.json"'
         return result
 
