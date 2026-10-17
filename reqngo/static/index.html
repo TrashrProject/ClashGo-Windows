@@ -60,7 +60,7 @@ label{font-size:12px;color:var(--muted);display:block;margin:0 0 5px}.field{marg
 <div class="scroll" id="account-list"></div>
 </div>
 <details class="panel" style="margin-top:15px">
-<summary style="cursor:pointer;font-weight:700">Flotte grande echelle <span class="sub">(V13 · test)</span></summary>
+<summary style="cursor:pointer;font-weight:700">Flotte grande echelle <span class="sub">(V14 · test)</span></summary>
 <p style="margin-top:12px">Profils logiques uniquement, sans connexion au jeu. Les 50 profils Guardian historiques sont distincts de cette nouvelle flotte.</p>
 <div class="grid">
 <div class="stat"><div class="label">Profils de la flotte</div><div class="n" id="fleet-total">—</div></div>
@@ -73,6 +73,7 @@ label{font-size:12px;color:var(--muted);display:block;margin:0 0 5px}.field{marg
 <div class="line"><span>Capacite des workers connectes</span><strong id="fleet-slots">—</strong></div>
 <div class="line"><span>Plus ancienne sonde prete</span><strong id="fleet-queue-age">—</strong></div>
 <div class="line"><span>Incidents workers ouverts</span><strong id="fleet-incidents-count">—</strong></div>
+<div class="line"><span>Workers sous forte charge (CPU/RAM &ge;95%)</span><strong id="fleet-overloaded-count">—</strong></div>
 <div class="panel" style="margin-top:14px">
 <h2>Evaluation de capacite <span class="sub">(diagnostics uniquement)</span></h2>
 <div class="line"><span>Etat de la file</span><strong id="fleet-capacity-state">—</strong></div>
@@ -242,10 +243,12 @@ document.getElementById("fleet-online-workers").textContent=summary.online_worke
 document.getElementById("fleet-slots").textContent=summary.online_slots||0;
 document.getElementById("fleet-queue-age").textContent=(summary.oldest_ready_wait_seconds||0)+" s";
 document.getElementById("fleet-incidents-count").textContent=summary.open_worker_incidents||0;
+document.getElementById("fleet-overloaded-count").textContent=summary.overloaded_workers||0;
 var assessment=await api("/api/fleet/capacity");
 var stateLabel={"nominal":"Stable","idle_without_workers":"Au repos",
 "worker_incidents":"Incidents workers","backlog_pressure":"Pression de file",
-"no_capacity":"Aucune capacite signalee"};
+"no_capacity":"Aucune capacite signalee",
+"worker_overload":"Workers surcharges"};
 document.getElementById("fleet-capacity-state").textContent=stateLabel[assessment.state]||"Etat inconnu";
 document.getElementById("fleet-capacity-message").textContent=assessment.message;
 document.getElementById("fleet-capacity-action").textContent=assessment.suggestion;
@@ -260,9 +263,18 @@ summary.profiles+" profil(s) en base · page "+(Math.floor(fleetOffset/fleetSize
 var workers=await api("/api/fleet/workers?limit=20");
 var workersList=document.getElementById("fleet-worker-list");workersList.replaceChildren();
 if(!workers.items.length)workersList.appendChild(node("div","entry","Aucun worker configure."));
-workers.items.forEach(function(w){workersList.appendChild(node("div","entry",
+workers.items.forEach(function(w){
+var samples=[];
+if(w.cpu_percent!==null&&w.cpu_percent!==undefined)samples.push("CPU "+Number(w.cpu_percent).toFixed(1)+"%");
+if(w.memory_percent!==null&&w.memory_percent!==undefined)samples.push("RAM hote "+Number(w.memory_percent).toFixed(1)+"%");
+if(w.process_rss_mb!==null&&w.process_rss_mb!==undefined)samples.push("RSS "+Math.round(w.process_rss_mb)+" Mo");
+if(w.android_bound_devices!==null&&w.android_bound_devices!==undefined)
+samples.push("ADB "+(w.android_online_devices===null||w.android_online_devices===undefined?"?":w.android_online_devices)+"/"+w.android_bound_devices);
+workersList.appendChild(node("div","entry",
 w.worker_id+" · "+(w.connected?"Connecte":"Sans nouvelles")+
-" · capacite "+w.capacity+" · "+w.status));});
+" · capacite declaree "+w.capacity+" · "+w.status+
+(samples.length?" · "+samples.join(" · "):" · metriques non disponibles")));
+});
 var incidents=await api("/api/fleet/incidents?limit=15");
 var incidentList=document.getElementById("fleet-worker-incidents");incidentList.replaceChildren();
 if(!incidents.items.length)incidentList.appendChild(node("div","entry","Aucune interruption connue."));
