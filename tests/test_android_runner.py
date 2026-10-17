@@ -119,6 +119,20 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(len(device.taps), 1)
         self.assertEqual(self.journal.state(), (1, "ready"))
 
+    def test_app_switch_during_visual_check_prevents_touch(self):
+        class SwitchingDevice(FakeDevice):
+            checks = 0
+
+            def game_foreground(self):
+                self.checks += 1
+                return self.checks == 1
+
+        device = SwitchingDevice()
+        with self.assertRaises(ExecutionBlocked):
+            self.runner(device, ["village", "village"]).step(dry_run=False)
+        self.assertEqual(device.taps, [])
+        self.assertEqual(self.journal.state(), (0, "ready"))
+
     def test_game_must_already_be_running(self):
         device = FakeDevice(running=False)
         with self.assertRaises(ExecutionBlocked):
