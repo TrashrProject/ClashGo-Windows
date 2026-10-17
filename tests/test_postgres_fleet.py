@@ -19,8 +19,8 @@ class PostgreSQLFleetTests(unittest.TestCase):
         self.second = PostgresFleetStore(DSN)
         with self.store.pool.connection() as conn:
             # CI starts a dedicated fresh database; never run against production.
-            conn.execute("TRUNCATE fleet_jobs, fleet_profiles, fleet_workers "
-                         "RESTART IDENTITY")
+            conn.execute("TRUNCATE fleet_worker_incidents, fleet_jobs, "
+                         "fleet_profiles, fleet_workers RESTART IDENTITY")
 
     def tearDown(self):
         self.second.close()
@@ -117,6 +117,33 @@ class PostgreSQLFleetTests(unittest.TestCase):
         self.assertEqual(self.second.complete(
             claimed[0]["job_id"], "worker_adb",
             claimed[0]["lease_token"], True)["state"], "done")
+
+    def test_stale_worker_incidents_across_multiple_postgres_replicas(self):
+        self.store.heartbeat("worker_01", "ok", 2)
+        with self.store.pool.connection() as conn:
+            conn.execute("""
+                UPDATE fleet_workers SET last_seen=clock_timestamp() -
+                    INTERVAL '181 seconds' WHERE worker_id='worker_01'
+            """)
+        first = self.store.scan_worker_health()
+        self.assertEqual(first, {"new_incidents": 1, "open_incidents": 1})
+        second = self.second.scan_worker_health()
+        self.assertEqual(second, {"new_incidents": 0, "open_incidents": 1})
+        self.assertEqual(self.second.summary()["open_worker_incidents"], 1)
+        self.assertEqual(self.second.summary()["online_slots"], 0)
+        self.second.heartbeat("worker_01", "degraded", 2)
+        self.assertEqual(self.store.scan_worker_health()["open_incidents"], 0)
+        self.assertEqual(self.store.worker_incidents()[0]["status"], "resolved")
+        with self.second.pool.connection() as conn:
+            conn.execute("""
+                UPDATE fleet_workers SET last_seen=clock_timestamp() -
+                    INTERVAL '181 seconds' WHERE worker_id='worker_01'
+            """)
+        reopened = self.store.scan_worker_health()
+        self.assertEqual(reopened, {"new_incidents": 1, "open_incidents": 1})
+        history = self.second.worker_incidents()
+        self.assertEqual(history[0]["occurrences"], 2)
+        self.assertIsNone(history[0]["resolved_at"])
 
     def test_capacity_and_monitoring(self):
         self.store.register_batch("test", 1, 3)
