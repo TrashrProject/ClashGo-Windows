@@ -25,6 +25,9 @@ def assess_fleet_capacity(summary: dict) -> dict:
     if any(type(value) is not int or value < 0 for value in raw.values()):
         raise ValueError("Compteurs de capacite invalides.")
 
+    overload = summary.get("overloaded_workers", 0)
+    if type(overload) is not int or overload < 0:
+        raise ValueError("Saturation invalide.")
     ready = raw["ready"]
     slots = raw["slots"]
     age = raw["oldest_seconds"]
@@ -39,6 +42,10 @@ def assess_fleet_capacity(summary: dict) -> dict:
         state = "backlog_pressure"
         message = "La file de diagnostic indique une pression ou une attente prolongee."
         action = "Mesurer le debit et la charge reelle des workers avant d'ajuster leur nombre."
+    elif overload:
+        state = "worker_overload"
+        message = "Une ou plusieurs machines ont signale une saturation CPU ou memoire."
+        action = "Verifier les charges et reduire les taches si necessaire avant d'augmenter les workers."
     elif missing:
         state = "worker_incidents"
         message = "Un ou plusieurs workers ont un incident de connexion ouvert."
@@ -62,6 +69,8 @@ def assess_fleet_capacity(summary: dict) -> dict:
         "backlog_per_declared_slot": backlog_per_slot,
         "oldest_ready_wait_seconds": age,
         "open_worker_incidents": missing,
-        "thresholds": {"ready_jobs_per_declared_slot": 20, "oldest_ready_seconds": 120},
+        "overloaded_workers": overload,
+        "thresholds": {"ready_jobs_per_declared_slot": 20,
+                       "oldest_ready_seconds": 120, "worker_cpu_or_memory_percent": 95},
         "scope": "technical-diagnostics-only",
     }
