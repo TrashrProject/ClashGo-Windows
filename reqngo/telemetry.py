@@ -133,10 +133,10 @@ class TelemetryStore:
                 raise ValueError("Une verification exige un code source structure et un niveau info.")
         at = self.clock()
         with self.lock, self.db:
-            old = self.db.execute("SELECT agent_id FROM diagnostic_events WHERE event_key=?", (event_key,)).fetchone()
+            old = self.db.execute("SELECT agent_id,code FROM diagnostic_events WHERE event_key=?", (event_key,)).fetchone()
             if old is not None:
-                if old["agent_id"] != agent_id:
-                    raise ValueError("Identifiant deja utilise par un autre agent.")
+                if old["agent_id"] != agent_id or old["code"] != code:
+                    raise ValueError("Cle d'evenement deja attribuee a un autre diagnostic.")
                 return {"ok": True, "duplicate": True}
             self.db.execute("""
                 INSERT INTO diagnostic_events(event_key,agent_id,profile_id,code,level,metadata,recorded_at)
