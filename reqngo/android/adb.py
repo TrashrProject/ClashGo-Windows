@@ -95,6 +95,21 @@ class AdbClient:
     def back(self):
         self._device("shell", "input", "keyevent", "KEYCODE_BACK")
 
+    def game_foreground(self):
+        """Fail closed unless Android explicitly reports the game as focused."""
+        pkg = "com.supercell.clashofclans/"
+        try:
+            raw = self._device("shell", "dumpsys", "window", "windows")
+        except AdbError:
+            return False
+        lines = raw.decode("utf-8", errors="replace").splitlines()
+        focus = [line for line in lines if "mCurrentFocus=" in line]
+        if not focus:
+            return False
+        # Inspect the LAST current-focus record, not historical tasks or
+        # running package lists. Unknown Android layouts must be calibrated.
+        return pkg in focus[-1]
+
     def game_running(self, package="com.supercell.clashofclans"):
         """Read-only process check; no login, launch or package installation."""
         if package != "com.supercell.clashofclans":
