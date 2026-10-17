@@ -21,14 +21,14 @@ from reqngo.supervisor import Supervisor
 from reqngo.health import guardian_ready
 from reqngo.telemetry import TelemetryStore
 from reqngo.telemetry_api import router_for
-from reqngo.fleet import FleetStore
+from reqngo.fleet_factory import make_fleet
 from reqngo.fleet_api import router_for as fleet_router_for
 
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.getenv("GUARDIAN_DATA_DIR", BASE.parent / "data"))
 engine = Guardian(DATA / "guardian.sqlite3")
 telemetry = TelemetryStore(DATA / "telemetry.sqlite3")
-fleet = FleetStore(DATA / "fleet.sqlite3")
+fleet = make_fleet(DATA / "fleet.sqlite3")
 stop = threading.Event()
 security = HTTPBasic()
 
@@ -112,7 +112,7 @@ def live():
 
 @app.get("/health/ready")
 def ready():
-    if not guardian_ready(engine, telemetry):
+    if not guardian_ready(engine, telemetry) or not fleet.ping():
         raise HTTPException(status_code=503, detail="not_ready")
     return {"status": "ready"}
 
