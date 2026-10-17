@@ -43,7 +43,7 @@ jobs:
         env:
           FLEET_TEST_PG_DSN: postgresql://fleet_test:local-ci-password-not-for-production@127.0.0.1:5432/fleet_ci
           FLEET_BENCH_DISPOSABLE: "1"
-        run: python tools/fleet_load_benchmark.py --profiles 5000 --jobs 1200 --workers 6
+        run: python -m tools.fleet_load_benchmark --profiles 5000 --jobs 1200 --workers 6
       - name: Store sanitized benchmark
         if: always()
         uses: actions/upload-artifact@v4
