@@ -41,3 +41,30 @@ jobs:
         run: python -m unittest tests.test_postgres_fleet -v
       - name: Compile worker modules
         run: python -m compileall -q reqngo
+
+  compose-end-to-end:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      # Values are isolated, disposable CI credentials, never production keys.
+      GUARDIAN_PASSWORD: ci-v10-admin-passphrase-local-only-2026
+      GUARDIAN_AGENT_TOKEN: ci-v10-telemetry-token-local-12345678901234567890
+      FLEET_DB_PASSWORD: ci-v10-database-secret-local-only-123456
+      FLEET_WORKER_01_TOKEN: ci-v10-worker-one-key-111111111111111111111
+      FLEET_WORKER_02_TOKEN: ci-v10-worker-two-key-222222222222222222222
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate distributed demo Compose
+        run: docker compose -f compose.fleet-demo.yaml config --quiet
+      - name: Launch Guardian/PostgreSQL/two workers
+        run: docker compose -f compose.fleet-demo.yaml up --build -d
+      - name: End-to-end distributed diagnostic workflow
+        run: python tools/fleet_compose_smoke.py
+      - name: Diagnostic status if test fails
+        if: failure()
+        run: |
+          docker compose -f compose.fleet-demo.yaml ps
+          docker compose -f compose.fleet-demo.yaml logs --tail=50 guardian postgres fleet01 fleet02
+      - name: Stop disposable CI environment
+        if: always()
+        run: docker compose -f compose.fleet-demo.yaml down -v
