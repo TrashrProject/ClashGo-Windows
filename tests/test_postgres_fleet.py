@@ -86,6 +86,17 @@ class PostgreSQLFleetTests(unittest.TestCase):
                          second["lease_token"], True)["state"], "done")
         self.assertEqual(self.store.summary()["jobs"]["done"], 1)
 
+    def test_fifty_thousand_logical_profiles_paginate_without_full_fetch(self):
+        for start in range(1, 50001, 10000):
+            batch = self.store.register_batch("scale", start, 10000)
+            self.assertEqual(batch["created"], 10000)
+        self.assertEqual(self.store.summary()["profiles"], 50000)
+        sample = self.second.profiles(49000, 200)
+        self.assertEqual(len(sample), 200)
+        self.assertEqual(sample[0]["profile_key"], "scale-049001")
+        self.assertEqual(sample[-1]["profile_key"], "scale-049200")
+        self.assertEqual(self.second.register_batch("scale", 49001, 1000)["existing"], 1000)
+
     def test_targeted_android_probe_skips_other_workers(self):
         self.store.register_batch("test", 1, 3)
         device_job = self.store.enqueue_probe(
