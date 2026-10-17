@@ -296,5 +296,12 @@ class PostgresFleetStore:
             """, (limit, offset)).fetchall()
         return [dict(r, created_at=float(r["created_at"])) for r in rows]
 
+    def ping(self):
+        try:
+            with self.pool.connection(timeout=3) as conn:
+                return conn.execute("SELECT 1 AS ok").fetchone()["ok"] == 1
+        except Exception:
+            return False
+
     def close(self):
         self.pool.close()
