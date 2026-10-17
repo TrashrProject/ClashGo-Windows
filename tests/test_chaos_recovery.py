@@ -110,8 +110,11 @@ class ChaosRecoveryTests(unittest.TestCase):
             store.heartbeat("pilot_01")
             now[0] += 200
             self.assertEqual(store.check_stale()["alerts_created"], 1)
+            # A host clock correction reuses the SAME last_seen timestamp,
+            # but the new heartbeat sequence must still create a new alert.
+            now[0] = 1000.0
             store.heartbeat("pilot_01")
-            now[0] += 200
+            now[0] = 1200.0
             self.assertEqual(store.check_stale()["alerts_created"], 1)
             self.assertEqual(store.check_stale()["alerts_created"], 0)
             self.assertEqual(
