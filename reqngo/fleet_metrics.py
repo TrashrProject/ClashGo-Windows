@@ -68,7 +68,7 @@ class WorkerResourceSampler:
                 values["memory_percent"] = self.psutil.virtual_memory().percent
                 values["process_rss_mb"] = (
                     self.psutil.Process().memory_info().rss / (1024 ** 2))
-            except (OSError, ValueError, AttributeError):
+            except (OSError, ValueError, AttributeError, TypeError):
                 pass
         if self.enable_adb and self.android_preflight is not None:
             configured = set(self.android_preflight.bindings.values())
