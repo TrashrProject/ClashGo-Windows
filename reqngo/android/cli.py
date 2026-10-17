@@ -46,7 +46,7 @@ def main(argv=None):
         detected = vision.detect(screenshot)
         print("Appareil:", client.serial, "resolution:", screenshot.width, "x", screenshot.height)
         print("Etat:", detected.state, "confiance:", round(detected.confidence, 3))
-        print("Jeu lance:", client.game_running())
+        print("Jeu lance:", client.game_running(), "au premier plan:", client.game_foreground())
         return 0
     if not args.workflow or not args.journal:
         parser.error("--workflow et --journal obligatoires")
