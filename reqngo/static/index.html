@@ -77,6 +77,11 @@ label{font-size:12px;color:var(--muted);display:block;margin:0 0 5px}.field{marg
 <button class="action" id="fleet-create">Creer les profils de test</button>
 <div class="field" style="margin-top:15px"><label for="fleet-probe-profile">Profil a diagnostiquer (test uniquement)</label>
 <input id="fleet-probe-profile" value="test-000001" maxlength="40"></div>
+<div class="field"><label for="fleet-probe-mode">Type de sonde</label>
+<select id="fleet-probe-mode"><option value="storage">Stockage du worker (simulation)</option>
+<option value="android">ADB : appareil associe (lecture seule)</option></select></div>
+<div class="field"><label for="fleet-probe-worker">Worker cible pour ADB (ex. fleet_01)</label>
+<input id="fleet-probe-worker" maxlength="64" placeholder="Obligatoire pour une sonde ADB"></div>
 <button class="action" id="fleet-probe">Ajouter une sonde technique</button></div>
 <div><h2>Navigation par pages</h2><div class="sub" id="fleet-summary">Chargement…</div>
 <div class="actions" style="margin-top:12px"><button class="action" id="fleet-prev">Precedent</button><button class="action" id="fleet-next">Suivant</button></div>
@@ -288,11 +293,18 @@ notify(result.created+" profil(s) de test crees · "+result.existing+" deja pres
 });
 document.getElementById("fleet-probe").addEventListener("click",async function(){
 var profile=document.getElementById("fleet-probe-profile").value.trim();
+var mode=document.getElementById("fleet-probe-mode").value;
+var workerId=document.getElementById("fleet-probe-worker").value.trim();
+if(mode==="android"&&!/^[A-Za-z][A-Za-z0-9_-]{1,63}$/.test(workerId))
+return notify("Pour ADB, indique un worker explicitement associe a l'appareil.");
+if(workerId&&!/^[A-Za-z][A-Za-z0-9_-]{1,63}$/.test(workerId))
+return notify("Identifiant du worker invalide.");
 if(!/^[A-Za-z][A-Za-z0-9_-]{0,23}-[0-9]{6,7}$/.test(profile)){
 return notify("Identifiant de profil de test invalide.");}
 var key="ui-probe-"+Date.now()+"-"+Math.random().toString(36).slice(2,12);
 try{
-await api("/api/fleet/probes","POST",{profile_key:profile,dedupe_key:key});
+await api("/api/fleet/probes","POST",{profile_key:profile,dedupe_key:key,
+probe_mode:mode,target_worker:workerId||null});
 await refreshFleet();notify("Sonde de diagnostic mise en file.");
 }catch(error){notify(error.message);}
 });
