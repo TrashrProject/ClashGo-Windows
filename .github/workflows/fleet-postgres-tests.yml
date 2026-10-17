@@ -1,0 +1,43 @@
+name: Fleet PostgreSQL tests
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-fleet:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: fleet_ci
+          POSTGRES_USER: fleet_test
+          POSTGRES_PASSWORD: local-ci-password-not-for-production
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fleet_test -d fleet_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt httpx
+      - name: Real PostgreSQL fleet integration
+        env:
+          # The dedicated CI database is disposable and has no user data.
+          FLEET_TEST_PG_DSN: postgresql://fleet_test:local-ci-password-not-for-production@127.0.0.1:5432/fleet_ci
+        run: python -m unittest tests.test_postgres_fleet -v
+      - name: Compile worker modules
+        run: python -m compileall -q reqngo
