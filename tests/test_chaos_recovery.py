@@ -66,6 +66,31 @@ class ChaosRecoveryTests(unittest.TestCase):
         self.assertEqual([e["code"] for e in self.events],
                          ["invalid_config", "probe_success"])
 
+    def test_lost_ack_does_not_duplicate_a_report_or_lie_about_repair(self):
+        central = TelemetryStore(self.base / "acked.sqlite3")
+        try:
+            lose_ack_once = [True]
+            def report_and_drop_first_ack(message):
+                central.report(**message)
+                if lose_ack_once[0]:
+                    lose_ack_once[0] = False
+                    raise TimeoutError("ack lost after server committed")
+            pilot = Pilot("pilot_01", 1, self.work, self.outbox,
+                          lambda body: central.heartbeat(**body), report_and_drop_first_ack)
+            self.assertFalse(pilot.step()["connected"])
+            self.assertEqual(self.outbox.count(), 2)
+            self.assertEqual(central.snapshot()["summary"]["open_cases"], 1)
+            # On replay, the same event_key is safely de-duplicated.
+            pilot.report = lambda event: central.report(**event)
+            self.assertTrue(pilot.step()["connected"])
+            self.assertEqual(self.outbox.count(), 0)
+            snapshot = central.snapshot()
+            self.assertEqual(len(snapshot["events"]), 2)
+            self.assertEqual(snapshot["summary"]["open_cases"], 0)
+            self.assertEqual(snapshot["cases"][0]["status"], "verified")
+        finally:
+            central.close()
+
     def test_partial_ack_keeps_only_unconfirmed_event(self):
         box = self.outbox
         for n in range(3):
