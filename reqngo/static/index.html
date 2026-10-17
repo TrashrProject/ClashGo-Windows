@@ -65,6 +65,9 @@ label{font-size:12px;color:var(--muted);display:block;margin:0 0 5px}.field{marg
 <p style="margin-top:12px">Statut des services de test connectés. Aucun contrôle du jeu.</p>
 <div id="telemetry-summary" class="sub">Chargement…</div>
 <div id="telemetry-agents" style="margin-top:10px"></div>
+<h2 style="margin-top:18px">Analyse des incidents</h2>
+<div class="sub" style="margin-bottom:8px">Analyse déterministe des erreurs techniques, sans intervention automatique risquée.</div>
+<div id="telemetry-insights"></div>
 <h2 style="margin-top:18px">Incidents à vérifier <span id="cases-count" class="sub"></span></h2>
 <div id="telemetry-cases"></div>
 <h2 style="margin-top:18px">Derniers événements techniques</h2><div id="telemetry-events"></div>
@@ -154,6 +157,13 @@ var info=await api("/api/telemetry/state");
 var sum=info.summary||{};
 document.getElementById("telemetry-summary").textContent=
 (sum.connected||0)+" service(s) connecté(s) · "+(sum.stale||0)+" sans nouvelles";
+var insights=document.getElementById("telemetry-insights");insights.replaceChildren();
+(info.analysis&&info.analysis.insights||[]).forEach(function(item){
+var block=node("div","entry");
+block.appendChild(node("strong","",item.title));
+block.appendChild(node("div","sub",item.recommendation));
+insights.appendChild(block);
+});
 var cases=document.getElementById("telemetry-cases");cases.replaceChildren();
 document.getElementById("cases-count").textContent="("+(sum.open_cases||0)+")";
 var openCases=(info.cases||[]).filter(function(c){return c.status==="open";});
