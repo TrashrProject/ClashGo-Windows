@@ -55,6 +55,18 @@ class AndroidBridgeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             bridge.swipe(0, 0, 1, 1, 20, screen)
 
+    def test_foreground_check_refuses_other_app_and_uncertain_window(self):
+        bridge = AdbClient("emulator-5554")
+        results = [
+            (b"mCurrentFocus=Window{u0 com.supercell.clashofclans/.Game}\n", True),
+            (b"mCurrentFocus=Window{u0 com.android.settings/.Settings}\n", False),
+            (b"mResumedActivity: com.supercell.clashofclans/.Game\n", False),
+        ]
+        for output, expected in results:
+            with self.subTest(output=output), patch(
+                    "subprocess.run", return_value=Mock(returncode=0, stdout=output)):
+                self.assertEqual(bridge.game_foreground(), expected)
+
     def test_reject_unexpected_device_serial(self):
         for serial in ("", "a b", "$(touch x)", "device;rm -rf /", "x" * 100):
             with self.assertRaises(ValueError):
