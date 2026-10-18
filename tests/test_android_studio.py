@@ -155,6 +155,15 @@ class StudioTests(unittest.TestCase):
         self.assertEqual(self.studio.status()["next_step"], 1)
         self.assertFalse(self.studio.stop_route()["stopping"])
 
+    def test_read_only_benchmark_does_not_tap_or_modify_journal(self):
+        timing = self.studio.benchmark(samples=3)
+        self.assertEqual(timing["samples"], 3)
+        self.assertEqual(timing["resolution"], [160, 120])
+        self.assertEqual(self.device.tap_count, 0)
+        self.assertEqual(self.studio.status()["next_step"], 0)
+        with self.assertRaises(ValueError):
+            self.studio.benchmark(samples=100)
+
     def test_restarted_studio_uses_persisted_calibration_and_journal(self):
         self.calibrate()
         self.studio.run_once(execute=True, confirmation="EXECUTER UNE ACTION")
