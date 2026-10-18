@@ -18,6 +18,7 @@ from reqngo.fleet import _WORKER
 from reqngo.fleet_metrics import WorkerResourceSampler
 from reqngo.android.adb import AdbError
 from reqngo.android.preflight import AndroidReadOnlyPreflight
+from reqngo.android.visual_preflight import VisualReadOnlyPreflight
 from reqngo.health import update_worker_heartbeat
 from reqngo.pilot_worker import validate_endpoint
 
@@ -52,7 +53,7 @@ class FleetClient:
 class FleetDiagnosticWorker:
     def __init__(self, send, workdir, capacity: int = 1, *,
                  worker_id: str | None = None, android_preflight=None,
-                 resource_sampler=None):
+                 resource_sampler=None, visual_preflight=None):
         if type(capacity) is not int or not 1 <= capacity <= 8:
             raise ValueError("Capacite de worker invalide.")
         self.send = send
@@ -61,6 +62,7 @@ class FleetDiagnosticWorker:
         self.worker_id = worker_id
         self.android_preflight = android_preflight
         self.resource_sampler = resource_sampler
+        self.visual_preflight = visual_preflight
 
     def _probe(self):
         """A real IO check within the dedicated worker directory, no game."""
@@ -88,7 +90,14 @@ class FleetDiagnosticWorker:
                   and self.worker_id is not None
                   and job.get("target_worker") == self.worker_id):
                 try:
-                    healthy = bool(self.android_preflight.check(job["profile_key"]))
+                    # A locally configured visual profile requires a verified
+                    # visual condition; never fall back to simple device presence.
+                    profile = job["profile_key"]
+                    if (self.visual_preflight is not None
+                            and profile in self.visual_preflight.rules):
+                        healthy = bool(self.visual_preflight.check(profile))
+                    else:
+                        healthy = bool(self.android_preflight.check(profile))
                 except (AdbError, OSError, ValueError):
                     healthy = False
             # Unknown modes/targets fail closed to needs_review.
@@ -122,7 +131,7 @@ class FleetDiagnosticWorker:
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="REQ N GO V10 test worker")
+    parser = argparse.ArgumentParser(description="REQ N GO visual diagnostic worker")
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
     worker_id = os.environ.get("FLEET_WORKER_ID", "")
@@ -141,6 +150,9 @@ def main(argv=None):
             os.environ.get("FLEET_ANDROID_PROFILE_SERIALS_JSON", ""),
             adb_binary=os.environ.get("ADB_BINARY", "adb"),
             require_game=os.environ.get("FLEET_ANDROID_REQUIRE_GAME") == "1")
+        visual = VisualReadOnlyPreflight.from_json(
+            preflight, os.environ.get("FLEET_VISUAL_DIR", "./visual"),
+            os.environ.get("FLEET_VISUAL_RULES_JSON", ""))
         sampler = WorkerResourceSampler(
             android_preflight=preflight,
             enable_adb=os.environ.get("FLEET_MONITOR_ANDROID") == "1")
@@ -148,7 +160,7 @@ def main(argv=None):
             client.send,
             os.environ.get("FLEET_WORKDIR", "./data/fleet-" + worker_id),
             capacity=capacity, worker_id=worker_id, android_preflight=preflight,
-            resource_sampler=sampler)
+            resource_sampler=sampler, visual_preflight=visual)
     except (ValueError, TypeError) as error:
         parser.error(str(error))
     heartbeat_file = worker.workdir / "worker_heartbeat.txt"
