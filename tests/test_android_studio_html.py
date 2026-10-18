@@ -43,13 +43,15 @@ class AndroidStudioHTMLTests(unittest.TestCase):
         references = set(re.findall(r'el\("([^"]+)"\)', js))
         self.assertFalse(references - set(parsed.ids))
         for endpoint in ("/api/frame", "/api/state", "/api/step", "/api/run",
-                         "/api/status", "/api/route", "/api/route/stop"):
+                         "/api/status", "/api/route", "/api/route/stop", "/api/benchmark"):
             self.assertIn(endpoint, js)
         self.assertIn("X-REQNGO-Local-Token", js)
         self.assertIn("EXECUTER UNE ACTION", js)
         self.assertIn("EXECUTER LE PARCOURS", js)
         self.assertIn("fast-start", parsed.ids)
         self.assertIn("fast-stop", parsed.ids)
+        self.assertIn("benchmark", parsed.ids)
+        self.assertIn("benchmark-result", parsed.ids)
         self.assertIn("setPointerCapture", js)
         self.assertNotIn("innerHTML", js)
         self.assertNotIn("eval(", js)
