@@ -41,7 +41,7 @@ Il n'y a **aucune boucle de farm**, de connexion à des comptes, de demande auto
 
 ## Fichiers locaux
 
-Dans `data/android-studio/`, le studio enregistre `states.json`, les repères `<nom>.png`, `workflow.json` et `execution.sqlite3`. Aucun écran complet n'est persisté par le serveur, sauf si tu utilises séparément la commande explicite `capture` de l'ancien CLI. Ces fichiers peuvent contenir des détails privés ; **ne les ajoute pas à Git** et ne les envoie pas à un vendeur.
+Dans un sous-dossier isolé `data/android-studio/device-<empreinte-du-serial>/` (séparé par appareil, sans afficher le serial en clair dans le chemin), le studio enregistre `states.json`, les repères `<nom>.png`, `workflow.json` et `execution.sqlite3`. Aucun écran complet n'est persisté par le serveur, sauf si tu utilises séparément la commande explicite `capture` de l'ancien CLI. Ces fichiers peuvent contenir des détails privés ; **ne les ajoute pas à Git** et ne les envoie pas à un vendeur.
 
 ## Sécurité et incidents
 
