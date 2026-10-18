@@ -232,3 +232,9 @@ La console `/fleet` permet désormais d'enregistrer une **affinité de worker te
 L'intervalle enregistré est un paramètre préparatoire : il ne déclenche **pas** encore de scans automatiques. Aucun compte de jeu, émulateur ou téléphone cloud n'est piloté par cette interface. Les routes administratives sont protégées et les modifications sont journalisées.
 
 Voir [Documentation V16](docs/FLEET_POLICIES_V16.md).
+
+## V17 — premier essai Android réel, sans simulation
+
+Lancer **`DEMARRER-ANDROID-STUDIO.bat`** sur Windows avec un appareil Android ou émulateur ADB opérationnel. Le studio local sur `http://127.0.0.1:8766` affiche les **vraies captures Android**, permet de découper à la souris les deux repères d'écran, de placer une coordonnée tactile réelle, de lancer un test sans toucher puis **une seule action ADB explicitement autorisée avec confirmation de l'état avant/après**. Les captures et configurations restent sur le PC, sans passage par Guardian ou le cloud.
+
+**Aucun appareil, émulateur ou compte Clash of Clans réel n'a encore été connecté aux tests CI.** Le pilote réel nécessite une calibration manuelle et ne fournit aucune boucle automatique de farm ou de dons. Voir [Guide Android Studio V17](docs/ANDROID_STUDIO_V17.md).
