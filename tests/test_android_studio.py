@@ -139,7 +139,7 @@ class StudioTests(unittest.TestCase):
         with self.assertRaises(StudioError):
             self.studio.save_state({"name": "village", "frame_id": captured,
                                     "rect": self.region})
-        self.assertEqual(len(list(self.path.glob("village.png"))), 1)
+        self.assertEqual(len(list(self.studio.folder.glob("village.png"))), 1)
         with self.assertRaises(StudioError):
             self.studio.save_step({"name": "missing", "before": "village",
                                    "after": "unknown", "position": [.4, .5]})
