@@ -8,27 +8,52 @@ echo ==================================================
 echo       REQ N GO - ANDROID LIVE STUDIO
 echo ==================================================
 echo.
-where python >nul 2>nul
+set "PYTHON=python"
+if exist ".venv\Scripts\python.exe" set "PYTHON=.venv\Scripts\python.exe"
+"%PYTHON%" --version >nul 2>nul
 if errorlevel 1 (
-  echo ERREUR : Python 3 est introuvable dans PATH.
-  goto :error
-)
-where adb >nul 2>nul
-if errorlevel 1 (
-  echo ERREUR : Android Platform Tools ^(adb^) est introuvable dans PATH.
-  echo Installer les outils officiels Android puis relancer.
+  echo ERREUR : Python 3 est introuvable.
   goto :error
 )
 
-python -c "import cv2, numpy" >nul 2>nul
+rem Use official adb if present. BlueStacks 5 bundles HD-Adb.exe in
+rem the default installation folder, so no separate SDK download is needed.
+set "ADB_CMD=adb"
+if defined ADB_BINARY set "ADB_CMD=%ADB_BINARY%"
+if not defined ADB_BINARY (
+  where adb >nul 2>nul
+  if errorlevel 1 (
+    if exist "C:\Program Files\BlueStacks_nxt\HD-Adb.exe" (
+      set "ADB_CMD=C:\Program Files\BlueStacks_nxt\HD-Adb.exe"
+    ) else (
+      echo ERREUR : Ni adb ni HD-Adb.exe de BlueStacks 5 ne sont trouves.
+      echo Active Android Debug Bridge dans BlueStacks puis installe
+      echo les Android Platform Tools ou indique ADB_BINARY.
+      goto :error
+    )
+  )
+)
+"%ADB_CMD%" version >nul 2>nul
+if errorlevel 1 (
+  echo ERREUR : L'executable ADB choisi ne fonctionne pas.
+  goto :error
+)
+
+"%PYTHON%" -c "import cv2, numpy" >nul 2>nul
 if errorlevel 1 (
   echo Installation des dependances visuelles OpenCV / NumPy...
-  python -m pip install -r requirements-android.txt
+  "%PYTHON%" -m pip install -r requirements-android.txt
   if errorlevel 1 goto :error
 )
 
+echo ADB utilise : %ADB_CMD%
+rem BlueStacks commonly uses local ADB port 5555. The port can be different.
+if /I "%ADB_CMD%"=="C:\Program Files\BlueStacks_nxt\HD-Adb.exe" (
+  echo Tentative de connexion locale BlueStacks sur 127.0.0.1:5555...
+  "%ADB_CMD%" connect 127.0.0.1:5555
+)
 echo Appareils Android disponibles :
-python -m reqngo.android.cli devices
+"%PYTHON%" -m reqngo.android.cli devices --adb "%ADB_CMD%"
 if errorlevel 1 goto :error
 
 echo.
@@ -48,7 +73,7 @@ set "REQNGO_ANDROID_ACTIONS=I_ACCEPT_LOCAL_TOUCHES"
 echo.
 echo Lancement du studio local sur http://127.0.0.1:8766
 echo Ne ferme pas cette fenetre pendant le test.
-python -m reqngo.android.studio --serial "%SERIAL%"
+"%PYTHON%" -m reqngo.android.studio --serial "%SERIAL%" --adb "%ADB_CMD%"
 if errorlevel 1 goto :error
 goto :end
 

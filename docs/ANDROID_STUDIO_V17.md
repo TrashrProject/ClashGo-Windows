@@ -9,10 +9,11 @@ Ce que nous avons codé est un **outil capable d'envoyer une vraie commande Andr
 Sur ton PC Windows 11 :
 
 1. Installer Python 3.12+ si absent.
-2. Installer **Android SDK Platform Tools** officiels (contenant `adb.exe`) et les ajouter au PATH Windows : <https://developer.android.com/tools/releases/platform-tools>.
-3. Préparer un **appareil Android** ou un **émulateur Android compatible ADB**, activer le débogage USB pour un téléphone, ou démarrer l'émulateur.
-4. Ouvrir Clash of Clans **manuellement** sur l'appareil, le laisser au premier plan.
-5. Dans le dossier racine du dépôt, double-cliquer **`DEMARRER-ANDROID-STUDIO.bat`**. Le lanceur vérifie Python, ADB et les bibliothèques visuelles, affiche les appareils, te demande **le numéro de série ADB** et si tu souhaites activer les gestes pour cet essai.
+2. Pour **BlueStacks 5** : démarrer une instance, ouvrir **Paramètres → Avancé → Android Debug Bridge**, activer ADB et **Enregistrer les modifications**. Avec l'installation BlueStacks standard, le lanceur détecte directement `C:\\Program Files\\BlueStacks_nxt\\HD-Adb.exe` et tente la connexion locale `127.0.0.1:5555`. Aucun Android Studio complet n'est nécessaire. Ce port peut différer selon l'instance. Si BlueStacks n'est pas installé au chemin standard, définir `ADB_BINARY` sur le chemin de son `HD-Adb.exe`.
+3. Sinon, installer **Android SDK Platform Tools** officiels (contenant `adb.exe`) et les ajouter au PATH Windows : <https://developer.android.com/tools/releases/platform-tools>.
+4. Préparer un **appareil Android** ou un **émulateur Android compatible ADB**, activer le débogage USB pour un téléphone, ou démarrer l'émulateur.
+5. Ouvrir Clash of Clans **manuellement** sur l'appareil, le laisser au premier plan.
+6. Dans le dossier racine du dépôt, double-cliquer **`DEMARRER-ANDROID-STUDIO.bat`**. Le lanceur vérifie Python, ADB et les bibliothèques visuelles, affiche les appareils, te demande **le numéro de série ADB** et si tu souhaites activer les gestes pour cet essai.
 
 Le navigateur s'ouvre automatiquement sur **<http://127.0.0.1:8766>**. Seul ton PC peut accéder à cet outil ; il est distinct du tableau de bord Guardian (`/fleet`).
 
