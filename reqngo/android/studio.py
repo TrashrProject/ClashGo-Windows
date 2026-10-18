@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from reqngo.android.adb import AdbClient, AdbError
+from reqngo.android.benchmark import measure_capture_latency
 from reqngo.android.runner import ActionRunner, ExecutionBlocked, Journal, Workflow
 from reqngo.android.vision import TemplateVision, VisionError
 
@@ -227,6 +228,16 @@ class AndroidStudio:
         finally:
             self._route_guard.release()
 
+    def benchmark(self, *, samples=5):
+        # Do not overlap capture benchmark with a real input sequence.
+        if not self._route_guard.acquire(blocking=False):
+            raise StudioError("Un parcours est en cours : mesure ADB indisponible.")
+        try:
+            with self.lock:
+                return measure_capture_latency(self.device, samples=samples)
+        finally:
+            self._route_guard.release()
+
     def stop_route(self):
         """Interrupt a route BETWEEN gestures; never interrupt ADB mid-tap."""
         active = self.route_active
@@ -408,6 +419,11 @@ class StudioHandler(BaseHTTPRequestHandler):
                 result = self.server.studio.run_once(
                     execute=data.get("execute", False),
                     confirmation=data.get("confirmation", ""))
+            elif route == "/api/benchmark":
+                if set(data) - {"samples"}:
+                    raise StudioError("Commande de mesure inconnue.")
+                result = self.server.studio.benchmark(
+                    samples=data.get("samples", 5))
             elif route == "/api/route":
                 if set(data) - {"confirmation", "max_steps"}:
                     raise StudioError("Commande de parcours inconnue.")
