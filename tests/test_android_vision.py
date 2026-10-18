@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from reqngo.android.adb import Screen
 from reqngo.android.vision import TemplateVision, VisionError
@@ -49,6 +50,15 @@ class TemplateVisionTests(unittest.TestCase):
         found = vision.detect(self.screenshot(self.base_img))
         self.assertEqual(found.state, "village")
         self.assertGreater(found.confidence, 0.99)
+
+    def test_fast_route_reuses_reference_without_disk_reads(self):
+        vision = self.manifest([{"name": "village", "template": "known.png"}])
+        shot = self.screenshot(self.base_img)
+        with patch.object(cv2, "imread", wraps=cv2.imread) as reader:
+            self.assertEqual(vision.detect(shot).state, "village")
+            self.assertEqual(vision.detect(shot).state, "village")
+            self.assertEqual(vision.detect(shot).state, "village")
+        self.assertEqual(reader.call_count, 1)
 
     def test_random_other_screen_is_unknown(self):
         vision = self.manifest([{"name": "village", "template": "known.png"}])
