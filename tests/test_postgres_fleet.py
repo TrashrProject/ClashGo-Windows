@@ -8,6 +8,7 @@ import threading
 import unittest
 
 from reqngo.fleet_postgres import PostgresFleetStore
+from reqngo.fleet_console import FleetConsole
 
 DSN = os.environ.get("FLEET_TEST_PG_DSN")
 
@@ -161,6 +162,31 @@ class PostgreSQLFleetTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.heartbeat("worker_01", metrics={
                 "cpu_percent": float("nan")})
+
+    def test_console_postgres_groups_and_guarded_bulk(self):
+        self.store.register_batch("console", 1, 300)
+        console = FleetConsole(self.store)
+        other = FleetConsole(self.second)
+        with self.store.pool.connection() as db:
+            db.execute("DELETE FROM fleet_console_audit")
+            db.execute("DELETE FROM fleet_console_groups")
+        console.create_group("qa-console", "QA Console")
+        selected = [f"console-{i:06d}" for i in range(1, 201)]
+        console.assign(selected, "qa-console")
+        self.assertEqual(other.groups()[0]["profiles"], 200)
+        self.assertEqual(other.profiles(group="qa-console", offset=190,
+                                        limit=30)["total"], 200)
+        self.assertEqual(len(other.profiles(group="qa-console", offset=190,
+                                            limit=30)["items"]), 10)
+        state = other.preview("qa-console", False)
+        self.assertEqual(state["would_change"], 200)
+        with self.assertRaises(ValueError):
+            console.bulk_set_enabled("qa-console", False, "SUSPENDRE qa-console", 199)
+        console.bulk_set_enabled("qa-console", False, state["confirmation"], 200)
+        self.assertEqual(other.profiles(group="qa-console", enabled="no")["total"], 200)
+        self.assertEqual(other.audit()["items"][0]["affected"], 200)
+        other.assign(["console-000001"], None)
+        self.assertEqual(console.groups()[0]["profiles"], 199)
 
     def test_capacity_and_monitoring(self):
         self.store.register_batch("test", 1, 3)
