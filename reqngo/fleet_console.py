@@ -138,8 +138,8 @@ class FleetConsole:
             # Key-prefix search: indexed and scalable, never arbitrary SQL.
             if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", q):
                 raise ValueError("Recherche de profil invalide.")
-            predicates.append("profile_key LIKE " + self.p + " ESCAPE '\\\\'")
-            args.append(q.replace("_", "\\\\_") + "%")
+            predicates.append("profile_key LIKE " + self.p + " ESCAPE '\\'")
+            args.append(q.replace("_", "\\_") + "%")
         if group == "ungrouped":
             predicates.append("group_key IS NULL")
         elif group != "all":
