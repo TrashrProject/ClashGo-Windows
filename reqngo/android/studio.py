@@ -253,6 +253,7 @@ class AndroidStudio:
                 self._route_stop.clear()
                 started = time.monotonic()
                 completed = 0
+                step_timings = []
                 reason = "limit"
                 journal = Journal(self.journal_path)
                 try:
@@ -267,6 +268,8 @@ class AndroidStudio:
                         if time.monotonic() - started >= 90:
                             reason = "time_limit"
                             break
+                        step_name = runner.workflow.steps[journal.state()[0]].name
+                        step_started = time.monotonic()
                         result = runner.step(dry_run=False)
                         if result["status"] == "complete":
                             reason = "complete"
@@ -276,6 +279,10 @@ class AndroidStudio:
                             reason = "recovered"
                             break
                         completed += 1
+                        step_timings.append({
+                            "step": step_name,
+                            "elapsed_ms": round((time.monotonic() - step_started) * 1000)
+                        })
                         if journal.state()[0] >= len(runner.workflow.steps):
                             reason = "complete"
                             break
@@ -283,6 +290,7 @@ class AndroidStudio:
                         "status": "route_finished",
                         "reason": reason,
                         "verified_steps": completed,
+                        "step_timings": step_timings,
                         "elapsed_ms": round((time.monotonic() - started) * 1000),
                         "next_step": journal.state()[0],
                     }
