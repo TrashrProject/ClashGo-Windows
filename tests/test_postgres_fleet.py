@@ -9,6 +9,7 @@ import unittest
 
 from reqngo.fleet_postgres import PostgresFleetStore
 from reqngo.fleet_console import FleetConsole
+from reqngo.fleet_policy import FleetPolicyConsole
 
 DSN = os.environ.get("FLEET_TEST_PG_DSN")
 
@@ -187,6 +188,40 @@ class PostgreSQLFleetTests(unittest.TestCase):
         self.assertEqual(other.audit()["items"][0]["affected"], 200)
         other.assign(["console-000001"], None)
         self.assertEqual(console.groups()[0]["profiles"], 199)
+
+    def test_inherited_policy_and_targeted_diagnostics_across_replicas(self):
+        self.store.register_batch("inherit", 1, 4)
+        self.store.heartbeat("policy_w1", "ok", 2)
+        self.second.heartbeat("policy_w2", "ok", 2)
+        console = FleetPolicyConsole(self.store)
+        remote = FleetPolicyConsole(self.second)
+        with self.store.pool.connection() as conn:
+            conn.execute("DELETE FROM fleet_console_profile_override")
+            conn.execute("DELETE FROM fleet_console_group_policy")
+            conn.execute("DELETE FROM fleet_console_audit")
+            conn.execute("DELETE FROM fleet_console_groups")
+        console.create_group("policy-a", "Policy A")
+        console.assign(["inherit-000001", "inherit-000002"], "policy-a")
+        console.set_group_policy("policy-a", "policy_w1", 180)
+        self.assertEqual(remote.profile_detail("inherit-000002")["effective_worker"],
+                         "policy_w1")
+        remote.set_profile_override("inherit-000001", "policy_w2", 60)
+        self.assertEqual(console.profile_detail("inherit-000001")[
+                         "effective_interval_seconds"], 60)
+        diag = remote.enqueue_profile_diagnostic("inherit-000001", "storage")
+        self.assertEqual(diag["target_worker"], "policy_w2")
+        self.assertEqual(console.fleet.claim("policy_w1"), [])
+        lease = self.second.claim("policy_w2")[0]
+        self.assertEqual(lease["job_id"], diag["job_id"])
+        self.store.complete(lease["job_id"], "policy_w2", lease["lease_token"], True)
+        history = console.profile_detail("inherit-000001")["recent_jobs"]
+        self.assertEqual(history[0]["state"], "done")
+        self.assertNotIn("lease_token", str(history))
+        remote.set_profile_override("inherit-000001", None, None)
+        self.assertEqual(console.profile_detail("inherit-000001")["effective_worker"],
+                         "policy_w1")
+        with self.assertRaises(ValueError):
+            remote.set_group_policy("policy-a", "worker_unknown", 100)
 
     def test_capacity_and_monitoring(self):
         self.store.register_batch("test", 1, 3)
