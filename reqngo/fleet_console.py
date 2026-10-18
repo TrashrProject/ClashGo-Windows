@@ -75,6 +75,9 @@ class FleetConsole:
             with self.fleet.lock:
                 yield self.fleet.db
 
+    def _first(self, row):
+        return next(iter(row.values())) if self.pg else row[0]
+
     def _lock_group(self, db, key):
         if self.pg:
             db.execute("SELECT pg_advisory_xact_lock(hashtext(%s)::bigint)", (key,))
@@ -95,7 +98,7 @@ class FleetConsole:
                 or not isinstance(description, str) or len(description) > 240):
             raise ValueError("Nom ou description de groupe invalide.")
         with self._connection(write=True) as db:
-            if db.execute("SELECT COUNT(*) FROM fleet_console_groups").fetchone()[0] >= _MAX_GROUPS:
+            if self._first(db.execute("SELECT COUNT(*) FROM fleet_console_groups").fetchone()) >= _MAX_GROUPS:
                 raise ValueError("Limite de 300 groupes atteinte.")
             if self._exists(db, key):
                 raise ValueError("Ce groupe existe deja.")
@@ -143,10 +146,12 @@ class FleetConsole:
             args.append(enabled == "yes" if self.pg else int(enabled == "yes"))
         where = " WHERE " + " AND ".join(predicates) if predicates else ""
         with self._connection() as db:
-            total = db.execute("SELECT COUNT(*) FROM fleet_profiles" + where,
-                               tuple(args)).fetchone()[0]
+            total = self._first(db.execute("SELECT COUNT(*) FROM fleet_profiles" + where,
+                               tuple(args)).fetchone())
             rows = db.execute(
-                "SELECT profile_key,enabled,group_key,created_at FROM fleet_profiles"
+                ("SELECT profile_key,enabled,group_key,"
+                 + ("EXTRACT(EPOCH FROM created_at)" if self.pg else "created_at")
+                 + " AS created_at FROM fleet_profiles")
                 + where + " ORDER BY profile_key LIMIT " + self.p + " OFFSET " + self.p,
                 tuple(args + [limit, offset])).fetchall()
         return {"total": total, "offset": offset, "limit": limit,
@@ -178,7 +183,9 @@ class FleetConsole:
             previous = db.execute("SELECT DISTINCT group_key FROM fleet_profiles "
                                   "WHERE profile_key IN (" + placeholders + ")",
                                   tuple(profile_keys)).fetchall()
-            old_keys = sorted({r[0] for r in previous if r[0] and r[0] != group_key})
+            old_keys = sorted({(r["group_key"] if self.pg else r[0]) for r in previous
+                               if (r["group_key"] if self.pg else r[0])
+                               and (r["group_key"] if self.pg else r[0]) != group_key})
             for old in old_keys:
                 self._lock_group(db, old)
             db.execute("UPDATE fleet_profiles SET group_key=" + self.p
@@ -204,7 +211,7 @@ class FleetConsole:
                              (group_key, not enabled if self.pg else int(not enabled))
                              ).fetchone()
         return {"group_key": group_key, "action": "activate" if enabled else "suspend",
-                "would_change": row[0],
+                "would_change": self._first(row),
                 "confirmation": ("ACTIVER " if enabled else "SUSPENDRE ") + group_key}
 
     def bulk_set_enabled(self, group_key, enabled, confirmation, expected_count):
@@ -217,9 +224,9 @@ class FleetConsole:
             if not self._exists(db, group_key):
                 raise ValueError("Groupe inconnu.")
             old = not enabled if self.pg else int(not enabled)
-            count = db.execute("SELECT COUNT(*) FROM fleet_profiles "
+            count = self._first(db.execute("SELECT COUNT(*) FROM fleet_profiles "
                                "WHERE group_key=" + self.p + " AND enabled=" + self.p,
-                               (group_key, old)).fetchone()[0]
+                               (group_key, old)).fetchone())
             if count != expected_count:
                 raise ValueError("Le groupe a change depuis la previsualisation.")
             if count:
