@@ -26,7 +26,7 @@
 <div class="panel"><div class="panelhead"><h2><span class="number">03</span> Tester sur l'appareil</h2><span class="meta">Un geste vérifié ou parcours borné</span></div>
 <div class="step-list" id="steps"><p class="quiet">Aucune étape définie.</p></div><div class="sep"></div>
 <div class="row"><button id="dry-run" class="button">Vérifier sans toucher</button><button id="execute" class="button warning" disabled>Exécuter 1 geste réel</button></div><div class="sep"></div><h3>Parcours rapide — demandes / changement de compte</h3><p class="hint">Enchaîne jusqu'à 10 gestes visuellement confirmés sans attente fixe. Le prochain geste ne part qu'après confirmation de l'état précédent. Le parcours s'arrête si l'écran devient inconnu.</p><div class="row" style="margin-top:12px"><button id="fast-start" class="button primary" disabled>Lancer le parcours rapide</button><button id="fast-stop" class="button" disabled>Arrêter après ce geste</button></div><p id="fast-progress" class="meta" role="status" aria-live="polite" style="margin-top:10px">Aucun parcours en cours.</p><p class="hint" id="run-status">L'exécution tactile est désactivée par défaut. Elle doit être autorisée explicitement sur le PC.</p></div>
-<div class="panel"><h2>État de l'exécution</h2><div class="row" style="justify-content:space-between;margin:12px 0"><span>Étape à effectuer</span><strong id="journal-index">—</strong></div><div class="row" style="justify-content:space-between"><span>Journal transactionnel</span><strong class="code" id="journal-phase">—</strong></div><div class="foot">Si un geste a été interrompu, son journal bloque les nouvelles tentatives aveugles. Une vérification de l'écran d'arrivée est requise.</div></div></aside></div>
+<div class="panel"><h2>Diagnostic de rapidité MuMu</h2><p class="hint">Mesure 5 captures ADB sans cliquer, sans lire les identifiants et sans enregistrer les images. La latence des captures n'est pas celle du changement de compte.</p><div class="row" style="margin-top:12px"><button class="button" id="benchmark">Mesurer la latence ADB</button></div><p id="benchmark-result" class="meta" style="margin-top:11px" role="status" aria-live="polite">Aucune mesure effectuée.</p></div><div class="panel"><h2>État de l'exécution</h2><div class="row" style="justify-content:space-between;margin:12px 0"><span>Étape à effectuer</span><strong id="journal-index">—</strong></div><div class="row" style="justify-content:space-between"><span>Journal transactionnel</span><strong class="code" id="journal-phase">—</strong></div><div class="foot">Si un geste a été interrompu, son journal bloque les nouvelles tentatives aveugles. Une vérification de l'écran d'arrivée est requise.</div></div></aside></div>
 <div class="foot">REQ N GO Android Studio · Local uniquement (127.0.0.1) · Aucun compte et aucune capture envoyés au serveur Guardian</div>
 </main><div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
 <script>
@@ -95,6 +95,17 @@ async function fastStop(){
   }catch(e){notify(e.message,true)}
 }
 el("fast-start").onclick=fastStart;el("fast-stop").onclick=fastStop;
+async function benchmark(){
+  const button=el("benchmark");button.disabled=true;
+  el("benchmark-result").textContent="Mesure en cours : 5 captures ADB...";
+  try{
+    const result=await request("/api/benchmark",{samples:5});
+    el("benchmark-result").textContent="Latence médiane : "+result.median_ms.toFixed(0)+" ms · moyenne : "+result.mean_ms.toFixed(0)+" ms · plus lente : "+result.max_ms.toFixed(0)+" ms · "+result.resolution.join(" × ");
+    notify("Mesure ADB terminée. Ces résultats ne mesurent pas les comptes.");
+  }catch(e){el("benchmark-result").textContent="Mesure impossible : "+e.message;notify(e.message,true)}
+  finally{button.disabled=false}
+}
+el("benchmark").onclick=benchmark;
 refresh();
 })();
 </script></body></html>
