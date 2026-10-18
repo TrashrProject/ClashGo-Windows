@@ -218,3 +218,9 @@ Les workers remontent CPU, charge RAM hote et consommation RSS du processus avec
 Le tableau de bord presente ces mesures et un indicateur de saturation (CPU/RAM vus par le systeme >=95 %). **Un appareil Android detecte ne signifie pas une session de jeu active et la charge hote Docker ne correspond pas necessairement aux limites d'un conteneur.** Le systeme ne fait pas d'auto-scaling et ne commande aucune action dans le jeu.
 
 Voir [Guide des mesures V14](docs/FLEET_METRICS_V14.md).
+
+## V15 — nouvelle interface Fleet Manager
+
+Une console responsive en français, accessible sur **`/fleet`**, organise les profils logiques fictifs par groupes persistants. Recherche et filtres sont executés coté serveur, avec 50 lignes par page et une sélection maximale de 200 profils. Des actions groupées d'activation/suspension exigent une prévisualisation et une confirmation explicite, puis sont enregistrées dans un journal d'audit. La page présente également les statistiques, workers, ressources et incidents déjà fournis par V9–V14.
+
+L'ancien écran Guardian `/` reste disponible. Les fonctions de contrôle Android ou de gameplay ne sont pas déclenchées par cette console. Voir [Guide V15](docs/FLEET_CONSOLE_V15.md).
