@@ -104,6 +104,57 @@ class StudioTests(unittest.TestCase):
                           confirmation="EXECUTER UNE ACTION")["status"], "complete")
         self.assertEqual(self.device.tap_count, 1)
 
+    def add_second_route_step(self):
+        from reqngo.android.adb import Screen
+        third = np.random.default_rng(101).integers(0, 256, (120, 160), dtype=np.uint8)
+        ok, png = cv2.imencode(".png", third)
+        self.assertTrue(ok)
+        self.device.frames.append(Screen(png.tobytes(), 160, 120))
+        self.device.stage = 2
+        frame_id, _ = self.studio.capture()
+        self.studio.save_state({"name": "request_sent", "frame_id": frame_id,
+                                "rect": self.region})
+        self.device.stage = 1
+        self.studio.save_step({"name": "send_request", "before": "clan_window",
+                               "after": "request_sent", "position": [.4, .5]})
+        self.device.stage = 0
+        def next_stage(x, y, screen):
+            self.device.tap_count += 1
+            self.device.stage += 1
+        self.device.tap = next_stage
+
+    def test_fast_route_verifies_two_steps_without_fixed_wait(self):
+        self.calibrate()
+        self.add_second_route_step()
+        with self.assertRaises(StudioError):
+            self.studio.run_route(confirmation="wrong", max_steps=2)
+        with self.assertRaises(StudioError):
+            self.studio.run_route(confirmation="EXECUTER LE PARCOURS", max_steps=50)
+        self.assertEqual(self.device.tap_count, 0)
+        result = self.studio.run_route(
+            confirmation="EXECUTER LE PARCOURS", max_steps=2)
+        self.assertEqual(result["reason"], "complete")
+        self.assertEqual(result["verified_steps"], 2)
+        self.assertEqual(self.device.tap_count, 2)
+        self.assertEqual(self.studio.status()["next_step"], 2)
+        self.assertFalse(self.studio.status()["route_active"])
+
+    def test_fast_route_stop_finishes_current_verified_step(self):
+        self.calibrate()
+        self.add_second_route_step()
+        def stop_after_first(x, y, screen):
+            self.device.tap_count += 1
+            self.device.stage += 1
+            self.studio.stop_route()
+        self.device.tap = stop_after_first
+        result = self.studio.run_route(
+            confirmation="EXECUTER LE PARCOURS", max_steps=2)
+        self.assertEqual(result["reason"], "stopped")
+        self.assertEqual(result["verified_steps"], 1)
+        self.assertEqual(self.device.tap_count, 1)
+        self.assertEqual(self.studio.status()["next_step"], 1)
+        self.assertFalse(self.studio.stop_route()["stopping"])
+
     def test_restarted_studio_uses_persisted_calibration_and_journal(self):
         self.calibrate()
         self.studio.run_once(execute=True, confirmation="EXECUTER UNE ACTION")
