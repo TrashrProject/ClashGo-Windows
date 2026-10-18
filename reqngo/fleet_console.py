@@ -67,6 +67,10 @@ class FleetConsole:
     def _connection(self, *, write=False):
         if self.pg:
             with self.fleet.pool.connection() as db:
+                if write:
+                    # Admin modifications are rare; one consistent lock avoids
+                    # deadlocks from simultaneous cross-group reassignments.
+                    db.execute("SELECT pg_advisory_xact_lock(832920501::bigint)")
                 yield db
         elif write:
             with self.fleet._transaction():
@@ -134,8 +138,8 @@ class FleetConsole:
             # Key-prefix search: indexed and scalable, never arbitrary SQL.
             if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", q):
                 raise ValueError("Recherche de profil invalide.")
-            predicates.append("profile_key LIKE " + self.p)
-            args.append(q + "%")
+            predicates.append("profile_key LIKE " + self.p + " ESCAPE '\\\\'")
+            args.append(q.replace("_", "\\\\_") + "%")
         if group == "ungrouped":
             predicates.append("group_key IS NULL")
         elif group != "all":
