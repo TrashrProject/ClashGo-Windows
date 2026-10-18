@@ -56,6 +56,10 @@ class AndroidStudio:
         self.workflow = self.folder / "workflow.json"
         self.journal_path = self.folder / "execution.sqlite3"
         self.lock = threading.RLock()
+        # Only one route or single gesture can own the Android device at a time.
+        self._route_guard = threading.Lock()
+        self._route_stop = threading.Event()
+        self.route_active = False
         self.clock = clock or time.monotonic
         self.actions_enabled = actions_enabled
         self.last_frame = None
@@ -93,7 +97,8 @@ class AndroidStudio:
                     "states": [row["name"] for row in self._states["states"]],
                     "steps": self._workflow["steps"],
                     "next_step": index, "phase": phase,
-                    "actions_enabled": self.actions_enabled}
+                    "actions_enabled": self.actions_enabled,
+                    "route_active": self.route_active}
 
     def capture(self):
         with self.lock:
@@ -199,21 +204,94 @@ class AndroidStudio:
             self._workflow = result
             return {"step": name, "index": len(result["steps"])-1}
 
+    def _build_runner(self, journal):
+        if not self._workflow["steps"] or not self._states["states"]:
+            raise StudioError("Calibre deux etats puis une etape avant de demarrer.")
+        vision = TemplateVision(self.manifest)
+        workflow = Workflow(self.workflow, vision.states)
+        return ActionRunner(self.device, vision, workflow, journal)
+
     def run_once(self, *, execute=False, confirmation=""):
-        with self.lock:
-            if execute and (not self.actions_enabled
-                            or confirmation != "EXECUTER UNE ACTION"):
-                raise StudioError("Geste non autorisé : confirme l'opération localement.")
-            if not self._workflow["steps"] or not self._states["states"]:
-                raise StudioError("Calibre deux états puis une étape avant de démarrer.")
-            journal = Journal(self.journal_path)
-            try:
-                vision = TemplateVision(self.manifest)
-                workflow = Workflow(self.workflow, vision.states)
-                runner = ActionRunner(self.device, vision, workflow, journal)
-                return runner.step(dry_run=not execute)
-            finally:
-                journal.close()
+        if not self._route_guard.acquire(blocking=False):
+            raise StudioError("Un parcours est deja en cours sur cet appareil.")
+        try:
+            with self.lock:
+                if execute and (not self.actions_enabled
+                                or confirmation != "EXECUTER UNE ACTION"):
+                    raise StudioError("Geste non autorise : confirme l'operation localement.")
+                journal = Journal(self.journal_path)
+                try:
+                    return self._build_runner(journal).step(dry_run=not execute)
+                finally:
+                    journal.close()
+        finally:
+            self._route_guard.release()
+
+    def stop_route(self):
+        """Interrupt a route BETWEEN gestures; never interrupt ADB mid-tap."""
+        active = self.route_active
+        if active:
+            self._route_stop.set()
+        return {"stopping": active}
+
+    def run_route(self, *, confirmation="", max_steps=10):
+        """Bounded, opt-in, visual-confirmation-driven sequence.
+
+        No fixed account-switch delay: after each postcondition is confirmed,
+        attempt the next calibrated step immediately. Never loop back to step 0.
+        The stop flag is intentionally independent of the studio lock.
+        """
+        if (not self.actions_enabled or confirmation != "EXECUTER LE PARCOURS"):
+            raise StudioError("Confirme explicitement le parcours rapide local.")
+        if type(max_steps) is not int or not 1 <= max_steps <= 10:
+            raise StudioError("Le parcours est limite a 1-10 gestes verifies.")
+        if not self._route_guard.acquire(blocking=False):
+            raise StudioError("Une autre operation Android est deja en cours.")
+        try:
+            with self.lock:
+                self.route_active = True
+                self._route_stop.clear()
+                started = time.monotonic()
+                completed = 0
+                reason = "limit"
+                journal = Journal(self.journal_path)
+                try:
+                    runner = self._build_runner(journal)
+                    if journal.state()[1] != "ready":
+                        raise StudioError(
+                            "Journal non pret : verifier manuellement l'action interrompue.")
+                    while completed < max_steps:
+                        if self._route_stop.is_set():
+                            reason = "stopped"
+                            break
+                        if time.monotonic() - started >= 90:
+                            reason = "time_limit"
+                            break
+                        result = runner.step(dry_run=False)
+                        if result["status"] == "complete":
+                            reason = "complete"
+                            break
+                        if result["status"] != "verified":
+                            # Ambiguous restart/recovery requires a separate check.
+                            reason = "recovered"
+                            break
+                        completed += 1
+                        if journal.state()[0] >= len(runner.workflow.steps):
+                            reason = "complete"
+                            break
+                    return {
+                        "status": "route_finished",
+                        "reason": reason,
+                        "verified_steps": completed,
+                        "elapsed_ms": round((time.monotonic() - started) * 1000),
+                        "next_step": journal.state()[0],
+                    }
+                finally:
+                    journal.close()
+                    self.route_active = False
+                    self._route_stop.clear()
+        finally:
+            self._route_guard.release()
 
 
 class StudioHTTPServer(ThreadingHTTPServer):
@@ -318,6 +396,16 @@ class StudioHandler(BaseHTTPRequestHandler):
                 result = self.server.studio.run_once(
                     execute=data.get("execute", False),
                     confirmation=data.get("confirmation", ""))
+            elif route == "/api/route":
+                if set(data) - {"confirmation", "max_steps"}:
+                    raise StudioError("Commande de parcours inconnue.")
+                result = self.server.studio.run_route(
+                    confirmation=data.get("confirmation", ""),
+                    max_steps=data.get("max_steps", 10))
+            elif route == "/api/route/stop":
+                if data:
+                    raise StudioError("La commande d'arret doit etre vide.")
+                result = self.server.studio.stop_route()
             else:
                 return self._error("Route non autorisée.", 404)
             self._json(result)
