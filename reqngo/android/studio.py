@@ -6,6 +6,7 @@ public API, PostgreSQL and fleet workers. It controls exactly one chosen device.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -46,7 +47,10 @@ class AndroidStudio:
                  actions_enabled=False, clock=None):
         self.device = client_class(serial, adb_binary=adb_binary)
         self.serial = serial
-        self.folder = Path(workspace).resolve()
+        # Each physical Android serial has an independent calibration/journal.
+        # A digest avoids writing the raw device serial into folder names.
+        device_key = hashlib.sha256(serial.encode("utf-8")).hexdigest()[:16]
+        self.folder = Path(workspace).resolve() / ("device-" + device_key)
         self.folder.mkdir(parents=True, exist_ok=True)
         self.manifest = self.folder / "states.json"
         self.workflow = self.folder / "workflow.json"
