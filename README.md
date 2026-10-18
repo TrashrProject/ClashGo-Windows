@@ -224,3 +224,11 @@ Voir [Guide des mesures V14](docs/FLEET_METRICS_V14.md).
 Une console responsive en français, accessible sur **`/fleet`**, organise les profils logiques fictifs par groupes persistants. Recherche et filtres sont executés coté serveur, avec 50 lignes par page et une sélection maximale de 200 profils. Des actions groupées d'activation/suspension exigent une prévisualisation et une confirmation explicite, puis sont enregistrées dans un journal d'audit. La page présente également les statistiques, workers, ressources et incidents déjà fournis par V9–V14.
 
 L'ancien écran Guardian `/` reste disponible. Les fonctions de contrôle Android ou de gameplay ne sont pas déclenchées par cette console. Voir [Guide V15](docs/FLEET_CONSOLE_V15.md).
+
+## V16 — politiques de groupe et diagnostic individuel
+
+La console `/fleet` permet désormais d'enregistrer une **affinité de worker technique** et un intervalle souhaité au niveau du groupe, puis de les laisser en héritage ou de définir des exceptions pour chaque profil. En ouvrant un profil, tu retrouves le worker effectif, les sources de ses réglages, les derniers résultats de diagnostics et des boutons de sondes de stockage ou Android en lecture seule. Les nouveaux diagnostics créés par la console ciblent le worker effectif et utilisent la file transactionnelle existante.
+
+L'intervalle enregistré est un paramètre préparatoire : il ne déclenche **pas** encore de scans automatiques. Aucun compte de jeu, émulateur ou téléphone cloud n'est piloté par cette interface. Les routes administratives sont protégées et les modifications sont journalisées.
+
+Voir [Documentation V16](docs/FLEET_POLICIES_V16.md).

@@ -45,7 +45,7 @@ body:has(dialog[open]){overflow:hidden}.toolbar{display:flex;flex-wrap:wrap;alig
 <button type="button" class="nav-btn" data-tab="audit"><span class="icon-char">◷</span>Historique</button>
 </div><div class="sidebar-bottom"><p class="kicker">Outils</p><a class="old-link" href="/">↗ Ancien Guardian</a><div class="sub" style="padding:14px">Console technique · aucune session de jeu connectée.</div></div></aside>
 <main class="content"><div class="mobile-nav" id="mobile-nav"></div>
-<div class="topline"><div><div class="eyebrow">Console de supervision / V15</div><h1 id="view-heading">Vue d'ensemble</h1><p id="view-description">Tous vos profils logiques, regroupés et surveillés au même endroit.</p></div>
+<div class="topline"><div><div class="eyebrow">Console de supervision / V16</div><h1 id="view-heading">Vue d'ensemble</h1><p id="view-description">Tous vos profils logiques, regroupés et surveillés au même endroit.</p></div>
 <div class="actions"><span id="backend" class="tag">Connexion…</span><button type="button" class="btn" id="reload">↻ Actualiser</button></div></div>
 <div class="notice">Environnement de développement : les profils sont logiques et fictifs. Aucun compte Clash of Clans réel n'est connecté à cette interface.</div>
 <section id="view-overview">
@@ -62,10 +62,17 @@ body:has(dialog[open]){overflow:hidden}.toolbar{display:flex;flex-wrap:wrap;alig
 <div class="toolbar"><div class="selection" id="selection-count">Aucun profil sélectionné</div><div class="actions">
 <select aria-label="Choisir le groupe de destination" id="assign-target" style="width:190px"><option value="">Sans groupe</option></select>
 <button class="btn primary" id="assign-selected" disabled>Affecter la sélection</button><button class="btn" id="unselect">Effacer</button></div></div>
-<div class="table-wrap"><table class="table"><thead><tr><th><input type="checkbox" id="select-page" aria-label="Sélectionner les profils de la page"></th><th>Identifiant</th><th>Groupe</th><th>État</th><th>Créé le</th></tr></thead><tbody id="profile-rows"></tbody></table></div>
+<div class="table-wrap"><table class="table"><thead><tr><th><input type="checkbox" id="select-page" aria-label="Sélectionner les profils de la page"></th><th>Identifiant</th><th>Groupe</th><th>État</th><th>Créé le</th><th>Diagnostic</th></tr></thead><tbody id="profile-rows"></tbody></table></div>
 <div class="pagination"><span class="sub" id="pagination-label">—</span><div class="actions"><button class="btn" id="page-previous">← Précédent</button><button class="btn" id="page-next">Suivant →</button></div></div></div></section>
-<section id="view-groups" class="hidden"><div class="panel"><div class="panel-head"><div><h2>Organisation des groupes</h2><p class="sub">Les paramètres communs et règles d'héritage seront ajoutés ultérieurement.</p></div><button class="btn primary" id="create-group">+ Créer un groupe</button></div>
+<section id="view-groups" class="hidden"><div class="panel"><div class="panel-head"><div><h2>Organisation des groupes</h2><p class="sub">Un groupe définit la configuration technique héritée par ses profils.</p></div><button class="btn primary" id="create-group">+ Créer un groupe</button></div>
 <div class="group-cards" id="groups-list"><div class="empty">Chargement…</div></div></div>
+<div class="panel"><div class="panel-head"><div><h2>Configuration héritée du groupe</h2><p class="sub">Le worker préféré est utilisé pour les nouvelles sondes déclenchées depuis cette console. Aucun changement sur les tâches déjà planifiées.</p></div></div>
+<div class="filters" style="grid-template-columns:1.1fr 1fr 1fr auto">
+<div class="field"><label for="policy-group">Groupe</label><select id="policy-group"><option value="">Choisir un groupe…</option></select></div>
+<div class="field"><label for="policy-worker">Worker de diagnostic préféré</label><select id="policy-worker"><option value="">Tout worker disponible</option></select></div>
+<div class="field"><label for="policy-interval">Intervalle technique (s) — préparatoire</label><input id="policy-interval" type="number" min="30" max="3600" value="600"></div>
+<button class="btn primary" id="policy-save">Enregistrer</button></div>
+<p class="sub" id="policy-status">Sélectionne un groupe pour consulter ses réglages.</p></div>
 <div class="panel"><h2 style="margin-bottom:8px">Gestion groupée des profils</h2><p class="sub" style="margin-bottom:17px">Suspendre ou réactiver uniquement les profils logiques d'un groupe. Une prévisualisation et une confirmation exacte sont obligatoires. Les tâches déjà en cours ne sont pas interrompues.</p>
 <div class="row"><div class="field" style="min-width:190px;flex:1"><label for="bulk-group">Groupe concerné</label><select id="bulk-group"><option value="">Choisir un groupe…</option></select></div><div class="actions" style="margin-top:18px"><button class="btn danger" id="bulk-suspend">Suspendre les profils</button><button class="btn" id="bulk-activate">Réactiver les profils</button></div></div></div></section>
 <section id="view-workers" class="hidden"><div class="panel"><div class="panel-head"><h2>Workers techniques</h2><span class="sub">Mesures du dernier heartbeat, pas des sessions de jeu</span></div>
@@ -74,7 +81,19 @@ body:has(dialog[open]){overflow:hidden}.toolbar{display:flex;flex-wrap:wrap;alig
 <div class="table-wrap"><table class="table"><thead><tr><th>Worker</th><th>État</th><th>Occurrences</th><th>Dernière activité</th></tr></thead><tbody id="incident-rows"></tbody></table></div></div></section>
 <section id="view-audit" class="hidden"><div class="panel"><div class="panel-head"><h2>Journal des modifications groupées</h2><span class="sub">100 dernières actions maximum</span></div>
 <div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Groupe</th><th>Action</th><th>Profils concernés</th></tr></thead><tbody id="audit-rows"></tbody></table></div></div></section>
-<div class="footer">REQ N GO Manager · Console V15 · Gestion de profils fictifs · Aucun automatisme de jeu</div></main></div>
+<div class="footer">REQ N GO Manager · Console V16 · Gestion de profils fictifs · Aucun automatisme de jeu</div></main></div>
+<dialog id="profile-dialog"><div><div class="panel-head"><h2 id="profile-detail-title">Diagnostic d'un profil</h2><button type="button" class="btn" data-close="profile-dialog">Fermer</button></div>
+<p id="profile-detail-summary">Chargement…</p>
+<div class="dialog-fields" style="margin-top:18px">
+<div class="field"><label for="profile-worker">Worker dédié (ou héritage du groupe)</label><select id="profile-worker"><option value="">Hériter du groupe</option></select></div>
+<div class="field"><label for="profile-interval">Intervalle technique (s) — vide = hériter</label><input id="profile-interval" type="number" min="30" max="3600" placeholder="Hériter du groupe"></div>
+<button type="button" class="btn primary" id="profile-save">Enregistrer les paramètres</button></div>
+<h2 style="margin-top:25px">Dernières sondes techniques</h2>
+<div id="profile-jobs" class="timeline" style="max-height:190px;overflow:auto;margin:12px 0 18px"></div>
+<div class="actions"><button type="button" class="btn" id="profile-diagnostic-storage">Tester le stockage</button>
+<button type="button" class="btn" id="profile-diagnostic-android">Vérifier Android (lecture seule)</button></div>
+<p class="sub" style="margin-top:12px">Une sonde Android exige un worker déjà affecté et correctement configuré localement. Aucun geste tactile ni action de jeu.</p>
+</div></dialog>
 <dialog id="batch-dialog"><form id="batch-form" method="dialog"><h2>Créer des profils de test</h2><p>Ajouter des profils logiques dans la base. Aucun compte de jeu n'est créé ou connecté.</p><div class="dialog-fields">
 <div class="field"><label for="batch-prefix">Préfixe</label><input id="batch-prefix" required maxlength="24" pattern="[A-Za-z][A-Za-z0-9_-]{0,23}" value="test"></div>
 <div class="field"><label for="batch-start">Numéro de départ</label><input id="batch-start" type="number" required min="1" max="9999999" value="1"></div>
@@ -92,7 +111,7 @@ body:has(dialog[open]){overflow:hidden}.toolbar{display:flex;flex-wrap:wrap;alig
 <script>
 (function(){"use strict";
 var headings={overview:["Vue d'ensemble","L'état de la flotte en un coup d'œil."],profiles:["Profils","Rechercher, filtrer et organiser les profils logiques."],groups:["Groupes","Piloter vos ensembles de profils sans action individuelle."],workers:["Workers","Observer les machines de diagnostic et leurs ressources."],incidents:["Incidents","Repérer les interruptions de services et leurs rétablissements."],audit:["Historique","Tracer les modifications de groupes et de profils."]};
-var current="overview",groups=[],page={items:[],total:0,offset:0,limit:50},selected=new Set(),timer=null,busy=false,confirmation=null;
+var current="overview",groups=[],page={items:[],total:0,offset:0,limit:50},selected=new Set(),timer=null,busy=false,confirmation=null,currentProfile=null;
 function el(id){return document.getElementById(id)}
 function txt(id,value){el(id).textContent=String(value)}
 function elem(tag,cls,text){var node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=String(text);return node}
@@ -102,11 +121,11 @@ function notify(message,error){var n=el("toast");n.classList.remove("hidden");n.
 async function api(path,method,body){var config={method:method||"GET",headers:{"X-Guardian-Action":"1"},cache:"no-store"};if(body!==undefined){config.headers["Content-Type"]="application/json";config.body=JSON.stringify(body)}var res=await fetch(path,config);var data;try{data=await res.json()}catch(e){throw new Error("Réponse serveur invalide")}if(!res.ok)throw new Error(typeof data.detail==="string"?data.detail:"Erreur serveur "+res.status);return data}
 function nav(tab){if(!headings[tab])return;current=tab;Object.keys(headings).forEach(function(key){el("view-"+key).classList.toggle("hidden",key!==tab)});document.querySelectorAll("[data-tab]").forEach(function(b){b.classList.toggle("active",b.dataset.tab===tab);b.setAttribute("aria-current",b.dataset.tab===tab?"page":"false")});txt("view-heading",headings[tab][0]);txt("view-description",headings[tab][1]);refreshTab()}
 function emptyRow(body,colspan,label){body.replaceChildren();var tr=elem("tr"),td=elem("td","empty",label);td.colSpan=colspan;tr.appendChild(td);body.appendChild(tr)}
-function refreshGroupSelect(){["profile-group","assign-target","bulk-group"].forEach(function(id){var select=el(id),previous=select.value;select.replaceChildren();if(id==="profile-group"){select.appendChild(option("all","Tous les groupes"));select.appendChild(option("ungrouped","Sans groupe"))}else{select.appendChild(option("",id==="bulk-group"?"Choisir un groupe…":"Sans groupe"))}groups.forEach(function(g){select.appendChild(option(g.group_key,g.label+" ("+g.profiles+")"))});if(Array.from(select.options).some(function(o){return o.value===previous}))select.value=previous})}
+function refreshGroupSelect(){["profile-group","assign-target","bulk-group","policy-group"].forEach(function(id){var select=el(id),previous=select.value;select.replaceChildren();if(id==="profile-group"){select.appendChild(option("all","Tous les groupes"));select.appendChild(option("ungrouped","Sans groupe"))}else{select.appendChild(option("",(id==="bulk-group"||id==="policy-group")?"Choisir un groupe…":"Sans groupe"))}groups.forEach(function(g){select.appendChild(option(g.group_key,g.label+" ("+g.profiles+")"))});if(Array.from(select.options).some(function(o){return o.value===previous}))select.value=previous})}
 function drawGroups(){["overview-groups","groups-list"].forEach(function(id){var holder=el(id);holder.replaceChildren();if(!groups.length){holder.appendChild(elem("div","empty","Aucun groupe. Créez votre premier groupe depuis l'onglet Groupes."));return}groups.forEach(function(g){var card=elem("button","group-card");card.type="button";var header=elem("div","group-head"),name=elem("strong","",g.label),tag=elem("span","tag",g.profiles+" profils");header.appendChild(name);header.appendChild(tag);card.appendChild(header);card.appendChild(elem("div","group-number",g.enabled));card.appendChild(elem("div","sub","actifs · "+g.group_key));var track=elem("div","meter"),fill=elem("div","meter-inner");fill.style.width=(g.profiles?Math.round(g.enabled/g.profiles*100):0)+"%";track.appendChild(fill);card.appendChild(track);card.onclick=function(){nav("profiles");el("profile-group").value=g.group_key;page.offset=0;selected.clear();loadProfiles()};holder.appendChild(card)})})}
 async function loadGroups(){var data=await api("/api/fleet/console/groups");groups=data.items;refreshGroupSelect();drawGroups()}
-function drawProfiles(){var body=el("profile-rows");body.replaceChildren();if(!page.items.length){emptyRow(body,5,"Aucun profil correspondant à ces filtres.");return}
-page.items.forEach(function(p){var tr=elem("tr"),check=elem("input");check.type="checkbox";check.checked=selected.has(p.profile_key);check.setAttribute("aria-label","Sélectionner "+p.profile_key);check.onchange=function(){if(check.checked){if(selected.size>=200){check.checked=false;notify("200 profils maximum par affectation.",true);return}selected.add(p.profile_key)}else selected.delete(p.profile_key);drawSelection()};var checkboxCell=elem("td");checkboxCell.appendChild(check);tr.appendChild(checkboxCell);tr.appendChild(elem("td","mono",p.profile_key));var g=groups.find(function(x){return x.group_key===p.group_key});tr.appendChild(elem("td","",g?g.label:"Sans groupe"));var status=elem("td");status.appendChild(elem("span",p.enabled?"tag good":"tag warn",p.enabled?"Actif":"Suspendu"));tr.appendChild(status);tr.appendChild(elem("td","sub",stamp(p.created_at)));body.appendChild(tr)});
+function drawProfiles(){var body=el("profile-rows");body.replaceChildren();if(!page.items.length){emptyRow(body,6,"Aucun profil correspondant à ces filtres.");return}
+page.items.forEach(function(p){var tr=elem("tr"),check=elem("input");check.type="checkbox";check.checked=selected.has(p.profile_key);check.setAttribute("aria-label","Sélectionner "+p.profile_key);check.onchange=function(){if(check.checked){if(selected.size>=200){check.checked=false;notify("200 profils maximum par affectation.",true);return}selected.add(p.profile_key)}else selected.delete(p.profile_key);drawSelection()};var checkboxCell=elem("td");checkboxCell.appendChild(check);tr.appendChild(checkboxCell);tr.appendChild(elem("td","mono",p.profile_key));var g=groups.find(function(x){return x.group_key===p.group_key});tr.appendChild(elem("td","",g?g.label:"Sans groupe"));var status=elem("td");status.appendChild(elem("span",p.enabled?"tag good":"tag warn",p.enabled?"Actif":"Suspendu"));tr.appendChild(status);tr.appendChild(elem("td","sub",stamp(p.created_at)));var action=elem("td");var open=elem("button","btn","Consulter");open.type="button";open.onclick=function(){openProfile(p.profile_key)};action.appendChild(open);tr.appendChild(action);body.appendChild(tr)});
 txt("pagination-label",(page.total?Math.min(page.offset+1,page.total):0)+"–"+Math.min(page.offset+page.items.length,page.total)+" sur "+page.total+" profils");el("page-previous").disabled=page.offset===0;el("page-next").disabled=page.offset+page.limit>=page.total;drawSelection()}
 function drawSelection(){txt("selection-count",selected.size+" profil(s) sélectionné(s) (200 maximum)");el("assign-selected").disabled=selected.size===0;el("select-page").checked=page.items.length>0&&page.items.every(function(p){return selected.has(p.profile_key)})}
 async function loadProfiles(){var query=new URLSearchParams({q:el("profile-query").value.trim(),group:el("profile-group").value,enabled:el("profile-enabled").value,offset:String(page.offset),limit:"50"});var data=await api("/api/fleet/console/profiles?"+query.toString());page=data;drawProfiles()}
@@ -114,7 +133,93 @@ async function loadOverview(){var data=await Promise.all([api("/api/fleet/summar
 async function loadWorkers(){var data=await api("/api/fleet/workers?limit=100");var body=el("worker-rows");body.replaceChildren();if(!data.items.length){emptyRow(body,6,"Aucun worker connecté ou enregistré.");return}data.items.forEach(function(w){var tr=elem("tr");tr.appendChild(elem("td","mono",w.worker_id));var s=elem("td");s.appendChild(elem("span",w.connected?"tag good":"tag bad",w.connected?"Connecté":"Sans nouvelles"));tr.appendChild(s);tr.appendChild(elem("td","",w.capacity));tr.appendChild(elem("td","",w.cpu_percent==null?"—":w.cpu_percent.toFixed(1)+" %"));tr.appendChild(elem("td","",w.memory_percent==null?"—":w.memory_percent.toFixed(1)+" %"));tr.appendChild(elem("td","",w.android_bound_devices==null?"—":(w.android_online_devices==null?"?":w.android_online_devices)+"/"+w.android_bound_devices));body.appendChild(tr)})}
 async function loadIncidents(){var data=await api("/api/fleet/incidents?limit=100");var body=el("incident-rows");body.replaceChildren();if(!data.items.length){emptyRow(body,4,"Aucune interruption connue.");return}data.items.forEach(function(x){var tr=elem("tr");tr.appendChild(elem("td","mono",x.worker_id));var s=elem("td");s.appendChild(elem("span",x.status==="open"?"tag bad":"tag good",x.status==="open"?"Ouvert":"Rétabli"));tr.appendChild(s);tr.appendChild(elem("td","",x.occurrences));tr.appendChild(elem("td","",stamp(x.last_seen)));body.appendChild(tr)})}
 async function loadAudit(){var data=await api("/api/fleet/console/audit?limit=100");var body=el("audit-rows");body.replaceChildren();if(!data.items.length){emptyRow(body,4,"Aucune modification groupée enregistrée.");return}data.items.forEach(function(x){var tr=elem("tr");tr.appendChild(elem("td","",stamp(x.recorded_at)));tr.appendChild(elem("td","mono",x.group_key));tr.appendChild(elem("td","",({assign:"Affectation",suspend:"Suspension",activate:"Réactivation"})[x.action]||x.action));tr.appendChild(elem("td","",x.affected));body.appendChild(tr)})}
-async function refreshTab(){if(busy)return;busy=true;try{if(current==="overview")await loadOverview();else if(current==="profiles"){await loadGroups();await loadProfiles()}else if(current==="groups")await loadGroups();else if(current==="workers")await loadWorkers();else if(current==="incidents")await loadIncidents();else if(current==="audit")await loadAudit()}catch(e){notify(e.message,true)}finally{busy=false}}
+async function refreshTab(){if(busy)return;busy=true;try{if(current==="overview")await loadOverview();else if(current==="profiles"){await loadGroups();await loadProfiles()}else if(current==="groups"){await loadGroups();await loadWorkerChoices();await loadGroupPolicy()}else if(current==="workers")await loadWorkers();else if(current==="incidents")await loadIncidents();else if(current==="audit")await loadAudit()}catch(e){notify(e.message,true)}finally{busy=false}}
+var knownWorkers=[];
+async function loadWorkerChoices(){
+  var data=await api("/api/fleet/workers?limit=200");
+  knownWorkers=data.items;
+  ["policy-worker","profile-worker"].forEach(function(id){
+    var field=el(id),before=field.value,empty=id==="policy-worker"?"Tout worker disponible":"Hériter du groupe";
+    field.replaceChildren();field.appendChild(option("",empty));
+    knownWorkers.forEach(function(worker){
+      field.appendChild(option(worker.worker_id,worker.worker_id+(worker.connected?" · connecté":" · déconnecté")));
+    });
+    if(Array.from(field.options).some(function(o){return o.value===before}))field.value=before;
+  });
+}
+async function loadGroupPolicy(){
+  var key=el("policy-group").value;
+  if(!key){txt("policy-status","Sélectionne un groupe pour consulter ses réglages.");return}
+  var result=await api("/api/fleet/console/groups/"+encodeURIComponent(key)+"/policy");
+  el("policy-worker").value=result.preferred_worker||"";
+  el("policy-interval").value=String(result.probe_interval_seconds);
+  txt("policy-status",result.source==="defaults"?"Configuration initiale : aucun worker dédié, 600 secondes.":"Configuration du groupe chargée. Les profils héritent automatiquement de ces choix.");
+}
+el("policy-group").onchange=function(){loadGroupPolicy().catch(function(e){notify(e.message,true)})};
+el("policy-save").onclick=async function(){
+  var key=el("policy-group").value,seconds=Number(el("policy-interval").value);
+  if(!key||!Number.isInteger(seconds)||seconds<30||seconds>3600){notify("Sélectionner un groupe et un intervalle entre 30 et 3600 secondes.",true);return}
+  try{
+    await api("/api/fleet/console/groups/"+encodeURIComponent(key)+"/policy","PUT",{
+      preferred_worker:el("policy-worker").value||null,probe_interval_seconds:seconds
+    });
+    await loadGroupPolicy();notify("Configuration de groupe sauvegardée.");
+  }catch(e){notify(e.message,true)}
+};
+async function refreshProfileDetail(){
+  if(!currentProfile)return;
+  var data=await api("/api/fleet/console/profiles/"+encodeURIComponent(currentProfile)+"/detail");
+  txt("profile-detail-title",data.profile_key);
+  var sourceNames={profile:"profil",group:"groupe",unassigned:"aucun",defaults:"valeur initiale"};
+  var worker=data.effective_worker||"Aucun worker dédié";
+  var heartbeat=data.worker_health?(" · dernier signal "+stamp(data.worker_health.last_seen)):"";
+  txt("profile-detail-summary",(data.enabled?"Profil activé":"Profil suspendu")+" · "+(data.group_key||"Sans groupe")+" · "+worker+
+      " (source : "+(sourceNames[data.worker_source]||data.worker_source)+")"+
+      heartbeat+" · intervalle "+data.effective_interval_seconds+" s ("+
+      (sourceNames[data.interval_source]||data.interval_source)+").");
+  el("profile-worker").value=data.worker_override||"";
+  el("profile-interval").value=data.interval_override===null?"":String(data.interval_override);
+  var jobs=el("profile-jobs");jobs.replaceChildren();
+  if(!data.recent_jobs.length){jobs.appendChild(elem("div","sub","Aucun diagnostic antérieur."));return}
+  data.recent_jobs.forEach(function(job){
+    jobs.appendChild(elem("div","timeline-item",
+      "Diagnostic n°"+job.job_id+" · "+job.probe_mode+" · "+job.state+
+      " · essais "+job.attempts+" · "+stamp(job.updated_at)
+    ));
+  });
+}
+async function openProfile(key){
+  currentProfile=key;
+  try{
+    await loadWorkerChoices();await refreshProfileDetail();
+    el("profile-dialog").showModal();
+  }catch(e){currentProfile=null;notify(e.message,true)}
+}
+el("profile-save").onclick=async function(){
+  if(!currentProfile)return;
+  var raw=el("profile-interval").value.trim();
+  var interval=raw===""?null:Number(raw);
+  if(interval!==null&&(!Number.isInteger(interval)||interval<30||interval>3600)){notify("Intervalle invalide.",true);return}
+  try{
+    await api("/api/fleet/console/profiles/"+encodeURIComponent(currentProfile)+"/override","PUT",{
+      preferred_worker:el("profile-worker").value||null,probe_interval_seconds:interval
+    });
+    await refreshProfileDetail();
+    notify("Paramètres du profil mis à jour. Les valeurs vides héritent du groupe.");
+  }catch(e){notify(e.message,true)}
+};
+async function runProfileDiagnostic(mode){
+  if(!currentProfile)return;
+  if(!window.confirm("Créer une sonde technique "+mode+" pour "+currentProfile+" ? Aucune action de jeu ne sera exécutée."))return;
+  try{
+    var result=await api("/api/fleet/console/profiles/"+encodeURIComponent(currentProfile)+"/diagnostic","POST",{probe_mode:mode});
+    await refreshProfileDetail();
+    notify("Sonde n°"+result.job_id+" mise en file"+(result.target_worker?" sur "+result.target_worker:"")+".");
+  }catch(e){notify(e.message,true)}
+}
+el("profile-diagnostic-storage").onclick=function(){runProfileDiagnostic("storage")};
+el("profile-diagnostic-android").onclick=function(){runProfileDiagnostic("android")};
+el("profile-dialog").addEventListener("close",function(){currentProfile=null});
 document.querySelectorAll("[data-tab]").forEach(function(b){b.addEventListener("click",function(){nav(b.dataset.tab)})});var mobile=el("mobile-nav");document.querySelectorAll(".sidebar .nav-btn").forEach(function(b){mobile.appendChild(b.cloneNode(true))});mobile.querySelectorAll("[data-tab]").forEach(function(b){b.onclick=function(){nav(b.dataset.tab)}});el("reload").onclick=refreshTab;el("go-groups").onclick=function(){nav("groups")};
 var typing=null;el("profile-query").oninput=function(){clearTimeout(typing);typing=setTimeout(function(){page.offset=0;selected.clear();loadProfiles().catch(function(e){notify(e.message,true)})},300)};
 ["profile-group","profile-enabled"].forEach(function(id){el(id).onchange=function(){page.offset=0;selected.clear();loadProfiles().catch(function(e){notify(e.message,true)})}});
