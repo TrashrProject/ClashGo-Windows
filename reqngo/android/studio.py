@@ -21,7 +21,7 @@ from reqngo.android.adb import AdbClient, AdbError
 from reqngo.android.runner import ActionRunner, ExecutionBlocked, Journal, Workflow
 from reqngo.android.vision import TemplateVision, VisionError
 
-_NAME = re.compile(r"[a-z][a-z0-9_]{1,39}\\Z")
+_NAME = re.compile(r"[a-z][a-z0-9_]{1,39}\Z")
 _WRITE_TOKEN = "I_ACCEPT_LOCAL_TOUCHES"
 _MAX_BODY = 8192
 
