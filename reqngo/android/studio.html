@@ -74,7 +74,10 @@ async function fastStart(){
   try{
     const result=await request("/api/route",{confirmation:code,max_steps:count});
     const seconds=(result.elapsed_ms/1000).toFixed(2);
-    el("fast-progress").textContent=result.verified_steps+" geste(s) confirmes en "+seconds+" s · "+result.reason;
+    const timings=Array.isArray(result.step_timings)?result.step_timings:[];
+    const slowest=timings.length?timings.reduce((a,b)=>b.elapsed_ms>a.elapsed_ms?b:a):null;
+    const slowText=slowest?" · Le plus lent : "+slowest.step+" ("+(slowest.elapsed_ms/1000).toFixed(2)+" s)":"";
+    el("fast-progress").textContent=result.verified_steps+" geste(s) confirmes en "+seconds+" s · "+result.reason+slowText;
     notify("Parcours termine : "+result.verified_steps+" etape(s) verifiee(s).");
   }catch(e){
     el("fast-progress").textContent="Parcours arrete : "+e.message;
