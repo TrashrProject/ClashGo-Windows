@@ -268,7 +268,11 @@ class AndroidStudio:
                         if time.monotonic() - started >= 90:
                             reason = "time_limit"
                             break
-                        step_name = runner.workflow.steps[journal.state()[0]].name
+                        position, phase = journal.state()
+                        if position >= len(runner.workflow.steps):
+                            reason = "complete"
+                            break
+                        step_name = runner.workflow.steps[position].name
                         step_started = time.monotonic()
                         result = runner.step(dry_run=False)
                         if result["status"] == "complete":
