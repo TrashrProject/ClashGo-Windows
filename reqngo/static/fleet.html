@@ -134,6 +134,92 @@ async function loadWorkers(){var data=await api("/api/fleet/workers?limit=100");
 async function loadIncidents(){var data=await api("/api/fleet/incidents?limit=100");var body=el("incident-rows");body.replaceChildren();if(!data.items.length){emptyRow(body,4,"Aucune interruption connue.");return}data.items.forEach(function(x){var tr=elem("tr");tr.appendChild(elem("td","mono",x.worker_id));var s=elem("td");s.appendChild(elem("span",x.status==="open"?"tag bad":"tag good",x.status==="open"?"Ouvert":"Rétabli"));tr.appendChild(s);tr.appendChild(elem("td","",x.occurrences));tr.appendChild(elem("td","",stamp(x.last_seen)));body.appendChild(tr)})}
 async function loadAudit(){var data=await api("/api/fleet/console/audit?limit=100");var body=el("audit-rows");body.replaceChildren();if(!data.items.length){emptyRow(body,4,"Aucune modification groupée enregistrée.");return}data.items.forEach(function(x){var tr=elem("tr");tr.appendChild(elem("td","",stamp(x.recorded_at)));tr.appendChild(elem("td","mono",x.group_key));tr.appendChild(elem("td","",({assign:"Affectation",suspend:"Suspension",activate:"Réactivation"})[x.action]||x.action));tr.appendChild(elem("td","",x.affected));body.appendChild(tr)})}
 async function refreshTab(){if(busy)return;busy=true;try{if(current==="overview")await loadOverview();else if(current==="profiles"){await loadGroups();await loadProfiles()}else if(current==="groups"){await loadGroups();await loadWorkerChoices();await loadGroupPolicy()}else if(current==="workers")await loadWorkers();else if(current==="incidents")await loadIncidents();else if(current==="audit")await loadAudit()}catch(e){notify(e.message,true)}finally{busy=false}}
+var knownWorkers=[];
+async function loadWorkerChoices(){
+  var data=await api("/api/fleet/workers?limit=200");
+  knownWorkers=data.items;
+  ["policy-worker","profile-worker"].forEach(function(id){
+    var field=el(id),before=field.value,empty=id==="policy-worker"?"Tout worker disponible":"Hériter du groupe";
+    field.replaceChildren();field.appendChild(option("",empty));
+    knownWorkers.forEach(function(worker){
+      field.appendChild(option(worker.worker_id,worker.worker_id+(worker.connected?" · connecté":" · déconnecté")));
+    });
+    if(Array.from(field.options).some(function(o){return o.value===before}))field.value=before;
+  });
+}
+async function loadGroupPolicy(){
+  var key=el("policy-group").value;
+  if(!key){txt("policy-status","Sélectionne un groupe pour consulter ses réglages.");return}
+  var result=await api("/api/fleet/console/groups/"+encodeURIComponent(key)+"/policy");
+  el("policy-worker").value=result.preferred_worker||"";
+  el("policy-interval").value=String(result.probe_interval_seconds);
+  txt("policy-status",result.source==="defaults"?"Configuration initiale : aucun worker dédié, 600 secondes.":"Configuration du groupe chargée. Les profils héritent automatiquement de ces choix.");
+}
+el("policy-group").onchange=function(){loadGroupPolicy().catch(function(e){notify(e.message,true)})};
+el("policy-save").onclick=async function(){
+  var key=el("policy-group").value,seconds=Number(el("policy-interval").value);
+  if(!key||!Number.isInteger(seconds)||seconds<30||seconds>3600){notify("Sélectionner un groupe et un intervalle entre 30 et 3600 secondes.",true);return}
+  try{
+    await api("/api/fleet/console/groups/"+encodeURIComponent(key)+"/policy","PUT",{
+      preferred_worker:el("policy-worker").value||null,probe_interval_seconds:seconds
+    });
+    await loadGroupPolicy();notify("Configuration de groupe sauvegardée.");
+  }catch(e){notify(e.message,true)}
+};
+async function refreshProfileDetail(){
+  if(!currentProfile)return;
+  var data=await api("/api/fleet/console/profiles/"+encodeURIComponent(currentProfile)+"/detail");
+  txt("profile-detail-title",data.profile_key);
+  var sourceNames={profile:"profil",group:"groupe",unassigned:"aucun",defaults:"valeur initiale"};
+  var worker=data.effective_worker||"Aucun worker dédié";
+  var heartbeat=data.worker_health?(" · dernier signal "+stamp(data.worker_health.last_seen)):"";
+  txt("profile-detail-summary",(data.enabled?"Profil activé":"Profil suspendu")+" · "+(data.group_key||"Sans groupe")+" · "+worker+
+      " (source : "+(sourceNames[data.worker_source]||data.worker_source)+")"+
+      heartbeat+" · intervalle "+data.effective_interval_seconds+" s ("+
+      (sourceNames[data.interval_source]||data.interval_source)+").");
+  el("profile-worker").value=data.worker_override||"";
+  el("profile-interval").value=data.interval_override===null?"":String(data.interval_override);
+  var jobs=el("profile-jobs");jobs.replaceChildren();
+  if(!data.recent_jobs.length){jobs.appendChild(elem("div","sub","Aucun diagnostic antérieur."));return}
+  data.recent_jobs.forEach(function(job){
+    jobs.appendChild(elem("div","timeline-item",
+      "Diagnostic n°"+job.job_id+" · "+job.probe_mode+" · "+job.state+
+      " · essais "+job.attempts+" · "+stamp(job.updated_at)
+    ));
+  });
+}
+async function openProfile(key){
+  currentProfile=key;
+  try{
+    await loadWorkerChoices();await refreshProfileDetail();
+    el("profile-dialog").showModal();
+  }catch(e){currentProfile=null;notify(e.message,true)}
+}
+el("profile-save").onclick=async function(){
+  if(!currentProfile)return;
+  var raw=el("profile-interval").value.trim();
+  var interval=raw===""?null:Number(raw);
+  if(interval!==null&&(!Number.isInteger(interval)||interval<30||interval>3600)){notify("Intervalle invalide.",true);return}
+  try{
+    await api("/api/fleet/console/profiles/"+encodeURIComponent(currentProfile)+"/override","PUT",{
+      preferred_worker:el("profile-worker").value||null,probe_interval_seconds:interval
+    });
+    await refreshProfileDetail();
+    notify("Paramètres du profil mis à jour. Les valeurs vides héritent du groupe.");
+  }catch(e){notify(e.message,true)}
+};
+async function runProfileDiagnostic(mode){
+  if(!currentProfile)return;
+  if(!window.confirm("Créer une sonde technique "+mode+" pour "+currentProfile+" ? Aucune action de jeu ne sera exécutée."))return;
+  try{
+    var result=await api("/api/fleet/console/profiles/"+encodeURIComponent(currentProfile)+"/diagnostic","POST",{probe_mode:mode});
+    await refreshProfileDetail();
+    notify("Sonde n°"+result.job_id+" mise en file"+(result.target_worker?" sur "+result.target_worker:"")+".");
+  }catch(e){notify(e.message,true)}
+}
+el("profile-diagnostic-storage").onclick=function(){runProfileDiagnostic("storage")};
+el("profile-diagnostic-android").onclick=function(){runProfileDiagnostic("android")};
+el("profile-dialog").addEventListener("close",function(){currentProfile=null});
 document.querySelectorAll("[data-tab]").forEach(function(b){b.addEventListener("click",function(){nav(b.dataset.tab)})});var mobile=el("mobile-nav");document.querySelectorAll(".sidebar .nav-btn").forEach(function(b){mobile.appendChild(b.cloneNode(true))});mobile.querySelectorAll("[data-tab]").forEach(function(b){b.onclick=function(){nav(b.dataset.tab)}});el("reload").onclick=refreshTab;el("go-groups").onclick=function(){nav("groups")};
 var typing=null;el("profile-query").oninput=function(){clearTimeout(typing);typing=setTimeout(function(){page.offset=0;selected.clear();loadProfiles().catch(function(e){notify(e.message,true)})},300)};
 ["profile-group","profile-enabled"].forEach(function(id){el(id).onchange=function(){page.offset=0;selected.clear();loadProfiles().catch(function(e){notify(e.message,true)})}});
