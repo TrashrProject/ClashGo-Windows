@@ -24,12 +24,15 @@ from reqngo.telemetry_api import router_for
 from reqngo.fleet_factory import make_fleet
 from reqngo.fleet_monitor import FleetHealthSupervisor
 from reqngo.fleet_api import router_for as fleet_router_for
+from reqngo.fleet_console import FleetConsole
+from reqngo.fleet_console_api import router_for as fleet_console_router
 
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.getenv("GUARDIAN_DATA_DIR", BASE.parent / "data"))
 engine = Guardian(DATA / "guardian.sqlite3")
 telemetry = TelemetryStore(DATA / "telemetry.sqlite3")
 fleet = make_fleet(DATA / "fleet.sqlite3")
+console = FleetConsole(fleet)
 stop = threading.Event()
 security = HTTPBasic()
 
@@ -94,6 +97,7 @@ app = FastAPI(title="REQ N GO Guardian", docs_url=None, redoc_url=None,
               openapi_url=None, lifespan=lifespan)
 app.include_router(router_for(telemetry, guard))
 app.include_router(fleet_router_for(fleet, guard, write_guard))
+app.include_router(fleet_console_router(console, guard, write_guard))
 
 
 @app.middleware("http")
@@ -127,6 +131,11 @@ def ready():
 @app.get("/")
 def dashboard(_: bool = Depends(guard)):
     return FileResponse(BASE / "static" / "index.html")
+
+
+@app.get("/fleet")
+def fleet_console(_: bool = Depends(guard)):
+    return FileResponse(BASE / "static" / "fleet.html")
 
 
 @app.get("/api/state")
