@@ -62,6 +62,9 @@ class TemplateVision:
             parsed.append((name, path, tuple(region), float(minimum)))
         self.specs = parsed
         self.states = frozenset(names)
+        # A fast route checks the same reference several times per gesture.
+        # Load it once per vision instance rather than reading disk for every frame.
+        self._template_cache = {}
 
     @staticmethod
     def _libraries():
@@ -79,9 +82,14 @@ class TemplateVision:
             raise AdbError("Capture Android non decodable.")
         scores = []
         for name, path, region, threshold in self.specs:
-            template = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-            if template is None or template.size == 0:
-                raise VisionError("Modele de reference illisible.")
+            template = self._template_cache.get(path)
+            if template is None:
+                template = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+                if template is None or template.size == 0:
+                    raise VisionError("Modele de reference illisible.")
+                if template.std() < 8:
+                    raise VisionError("Modele de reference presque uniforme : risque de faux positif.")
+                self._template_cache[path] = template
             x1, y1, x2, y2 = region
             left = int(x1 * screen.width)
             top = int(y1 * screen.height)
@@ -90,8 +98,6 @@ class TemplateVision:
             patch = frame[top:bottom, left:right]
             if template.shape[0] > patch.shape[0] or template.shape[1] > patch.shape[1]:
                 continue
-            if template.std() < 8:
-                raise VisionError("Modele de reference presque uniforme : risque de faux positif.")
             # TM_CCOEFF_NORMED is intentionally conservative. Do not infer a
             # visual state from OCR strings or imagined image descriptions.
             match = cv2.matchTemplate(patch, template, cv2.TM_CCOEFF_NORMED)
