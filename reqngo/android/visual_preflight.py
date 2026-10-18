@@ -37,15 +37,31 @@ class VisualReadOnlyPreflight:
         checked = {}
         for key, record in rules.items():
             if (not isinstance(key, str) or not _KEY.fullmatch(key)
-                    or not isinstance(record, dict)
-                    or set(record) != {"manifest", "expected"}):
+                    or not isinstance(record, dict)):
                 raise ValueError("Regle de reconnaissance invalide.")
-            filename, expected = record["manifest"], record["expected"]
-            if (not isinstance(filename, str) or not _FILENAME.fullmatch(filename)
-                    or not isinstance(expected, str) or not _STATE.fullmatch(expected)
-                    or expected == "unknown"):
-                raise ValueError("Nom de calibration ou d'etat invalide.")
-            checked[key] = (filename, expected)
+            if set(record) == {"manifest", "expected"}:
+                logic, checks = "all", [record]
+            elif set(record) == {"logic", "checks"}:
+                logic, checks = record["logic"], record["checks"]
+                if (logic not in ("all", "any")
+                        or not isinstance(checks, list)
+                        or not 1 <= len(checks) <= 5):
+                    raise ValueError("Conditions visuelles invalides.")
+            else:
+                raise ValueError("Regle visuelle non autorisee.")
+            parsed = []
+            for check in checks:
+                if not isinstance(check, dict) or set(check) != {"manifest", "expected"}:
+                    raise ValueError("Condition visuelle invalide.")
+                filename, expected = check["manifest"], check["expected"]
+                if (not isinstance(filename, str) or not _FILENAME.fullmatch(filename)
+                        or not isinstance(expected, str) or not _STATE.fullmatch(expected)
+                        or expected == "unknown"):
+                    raise ValueError("Nom de calibration ou d'etat invalide.")
+                parsed.append((filename, expected))
+            if len(set(parsed)) != len(parsed):
+                raise ValueError("Condition visuelle dupliquee.")
+            checked[key] = (logic, tuple(parsed))
         self.rules = checked
         if self.rules and not self.directory.is_dir():
             raise ValueError("Repertoire local des calibrations introuvable.")
@@ -65,15 +81,18 @@ class VisualReadOnlyPreflight:
         serial = self.preflight.bindings.get(profile_key)
         if rule is None or serial is None:
             return False
-        filename, expected = rule
-        calibration = (self.directory / filename).resolve()
-        if calibration.parent != self.directory or not calibration.is_file():
-            return False
-        if calibration.stat().st_size > 60_000:
-            raise VisionError("Manifeste visuel trop volumineux.")
-        vision = self.vision_class(calibration)
-        if expected not in vision.states:
-            raise VisionError("Etat non defini dans la calibration locale.")
+        logic, checks = rule
+        detectors = []
+        for filename, expected in checks:
+            calibration = (self.directory / filename).resolve()
+            if calibration.parent != self.directory or not calibration.is_file():
+                return False
+            if calibration.stat().st_size > 60_000:
+                raise VisionError("Manifeste visuel trop volumineux.")
+            vision = self.vision_class(calibration)
+            if expected not in vision.states:
+                raise VisionError("Etat non defini dans la calibration locale.")
+            detectors.append((vision, expected))
         # Use the same per-device lock as ordinary ADB diagnostics, so one
         # worker process cannot inspect a device in conflicting threads.
         lock = self.preflight.serial_locks[serial]
@@ -86,14 +105,21 @@ class VisualReadOnlyPreflight:
                                        timeout=15)
             if not device.game_running() or not device.game_foreground():
                 return False
+            stable = None
             for frame_idx in range(2):
                 # Re-check before EACH frame; no input, no retry loop.
                 if not device.game_foreground():
                     return False
                 screen = device.screenshot()
-                observation = vision.detect(screen)
-                if observation.state != expected:
+                matches = {n for n, (vision, expected) in enumerate(detectors)
+                           if vision.detect(screen).state == expected}
+                if logic == "all" and len(matches) != len(detectors):
+                    return False
+                if logic == "any" and not matches:
+                    return False
+                stable = matches if stable is None else stable & matches
+                if not stable:
                     return False
                 if frame_idx == 0:
                     self.delay(0.25)
-            return True
+            return len(stable) == len(detectors) if logic == "all" else bool(stable)
