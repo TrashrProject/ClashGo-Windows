@@ -63,6 +63,28 @@ public final class RouteCalibrationStore {
         return target;
     }
 
+    /**
+     * Calibrate a stage straight from its saved, operator-reviewed reference.
+     * This does not dispatch any gesture and does not assume current game state.
+     * The live screen is still revalidated before every actual gesture.
+     */
+    public static RouteTarget saveFromReference(Context context, int step,
+                                                float x, float y) throws Exception {
+        if (step < 0 || step >= GuidedRoute.SIZE)
+            throw new IllegalArgumentException("Étape de parcours inconnue");
+        File reference = ScreenCatalog.referenceFile(context, GuidedRoute.FROM[step]);
+        android.graphics.Bitmap bitmap = android.graphics.BitmapFactory.decodeFile(
+                reference.getAbsolutePath());
+        if (bitmap == null) throw new IllegalStateException("Image de référence manquante");
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        bitmap.recycle();
+        RouteTarget target = new RouteTarget(step, width, height, x, y, sha256(reference));
+        if (!prefs(context).edit().putString(key(step), target.encode()).commit())
+            throw new IllegalStateException("Échec de stockage du bouton calibré");
+        return target;
+    }
+
     public static RouteTarget loadForCurrentScreen(Context context, GuidedRoute route) throws Exception {
         if (route.phase() != GuidedRoute.Phase.READY)
             throw new IllegalStateException("Étape non prête");
