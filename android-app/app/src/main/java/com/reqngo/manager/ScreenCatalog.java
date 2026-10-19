@@ -17,11 +17,15 @@ import java.util.Arrays;
  */
 public final class ScreenCatalog {
     public static final String[] IDS = {
-        "village", "clan_profile", "clan_chat", "request_dialog", "request_posted"
+        "village", "clan_profile", "clan_chat", "request_dialog", "request_posted",
+        "clan_closed", "clan_invitation", "join_pending",
+        "request_cooldown", "castle_full", "connection_error"
     };
     public static final String[] LABELS = {
         "Village", "Fiche du clan", "Chat du clan",
-        "Fenêtre de demande", "Demande visible dans le chat"
+        "Fenêtre de demande", "Demande visible dans le chat",
+        "Clan fermé", "Invitation / autorisation requise", "Adhésion en attente",
+        "Délai de demande actif", "Château plein", "Erreur de connexion"
     };
 
     private ScreenCatalog() { }
