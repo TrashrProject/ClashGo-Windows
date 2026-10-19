@@ -443,6 +443,8 @@ public final class GameBridgeService extends AccessibilityService {
                             GameBridgeService.this);
                     String blocker = GameBlocker.reason(detected.id);
                     if (blocker != null) {
+                        DiagnosticTrail.Event code = GameBlocker.diagnosticEvent(detected.id);
+                        if (code != null) DiagnosticStore.record(GameBridgeService.this, code);
                         stopAutomaticInternal("Arrêt auto : " + blocker);
                         return;
                     }
