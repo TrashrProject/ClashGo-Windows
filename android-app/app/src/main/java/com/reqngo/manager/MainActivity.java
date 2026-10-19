@@ -187,6 +187,7 @@ public final class MainActivity extends Activity {
         section("04  /  Calibration des cinq écrans",
                 "Sur MuMu, capture d'abord chaque étape réelle. Mémorise localement : village, fiche clan, chat, fenêtre de demande et demande publiée. L'application signale les ambiguïtés.");
         action("Mémoriser la capture comme état connu", false, v -> chooseScreenState());
+        action("Choisir une zone stable pour identifier l'écran", false, v -> chooseStableRegion());
         action("Identifier l'écran capturé", false, v -> identifyScreen());
         detectedScreen = text("Aucun écran analysé.", 13, MUTED);
         LinearLayout.LayoutParams detectedLp = new LinearLayout.LayoutParams(-1, -2);
@@ -519,6 +520,42 @@ public final class MainActivity extends Activity {
                 }).show();
     }
 
+    private void chooseStableRegion() {
+        long capture = prefs().getLong("capture_time", -1L);
+        long now = System.currentTimeMillis();
+        RequestJournal.Phase journal = new RequestJournal(
+                prefs().getString("journal", "BLOCKED")).phase();
+        if (capture <= 0 || capture > now || now - capture > 120000
+                || selectedReferenceTime != capture || selectedX <= .10f || selectedX >= .90f
+                || selectedY <= .10f || selectedY >= .90f
+                || journal == RequestJournal.Phase.ARMED
+                || journal == RequestJournal.Phase.DISPATCHED_UNVERIFIED) {
+            toast("Choisis un point stable loin des bords, sur une capture récente et résolue.");
+            return;
+        }
+        final float x = selectedX, y = selectedY;
+        new AlertDialog.Builder(this).setTitle("Zone visuelle stable")
+                .setItems(ScreenCatalog.LABELS, (dialog, which) -> {
+                    new AlertDialog.Builder(this)
+                            .setTitle("Identifier « " + ScreenCatalog.LABELS[which] + " »")
+                            .setMessage("Utiliser une zone autour du point sélectionné pour reconnaître "
+                                    + "cet écran ? Choisis une icône ou un titre stable, "
+                                    + "pas une animation. Aucune action n'en découlera automatiquement.")
+                            .setNegativeButton("Annuler", null)
+                            .setPositiveButton("Enregistrer", (confirm, unused) -> {
+                                try {
+                                    if (capture != prefs().getLong("capture_time", -1L))
+                                        throw new IllegalStateException("Capture périmée");
+                                    ScreenCatalog.setAnchor(this, ScreenCatalog.IDS[which], x, y);
+                                    detectedScreen.setText("Zone stable enregistrée pour : "
+                                            + ScreenCatalog.LABELS[which]);
+                                } catch (Exception e) {
+                                    toast("Zone refusée : " + e.getMessage());
+                                }
+                            }).show();
+                }).show();
+    }
+
     private void identifyScreen() {
         RequestJournal.Phase phase = new RequestJournal(
                 prefs().getString("journal", "BLOCKED")).phase();
@@ -536,6 +573,7 @@ public final class MainActivity extends Activity {
                     ? String.format(java.util.Locale.ROOT, "%.2f %%", result.difference * 100)
                     : "inconnue";
             detectedScreen.setText("Écran probable : " + result.state
+                    + "\nMéthode : " + result.method
                     + "\nÉcart visuel : " + difference + " | Références : " + result.enrolled
                     + "\nIdentification indicative, pas une preuve de demande réussie.");
         } catch (Exception e) {
