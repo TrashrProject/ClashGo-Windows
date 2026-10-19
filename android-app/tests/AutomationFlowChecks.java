@@ -38,6 +38,15 @@ public final class AutomationFlowChecks {
         AutoRoutePolicy interrupted = AutoRoutePolicy.recover(2, "VERIFYING");
         check(interrupted.state() == AutoRoutePolicy.State.BLOCKED,
                 "never auto resume after unknown gesture");
+        AutoRoutePolicy linked = AutoRoutePolicy.fresh();
+        linked.startAt(1, true, true);
+        check(linked.index() == 1 && "clan_profile".equals(linked.before()),
+                "deep link starts from clan-profile verification");
+        linked.verifiedBefore("clan_profile", true, true);
+        linked.dispatched();
+        linked.block();
+        fail(() -> linked.verifiedAfter("clan_chat"));
+        fail(() -> AutoRoutePolicy.fresh().startAt(4, true, true));
         check(AutoRoutePolicy.recover(4, "COMPLETE_VISUAL").state()
                 == AutoRoutePolicy.State.COMPLETE_VISUAL, "terminal visual record retained");
         check(AutoRoutePolicy.recover(3, "bogus").state() == AutoRoutePolicy.State.BLOCKED,
