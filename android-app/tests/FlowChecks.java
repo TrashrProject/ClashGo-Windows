@@ -4,6 +4,8 @@ import com.reqngo.manager.RequestJournal;
 import com.reqngo.manager.GuidedRoute;
 import com.reqngo.manager.RouteTarget;
 import com.reqngo.manager.DiagnosticTrail;
+import com.reqngo.manager.CaptureGate;
+import com.reqngo.manager.CaptureQuality;
 
 public final class FlowChecks {
     private static void check(boolean ok, String message) {
@@ -144,6 +146,26 @@ public final class FlowChecks {
         mustFail(() -> DiagnosticTrail.append("", null, 0, 100L));
         mustFail(() -> DiagnosticTrail.append("", DiagnosticTrail.Event.ROUTE_RESET, -1, 100L));
         mustFail(() -> DiagnosticTrail.append("", DiagnosticTrail.Event.ROUTE_RESET, 0, -1L));
-        System.out.println("OK: tests de clan, journal, écran, parcours, calibrations et diagnostics");
+        check(CaptureGate.check(true, true, false, false, false, false)
+                == CaptureGate.Reason.READY, "service connected can capture");
+        check(CaptureGate.check(true, true, false, false, true, false)
+                == CaptureGate.Reason.CAPTURE_IN_PROGRESS, "pending screenshot != disabled service");
+        check(CaptureGate.check(true, false, false, false, false, false)
+                == CaptureGate.Reason.SERVICE_NOT_CONNECTED, "disconnected service");
+        check(CaptureGate.explanation(CaptureGate.Reason.SERVICE_NOT_CONNECTED, true)
+                .contains("autorisé"), "enabled but disconnected reported correctly");
+        check(CaptureGate.check(true, true, false, true, false, false)
+                == CaptureGate.Reason.GESTURE_IN_PROGRESS, "gesture blocks another screenshot");
+        check(CaptureGate.check(true, true, true, false, false, false)
+                == CaptureGate.Reason.AUTOMATIC_CYCLE_ACTIVE, "auto run blocks manual screenshot");
+        check(CaptureGate.check(false, true, false, false, false, false)
+                == CaptureGate.Reason.ANDROID_TOO_OLD, "API level checked");
+        int[] darkScreenshot = new int[96 * 96];
+        java.util.Arrays.fill(darkScreenshot, 0xff000000);
+        check(CaptureQuality.nearlyBlack(darkScreenshot), "black screenshot rejected");
+        for (int i = 0; i < 600; i++) darkScreenshot[i] = 0xffb4b4b4;
+        check(!CaptureQuality.nearlyBlack(darkScreenshot), "real rendered details preserved");
+        mustFail(() -> CaptureQuality.nearlyBlack(new int[4]));
+        System.out.println("OK: tests de clan, journal, écran, parcours, diagnostics et captures");
     }
 }
