@@ -26,10 +26,14 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.io.File;
+import java.io.InputStream;
+import java.io.OutputStream;
 
 /** Native Android MVP. No simulated victory or account switching. */
 public final class MainActivity extends Activity {
     private static final int PROJECTION_REQUEST = 4120;
+    private static final int CALIBRATION_EXPORT_REQUEST = 5130;
+    private static final int CALIBRATION_IMPORT_REQUEST = 5131;
     private static final int AUTO_PROJECTION_REQUEST = 4121;
     private static final int BG = Color.rgb(16, 18, 22);
     private static final int SURFACE = Color.rgb(28, 31, 37);
@@ -46,6 +50,7 @@ public final class MainActivity extends Activity {
     private TextView comparison;
     private TextView detectedScreen;
     private TextView routeStatus;
+    private TextView referencesStatus;
     private TextView fleetStatus;
     private TextView autoStatus;
     private EditText profileIdInput;
@@ -214,6 +219,12 @@ public final class MainActivity extends Activity {
         action("Mémoriser la capture comme état connu", false, v -> chooseScreenState());
         action("Choisir une zone stable pour identifier l'écran", false, v -> chooseStableRegion());
         action("Identifier l'écran capturé", false, v -> identifyScreen());
+        referencesStatus = text("Références enregistrées : vérification en cours.", 13, TEXT);
+        referencesStatus.setPadding(dp(13), dp(12), dp(13), dp(12));
+        referencesStatus.setBackground(background(SURFACE, 0));
+        screen.addView(referencesStatus);
+        action("Sauvegarder mes images et boutons (.zip)", false, v -> exportCalibration());
+        action("Restaurer mes images et boutons (.zip)", false, v -> importCalibration());
         detectedScreen = text("Aucun écran analysé.", 13, MUTED);
         LinearLayout.LayoutParams detectedLp = new LinearLayout.LayoutParams(-1, -2);
         detectedLp.topMargin = dp(10);
@@ -479,6 +490,11 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == CALIBRATION_EXPORT_REQUEST
+                || requestCode == CALIBRATION_IMPORT_REQUEST) {
+            onArchiveResult(requestCode, resultCode, data);
+            return;
+        }
         if (requestCode != PROJECTION_REQUEST
                 && requestCode != AUTO_PROJECTION_REQUEST) return;
         final boolean automatic = requestCode == AUTO_PROJECTION_REQUEST;
@@ -515,6 +531,82 @@ public final class MainActivity extends Activity {
             stopService(new Intent(this, AlternativeCaptureService.class));
             if (automatic) prefs().edit().remove("auto_profile_id").commit();
             toast("Partage d'écran impossible : " + error.getClass().getSimpleName());
+        }
+    }
+
+    /** Optional backup via Android's file picker. No network and no account sessions. */
+    private void exportCalibration() {
+        if (CalibrationArchive.flowReferenceCount(this) == 0) {
+            toast("Aucune référence enregistrée. Il n'y a rien à sauvegarder.");
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("Sauvegarder tes calibrations")
+                .setMessage("Crée un ZIP avec tes références et tes boutons calibrés. "
+                        + "Les captures peuvent montrer des noms de joueurs ou de clans. "
+                        + "Le ZIP n'est PAS chiffré : conserve-le dans un dossier privé. "
+                        + "Les comptes et identifiants de connexion ne sont pas exportés.")
+                .setNegativeButton("Annuler", null)
+                .setPositiveButton("Choisir où sauvegarder", (dialog, which) -> {
+                    Intent create = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                            .addCategory(Intent.CATEGORY_OPENABLE)
+                            .setType("application/zip")
+                            .putExtra(Intent.EXTRA_TITLE, "REQNGO_calibrations.zip");
+                    try { startActivityForResult(create, CALIBRATION_EXPORT_REQUEST); }
+                    catch (RuntimeException error) {
+                        toast("Sélecteur de fichiers indisponible : "
+                                + error.getClass().getSimpleName());
+                    }
+                }).show();
+    }
+
+    private void importCalibration() {
+        new AlertDialog.Builder(this).setTitle("Restaurer tes références")
+                .setMessage("Sélectionne une sauvegarde REQ N GO créée précédemment. "
+                        + "Les images et boutons sauvegardés remplaceront ceux de cette installation. "
+                        + "Le parcours restera BLOQUÉ jusqu'à vérification manuelle des écrans. "
+                        + "Ce bouton ne peut pas récupérer des données d'une application "
+                        + "déjà désinstallée sans sauvegarde.")
+                .setNegativeButton("Annuler", null)
+                .setPositiveButton("Sélectionner le ZIP", (dialog, which) -> {
+                    Intent open = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                            .addCategory(Intent.CATEGORY_OPENABLE)
+                            .setType("application/zip");
+                    try { startActivityForResult(open, CALIBRATION_IMPORT_REQUEST); }
+                    catch (RuntimeException error) {
+                        toast("Sélecteur de fichiers indisponible : "
+                                + error.getClass().getSimpleName());
+                    }
+                }).show();
+    }
+
+    private void onArchiveResult(int requestCode, int resultCode, Intent data) {
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            toast("Opération de sauvegarde annulée.");
+            return;
+        }
+        try {
+            if (requestCode == CALIBRATION_EXPORT_REQUEST) {
+                try (OutputStream out = getContentResolver().openOutputStream(data.getData())) {
+                    if (out == null) throw new IllegalStateException("Fichier non accessible");
+                    CalibrationArchive.exportTo(this, out);
+                }
+                toast("Calibrations sauvegardées. Conserve le ZIP avant de changer d'APK.");
+            } else {
+                int imported;
+                try (InputStream in = getContentResolver().openInputStream(data.getData())) {
+                    if (in == null) throw new IllegalStateException("Archive illisible");
+                    imported = CalibrationArchive.importFrom(this, in);
+                }
+                calibrationPreviewStep = -1;
+                shownReferenceTime = -1;
+                selectedX = -1;
+                selectedY = -1;
+                refresh();
+                toast(imported + " références restaurées. "
+                        + "Réactive l'accessibilité puis examine le jeu avant tout geste.");
+            }
+        } catch (Exception error) {
+            toast("Sauvegarde/restauration refusée : " + error.getMessage());
         }
     }
 
@@ -972,6 +1064,15 @@ public final class MainActivity extends Activity {
 
     private void refresh() {
         if (status == null || screenshot == null) return;
+        if (referencesStatus != null) {
+            int count = CalibrationArchive.flowReferenceCount(this);
+            int total = CalibrationArchive.referenceCount(this);
+            referencesStatus.setText("Références du parcours : " + count
+                    + "/5 · total (avec états d'erreur) : " + total
+                    + "\nSi tu viens d'installer une nouvelle APK et vois 0/5, "
+                    + "la précédente calibration n'est pas présente dans ce stockage. "
+                    + "Restaure un ZIP sauvegardé ou recrée les captures.");
+        }
         if (fleetStatus != null) {
             try { fleetStatus.setText(ProfileStore.summary(this)); }
             catch (RuntimeException error) { fleetStatus.setText("Profils bloqués : " + error.getMessage()); }
