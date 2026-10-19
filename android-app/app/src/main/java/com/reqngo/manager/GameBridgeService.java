@@ -77,7 +77,17 @@ public final class GameBridgeService extends AccessibilityService {
 
     @Override public void onInterrupt() {
         DiagnosticStore.record(this, DiagnosticTrail.Event.SERVICE_INTERRUPTED);
-        report("Service interrompu.");
+        if (autoRunning) {
+            stopAutomaticInternal("Arrêt auto : service d'accessibilité interrompu.");
+        } else if (gesturePending || phase() == RequestJournal.Phase.ARMED) {
+            operationGeneration++;
+            main.removeCallbacksAndMessages(null);
+            gesturePending = false;
+            setPhase(RequestJournal.Phase.BLOCKED);
+            report("Geste interrompu : revue manuelle obligatoire.");
+        } else {
+            report("Service interrompu.");
+        }
     }
 
     @Override public void onDestroy() {
