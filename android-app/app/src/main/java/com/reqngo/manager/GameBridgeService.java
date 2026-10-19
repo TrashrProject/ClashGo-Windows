@@ -165,8 +165,7 @@ public final class GameBridgeService extends AccessibilityService {
     /** Operator-requested capture: keep reference untouched during unresolved gestures. */
     public static boolean captureAfterReturnToGame() {
         GameBridgeService s = active;
-        if (startIndex < 0 || startIndex > 1
-                || s == null || Build.VERSION.SDK_INT < 30 || s.autoRunning
+        if (s == null || Build.VERSION.SDK_INT < 30 || s.autoRunning
                 || s.capturePending || s.gesturePending
                 || s.phase() == RequestJournal.Phase.ARMED) return false;
         s.capturePending = true;
