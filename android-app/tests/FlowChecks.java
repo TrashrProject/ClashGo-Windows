@@ -52,6 +52,21 @@ public final class FlowChecks {
         check(FrameFingerprint.compare(before, animated, w, h).similarEnoughForTap(),
                 "une petite zone animée ne doit pas bloquer tous les gestes");
         mustFail(() -> FrameFingerprint.compare(before, shifted, w - 1, h));
+        // Small popup near a selected button: global image looks stable,
+        // but touching that button is unsafe.
+        int[] popup = before.clone();
+        for (int yy = 18; yy < 30; yy++)
+            for (int xx = 18; xx < 30; xx++)
+                popup[yy * w + xx] = 0xff101010;
+        check(FrameFingerprint.compare(before, popup, w, h).similarEnoughForTap(),
+                "global comparator intentionally overlooks a small popup");
+        check(!FrameFingerprint.compareNearTap(before, popup, w, h, .5, .5)
+                .similarEnoughForTap(),
+                "local comparator must block a covered touch target");
+        check(FrameFingerprint.compareNearTap(before, popup, w, h, .10, .10)
+                .similarEnoughForTap(),
+                "unrelated distant popup should not invalidate untouched corner");
+        mustFail(() -> FrameFingerprint.compareNearTap(before, popup, w, h, -1, .5));
         System.out.println("OK: tests de clan, journal et écran avant geste");
     }
 }
