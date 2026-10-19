@@ -38,6 +38,28 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+      # The default Android debug key is otherwise regenerated on every
+      # disposable GitHub runner, preventing an update of the installed APK.
+      # This is a TEST-ONLY key. Publishing a release requires a separate
+      # protected signing key in GitHub Actions Secrets.
+      - name: Restaurer la signature de test Android
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: reqngo-android-debug-key-v1
+      - name: Préparer la signature de test si première compilation
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -storetype JKS \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US" -noprompt
+          fi
+          keytool -list -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey -v \
+            | grep 'SHA256:'
       - name: Compiler l'APK
         run: gradle -p android-app --no-daemon :app:assembleDebug
       - name: Vérifier le paquet et sa signature debug
