@@ -96,9 +96,14 @@ public final class AutomationFlowChecks {
         check(GameBlocker.isBlocker("castle_full"), "full castle is blocking");
         check(GameBlocker.isBlocker("connection_error"), "network failure is blocking");
         check(!GameBlocker.isBlocker("request_posted"), "submitted request is not an error");
-        for (String id : GameBlocker.IDS)
+        for (String id : GameBlocker.IDS) {
             check(GameBlocker.reason(id) != null && !GameBlocker.reason(id).isEmpty(),
                     "every blocker has an explanatory stop reason");
+            check(GameBlocker.diagnosticEvent(id) != null,
+                    "every blocker has a shareable safe event code");
+        }
+        check(GameBlocker.diagnosticEvent("request_posted") == null,
+                "success must not create a blocker event");
 
         ProfileQueue large = new ProfileQueue();
         for (int i = 0; i < 5000; i++) large.add("ACC_" + i);
