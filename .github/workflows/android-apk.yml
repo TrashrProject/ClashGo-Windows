@@ -1,16 +1,13 @@
 name: Android APK — REQ N GO
 on:
-  pull_request:
-    paths:
-      - 'android-app/**'
-      - '.github/workflows/android-apk.yml'
+  workflow_dispatch:
   push:
     branches: [main, feature/reqngo-android-apk-v1]
     paths:
       - 'android-app/**'
       - '.github/workflows/android-apk.yml'
 concurrency:
-  group: reqngo-android-${{ github.event.pull_request.head.ref || github.ref }}
+  group: reqngo-android-${{ github.ref_name }}
   cancel-in-progress: true
 permissions:
   contents: read
