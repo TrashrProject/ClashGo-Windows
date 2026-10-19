@@ -8,8 +8,9 @@
 - Raccourci vers la fiche du clan et ouverture du jeu Google Play.
 - Service d'accessibilité **désactivé par défaut**, activé manuellement par l'utilisateur.
 - Capture réelle de l'écran du jeu avec `AccessibilityService.takeScreenshot` sur **Android 11+**, stockée uniquement dans le stockage privé de l'APK.
-- Calibration manuelle d'un point sur la capture et **un seul** geste tactile explicite, uniquement lorsque Clash of Clans est confirmé au premier plan.
-- Journal local `READY → ARMED → DISPATCHED_UNVERIFIED`, sans répétition d'un geste au résultat inconnu. Confirmation et réarmement manuels.
+- Calibration manuelle d'un point sur une capture de référence, liée à cette capture précise. Juste avant **un seul** geste tactile explicite, l'APK prend une nouvelle capture et compare 2 304 points : si l'écran a trop changé, aucun geste n'est exécuté.
+- Journal local `READY → ARMED → DISPATCHED_UNVERIFIED`, sans répétition d'un geste au résultat inconnu.
+- Capture **après** le geste, comparaison avec la référence et affichage des deux images. Une différence visuelle ne prouve pas que la demande a réussi : la confirmation reste manuelle. Confirmation et réarmement manuels.
 - Arrêt qui annule tout geste en attente.
 - Aucun SDK tiers et aucune permission réseau.
 
@@ -32,8 +33,9 @@ Ou dans Android Studio : ouvrir le dossier `android-app` en tant que projet, syn
 3. Activer volontairement le service REQ N GO dans les paramètres Android d'accessibilité.
 4. Lancer Clash of Clans et atteindre le village (ne pas capturer un écran d'authentification).
 5. Dans REQ N GO, choisir « Capturer le jeu » : l'application revient au jeu, le service effectue une capture locale puis attendre de revenir dans REQ N GO pour l'actualiser.
-6. Cliquer sur la capture pour calibrer un point. Confirmer **un appui de test**, puis vérifier visuellement dans le jeu ce qui a changé.
-7. Après une action incertaine, **ne pas réarmer** avant d'avoir inspecté l'écran réel.
+6. Cliquer sur la capture pour calibrer un point. Confirmer **un appui de test**. L'APK recapture le jeu avant l'action et refuse d'appuyer si le contenu diffère trop de la référence ; après l'appui, il tente une capture du résultat.
+7. Revenir dans REQ N GO et comparer les captures avant/après. La comparaison statistique n'est pas une preuve de demande réussie.
+8. Après une action incertaine, **ne pas réarmer** avant d'avoir inspecté l'écran réel.
 
 La capture ne doit pas être envoyée publiquement si elle contient un nom, un tag de joueur ou un code de connexion.
 
