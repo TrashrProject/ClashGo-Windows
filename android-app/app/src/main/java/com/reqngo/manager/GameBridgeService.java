@@ -339,6 +339,7 @@ public final class GameBridgeService extends AccessibilityService {
                 || !s.prefs().getString("route_phase", "").equals("READY")
                 || !s.prefs().getString("auto_phase", "IDLE").equals("IDLE")) return false;
         try {
+            if (!s.profileLeaseValid()) return false;
             int width = s.prefs().getInt("capture_width", 0);
             int height = s.prefs().getInt("capture_height", 0);
             if (width < 20 || height < 20) return false;
@@ -372,6 +373,15 @@ public final class GameBridgeService extends AccessibilityService {
         s.prefs().edit().putInt("auto_index", 0).putString("auto_phase", "IDLE").commit();
     }
 
+    /** A visual route must remain bound to the same operator-selected profile. */
+    private boolean profileLeaseValid() {
+        try {
+            String profile = prefs().getString("auto_profile_id", null);
+            return profile != null && ProfileStore.load(this).holdsActive(
+                    profile, System.currentTimeMillis());
+        } catch (RuntimeException error) { return false; }
+    }
+
     private boolean persistAutomatic() {
         return prefs().edit().putInt("auto_index", automatic.index())
                 .putString("auto_phase", automatic.state().name()).commit();
@@ -387,7 +397,7 @@ public final class GameBridgeService extends AccessibilityService {
         prefs().edit().putInt("auto_index", automatic.index())
                 .putString("auto_phase", "BLOCKED")
                 .putString("route_phase", "BLOCKED")
-                .putString("journal", "BLOCKED").commit();
+                .putString("journal", "BLOCKED").remove("auto_profile_id").commit();
         DiagnosticStore.record(this, DiagnosticTrail.Event.ROUTE_BLOCKED);
         report(cause);
     }
@@ -400,6 +410,10 @@ public final class GameBridgeService extends AccessibilityService {
 
     private void autoCapture(int generation, boolean afterGesture, int attempt) {
         if (!autoRunning || generation != operationGeneration) return;
+        if (!profileLeaseValid()) {
+            stopAutomaticInternal("Arrêt auto : profil ou bail de session différent.");
+            return;
+        }
         if (Build.VERSION.SDK_INT < 30 || !gameForeground()) {
             stopAutomaticInternal("Arrêt auto : Clash of Clans n'est pas au premier plan.");
             return;
