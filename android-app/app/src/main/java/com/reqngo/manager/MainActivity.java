@@ -42,6 +42,9 @@ public final class MainActivity extends Activity {
     private TextView comparison;
     private TextView detectedScreen;
     private TextView routeStatus;
+    private TextView fleetStatus;
+    private TextView autoStatus;
+    private EditText profileIdInput;
     private long shownReferenceTime = -1L;
     private long selectedReferenceTime = -1L;
     private float selectedX = -1, selectedY = -1;
@@ -238,11 +241,154 @@ public final class MainActivity extends Activity {
         action("Bloquer le parcours et annuler toute action en attente", false, v -> stopGuidedRoute());
         action("Réinitialiser le parcours après examen", false, v -> restartGuidedRoute());
 
-        section("07  /  Diagnostic local", "Historique limité des captures, gestes et changements d'étape. Le rapport ne contient ni captures, ni tags de joueurs, ni données de connexion.");
+        section("07  /  Gestion des profils logiques",
+                "Une seule session Android active. Les profils ne contiennent que des identifiants locaux ; aucune connexion, sauvegarde privée ou session Supercell n'est copiée.");
+        profileIdInput = new EditText(this);
+        profileIdInput.setSingleLine(true);
+        profileIdInput.setTextColor(TEXT);
+        profileIdInput.setHintTextColor(MUTED);
+        profileIdInput.setHint("Ex. FARM_001");
+        profileIdInput.setBackground(background(SURFACE, Color.rgb(63,67,72)));
+        profileIdInput.setPadding(dp(14), dp(12), dp(14), dp(12));
+        screen.addView(profileIdInput, new LinearLayout.LayoutParams(-1, dp(55)));
+        action("Ajouter le profil logique", false, v -> addLogicalProfile());
+        action("Préparer le prochain profil", false, v -> acquireNextProfile());
+        action("Confirmer manuellement la connexion de ce profil", false, v -> approveProfileLogin());
+        action("Terminer / bloquer le profil actif", false, v -> finishProfile());
+        fleetStatus = text("Aucun profil chargé.", 13, MUTED);
+        fleetStatus.setPadding(dp(12), dp(12), dp(12), dp(12));
+        fleetStatus.setBackground(background(SURFACE, 0));
+        screen.addView(fleetStatus);
+
+        section("08  /  Exécution automatique expérimentale",
+                "Après calibration complète et validation de la connexion du profil actif, le moteur peut tenter un cycle de QUATRE gestes. Une seule autorisation au départ, jamais de répétition d'un geste incertain. Réussite visuelle ≠ demande confirmée par Supercell.");
+        autoStatus = text("Moteur automatique à l'arrêt.", 13, MUTED);
+        screen.addView(autoStatus);
+        action("Lancer UN cycle automatique calibré", true, v -> startOneAutomaticCycle());
+        action("ARRÊTER immédiatement le cycle automatique", false, v -> {
+            GameBridgeService.stopAutomatic();
+            refresh();
+        });
+
+        section("09  /  Diagnostic local", "Historique limité des captures, gestes et changements d'étape. Le rapport ne contient ni captures, ni tags de joueurs, ni données de connexion.");
         action("Voir le rapport de diagnostic", false, v -> showDiagnostics());
 
         section("État du pilote", "Ce parcours est guidé, PAS autonome : aucune adhésion au clan, demande réussie ou changement de compte ne sont supposés. Les écrans réels doivent d'abord être calibrés sur MuMu. Automatiser le gameplay peut enfreindre les règles de Supercell.");
         refresh();
+    }
+
+    private ProfileQueue.Item findCurrentProfile(ProfileQueue queue) {
+        for (ProfileQueue.Item item : queue.items()) {
+            if (item.status == ProfileQueue.Status.ACTIVE
+                    || item.status == ProfileQueue.Status.NEEDS_OPERATOR_LOGIN) return item;
+        }
+        return null;
+    }
+
+    private void addLogicalProfile() {
+        try {
+            ProfileQueue q = ProfileStore.load(this);
+            q.add(profileIdInput.getText().toString());
+            ProfileStore.persist(this);
+            refresh();
+        } catch (RuntimeException error) { toast(error.getMessage()); }
+    }
+
+    private void acquireNextProfile() {
+        try {
+            ProfileQueue q = ProfileStore.load(this);
+            ProfileQueue.Item item = q.acquire(System.currentTimeMillis());
+            ProfileStore.persist(this);
+            if (item == null) {
+                toast("Aucun profil libre : termine d'abord la session en cours."); return;
+            }
+            toast("Profil réservé : " + item.id
+                    + ". Connecte-le dans le jeu par la méthode officielle.");
+            refresh();
+        } catch (RuntimeException error) { toast(error.getMessage()); }
+    }
+
+    private void approveProfileLogin() {
+        try {
+            ProfileQueue q = ProfileStore.load(this);
+            ProfileQueue.Item pending = findCurrentProfile(q);
+            if (pending == null || pending.status != ProfileQueue.Status.NEEDS_OPERATOR_LOGIN) {
+                toast("Aucun profil en attente de connexion."); return;
+            }
+            new AlertDialog.Builder(this).setTitle("Confirmer le profil actif")
+                    .setMessage("Vérifie dans Clash of Clans que le compte AUTORISÉ "
+                            + pending.id + " est bien connecté. Cette application ne peut pas "
+                            + "vérifier une connexion uniquement avec le nom logique.")
+                    .setNegativeButton("Annuler", null)
+                    .setPositiveButton("Connexion vérifiée", (d, w) -> {
+                        try {
+                            q.operatorConfirmedLogin(pending.id, System.currentTimeMillis());
+                            ProfileStore.persist(this);
+                            refresh();
+                        } catch (RuntimeException e) { toast(e.getMessage()); }
+                    }).show();
+        } catch (RuntimeException error) { toast(error.getMessage()); }
+    }
+
+    private void finishProfile() {
+        try {
+            ProfileQueue q = ProfileStore.load(this);
+            ProfileQueue.Item current = findCurrentProfile(q);
+            if (current == null) { toast("Aucun profil actif ou réservé."); return; }
+            new AlertDialog.Builder(this).setTitle("Fin de la session")
+                    .setMessage("Le résultat 'visuel' n'est pas une preuve serveur. "
+                            + "Marquer ce profil comme terminé visuellement si le cycle "
+                            + "affiché a été vérifié, sinon le bloquer.")
+                    .setNegativeButton("Bloquer", (d, w) -> {
+                        q.block(current.id);
+                        ProfileStore.persist(this);
+                        refresh();
+                    })
+                    .setPositiveButton("Terminé visuellement", (d, w) -> {
+                        try {
+                            if (current.status != ProfileQueue.Status.ACTIVE
+                                    || !prefs().getString("auto_phase", "").equals("COMPLETE_VISUAL"))
+                                throw new IllegalStateException("Aucun cycle automatique terminé");
+                            q.finish(current.id, true);
+                            ProfileStore.persist(this);
+                            refresh();
+                        } catch (RuntimeException error) { toast(error.getMessage()); }
+                    }).show();
+        } catch (RuntimeException error) { toast(error.getMessage()); }
+    }
+
+    private void startOneAutomaticCycle() {
+        try {
+            ProfileQueue q = ProfileStore.load(this);
+            ProfileQueue.Item current = findCurrentProfile(q);
+            if (current == null || current.status != ProfileQueue.Status.ACTIVE) {
+                toast("Prépare et confirme d'abord un profil actif."); return;
+            }
+            if (route().index() != 0 || route().phase() != GuidedRoute.Phase.READY
+                    || new RequestJournal(prefs().getString("journal", "BLOCKED")).phase()
+                        != RequestJournal.Phase.READY) {
+                toast("Réinitialise d'abord le parcours après examen du jeu."); return;
+            }
+            new AlertDialog.Builder(this).setTitle("Cycle automatique expérimental")
+                    .setMessage("Profil logique : " + current.id
+                            + "\\nJusqu'à 4 gestes, seulement si les 5 captures et 4 boutons "
+                            + "sont calibrés. Arrêt à la première différence ou erreur. "
+                            + "Ne confirme jamais la réussite côté serveur. "
+                            + "L'utilisation peut contrevenir aux règles de Supercell. "
+                            + "Autoriser ce cycle unique ?")
+                    .setNegativeButton("Annuler", null)
+                    .setPositiveButton("Autoriser le cycle", (d, w) -> {
+                        if (!GameBridgeService.startAutomaticRoute()) {
+                            toast("Cycle refusé : service Android ou calibrations manquantes.");
+                            refresh(); return;
+                        }
+                        if (!openGame()) {
+                            GameBridgeService.stopAutomatic();
+                            toast("Jeu introuvable : cycle bloqué.");
+                        }
+                        refresh();
+                    }).show();
+        } catch (RuntimeException error) { toast(error.getMessage()); }
     }
 
     private void showDiagnostics() {
@@ -479,6 +625,7 @@ public final class MainActivity extends Activity {
                             throw new IllegalStateException("Stockage inaccessible");
                         }
                         DiagnosticStore.record(this, DiagnosticTrail.Event.ROUTE_RESET);
+                        GameBridgeService.resetAutomaticAfterReview();
                         refresh();
                     } catch (RuntimeException error) {
                         toast("Impossible de redémarrer la séquence.");
@@ -661,6 +808,14 @@ public final class MainActivity extends Activity {
 
     private void refresh() {
         if (status == null || screenshot == null) return;
+        if (fleetStatus != null) {
+            try { fleetStatus.setText(ProfileStore.summary(this)); }
+            catch (RuntimeException error) { fleetStatus.setText("Profils bloqués : " + error.getMessage()); }
+        }
+        if (autoStatus != null) autoStatus.setText(
+                "Cycle auto : " + prefs().getString("auto_phase", "IDLE")
+                + " | Étape " + prefs().getInt("auto_index", 0) + "/" + GuidedRoute.SIZE
+                + "\\nUn résultat visuel n'est pas une preuve d'envoi serveur.");
         if (routeStatus != null) {
             GuidedRoute current = route();
             String states = current.index() < GuidedRoute.SIZE
