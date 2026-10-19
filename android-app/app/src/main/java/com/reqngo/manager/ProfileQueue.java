@@ -45,7 +45,7 @@ public final class ProfileQueue {
     public Item acquire(long now) {
         if (now <= 0) throw new IllegalArgumentException("Horodatage invalide");
         for (Item item : entries) {
-            if (item.status == Status.ACTIVE) {
+            if (item.status == Status.ACTIVE || item.status == Status.NEEDS_OPERATOR_LOGIN) {
                 if (item.leaseUntilMs > now) return null;
                 item.status = Status.BLOCKED; // expired lease is never silently reused
                 item.leaseUntilMs = 0;
