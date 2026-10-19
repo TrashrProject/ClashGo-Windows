@@ -1,6 +1,7 @@
 import com.reqngo.manager.ClanTag;
 import com.reqngo.manager.FrameFingerprint;
 import com.reqngo.manager.RequestJournal;
+import com.reqngo.manager.GuidedRoute;
 
 public final class FlowChecks {
     private static void check(boolean ok, String message) {
@@ -67,6 +68,44 @@ public final class FlowChecks {
                 .similarEnoughForTap(),
                 "unrelated distant popup should not invalidate untouched corner");
         mustFail(() -> FrameFingerprint.compareNearTap(before, popup, w, h, -1, .5));
-        System.out.println("OK: tests de clan, journal et écran avant geste");
+        // An accidental tap can NEVER advance a clan/request route.
+        GuidedRoute route = GuidedRoute.fresh();
+        check(route.index() == 0 && "village".equals(route.expectedBefore()),
+                "première étape au village");
+        mustFail(() -> route.start("clan_chat", true));
+        mustFail(() -> route.start("village", false));
+        route.start("village", true);
+        check(route.phase() == GuidedRoute.Phase.AWAITING_REVIEW, "action incertaine");
+        mustFail(() -> route.start("village", true));
+        mustFail(() -> route.accept("clan_profile", false, true));
+        mustFail(() -> route.accept("clan_profile", true, false));
+        mustFail(() -> route.accept("request_posted", true, true));
+        check(route.index() == 0, "aucun progrès sans preuve");
+        route.accept("clan_profile", true, true);
+        check(route.index() == 1 && route.phase() == GuidedRoute.Phase.READY,
+                "une étape vérifiée uniquement");
+        route.start("clan_profile", true);
+        route.accept("clan_chat", true, true);
+        route.start("clan_chat", true);
+        route.accept("request_dialog", true, true);
+        route.start("request_dialog", true);
+        route.accept("request_posted", true, true);
+        check(route.phase() == GuidedRoute.Phase.COMPLETE && route.index() == GuidedRoute.SIZE,
+                "fin uniquement après les quatre étapes");
+        mustFail(() -> route.start("request_posted", true));
+        route.restartAfterReview();
+        check(route.index() == 0 && route.phase() == GuidedRoute.Phase.READY,
+                "reprise explicite après fin");
+        route.start("village", true);
+        route.block();
+        mustFail(() -> route.accept("clan_profile", true, true));
+        route.restartAfterReview();
+        check(new GuidedRoute(-1, "READY").phase() == GuidedRoute.Phase.BLOCKED,
+                "état hors limites bloqué");
+        check(new GuidedRoute(2, "BAD").phase() == GuidedRoute.Phase.BLOCKED,
+                "état corrompu bloqué");
+        check(new GuidedRoute(GuidedRoute.SIZE, "READY").phase() == GuidedRoute.Phase.BLOCKED,
+                "index terminé sans preuve bloqué");
+        System.out.println("OK: tests de clan, journal, écran et parcours guidé");
     }
 }
