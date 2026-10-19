@@ -226,7 +226,8 @@ public final class MainActivity extends Activity {
         long time = prefs().getLong("capture_time", 0L);
         RequestJournal.Phase phase = new RequestJournal(
                 prefs().getString("journal", "BLOCKED")).phase();
-        if (time <= 0 || System.currentTimeMillis() - time > 120000
+        if (time <= 0 || time > System.currentTimeMillis()
+                || System.currentTimeMillis() - time > 120000
                 || phase == RequestJournal.Phase.ARMED
                 || phase == RequestJournal.Phase.DISPATCHED_UNVERIFIED) {
             toast("Capture trop ancienne ou geste incertain : vérifie le jeu et recapture."); return;
@@ -242,6 +243,8 @@ public final class MainActivity extends Activity {
                             .setNegativeButton("Annuler", null)
                             .setPositiveButton("Enregistrer", (d, index) -> {
                                 try {
+                                    if (time != prefs().getLong("capture_time", -1L))
+                                        throw new IllegalStateException("La capture a changé");
                                     ScreenCatalog.save(this, id);
                                     detectedScreen.setText("État enregistré localement : "
                                             + ScreenCatalog.LABELS[which]);
@@ -269,8 +272,8 @@ public final class MainActivity extends Activity {
                     ? String.format(java.util.Locale.ROOT, "%.2f %%", result.difference * 100)
                     : "inconnue";
             detectedScreen.setText("Écran probable : " + result.state
-                    + "\\nÉcart visuel : " + difference + " | Références : " + result.enrolled
-                    + "\\nIdentification indicative, pas une preuve de demande réussie.");
+                    + "\nÉcart visuel : " + difference + " | Références : " + result.enrolled
+                    + "\nIdentification indicative, pas une preuve de demande réussie.");
         } catch (Exception e) {
             toast("Identification impossible : " + e.getClass().getSimpleName());
         }
