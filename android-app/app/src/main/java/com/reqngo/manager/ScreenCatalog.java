@@ -27,12 +27,14 @@ public final class ScreenCatalog {
 
     public static final class Result {
         public final String state;
+        public final String id;
         public final double difference;
         public final double runnerUpMargin;
         public final int enrolled;
 
-        Result(String state, double difference, double margin, int enrolled) {
+        Result(String state, String id, double difference, double margin, int enrolled) {
             this.state = state;
+            this.id = id;
             this.difference = difference;
             this.runnerUpMargin = margin;
             this.enrolled = enrolled;
@@ -75,7 +77,15 @@ public final class ScreenCatalog {
      * average RGB difference are ambiguous and are reported as unknown.
      */
     public static Result identify(Context context) {
-        File source = new File(context.getFilesDir(), "latest_game_capture.png");
+        return identifyFile(context, "latest_game_capture.png");
+    }
+
+    public static Result identifyPostAction(Context context) {
+        return identifyFile(context, "post_action_capture.png");
+    }
+
+    private static Result identifyFile(Context context, String filename) {
+        File source = new File(context.getFilesDir(), filename);
         Bitmap current = BitmapFactory.decodeFile(source.getAbsolutePath());
         if (current == null) throw new IllegalStateException("Capture absente ou illisible");
         try {
@@ -85,6 +95,7 @@ public final class ScreenCatalog {
             current.getPixels(currentPixels, 0, width, 0, 0, width, height);
             double best = Double.POSITIVE_INFINITY, next = Double.POSITIVE_INFINITY;
             String bestName = "inconnu";
+            String bestId = "unknown";
             boolean bestValid = false;
             int enrolled = 0;
             for (int i = 0; i < IDS.length; i++) {
@@ -103,6 +114,7 @@ public final class ScreenCatalog {
                         next = best;
                         best = score.averageDifference;
                         bestName = LABELS[i];
+                        bestId = IDS[i];
                         bestValid = score.similarEnoughForTap();
                     } else if (score.averageDifference < next) {
                         next = score.averageDifference;
@@ -114,8 +126,9 @@ public final class ScreenCatalog {
             double margin = next - best;
             if (!bestValid || (!Double.isInfinite(margin) && margin < .008)) {
                 bestName = "inconnu / ambigu";
+                bestId = "unknown";
             }
-            return new Result(bestName, best, margin, enrolled);
+            return new Result(bestName, bestId, best, margin, enrolled);
         } finally {
             current.recycle();
         }
