@@ -187,8 +187,8 @@ public final class MainActivity extends Activity {
             return true;
         });
 
-        section("04  /  Calibration des cinq écrans",
-                "Sur MuMu, capture d'abord chaque étape réelle. Mémorise localement : village, fiche clan, chat, fenêtre de demande et demande publiée. L'application signale les ambiguïtés.");
+        section("04  /  Calibration du parcours et des erreurs",
+                "Sur MuMu, enregistre les cinq écrans du parcours et, lorsque tu les rencontres, les six états bloquants : clan fermé, invitation, adhésion en attente, délai actif, château plein et connexion perdue. Un écran inconnu arrête le cycle.");
         action("Mémoriser la capture comme état connu", false, v -> chooseScreenState());
         action("Choisir une zone stable pour identifier l'écran", false, v -> chooseStableRegion());
         action("Identifier l'écran capturé", false, v -> identifyScreen());
@@ -261,7 +261,7 @@ public final class MainActivity extends Activity {
         screen.addView(fleetStatus);
 
         section("08  /  Exécution automatique expérimentale",
-                "Après calibration complète et validation de la connexion du profil actif, le moteur peut tenter un cycle de QUATRE gestes. Une seule autorisation au départ, jamais de répétition d'un geste incertain. Réussite visuelle ≠ demande confirmée par Supercell.");
+                "Un seul cycle autorisé par l'utilisateur, jusqu'à quatre gestes calibrés ou trois via la fiche du clan. Le moteur exige deux captures concordantes et s'arrête sur un état inattendu. Succès visuel ≠ succès confirmé par Supercell.");
         autoStatus = text("Moteur automatique à l'arrêt.", 13, MUTED);
         screen.addView(autoStatus);
         action("Lancer UN cycle automatique calibré", true, v -> startOneAutomaticCycle(false));
@@ -275,7 +275,7 @@ public final class MainActivity extends Activity {
         section("09  /  Diagnostic local", "Historique limité des captures, gestes et changements d'étape. Le rapport ne contient ni captures, ni tags de joueurs, ni données de connexion.");
         action("Voir le rapport de diagnostic", false, v -> showDiagnostics());
 
-        section("État du pilote", "Ce parcours est guidé, PAS autonome : aucune adhésion au clan, demande réussie ou changement de compte ne sont supposés. Les écrans réels doivent d'abord être calibrés sur MuMu. Automatiser le gameplay peut enfreindre les règles de Supercell.");
+        section("État du pilote", "Cycle automatique expérimental disponible, mais ni l'adhésion au clan, ni l'envoi de renforts côté serveur, ni la rotation des sessions Supercell ne sont validés. Un test réel MuMu reste indispensable. L'automatisation peut contrevenir aux règles de Supercell.");
         refresh();
     }
 
