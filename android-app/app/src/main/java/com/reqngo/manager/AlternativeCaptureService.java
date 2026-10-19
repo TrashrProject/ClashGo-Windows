@@ -19,6 +19,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
@@ -36,12 +37,20 @@ import java.nio.ByteBuffer;
  */
 public final class AlternativeCaptureService extends Service {
     public static final String ACTION_CAPTURE = "com.reqngo.manager.CAPTURE_ONCE";
+    public static final String ACTION_AUTO = "com.reqngo.manager.CAPTURE_AUTO_ROUTE";
+    public static final String EXTRA_AUTO_START_INDEX = "auto_start_index";
     public static final String EXTRA_RESULT_CODE = "projection_result_code";
     public static final String EXTRA_RESULT_DATA = "projection_result_data";
     private static final String CHANNEL = "reqngo_one_shot_screen_capture";
     private static final int NOTIFICATION_ID = 1142;
     private static final long TIMEOUT_MS = 13000;
     private static final long WAIT_FOR_GAME_MS = 3500;
+    private static final long MAX_AUTO_DURATION_MS = 105000L;
+    private static volatile AlternativeCaptureService activeAutomatic;
+    public interface FrameCallback {
+        void onFrame(Bitmap image);
+        void onError(String error);
+    }
 
     private HandlerThread worker;
     private Handler handler;
@@ -51,8 +60,45 @@ public final class AlternativeCaptureService extends Service {
     private long started;
     private boolean finished;
     private long lastFrameAttempt;
+    private boolean automaticMode;
+    private FrameCallback pendingFrame;
+    private final Handler ui = new Handler(Looper.getMainLooper());
 
     @Override public IBinder onBind(Intent intent) { return null; }
+
+    public static boolean automaticCaptureAvailable() {
+        AlternativeCaptureService service = activeAutomatic;
+        return service != null && service.automaticMode && !service.finished;
+    }
+
+    /**
+     * Obtain only the next sampled frame of a currently user-approved screen
+     * sharing session. No projection token is cached or silently re-used.
+     */
+    public static boolean requestAutomaticFrame(FrameCallback callback) {
+        AlternativeCaptureService service = activeAutomatic;
+        if (callback == null || service == null || service.finished || service.handler == null)
+            return false;
+        service.handler.post(() -> {
+            if (service.finished || !service.automaticMode || service.pendingFrame != null) {
+                service.ui.post(() -> callback.onError("Capture déjà occupée ou session fermée"));
+                return;
+            }
+            service.pendingFrame = callback;
+            service.handler.postDelayed(() -> {
+                if (service.pendingFrame == callback) {
+                    service.pendingFrame = null;
+                    service.ui.post(() -> callback.onError(
+                            "Aucune image reçue via MediaProjection en 7 secondes"));
+                }
+            }, 7000);
+        });
+        return true;
+    }
+
+    public static void stopAutomaticProjection(android.content.Context context) {
+        context.stopService(new Intent(context, AlternativeCaptureService.class));
+    }
 
     private SharedPreferences preferences() {
         return getSharedPreferences("local_preferences", MODE_PRIVATE);
@@ -74,10 +120,13 @@ public final class AlternativeCaptureService extends Service {
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent == null || !ACTION_CAPTURE.equals(intent.getAction()) || worker != null) {
+        if (intent == null || worker != null
+                || (!ACTION_CAPTURE.equals(intent.getAction())
+                        && !ACTION_AUTO.equals(intent.getAction()))) {
             stopSelf(startId);
             return START_NOT_STICKY;
         }
+        automaticMode = ACTION_AUTO.equals(intent.getAction());
         try {
             NotificationManager notifications =
                     (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
@@ -86,7 +135,9 @@ public final class AlternativeCaptureService extends Service {
             Notification notification = new Notification.Builder(this, CHANNEL)
                     .setSmallIcon(android.R.drawable.ic_menu_camera)
                     .setContentTitle("REQ N GO — capture autorisée")
-                    .setContentText("Capture ponctuelle du jeu en cours")
+                    .setContentText(automaticMode
+                            ? "Cycle calibré : partage d'écran actif jusqu'à l'arrêt"
+                            : "Capture ponctuelle du jeu en cours")
                     .setOngoing(true)
                     .build();
             if (Build.VERSION.SDK_INT >= 29) {
@@ -137,9 +188,23 @@ public final class AlternativeCaptureService extends Service {
                     "REQNGO One Shot", width, height, metrics.densityDpi,
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                     reader.getSurface(), null, handler);
-            handler.postDelayed(() -> finish("Capture alternative sans réponse d'Android après 13 secondes."),
-                    TIMEOUT_MS);
-            status("Capture alternative autorisée. Retour au jeu, analyse dans quelques secondes.");
+            if (automaticMode) {
+                activeAutomatic = this;
+                int startIndex = intent.getIntExtra(EXTRA_AUTO_START_INDEX, -1);
+                if (!GameBridgeService.startAutomaticRoute(startIndex)) {
+                    finish("Cycle non lancé : profil, boutons ou références incomplets.");
+                    return START_NOT_STICKY;
+                }
+                handler.postDelayed(() -> finish(
+                        "Cycle arrêté : durée maximale de partage atteinte."),
+                        MAX_AUTO_DURATION_MS);
+                status("Capture MediaProjection activée pour un seul cycle calibré.");
+            } else {
+                handler.postDelayed(() -> finish(
+                        "Capture alternative sans réponse d'Android après 13 secondes."),
+                        TIMEOUT_MS);
+                status("Capture alternative autorisée. Retour au jeu, analyse dans quelques secondes.");
+            }
         } catch (Exception e) {
             finish("Capture alternative indisponible : " + e.getClass().getSimpleName());
         }
@@ -155,8 +220,9 @@ public final class AlternativeCaptureService extends Service {
             image = input.acquireLatestImage();
             if (image == null) return;
             long elapsed = SystemClock.elapsedRealtime() - started;
-            if (elapsed < WAIT_FOR_GAME_MS) return;
-            if (elapsed - lastFrameAttempt < 450) return;
+            if (!automaticMode && elapsed < WAIT_FOR_GAME_MS) return;
+            if (automaticMode && pendingFrame == null) return;
+            if (elapsed - lastFrameAttempt < (automaticMode ? 180 : 450)) return;
             lastFrameAttempt = elapsed;
             if (!GameBridgeService.gameVisibleForCapture()) {
                 if (elapsed >= 9700)
@@ -178,9 +244,20 @@ public final class AlternativeCaptureService extends Service {
             cropped = Bitmap.createBitmap(raw, 0, 0, image.getWidth(), image.getHeight());
 
             if (CaptureQuality.nearlyBlack(BitmapSamples.extract(cropped))) {
-                if (elapsed >= 9700)
+                if (!automaticMode && elapsed >= 9700)
                     finish("Capture alternative également noire sur MuMu. "
                             + "Vérifie le moteur graphique et la compatibilité de l'émulateur.");
+                // For an auto cycle the pending frame times out: never accept black pixels.
+                return;
+            }
+            if (automaticMode) {
+                FrameCallback callback = pendingFrame;
+                pendingFrame = null;
+                if (callback != null) {
+                    Bitmap delivered = cropped;
+                    cropped = null; // ownership transferred to GameBridgeService callback
+                    ui.post(() -> callback.onFrame(delivered));
+                }
                 return;
             }
             File output = new File(getFilesDir(), "latest_game_capture.png");
@@ -211,7 +288,13 @@ public final class AlternativeCaptureService extends Service {
     }
 
     @Override public void onDestroy() {
+        boolean wasAutomatic = automaticMode;
         finished = true;
+        if (activeAutomatic == this) activeAutomatic = null;
+        FrameCallback unfinished = pendingFrame;
+        pendingFrame = null;
+        if (unfinished != null) ui.post(() -> unfinished.onError(
+                "Session de capture arrêtée avant réception de l'image"));
         if (reader != null) {
             reader.setOnImageAvailableListener(null, null);
             reader.close();
@@ -230,6 +313,7 @@ public final class AlternativeCaptureService extends Service {
             worker = null;
         }
         stopForeground(STOP_FOREGROUND_REMOVE);
+        if (wasAutomatic) GameBridgeService.onAutomaticProjectionStopped();
         super.onDestroy();
     }
 }
