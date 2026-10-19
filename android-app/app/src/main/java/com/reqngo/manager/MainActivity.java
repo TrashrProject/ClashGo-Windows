@@ -334,7 +334,7 @@ public final class MainActivity extends Activity {
                             toast("Jeu inaccessible : parcours arrêté.");
                         }
                         refresh();
-                    } catch (RuntimeException error) {
+                    } catch (Exception error) {
                         live.block(); saveRoute(live);
                         toast("Erreur de parcours : " + error.getMessage());
                         refresh();
