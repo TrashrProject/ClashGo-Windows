@@ -348,11 +348,13 @@ public final class MainActivity extends Activity {
                     })
                     .setPositiveButton("Terminé visuellement", (d, w) -> {
                         try {
-                            if (current.status != ProfileQueue.Status.ACTIVE
+                            if (!q.holdsActive(current.id, System.currentTimeMillis())
+                                    || !current.id.equals(prefs().getString("auto_profile_id", null))
                                     || !prefs().getString("auto_phase", "").equals("COMPLETE_VISUAL"))
                                 throw new IllegalStateException("Aucun cycle automatique terminé");
                             q.finish(current.id, true);
                             ProfileStore.persist(this);
+                            prefs().edit().remove("auto_profile_id").commit();
                             refresh();
                         } catch (RuntimeException error) { toast(error.getMessage()); }
                     }).show();
@@ -388,7 +390,17 @@ public final class MainActivity extends Activity {
                             + "Autoriser ce cycle unique ?")
                     .setNegativeButton("Annuler", null)
                     .setPositiveButton("Autoriser le cycle", (d, w) -> {
+                        if (!ProfileStore.load(this).holdsActive(current.id,
+                                System.currentTimeMillis())) {
+                            toast("Bail de profil expiré : reconnecte et vérifie le compte.");
+                            return;
+                        }
+                        if (!prefs().edit().putString("auto_profile_id", current.id).commit()) {
+                            toast("Impossible de verrouiller le profil actif.");
+                            return;
+                        }
                         if (!GameBridgeService.startAutomaticRoute(directClanLink ? 1 : 0)) {
+                            prefs().edit().remove("auto_profile_id").commit();
                             toast("Cycle refusé : service Android ou calibrations manquantes.");
                             refresh(); return;
                         }
