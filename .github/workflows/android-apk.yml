@@ -27,7 +27,7 @@ jobs:
       - name: Vérifier les règles de sûreté (Java pur)
         run: |
           mkdir -p /tmp/reqngo-tests
-          javac -d /tmp/reqngo-tests android-app/app/src/main/java/com/reqngo/manager/ClanTag.java android-app/app/src/main/java/com/reqngo/manager/RequestJournal.java android-app/app/src/main/java/com/reqngo/manager/FrameFingerprint.java android-app/tests/FlowChecks.java
+          javac -d /tmp/reqngo-tests android-app/app/src/main/java/com/reqngo/manager/ClanTag.java android-app/app/src/main/java/com/reqngo/manager/RequestJournal.java android-app/app/src/main/java/com/reqngo/manager/FrameFingerprint.java android-app/app/src/main/java/com/reqngo/manager/GuidedRoute.java android-app/tests/FlowChecks.java
           java -cp /tmp/reqngo-tests FlowChecks
       - name: SDK Android du runner
         run: |
