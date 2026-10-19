@@ -153,11 +153,11 @@ public final class GameBridgeService extends AccessibilityService {
         s.capturePending = true;
         int generation = ++s.operationGeneration;
         s.report("Capture demandée : ouverture du jeu.");
-        s.main.postDelayed(() -> s.captureNow(generation), 2200);
+        s.main.postDelayed(() -> s.captureNow(generation, false), 2200);
         return true;
     }
 
-    private void captureNow(int generation) {
+    private void captureNow(int generation, boolean afterGestureOnly) {
         if (generation != operationGeneration) return;
         if (Build.VERSION.SDK_INT < 30 || !gameForeground()) {
             capturePending = false;
@@ -176,7 +176,7 @@ public final class GameBridgeService extends AccessibilityService {
                 try {
                     if (generation != operationGeneration || !gameForeground()) return;
                     frame = bitmapFromResult(result);
-                    if (phase() == RequestJournal.Phase.DISPATCHED_UNVERIFIED) {
+                    if (phase() == RequestJournal.Phase.DISPATCHED_UNVERIFIED || afterGestureOnly) {
                         store(frame, "post_action_capture.png");
                         FrameFingerprint.Score difference = compareWithReference(frame, -1, -1)[0];
                         prefs().edit().putString("comparison", String.format(Locale.ROOT,
@@ -196,7 +196,7 @@ public final class GameBridgeService extends AccessibilityService {
                 } catch (Exception e) {
                     report("Échec capture : " + e.getClass().getSimpleName());
                 } finally {
-                    capturePending = false;
+                    if (generation == operationGeneration) capturePending = false;
                     if (frame != null) frame.recycle();
                     result.getHardwareBuffer().close();
                 }
@@ -281,7 +281,7 @@ public final class GameBridgeService extends AccessibilityService {
                 gesturePending = false;
                 report("Geste envoyé. Capture de résultat en préparation...");
                 capturePending = true;
-                main.postDelayed(() -> captureNow(generation), 1000);
+                main.postDelayed(() -> captureNow(generation, true), 1000);
             }
             @Override public void onCancelled(GestureDescription description) {
                 if (generation != operationGeneration) return;
