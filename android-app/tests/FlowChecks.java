@@ -2,6 +2,7 @@ import com.reqngo.manager.ClanTag;
 import com.reqngo.manager.FrameFingerprint;
 import com.reqngo.manager.RequestJournal;
 import com.reqngo.manager.GuidedRoute;
+import com.reqngo.manager.RouteTarget;
 
 public final class FlowChecks {
     private static void check(boolean ok, String message) {
@@ -106,6 +107,24 @@ public final class FlowChecks {
                 "état corrompu bloqué");
         check(new GuidedRoute(GuidedRoute.SIZE, "READY").phase() == GuidedRoute.Phase.BLOCKED,
                 "index terminé sans preuve bloqué");
-        System.out.println("OK: tests de clan, journal, écran et parcours guidé");
+
+        // A target is tied to one stage, screen resolution and reference image.
+        String digest = "a".repeat(64), newDigest = "b".repeat(64);
+        RouteTarget point = new RouteTarget(2, 720, 1280, .325f, .775f, digest);
+        RouteTarget persisted = RouteTarget.decode(point.encode());
+        check(persisted.step == 2 && Math.abs(persisted.x - .325f) < .00001f,
+                "coordonnées enregistrées fidèlement");
+        check(persisted.validFor(2, 720, 1280, digest), "référence inchangée");
+        check(!persisted.validFor(2, 1080, 1920, digest), "résolution changée");
+        check(!persisted.validFor(3, 720, 1280, digest), "autre étape");
+        check(!persisted.validFor(2, 720, 1280, newDigest), "capture recalibrée");
+        mustFail(() -> new RouteTarget(0, 720, 1280, Float.NaN, .5f, digest));
+        mustFail(() -> new RouteTarget(0, 720, 1280, .5f, 1f, digest));
+        mustFail(() -> new RouteTarget(-1, 720, 1280, .5f, .5f, digest));
+        mustFail(() -> new RouteTarget(0, 720, 1280, .5f, .5f, "invalid"));
+        mustFail(() -> RouteTarget.decode("1|bad|720|.5|.5|" + digest));
+        mustFail(() -> RouteTarget.decode("0|720|1280|.5|.5|wrong"));
+        mustFail(() -> RouteTarget.decode(null));
+        System.out.println("OK: tests de clan, journal, écran, parcours et calibrations");
     }
 }
