@@ -48,6 +48,7 @@ public final class MainActivity extends Activity {
     private TextView fleetStatus;
     private TextView autoStatus;
     private EditText profileIdInput;
+    private int calibrationPreviewStep = -1;
     private long shownReferenceTime = -1L;
     private long selectedReferenceTime = -1L;
     private float selectedX = -1, selectedY = -1;
@@ -254,7 +255,15 @@ public final class MainActivity extends Activity {
         routeStatus.setPadding(dp(13), dp(13), dp(13), dp(13));
         routeStatus.setBackground(background(SURFACE, 0));
         screen.addView(routeStatus);
-        action("Mémoriser le bouton sélectionné pour cette étape", false, v -> saveGuidedTarget());
+        action("Choisir une référence et son bouton (1 à 4)", false,
+                v -> pickCalibrationPreview());
+        action("Enregistrer le bouton sélectionné", false, v -> saveGuidedTarget());
+        action("Revenir à la dernière capture", false, v -> {
+            calibrationPreviewStep = -1;
+            selectedX = -1;
+            selectedY = -1;
+            refresh();
+        });
         action("Exécuter UN geste avec le bouton calibré", true, v -> prepareGuidedStep());
         action("Vérifier et valider l'étape par la capture d'arrivée", false, v -> approveGuidedStep());
         action("Bloquer le parcours et annuler toute action en attente", false, v -> stopGuidedRoute());
@@ -517,14 +526,42 @@ public final class MainActivity extends Activity {
                 .putString("route_phase", route.phase().name()).commit();
     }
 
+    private void pickCalibrationPreview() {
+        new AlertDialog.Builder(this)
+                .setTitle("Sélectionner le bouton")
+                .setItems(GuidedRoute.TITLE, (dialog, which) -> {
+                    File source = ScreenCatalog.referenceFile(this, GuidedRoute.FROM[which]);
+                    Bitmap preview = BitmapFactory.decodeFile(source.getAbsolutePath());
+                    if (preview == null) {
+                        toast("Référence absente : " + GuidedRoute.FROM[which]);
+                        return;
+                    }
+                    calibrationPreviewStep = which;
+                    selectedX = -1;
+                    selectedY = -1;
+                    selectedReferenceTime = -1;
+                    screenshot.setImageBitmap(preview);
+                    pointLabel.setText("Étape " + (which + 1) + " : "
+                            + GuidedRoute.TITLE[which]
+                            + ". Choisis le centre du bouton sur l'image en section 03.");
+                    toast("Image affichée en section 03 : choisis le bouton, puis enregistre.");
+                }).show();
+    }
+
     private void saveGuidedTarget() {
         if (selectedX <= 0 || selectedY <= 0) {
             toast("Choisis d'abord le centre du bouton sur la capture."); return;
         }
         try {
-            GuidedRoute current = route();
-            RouteTarget point = RouteCalibrationStore.store(
-                    this, current, selectedX, selectedY, selectedReferenceTime);
+            RouteTarget point;
+            if (calibrationPreviewStep >= 0) {
+                point = RouteCalibrationStore.saveFromReference(
+                        this, calibrationPreviewStep, selectedX, selectedY);
+            } else {
+                GuidedRoute current = route();
+                point = RouteCalibrationStore.store(
+                        this, current, selectedX, selectedY, selectedReferenceTime);
+            }
             DiagnosticStore.record(this, DiagnosticTrail.Event.BUTTON_CALIBRATED);
             toast("Bouton enregistré pour l'étape " + (point.step + 1)
                     + " (" + Math.round(point.x * 100) + " %, "
@@ -858,6 +895,10 @@ public final class MainActivity extends Activity {
     }
 
     private void confirmTap() {
+        if (calibrationPreviewStep >= 0) {
+            toast("Reviens à la dernière capture avant d'essayer un geste libre.");
+            return;
+        }
         if (route().phase() == GuidedRoute.Phase.AWAITING_REVIEW) {
             toast("Étape guidée en cours : utilise sa validation, pas le geste libre."); return;
         }
@@ -960,6 +1001,16 @@ public final class MainActivity extends Activity {
         }
         File file = new File(getFilesDir(), "latest_game_capture.png");
         if (!file.isFile()) return;
+        if (calibrationPreviewStep >= 0) {
+            File reference = ScreenCatalog.referenceFile(this,
+                    GuidedRoute.FROM[calibrationPreviewStep]);
+            Bitmap preview = BitmapFactory.decodeFile(reference.getAbsolutePath());
+            if (preview != null) {
+                screenshot.setImageBitmap(preview);
+                return;
+            }
+            calibrationPreviewStep = -1;
+        }
         Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
         if (bitmap != null) screenshot.setImageBitmap(bitmap);
     }
