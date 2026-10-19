@@ -49,6 +49,12 @@ public final class GameBridgeService extends AccessibilityService {
 
     public static boolean connected() { return active != null; }
 
+    /** Allows a one-shot screen share to reject launcher/system-UI frames. */
+    public static boolean gameVisibleForCapture() {
+        GameBridgeService service = active;
+        return service != null && service.gameForeground();
+    }
+
     /**
      * Android keeps the accessibility permission when the service disconnects.
      * Distinguish "enabled in settings" from "actually connected in our process".
