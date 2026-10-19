@@ -434,6 +434,12 @@ public final class MainActivity extends Activity {
     }
 
     private void requestAlternativeCapture() {
+        CaptureGate.Reason readiness = GameBridgeService.captureReadiness(this);
+        if (readiness != CaptureGate.Reason.READY) {
+            toast(CaptureGate.explanation(readiness,
+                    GameBridgeService.enabledInSettings(this)));
+            return;
+        }
         new AlertDialog.Builder(this)
                 .setTitle("Capture alternative — autorisation Android")
                 .setMessage("Cette méthode utilise MediaProjection au lieu de la capture "
