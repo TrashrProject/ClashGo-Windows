@@ -27,5 +27,18 @@ public final class GameBlocker {
         }
     }
 
+    public static DiagnosticTrail.Event diagnosticEvent(String screenId) {
+        if (screenId == null) return null;
+        switch (screenId) {
+            case "clan_closed": return DiagnosticTrail.Event.GAME_CLAN_CLOSED;
+            case "clan_invitation": return DiagnosticTrail.Event.GAME_INVITATION;
+            case "join_pending": return DiagnosticTrail.Event.GAME_JOIN_PENDING;
+            case "request_cooldown": return DiagnosticTrail.Event.GAME_REQUEST_COOLDOWN;
+            case "castle_full": return DiagnosticTrail.Event.GAME_CASTLE_FULL;
+            case "connection_error": return DiagnosticTrail.Event.GAME_CONNECTION_ERROR;
+            default: return null;
+        }
+    }
+
     public static boolean isBlocker(String screenId) { return reason(screenId) != null; }
 }
