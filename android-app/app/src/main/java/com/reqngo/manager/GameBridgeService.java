@@ -37,6 +37,8 @@ public final class GameBridgeService extends AccessibilityService {
     private int operationGeneration = 0;
     private boolean autoRunning = false;
     private AutoRoutePolicy automatic = AutoRoutePolicy.fresh();
+    private int beforeMatches = 0;
+    private int afterMatches = 0;
 
     public static boolean connected() { return active != null; }
 
@@ -101,7 +103,7 @@ public final class GameBridgeService extends AccessibilityService {
         // Some games expose no accessibility tree. In this case require
         // a very recent WINDOW transition explicitly identifying the game.
         return GAME.equals(windowPackage)
-                && SystemClock.elapsedRealtime() - lastWindowTime < 10000;
+                && SystemClock.elapsedRealtime() - lastWindowTime < 30000;
     }
 
     private RequestJournal.Phase phase() {
@@ -342,6 +344,8 @@ public final class GameBridgeService extends AccessibilityService {
                     return false;
             }
             s.automatic = AutoRoutePolicy.fresh();
+            s.beforeMatches = 0;
+            s.afterMatches = 0;
             s.automatic.start(true, true);
             if (!s.persistAutomatic()) return false;
             s.autoRunning = true;
@@ -464,6 +468,14 @@ public final class GameBridgeService extends AccessibilityService {
             stopAutomaticInternal("Arrêt auto : état ou bouton non reconnu (" + detected.state + ").");
             return;
         }
+        // Two separate frames must agree before any automated gesture.
+        if (beforeMatches == 0) {
+            beforeMatches = 1;
+            main.postDelayed(() -> autoCapture(generation, false, 0), 350);
+            return;
+        }
+        beforeMatches = 0;
+        afterMatches = 0;
         automatic.verifiedBefore(detected.id, true, true);
         if (!persistAutomatic()) {
             stopAutomaticInternal("Arrêt auto : journal inaccessible."); return;
@@ -502,14 +514,24 @@ public final class GameBridgeService extends AccessibilityService {
             stopAutomaticInternal("Arrêt auto : résultat dans une phase inattendue."); return;
         }
         if (!automatic.after().equals(detected.id)) {
+            afterMatches = 0;
             // Re-observe only: NEVER repeat a tap whose effect is uncertain.
-            if (attempt < 2) {
-                main.postDelayed(() -> autoCapture(generation, true, attempt + 1), 950);
+            if (attempt < 4) {
+                main.postDelayed(() -> autoCapture(generation, true, attempt + 1), 800);
             } else {
                 stopAutomaticInternal("Arrêt auto : écran d'arrivée non confirmé (" + detected.state + ").");
             }
             return;
         }
+        if (afterMatches == 0) {
+            if (attempt >= 4) {
+                stopAutomaticInternal("Arrêt auto : état d'arrivée non stabilisé."); return;
+            }
+            afterMatches = 1;
+            main.postDelayed(() -> autoCapture(generation, true, attempt + 1), 350);
+            return;
+        }
+        afterMatches = 0;
         Bitmap evidence = BitmapFactory.decodeFile(
                 new File(getFilesDir(), "auto_frame.png").getAbsolutePath());
         if (evidence == null) {
