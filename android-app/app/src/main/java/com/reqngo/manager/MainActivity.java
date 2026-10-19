@@ -2,6 +2,8 @@ package com.reqngo.manager;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipboardManager;
+import android.content.ClipData;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
@@ -235,8 +237,32 @@ public final class MainActivity extends Activity {
         action("Bloquer le parcours et annuler toute action en attente", false, v -> stopGuidedRoute());
         action("Réinitialiser le parcours après examen", false, v -> restartGuidedRoute());
 
+        section("07  /  Diagnostic local", "Historique limité des captures, gestes et changements d'étape. Le rapport ne contient ni captures, ni tags de joueurs, ni données de connexion.");
+        action("Voir le rapport de diagnostic", false, v -> showDiagnostics());
+
         section("État du pilote", "Ce parcours est guidé, PAS autonome : aucune adhésion au clan, demande réussie ou changement de compte ne sont supposés. Les écrans réels doivent d'abord être calibrés sur MuMu. Automatiser le gameplay peut enfreindre les règles de Supercell.");
         refresh();
+    }
+
+    private void showDiagnostics() {
+        final String report = DiagnosticStore.report(this);
+        ScrollView view = new ScrollView(this);
+        TextView content = text(report, 12, TEXT);
+        content.setTextIsSelectable(true);
+        content.setPadding(dp(15), dp(14), dp(15), dp(14));
+        view.addView(content);
+        new AlertDialog.Builder(this)
+                .setTitle("Diagnostics REQ N GO (sans données de compte)")
+                .setView(view)
+                .setNegativeButton("Fermer", null)
+                .setPositiveButton("Copier le rapport", (dialog, which) -> {
+                    ClipboardManager clip = (ClipboardManager)
+                            getSystemService(CLIPBOARD_SERVICE);
+                    if (clip != null) {
+                        clip.setPrimaryClip(ClipData.newPlainText("REQ N GO diagnostic", report));
+                        toast("Rapport technique copié ; aucun identifiant ni image inclus.");
+                    }
+                }).show();
     }
 
     private GuidedRoute route() {
@@ -257,6 +283,7 @@ public final class MainActivity extends Activity {
             GuidedRoute current = route();
             RouteTarget point = RouteCalibrationStore.store(
                     this, current, selectedX, selectedY, selectedReferenceTime);
+            DiagnosticStore.record(this, DiagnosticTrail.Event.BUTTON_CALIBRATED);
             toast("Bouton enregistré pour l'étape " + (point.step + 1)
                     + " (" + Math.round(point.x * 100) + " %, "
                     + Math.round(point.y * 100) + " %).");
@@ -322,8 +349,10 @@ public final class MainActivity extends Activity {
                                 .putString("route_phase", live.phase().name())
                                 .putLong("route_started_ms", System.currentTimeMillis())
                                 .commit()) throw new IllegalStateException("Journal inaccessible");
+                        DiagnosticStore.record(this, DiagnosticTrail.Event.ROUTE_STEP_STARTED);
                         if (!GameBridgeService.armSingleTap(target.x, target.y)) {
                             live.block(); saveRoute(live);
+                            DiagnosticStore.record(this, DiagnosticTrail.Event.ROUTE_BLOCKED);
                             toast("Action refusée : parcours bloqué, aucune répétition automatique.");
                             refresh(); return;
                         }
@@ -393,6 +422,7 @@ public final class MainActivity extends Activity {
                                 .remove("route_started_ms").commit()) {
                             toast("Enregistrement impossible : ne pas continuer."); return;
                         }
+                        DiagnosticStore.record(this, DiagnosticTrail.Event.ROUTE_STEP_APPROVED);
                         toast("Étape revue et enregistrée. Capture le prochain écran pour continuer.");
                         refresh();
                     } catch (RuntimeException e) {
@@ -414,6 +444,7 @@ public final class MainActivity extends Activity {
                     prefs().edit().putInt("route_index", progress.index())
                             .putString("route_phase", progress.phase().name())
                             .putString("journal", "BLOCKED").commit();
+                    DiagnosticStore.record(this, DiagnosticTrail.Event.ROUTE_BLOCKED);
                     refresh();
                 }).show();
     }
@@ -426,7 +457,9 @@ public final class MainActivity extends Activity {
             toast("Bloque ou termine d'abord le parcours."); return;
         }
         if (j.phase() != RequestJournal.Phase.BLOCKED
-                && j.phase() != RequestJournal.Phase.CONFIRMED) {
+                && j.phase() != RequestJournal.Phase.CONFIRMED
+                && !(progress.phase() == GuidedRoute.Phase.COMPLETE
+                     && j.phase() == RequestJournal.Phase.READY)) {
             toast("Une action est incertaine : bloque-la et examine le jeu."); return;
         }
         new AlertDialog.Builder(this).setTitle("Nouvelle tentative")
@@ -444,6 +477,7 @@ public final class MainActivity extends Activity {
                                 .remove("route_started_ms").commit()) {
                             throw new IllegalStateException("Stockage inaccessible");
                         }
+                        DiagnosticStore.record(this, DiagnosticTrail.Event.ROUTE_RESET);
                         refresh();
                     } catch (RuntimeException error) {
                         toast("Impossible de redémarrer la séquence.");
@@ -475,6 +509,7 @@ public final class MainActivity extends Activity {
                                     if (time != prefs().getLong("capture_time", -1L))
                                         throw new IllegalStateException("La capture a changé");
                                     ScreenCatalog.save(this, id);
+                                    DiagnosticStore.record(this, DiagnosticTrail.Event.REFERENCE_RECORDED);
                                     detectedScreen.setText("État enregistré localement : "
                                             + ScreenCatalog.LABELS[which]);
                                 } catch (Exception e) {
