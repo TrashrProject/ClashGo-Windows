@@ -510,10 +510,18 @@ public final class GameBridgeService extends AccessibilityService {
             }
             return;
         }
+        Bitmap evidence = BitmapFactory.decodeFile(
+                new File(getFilesDir(), "auto_frame.png").getAbsolutePath());
+        if (evidence == null) {
+            stopAutomaticInternal("Arrêt auto : capture de preuve indisponible."); return;
+        }
         try {
-            store(BitmapFactory.decodeFile(new File(getFilesDir(), "auto_frame.png")
-                    .getAbsolutePath()), "post_action_capture.png");
-        } catch (Exception ignored) { /* Visual audit still available in auto_frame.png */ }
+            store(evidence, "post_action_capture.png");
+        } catch (Exception failure) {
+            stopAutomaticInternal("Arrêt auto : impossible de conserver la preuve."); return;
+        } finally {
+            evidence.recycle();
+        }
         automatic.verifiedAfter(detected.id);
         boolean finished = automatic.state() == AutoRoutePolicy.State.COMPLETE_VISUAL;
         if (!prefs().edit().putInt("auto_index", automatic.index())
