@@ -107,10 +107,7 @@ public final class ScreenCatalog {
             int w = saved.getWidth(), h = saved.getHeight();
             if (w != current.getWidth() || h != current.getHeight() || w < 20 || h < 20)
                 throw new IllegalStateException("Dimensions incompatibles");
-            int[] a = new int[w * h], b = new int[w * h];
-            saved.getPixels(a, 0, w, 0, 0, w, h);
-            current.getPixels(b, 0, w, 0, 0, w, h);
-            if (!FrameFingerprint.compare(a, b, w, h).similarEnoughForTap())
+            if (!BitmapSamples.full(saved, current).similarEnoughForTap())
                 throw new IllegalStateException("Recapture l'écran mémorisé avant de choisir sa zone");
         } finally {
             saved.recycle();
@@ -146,8 +143,7 @@ public final class ScreenCatalog {
         try {
             final int width = current.getWidth(), height = current.getHeight();
             if (width < 20 || height < 20) throw new IllegalStateException("Capture invalide");
-            int[] currentPixels = new int[width * height];
-            current.getPixels(currentPixels, 0, width, 0, 0, width, height);
+            int[] currentPixels = BitmapSamples.extract(current);
             double best = Double.POSITIVE_INFINITY, next = Double.POSITIVE_INFINITY;
             String bestName = "inconnu";
             String bestId = "unknown";
@@ -162,8 +158,7 @@ public final class ScreenCatalog {
                 if (stored == null) continue;
                 try {
                     if (stored.getWidth() != width || stored.getHeight() != height) continue;
-                    int[] referencePixels = new int[width * height];
-                    stored.getPixels(referencePixels, 0, width, 0, 0, width, height);
+                    int[] referencePixels = BitmapSamples.extract(stored);
                     // Only after explicit ROI calibration. The fallback remains
                     // full-frame comparison for uncalibrated screen types.
                     SharedPreferences p = prefs(context);
@@ -171,11 +166,13 @@ public final class ScreenCatalog {
                             && p.contains("roi_" + IDS[i] + "_y");
                     FrameFingerprint.Score score = roi
                             ? FrameFingerprint.compareNearTap(
-                                referencePixels, currentPixels, width, height,
+                                referencePixels, currentPixels,
+                                BitmapSamples.WIDTH, BitmapSamples.HEIGHT,
                                 p.getFloat("roi_" + IDS[i] + "_x", -1f),
                                 p.getFloat("roi_" + IDS[i] + "_y", -1f))
                             : FrameFingerprint.compare(
-                                referencePixels, currentPixels, width, height);
+                                referencePixels, currentPixels,
+                                BitmapSamples.WIDTH, BitmapSamples.HEIGHT);
                     if (score.averageDifference < best) {
                         next = best;
                         best = score.averageDifference;
