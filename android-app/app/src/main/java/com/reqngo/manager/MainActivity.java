@@ -381,8 +381,8 @@ public final class MainActivity extends Activity {
                     .setMessage("Profil logique : " + current.id
                             + (directClanLink ? "\\nFiche du clan par lien, puis 3 gestes au maximum. "
                                 : "\\nQuatre gestes au maximum. ")
-                            + "Les écrans et boutons nécessaires doivent être "
-                            + "sont calibrés. Arrêt à la première différence ou erreur. "
+                            + "Les écrans et boutons nécessaires doivent être calibrés. "
+                            + "Arrêt à la première différence ou erreur. "
                             + "Ne confirme jamais la réussite côté serveur. "
                             + "L'utilisation peut contrevenir aux règles de Supercell. "
                             + "Autoriser ce cycle unique ?")
