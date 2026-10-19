@@ -250,6 +250,7 @@ public final class MainActivity extends Activity {
             toast("Parcours non prêt : vérifie ou réinitialise l'étape en cours."); return;
         }
         if (selectedX < 0 || selectedY < 0 || selectedReferenceTime <= 0
+                || selectedReferenceTime > System.currentTimeMillis()
                 || selectedReferenceTime != prefs().getLong("capture_time", -1L)
                 || System.currentTimeMillis() - selectedReferenceTime > 120000) {
             toast("Capture récente et point de geste requis pour cette étape."); return;
@@ -273,9 +274,9 @@ public final class MainActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle("Étape " + (currentStep + 1) + " / " + GuidedRoute.SIZE)
                 .setMessage(GuidedRoute.TITLE[currentStep]
-                        + "\\nÉcran reconnu : " + identified.state
-                        + "\\nDestination attendue : " + route.expectedAfter()
-                        + "\\nAutoriser exactement un appui sur le point choisi ? "
+                        + "\nÉcran reconnu : " + identified.state
+                        + "\nDestination attendue : " + route.expectedAfter()
+                        + "\nAutoriser exactement un appui sur le point choisi ? "
                         + "Le résultat ne sera jamais considéré comme réussi automatiquement.")
                 .setNegativeButton("Annuler", null)
                 .setPositiveButton("Autoriser un geste", (dialog, which) -> {
@@ -340,7 +341,7 @@ public final class MainActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle("Confirmer le résultat dans Clash of Clans")
                 .setMessage("Capture d'arrivée : " + detected.state
-                        + "\\nVérifie MANUELLEMENT le clan, le bouton ou la demande dans le jeu. "
+                        + "\nVérifie MANUELLEMENT le clan, le bouton ou la demande dans le jeu. "
                         + "Une ressemblance visuelle ne prouve ni l'adhésion ni l'envoi. "
                         + "Confirmer explicitement que l'étape est réussie ?")
                 .setNegativeButton("Non, résultat incertain", null)
@@ -507,6 +508,9 @@ public final class MainActivity extends Activity {
     }
 
     private void confirmTap() {
+        if (route().phase() == GuidedRoute.Phase.AWAITING_REVIEW) {
+            toast("Étape guidée en cours : utilise sa validation, pas le geste libre."); return;
+        }
         if (selectedX < 0 || selectedY < 0 || selectedReferenceTime <= 0
                 || selectedReferenceTime != prefs().getLong("capture_time", -1L)) {
             toast("Choisis un point sur la capture de référence actuelle."); return;
@@ -528,6 +532,9 @@ public final class MainActivity extends Activity {
     }
 
     private void review(boolean success) {
+        if (route().phase() == GuidedRoute.Phase.AWAITING_REVIEW) {
+            toast("Valide ou bloque le parcours guidé dans sa section."); return;
+        }
         RequestJournal j = new RequestJournal(prefs().getString("journal", "BLOCKED"));
         try {
             if (success) j.confirmedByOperator();
@@ -538,6 +545,9 @@ public final class MainActivity extends Activity {
     }
 
     private void resetJournal() {
+        if (route().phase() == GuidedRoute.Phase.AWAITING_REVIEW) {
+            toast("Ne réarme pas pendant une étape guidée incertaine."); return;
+        }
         RequestJournal j = new RequestJournal(prefs().getString("journal", "BLOCKED"));
         try {
             j.reviewAndReset();
@@ -551,7 +561,7 @@ public final class MainActivity extends Activity {
         if (routeStatus != null) {
             GuidedRoute current = route();
             String states = current.index() < GuidedRoute.SIZE
-                    ? "\\nÉcran requis : " + current.expectedBefore()
+                    ? "\nÉcran requis : " + current.expectedBefore()
                         + " → " + current.expectedAfter()
                     : "\\nAucune autre étape";
             routeStatus.setText(current.summary() + states);
