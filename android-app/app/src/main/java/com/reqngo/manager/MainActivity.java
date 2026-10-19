@@ -14,6 +14,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.media.projection.MediaProjectionManager;
 import android.provider.Settings;
 import android.view.MotionEvent;
 import android.view.View;
@@ -28,6 +29,7 @@ import java.io.File;
 
 /** Native Android MVP. No simulated victory or account switching. */
 public final class MainActivity extends Activity {
+    private static final int PROJECTION_REQUEST = 4120;
     private static final int BG = Color.rgb(16, 18, 22);
     private static final int SURFACE = Color.rgb(28, 31, 37);
     private static final int TEXT = Color.rgb(236, 234, 230);
@@ -171,6 +173,8 @@ public final class MainActivity extends Activity {
                 toast("Clash of Clans Google Play introuvable.");
             }
         });
+        action("Capture alternative — partage d'écran Android", false,
+                v -> requestAlternativeCapture());
         action("Actualiser la capture", false, v -> refresh());
         captureNotice = text("État de la capture : en attente.", 13, MUTED);
         LinearLayout.LayoutParams noticeParams = new LinearLayout.LayoutParams(-1, -2);
@@ -427,6 +431,53 @@ public final class MainActivity extends Activity {
                         refresh();
                     }).show();
         } catch (RuntimeException error) { toast(error.getMessage()); }
+    }
+
+    private void requestAlternativeCapture() {
+        new AlertDialog.Builder(this)
+                .setTitle("Capture alternative — autorisation Android")
+                .setMessage("Cette méthode utilise MediaProjection au lieu de la capture "
+                        + "par accessibilité. Android demandera de partager l'écran. "
+                        + "Choisis « Écran entier » s'il propose plusieurs modes. "
+                        + "Le service prend une seule image après le retour dans Clash of Clans, "
+                        + "puis s'arrête. Aucune vidéo ni image n'est envoyée à un serveur.")
+                .setNegativeButton("Annuler", null)
+                .setPositiveButton("Autoriser via Android", (dialog, which) -> {
+                    try {
+                        MediaProjectionManager projection =
+                                (MediaProjectionManager)
+                                        getSystemService(MEDIA_PROJECTION_SERVICE);
+                        startActivityForResult(projection.createScreenCaptureIntent(),
+                                PROJECTION_REQUEST);
+                    } catch (RuntimeException error) {
+                        toast("Capture alternative indisponible : "
+                                + error.getClass().getSimpleName());
+                    }
+                }).show();
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != PROJECTION_REQUEST) return;
+        if (resultCode != RESULT_OK || data == null) {
+            toast("Partage d'écran refusé : aucune capture effectuée.");
+            return;
+        }
+        Intent capture = new Intent(this, AlternativeCaptureService.class)
+                .setAction(AlternativeCaptureService.ACTION_CAPTURE)
+                .putExtra(AlternativeCaptureService.EXTRA_RESULT_CODE, resultCode)
+                .putExtra(AlternativeCaptureService.EXTRA_RESULT_DATA, data);
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(capture);
+            else startService(capture);
+            if (!openGame()) {
+                stopService(new Intent(this, AlternativeCaptureService.class));
+                toast("Clash of Clans introuvable : capture alternative annulée.");
+            }
+        } catch (RuntimeException error) {
+            stopService(new Intent(this, AlternativeCaptureService.class));
+            toast("Partage d'écran impossible : " + error.getClass().getSimpleName());
+        }
     }
 
     private void showDiagnostics() {
