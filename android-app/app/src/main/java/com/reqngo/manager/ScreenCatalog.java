@@ -164,24 +164,30 @@ public final class ScreenCatalog {
                     SharedPreferences p = prefs(context);
                     boolean roi = p.contains("roi_" + IDS[i] + "_x")
                             && p.contains("roi_" + IDS[i] + "_y");
-                    FrameFingerprint.Score score = roi
+                    // Rank every state by the SAME full-frame metric.
+                    // Ranking one screenshot by its tiny ROI and another by
+                    // full-frame error is mathematically incomparable.
+                    FrameFingerprint.Score global = FrameFingerprint.compare(
+                            referencePixels, currentPixels,
+                            BitmapSamples.WIDTH, BitmapSamples.HEIGHT);
+                    FrameFingerprint.Score local = roi
                             ? FrameFingerprint.compareNearTap(
                                 referencePixels, currentPixels,
                                 BitmapSamples.WIDTH, BitmapSamples.HEIGHT,
                                 p.getFloat("roi_" + IDS[i] + "_x", -1f),
                                 p.getFloat("roi_" + IDS[i] + "_y", -1f))
-                            : FrameFingerprint.compare(
-                                referencePixels, currentPixels,
-                                BitmapSamples.WIDTH, BitmapSamples.HEIGHT);
-                    if (score.averageDifference < best) {
+                            : null;
+                    if (global.averageDifference < best) {
                         next = best;
-                        best = score.averageDifference;
+                        best = global.averageDifference;
                         bestName = LABELS[i];
                         bestId = IDS[i];
-                        bestValid = score.similarEnoughForTap();
-                        bestMethod = roi ? "zone stable" : "écran entier";
-                    } else if (score.averageDifference < next) {
-                        next = score.averageDifference;
+                        bestValid = roi
+                                ? local.similarEnoughForTap() && global.averageDifference <= .14
+                                : global.similarEnoughForTap();
+                        bestMethod = roi ? "écran entier + zone stable" : "écran entier";
+                    } else if (global.averageDifference < next) {
+                        next = global.averageDifference;
                     }
                 } finally {
                     stored.recycle();
