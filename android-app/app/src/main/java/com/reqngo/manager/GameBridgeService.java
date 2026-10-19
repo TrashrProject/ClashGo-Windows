@@ -418,6 +418,11 @@ public final class GameBridgeService extends AccessibilityService {
                     store(screenshot, "auto_frame.png");
                     ScreenCatalog.Result detected = ScreenCatalog.identifyAutomatic(
                             GameBridgeService.this);
+                    String blocker = GameBlocker.reason(detected.id);
+                    if (blocker != null) {
+                        stopAutomaticInternal("Arrêt auto : " + blocker);
+                        return;
+                    }
                     if (afterGesture) {
                         autoVerifyAfter(generation, detected, attempt);
                     } else {
