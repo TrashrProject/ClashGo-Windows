@@ -3,6 +3,7 @@ import com.reqngo.manager.FrameFingerprint;
 import com.reqngo.manager.RequestJournal;
 import com.reqngo.manager.GuidedRoute;
 import com.reqngo.manager.RouteTarget;
+import com.reqngo.manager.DiagnosticTrail;
 
 public final class FlowChecks {
     private static void check(boolean ok, String message) {
@@ -125,6 +126,24 @@ public final class FlowChecks {
         mustFail(() -> RouteTarget.decode("1|bad|720|.5|.5|" + digest));
         mustFail(() -> RouteTarget.decode("0|720|1280|.5|.5|wrong"));
         mustFail(() -> RouteTarget.decode(null));
-        System.out.println("OK: tests de clan, journal, écran, parcours et calibrations");
+        // Shareable diagnostics allow only enumerated events and bounded history.
+        String history = "";
+        for (int i = 0; i < 100; i++) {
+            history = DiagnosticTrail.append(history,
+                    DiagnosticTrail.Event.CAPTURE_SAVED, i % (GuidedRoute.SIZE + 1),
+                    1760000000000L + i);
+        }
+        check(DiagnosticTrail.parse(history).size() == DiagnosticTrail.MAX_EVENTS,
+                "diagnostic history bounded to 60 events");
+        check(!DiagnosticTrail.render(history, "READY", 1).contains("#P0LY"),
+                "report cannot accidentally contain clan tag");
+        check(DiagnosticTrail.parse("bad-data\\n1760000000000|CAPTURE_SAVED|2")
+                .size() == 1, "invalid history lines discarded");
+        check(DiagnosticTrail.render("", "HACKED", -12).contains("BLOCKED"),
+                "tampered state must fail closed");
+        mustFail(() -> DiagnosticTrail.append("", null, 0, 100L));
+        mustFail(() -> DiagnosticTrail.append("", DiagnosticTrail.Event.ROUTE_RESET, -1, 100L));
+        mustFail(() -> DiagnosticTrail.append("", DiagnosticTrail.Event.ROUTE_RESET, 0, -1L));
+        System.out.println("OK: tests de clan, journal, écran, parcours, calibrations et diagnostics");
     }
 }
