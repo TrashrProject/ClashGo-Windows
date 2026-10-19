@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <queries>
         <package android:name="com.supercell.clashofclans" />
         <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="https" android:host="link.clashofclans.com" /></intent>
@@ -13,6 +15,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service android:name=".AlternativeCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
         <service android:name=".GameBridgeService"
             android:label="@string/accessibility_name"
             android:description="@string/accessibility_description"
