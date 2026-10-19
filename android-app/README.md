@@ -1,4 +1,4 @@
-# REQ N GO — application Android native (V2.1 alpha, expérimental)
+# REQ N GO — application Android native (V2.2 alpha, expérimental)
 
 **Une APK Android native, et non un programme Windows ou une interface web.**
 
@@ -39,6 +39,16 @@
 - **Classement visuel corrigé** : les onze états sont classés sur une mesure plein écran comparable, une zone locale configurée sert de vérification complémentaire. Cela évite de comparer abusivement un petit rectangle d'une référence à l'écran entier d'une autre.
 - **Interruption Android** : arrêt du cycle ou blocage du geste armé si le service d'accessibilité est interrompu. Aucun geste incertain n'est relancé automatiquement.
 - **Tests synthétiques supplémentaires** : six cas d'erreur et leurs codes de diagnostic, identification et expiration du profil actif.
+
+### Correctif MuMu V2.2 — méthode de capture alternative avec consentement Android
+
+Le premier test réel sur MuMu a confirmé `SERVICE_CONNECTED`, puis deux `CAPTURE_REJECTED` à environ 2,2 secondes : le service Android fonctionne, mais `AccessibilityService.takeScreenshot()` a renvoyé une image presque entièrement noire.
+
+La V2.2 conserve cette méthode et ajoute un bouton **« Capture alternative — partage d'écran Android »** dans la section 03. Android affiche alors son dialogue natif MediaProjection : l'utilisateur doit autoriser volontairement la capture de l'**écran entier**. L'APK ouvre Clash of Clans, attend le rendu puis prend **une seule image** dans un service temporaire visible par notification. L'image reste dans le stockage privé de l'application. Aucune vidéo ni donnée n'est envoyée à un serveur. Le service s'arrête après une capture valide ou un délai de sécurité.
+
+La méthode alternative ne remplace pas l'accessibilité pour les gestes. Elle exige que Clash of Clans soit confirmé au premier plan ; un écran noir, une fenêtre inconnue ou une image non décodable n'écrase pas la référence précédente. Si **les deux** API Android renvoient du noir, il faudra comparer avec la fonction de capture d'écran native de MuMu, puis examiner la configuration graphique de l'émulateur. Cela ne prouve ni une incompatibilité définitive de MuMu ni une interdiction de capturer Clash of Clans.
+
+**Sécurité / Android 14+** : la nouvelle méthode utilise les permissions `FOREGROUND_SERVICE` et `FOREGROUND_SERVICE_MEDIA_PROJECTION`, avec `foregroundServiceType=mediaProjection`. Android demande son propre consentement à chaque essai ; aucun lancement silencieux ni enregistrement continu. Sur les Android plus anciens, la capture alternative peut être indisponible selon les limitations de la projection. Aucun essai MuMu de cette nouvelle API n'a encore été effectué.
 
 ### Limites : ne pas confondre avec le bot terminé
 
