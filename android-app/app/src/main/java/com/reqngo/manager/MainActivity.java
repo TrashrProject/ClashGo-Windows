@@ -1,0 +1,278 @@
+package com.reqngo.manager;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.graphics.Matrix;
+import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.provider.Settings;
+import android.view.MotionEvent;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+import android.widget.Toast;
+import java.io.File;
+
+/** Native Android MVP. No simulated victory or account switching. */
+public final class MainActivity extends Activity {
+    private static final int BG = Color.rgb(16, 18, 22);
+    private static final int SURFACE = Color.rgb(28, 31, 37);
+    private static final int TEXT = Color.rgb(236, 234, 230);
+    private static final int MUTED = Color.rgb(165, 169, 177);
+    private static final int RED = Color.rgb(169, 75, 80);
+    private LinearLayout screen;
+    private TextView status;
+    private TextView pointLabel;
+    private EditText clan;
+    private ImageView screenshot;
+    private float selectedX = -1, selectedY = -1;
+
+    private SharedPreferences prefs() {
+        return getSharedPreferences("local_preferences", MODE_PRIVATE);
+    }
+
+    private int dp(float value) {
+        return (int) (value * getResources().getDisplayMetrics().density + .5f);
+    }
+
+    private GradientDrawable background(int color, int stroke) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(color); d.setCornerRadius(dp(12));
+        if (stroke != 0) d.setStroke(dp(1), stroke);
+        return d;
+    }
+
+    private TextView text(String value, float size, int color) {
+        TextView t = new TextView(this);
+        t.setText(value); t.setTextSize(size); t.setTextColor(color);
+        t.setLineSpacing(dp(3), 1f);
+        return t;
+    }
+
+    private void section(String heading, String description) {
+        TextView title = text(heading, 18, TEXT);
+        title.setTypeface(null, 1);
+        LinearLayout.LayoutParams a = new LinearLayout.LayoutParams(-1, -2);
+        a.topMargin = dp(24);
+        screen.addView(title, a);
+        TextView desc = text(description, 13, MUTED);
+        LinearLayout.LayoutParams b = new LinearLayout.LayoutParams(-1, -2);
+        b.topMargin = dp(5);
+        screen.addView(desc, b);
+    }
+
+    private Button action(String label, boolean primary, View.OnClickListener listener) {
+        Button b = new Button(this);
+        b.setAllCaps(false); b.setText(label); b.setTextColor(TEXT);
+        b.setTextSize(14);
+        b.setBackground(background(primary ? RED : SURFACE, primary ? 0 : Color.rgb(63,67,72)));
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, dp(52));
+        p.topMargin = dp(11);
+        screen.addView(b, p);
+        b.setOnClickListener(listener);
+        return b;
+    }
+
+    private void toast(String value) { Toast.makeText(this, value, Toast.LENGTH_LONG).show(); }
+
+    @Override protected void onCreate(Bundle state) {
+        super.onCreate(state);
+        getWindow().setStatusBarColor(BG);
+        getWindow().setNavigationBarColor(BG);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        screen = new LinearLayout(this);
+        screen.setOrientation(LinearLayout.VERTICAL);
+        screen.setPadding(dp(22), dp(25), dp(22), dp(36));
+        scroll.addView(screen);
+        setContentView(scroll);
+
+        TextView brand = text("REQ N GO", 30, TEXT);
+        brand.setTypeface(null, 1);
+        screen.addView(brand);
+        TextView alpha = text("ANDROID  /  PREMIER PILOTE", 12, RED);
+        screen.addView(alpha);
+        TextView lead = text("Capture locale, accès rapide au clan et geste de test contrôlé. Aucune demande automatisée n'est encore validée.", 14, MUTED);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = dp(14);
+        screen.addView(lead, lp);
+
+        section("01  /  Autorisations", "Active volontairement le service Android. Il n'envoie aucun geste tant que tu ne confirmes pas une opération.");
+        action("Ouvrir les paramètres d'accessibilité", false, v ->
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        status = text("", 13, TEXT);
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, -2);
+        sp.topMargin = dp(12); sp.bottomMargin = dp(4);
+        status.setPadding(dp(14), dp(14), dp(14), dp(14));
+        status.setBackground(background(SURFACE, 0));
+        screen.addView(status, sp);
+
+        section("02  /  Clan cible", "Saisis le tag exact du clan. Le raccourci ouvre sa fiche : il ne contourne pas les conditions d'adhésion.");
+        clan = new EditText(this);
+        clan.setSingleLine(true);
+        clan.setTextSize(17);
+        clan.setTextColor(TEXT);
+        clan.setHintTextColor(MUTED);
+        clan.setHint("#TAG_DU_CLAN");
+        clan.setBackground(background(SURFACE, Color.rgb(63,67,72)));
+        clan.setPadding(dp(14), dp(12), dp(14), dp(12));
+        clan.setText(prefs().getString("clan_tag", ""));
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, dp(54));
+        cp.topMargin = dp(12);
+        screen.addView(clan, cp);
+        action("Enregistrer le clan", false, v -> saveTag());
+        action("Ouvrir la fiche du clan", true, v -> openClan());
+        action("Ouvrir Clash of Clans", false, v -> openGame());
+
+        section("03  /  Capture du jeu", "Android 11 minimum pour la capture par accessibilité. L'image reste dans le stockage privé de cette APK, jamais sur un serveur.");
+        action("Capturer le jeu (retour automatique)", true, v -> {
+            if (Build.VERSION.SDK_INT < 30) {
+                toast("La capture exige Android 11 ou plus sur MuMu."); return;
+            }
+            if (!GameBridgeService.captureAfterReturnToGame()) {
+                toast("Active d'abord le service Android."); return;
+            }
+            if (!openGame()) {
+                GameBridgeService.cancelPending();
+                toast("Clash of Clans Google Play introuvable.");
+            }
+        });
+        action("Actualiser la capture", false, v -> refresh());
+        screenshot = new ImageView(this);
+        screenshot.setAdjustViewBounds(true);
+        screenshot.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        screenshot.setBackground(background(SURFACE, Color.rgb(63,67,72)));
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(-1, dp(240));
+        ip.topMargin = dp(12);
+        screen.addView(screenshot, ip);
+        screenshot.setOnTouchListener((view, event) -> {
+            if (event.getAction() != MotionEvent.ACTION_UP || screenshot.getDrawable() == null) return true;
+            Matrix inverse = new Matrix();
+            if (!screenshot.getImageMatrix().invert(inverse)) return true;
+            float[] mapped = {event.getX() - screenshot.getPaddingLeft(),
+                    event.getY() - screenshot.getPaddingTop()};
+            inverse.mapPoints(mapped);
+            float width = screenshot.getDrawable().getIntrinsicWidth();
+            float height = screenshot.getDrawable().getIntrinsicHeight();
+            if (width <= 0 || height <= 0 || mapped[0] <= 0 || mapped[0] >= width
+                    || mapped[1] <= 0 || mapped[1] >= height) return true;
+            selectedX = mapped[0] / width;
+            selectedY = mapped[1] / height;
+            pointLabel.setText(String.format(java.util.Locale.ROOT,
+                    "Point choisi : %.1f %% × %.1f %%", selectedX * 100, selectedY * 100));
+            return true;
+        });
+
+        section("04  /  Appui de calibration", "Touche un point sur la capture puis confirme UN appui. Le jeu doit être au premier plan et la résolution identique. Ce n'est pas une demande automatique.");
+        pointLabel = text("Aucun point sélectionné", 13, MUTED);
+        screen.addView(pointLabel);
+        action("Envoyer un seul appui de test", true, v -> confirmTap());
+        action("Confirmer manuellement l'effet constaté", false, v -> review(true));
+        action("Signaler échec / résultat incertain", false, v -> review(false));
+        action("Réarmer après examen", false, v -> resetJournal());
+        action("ARRÊT : annuler toute action en attente", false, v -> {
+            GameBridgeService.cancelPending();
+            prefs().edit().putString("journal", "BLOCKED").commit();
+            refresh(); toast("Actions en attente annulées.");
+        });
+        section("État du pilote", "Pas de rotation de comptes, aucun import de session, aucune détection de demande fiable avant calibration de captures du jeu. Automatiser le gameplay peut enfreindre les règles de Supercell.");
+        refresh();
+    }
+
+    private boolean saveTag() {
+        try {
+            String tag = ClanTag.normalize(clan.getText().toString());
+            if (!prefs().edit().putString("clan_tag", tag).commit()) throw new IllegalStateException("Stockage indisponible");
+            clan.setText(tag);
+            toast("Clan enregistré : " + tag);
+            return true;
+        } catch (RuntimeException e) {
+            toast(e.getMessage()); return false;
+        }
+    }
+
+    private void openClan() {
+        if (!saveTag()) return;
+        try {
+            Uri uri = Uri.parse(ClanTag.profileUrl(clan.getText().toString()));
+            startActivity(new Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE));
+        } catch (Exception e) {
+            toast("Impossible d'ouvrir le lien. Utilise la recherche par tag dans le jeu.");
+        }
+    }
+
+    private boolean openGame() {
+        Intent launch = getPackageManager().getLaunchIntentForPackage(GameBridgeService.GAME);
+        if (launch == null) return false;
+        try { startActivity(launch); return true; }
+        catch (RuntimeException e) { return false; }
+    }
+
+    private void confirmTap() {
+        if (selectedX < 0 || selectedY < 0) {
+            toast("Sélectionne d'abord un point sur la capture."); return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Un seul geste Android")
+                .setMessage("Autoriser un appui sur le point choisi ? Le jeu sera ouvert. Un geste envoyé ne signifie PAS qu'une demande de renforts a réussi.")
+                .setNegativeButton("Annuler", null)
+                .setPositiveButton("Autoriser", (dialog, which) -> {
+                    if (!GameBridgeService.armSingleTap(selectedX, selectedY)) {
+                        toast("Geste bloqué : service, capture récente ou journal non prêt."); return;
+                    }
+                    if (!openGame()) {
+                        GameBridgeService.cancelPending();
+                        prefs().edit().putString("journal", "BLOCKED").commit();
+                        toast("Clash of Clans introuvable.");
+                    }
+                }).show();
+    }
+
+    private void review(boolean success) {
+        RequestJournal j = new RequestJournal(prefs().getString("journal", "BLOCKED"));
+        try {
+            if (success) j.confirmedByOperator();
+            else j.block();
+            prefs().edit().putString("journal", j.phase().name()).commit();
+            refresh();
+        } catch (IllegalStateException e) { toast(e.getMessage()); }
+    }
+
+    private void resetJournal() {
+        RequestJournal j = new RequestJournal(prefs().getString("journal", "BLOCKED"));
+        try {
+            j.reviewAndReset();
+            prefs().edit().putString("journal", j.phase().name()).commit();
+            refresh();
+        } catch (IllegalStateException e) { toast(e.getMessage()); }
+    }
+
+    private void refresh() {
+        if (status == null || screenshot == null) return;
+        String availability = GameBridgeService.connected() ? "Service activé" : "Service inactif";
+        String journal = prefs().getString("journal", "READY");
+        String message = prefs().getString("status", "En attente d'une première capture.");
+        status.setText(availability + "\nJournal : " + journal + "\n" + message);
+        File file = new File(getFilesDir(), "latest_game_capture.png");
+        if (!file.isFile()) return;
+        Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
+        if (bitmap != null) screenshot.setImageBitmap(bitmap);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (status != null && screenshot != null) refresh();
+    }
+}
