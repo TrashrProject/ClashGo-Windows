@@ -153,6 +153,12 @@ public final class AlternativeCaptureService extends Service {
             if (elapsed < WAIT_FOR_GAME_MS) return;
             if (elapsed - lastFrameAttempt < 450) return;
             lastFrameAttempt = elapsed;
+            if (!GameBridgeService.gameVisibleForCapture()) {
+                if (elapsed >= 9700)
+                    finish("Capture alternative annulée : Clash of Clans n'est pas confirmé "
+                            + "au premier plan. Vérifie l'accessibilité et relance le jeu.");
+                return;
+            }
 
             Image.Plane plane = image.getPlanes()[0];
             ByteBuffer bytes = plane.getBuffer();
