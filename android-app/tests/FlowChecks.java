@@ -137,7 +137,7 @@ public final class FlowChecks {
                 "diagnostic history bounded to 60 events");
         check(!DiagnosticTrail.render(history, "READY", 1).contains("#P0LY"),
                 "report cannot accidentally contain clan tag");
-        check(DiagnosticTrail.parse("bad-data\\n1760000000000|CAPTURE_SAVED|2")
+        check(DiagnosticTrail.parse("bad-data\n1760000000000|CAPTURE_SAVED|2")
                 .size() == 1, "invalid history lines discarded");
         check(DiagnosticTrail.render("", "HACKED", -12).contains("BLOCKED"),
                 "tampered state must fail closed");
