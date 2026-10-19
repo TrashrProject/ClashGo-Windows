@@ -1,6 +1,7 @@
 import com.reqngo.manager.AutoRoutePolicy;
 import com.reqngo.manager.GuidedRoute;
 import com.reqngo.manager.ProfileQueue;
+import com.reqngo.manager.GameBlocker;
 
 /** Regression checks for automatic visual flow and multi-profile isolation. */
 public final class AutomationFlowChecks {
@@ -67,6 +68,10 @@ public final class AutomationFlowChecks {
         fail(() -> fleet.operatorConfirmedLogin("ACC-002", 10_002));
         fleet.operatorConfirmedLogin(first.id, 10_002);
         check(fleet.acquire(10_003) == null, "only one active profile on this worker");
+        check(fleet.holdsActive(first.id, 10_003), "lease is active for selected profile");
+        check(!fleet.holdsActive("ACC-002", 10_003), "other profile cannot use active lease");
+        check(!fleet.holdsActive("ACC-001", 10_002 + ProfileQueue.LEASE_MS),
+                "expired profile lease stops operations");
         fleet.finish(first.id, true);
         ProfileQueue.Item second = fleet.acquire(10_004);
         check(second != null && second.id.equals("ACC-002"), "next after completion");
@@ -85,6 +90,15 @@ public final class AutomationFlowChecks {
                 "expired lease protected");
         fail(() -> ProfileQueue.decode("v1\nBAD|ACTIVE|oops\n"));
         fail(() -> ProfileQueue.decode("v1\nBAD|UNKNOWN|20\n"));
+
+        check(GameBlocker.isBlocker("request_cooldown"), "cooldown is blocking");
+        check(GameBlocker.isBlocker("join_pending"), "pending membership is blocking");
+        check(GameBlocker.isBlocker("castle_full"), "full castle is blocking");
+        check(GameBlocker.isBlocker("connection_error"), "network failure is blocking");
+        check(!GameBlocker.isBlocker("request_posted"), "submitted request is not an error");
+        for (String id : GameBlocker.IDS)
+            check(GameBlocker.reason(id) != null && !GameBlocker.reason(id).isEmpty(),
+                    "every blocker has an explanatory stop reason");
 
         ProfileQueue large = new ProfileQueue();
         for (int i = 0; i < 5000; i++) large.add("ACC_" + i);
