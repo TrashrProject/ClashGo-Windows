@@ -23,12 +23,21 @@ if defined ADB_BINARY set "ADB_CMD=%ADB_BINARY%"
 if not defined ADB_BINARY (
   where adb >nul 2>nul
   if errorlevel 1 (
-    if exist "C:\Program Files\BlueStacks_nxt\HD-Adb.exe" (
+    rem Only use ADB executables that actually exist on this computer.
+    rem MuMu installations vary by release, architecture and install location.
+    if exist "C:\Program Files\Netease\MuMu Player 12\shell\adb.exe" (
+      set "ADB_CMD=C:\Program Files\Netease\MuMu Player 12\shell\adb.exe"
+    ) else if exist "C:\Program Files\Netease\MuMuPlayer-12.0\shell\adb.exe" (
+      set "ADB_CMD=C:\Program Files\Netease\MuMuPlayer-12.0\shell\adb.exe"
+    ) else if exist "C:\Program Files\Netease\MuMu Player 12\nx_device\15.0\shell\adb.exe" (
+      set "ADB_CMD=C:\Program Files\Netease\MuMu Player 12\nx_device\15.0\shell\adb.exe"
+    ) else if exist "C:\Program Files (x86)\Nemu\vmonitor\bin\adb_server.exe" (
+      set "ADB_CMD=C:\Program Files (x86)\Nemu\vmonitor\bin\adb_server.exe"
+    ) else if exist "C:\Program Files\BlueStacks_nxt\HD-Adb.exe" (
       set "ADB_CMD=C:\Program Files\BlueStacks_nxt\HD-Adb.exe"
     ) else (
-      echo ERREUR : Ni adb ni HD-Adb.exe de BlueStacks 5 ne sont trouves.
-      echo Active Android Debug Bridge dans BlueStacks puis installe
-      echo les Android Platform Tools ou indique ADB_BINARY.
+      echo ERREUR : ADB introuvable dans le PATH et les dossiers usuels.
+      echo Definis ADB_BINARY vers le chemin exact de adb.exe de ton emulateur.
       goto :error
     )
   )
@@ -54,13 +63,26 @@ if /I "%ADB_CMD%"=="C:\Program Files\BlueStacks_nxt\HD-Adb.exe" (
 )
 echo Appareils Android disponibles :
 "%PYTHON%" -m reqngo.android.cli devices --adb "%ADB_CMD%"
-if errorlevel 1 goto :error
+if errorlevel 1 (
+  echo.
+  echo MuMu : verifie le port ADB reel dans le gestionnaire d'instances.
+  echo Connecte-le avec adb connect 127.0.0.1:PORT puis relance ce script.
+  echo N'utilise pas un port devine : il varie selon les versions et instances.
+  goto :error
+)
 
 echo.
 set "SERIAL="
 set /p "SERIAL=Copie ici le serial de TON appareil : "
 if not defined SERIAL (
   echo Aucun appareil selectionne.
+  goto :error
+)
+echo.
+echo Diagnostic lecture seule de l'appareil choisi...
+"%PYTHON%" -m reqngo.android.cli preflight --serial "%SERIAL%" --adb "%ADB_CMD%"
+if errorlevel 1 (
+  echo Le pilote reste bloque : corrige l'etat ADB ou le premier plan.
   goto :error
 )
 echo.
