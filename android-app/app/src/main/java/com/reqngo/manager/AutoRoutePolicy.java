@@ -30,8 +30,15 @@ public final class AutoRoutePolicy {
     public String after() { return index < GuidedRoute.SIZE ? GuidedRoute.TO[index] : "complete"; }
 
     public void start(boolean explicitConsent, boolean allReferencesPresent) {
-        if (state != State.IDLE || index != 0 || !explicitConsent || !allReferencesPresent)
+        startAt(0, explicitConsent, allReferencesPresent);
+    }
+
+    /** A deep link can skip opening the clan profile, never verification. */
+    public void startAt(int initialStep, boolean explicitConsent, boolean allReferencesPresent) {
+        if (state != State.IDLE || index != 0 || initialStep < 0
+                || initialStep >= GuidedRoute.SIZE || !explicitConsent || !allReferencesPresent)
             throw new IllegalStateException("Consentement et calibration nécessaires");
+        index = initialStep;
         state = State.CHECKING;
     }
 
