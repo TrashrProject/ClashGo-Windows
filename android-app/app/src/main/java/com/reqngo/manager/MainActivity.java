@@ -38,6 +38,7 @@ public final class MainActivity extends Activity {
     private ImageView screenshot;
     private ImageView postScreenshot;
     private TextView comparison;
+    private TextView detectedScreen;
     private long shownReferenceTime = -1L;
     private long selectedReferenceTime = -1L;
     private float selectedX = -1, selectedY = -1;
@@ -180,7 +181,16 @@ public final class MainActivity extends Activity {
             return true;
         });
 
-        section("04  /  Contrôle avant et après l'appui",
+        section("04  /  Calibration des cinq écrans",
+                "Sur MuMu, capture d'abord chaque étape réelle. Mémorise localement : village, fiche clan, chat, fenêtre de demande et demande publiée. L'application signale les ambiguïtés.");
+        action("Mémoriser la capture comme état connu", false, v -> chooseScreenState());
+        action("Identifier l'écran capturé", false, v -> identifyScreen());
+        detectedScreen = text("Aucun écran analysé.", 13, MUTED);
+        LinearLayout.LayoutParams detectedLp = new LinearLayout.LayoutParams(-1, -2);
+        detectedLp.topMargin = dp(10);
+        screen.addView(detectedScreen, detectedLp);
+
+        section("05  /  Contrôle avant et après l'appui",
                 "Touche un point de la capture. Avant le geste, l'APK recapture le jeu et bloque l'action si l'écran diffère trop. Le résultat sera photographié sans être déclaré réussi.");
         pointLabel = text("Aucun point sélectionné", 13, MUTED);
         screen.addView(pointLabel);
@@ -210,6 +220,60 @@ public final class MainActivity extends Activity {
         });
         section("État du pilote", "Pas de rotation de comptes, aucun import de session, aucune détection de demande fiable avant calibration de captures du jeu. Automatiser le gameplay peut enfreindre les règles de Supercell.");
         refresh();
+    }
+
+    private void chooseScreenState() {
+        long time = prefs().getLong("capture_time", 0L);
+        RequestJournal.Phase phase = new RequestJournal(
+                prefs().getString("journal", "BLOCKED")).phase();
+        if (time <= 0 || System.currentTimeMillis() - time > 120000
+                || phase == RequestJournal.Phase.ARMED
+                || phase == RequestJournal.Phase.DISPATCHED_UNVERIFIED) {
+            toast("Capture trop ancienne ou geste incertain : vérifie le jeu et recapture."); return;
+        }
+        new AlertDialog.Builder(this).setTitle("Quel écran du jeu ?")
+                .setItems(ScreenCatalog.LABELS, (dialog, which) -> {
+                    final String id = ScreenCatalog.IDS[which];
+                    new AlertDialog.Builder(this)
+                            .setTitle("Enregistrer cet état")
+                            .setMessage("La capture actuelle remplacera l'ancienne référence de « "
+                                    + ScreenCatalog.LABELS[which] +
+                                    " ». Vérifie qu'elle ne contient aucune connexion ou donnée sensible.")
+                            .setNegativeButton("Annuler", null)
+                            .setPositiveButton("Enregistrer", (d, index) -> {
+                                try {
+                                    ScreenCatalog.save(this, id);
+                                    detectedScreen.setText("État enregistré localement : "
+                                            + ScreenCatalog.LABELS[which]);
+                                } catch (Exception e) {
+                                    toast("Enregistrement impossible : " + e.getClass().getSimpleName());
+                                }
+                            }).show();
+                }).show();
+    }
+
+    private void identifyScreen() {
+        RequestJournal.Phase phase = new RequestJournal(
+                prefs().getString("journal", "BLOCKED")).phase();
+        if (phase == RequestJournal.Phase.ARMED
+                || phase == RequestJournal.Phase.DISPATCHED_UNVERIFIED) {
+            toast("Termine la revue du geste avant une autre calibration."); return;
+        }
+        try {
+            ScreenCatalog.Result result = ScreenCatalog.identify(this);
+            if (result.enrolled == 0) {
+                detectedScreen.setText("Aucun état enregistré : capture et mémorise les écrans de MuMu.");
+                return;
+            }
+            String difference = Double.isFinite(result.difference)
+                    ? String.format(java.util.Locale.ROOT, "%.2f %%", result.difference * 100)
+                    : "inconnue";
+            detectedScreen.setText("Écran probable : " + result.state
+                    + "\\nÉcart visuel : " + difference + " | Références : " + result.enrolled
+                    + "\\nIdentification indicative, pas une preuve de demande réussie.");
+        } catch (Exception e) {
+            toast("Identification impossible : " + e.getClass().getSimpleName());
+        }
     }
 
     private boolean saveTag() {
