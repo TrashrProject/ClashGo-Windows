@@ -1123,8 +1123,8 @@ public final class MainActivity extends Activity {
                     + CaptureGate.explanation(readiness, enabled)
                     + "\nDernier diagnostic : " + message);
         }
-        File file = new File(getFilesDir(), "latest_game_capture.png");
-        if (!file.isFile()) return;
+        // The current screenshot can be absent while previously saved
+        // references still exist. The preview must work in that situation.
         if (calibrationPreviewStep >= 0) {
             File reference = ScreenCatalog.referenceFile(this,
                     GuidedRoute.FROM[calibrationPreviewStep]);
@@ -1135,8 +1135,10 @@ public final class MainActivity extends Activity {
             }
             calibrationPreviewStep = -1;
         }
-        Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
-        if (bitmap != null) screenshot.setImageBitmap(bitmap);
+        File file = new File(getFilesDir(), "latest_game_capture.png");
+        Bitmap bitmap = file.isFile()
+                ? BitmapFactory.decodeFile(file.getAbsolutePath()) : null;
+        screenshot.setImageBitmap(bitmap);
     }
 
     @Override protected void onResume() {
