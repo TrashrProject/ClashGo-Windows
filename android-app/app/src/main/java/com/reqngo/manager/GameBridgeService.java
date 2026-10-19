@@ -146,17 +146,16 @@ public final class GameBridgeService extends AccessibilityService {
                 new File(getFilesDir(), "latest_game_capture.png").getAbsolutePath());
         if (reference == null) throw new IllegalStateException("Capture de référence absente");
         try {
-            int width = frame.getWidth(), height = frame.getHeight();
-            if (reference.getWidth() != width || reference.getHeight() != height) {
+            if (reference.getWidth() != frame.getWidth()
+                    || reference.getHeight() != frame.getHeight())
                 throw new IllegalStateException("Orientation modifiée");
-            }
-            int[] left = new int[width * height];
-            int[] right = new int[width * height];
-            reference.getPixels(left, 0, width, 0, 0, width, height);
-            frame.getPixels(right, 0, width, 0, 0, width, height);
-            FrameFingerprint.Score overall = FrameFingerprint.compare(left, right, width, height);
+            int[] left = BitmapSamples.extract(reference);
+            int[] right = BitmapSamples.extract(frame);
+            FrameFingerprint.Score overall = FrameFingerprint.compare(left, right,
+                    BitmapSamples.WIDTH, BitmapSamples.HEIGHT);
             FrameFingerprint.Score near = normalizedX > 0 && normalizedY > 0
-                    ? FrameFingerprint.compareNearTap(left, right, width, height,
+                    ? FrameFingerprint.compareNearTap(left, right,
+                            BitmapSamples.WIDTH, BitmapSamples.HEIGHT,
                             normalizedX, normalizedY) : null;
             return new FrameFingerprint.Score[]{ overall, near };
         } finally { reference.recycle(); }
@@ -448,11 +447,10 @@ public final class GameBridgeService extends AccessibilityService {
             int width = screenshot.getWidth(), height = screenshot.getHeight();
             if (reference.getWidth() != width || reference.getHeight() != height)
                 return false;
-            int[] baseline = new int[width * height];
-            int[] live = new int[width * height];
-            reference.getPixels(baseline, 0, width, 0, 0, width, height);
-            screenshot.getPixels(live, 0, width, 0, 0, width, height);
-            return FrameFingerprint.compareNearTap(baseline, live, width, height,
+            int[] baseline = BitmapSamples.extract(reference);
+            int[] live = BitmapSamples.extract(screenshot);
+            return FrameFingerprint.compareNearTap(baseline, live,
+                    BitmapSamples.WIDTH, BitmapSamples.HEIGHT,
                     x, y).similarEnoughForTap();
         } finally { reference.recycle(); }
     }
