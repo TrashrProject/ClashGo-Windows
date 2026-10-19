@@ -21,13 +21,20 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - name: Installer le SDK Android
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Vérifier les règles de sûreté (Java pur)
+        run: |
+          mkdir -p /tmp/reqngo-tests
+          javac -d /tmp/reqngo-tests android-app/app/src/main/java/com/reqngo/manager/ClanTag.java android-app/app/src/main/java/com/reqngo/manager/RequestJournal.java android-app/tests/FlowChecks.java
+          java -cp /tmp/reqngo-tests FlowChecks
+      - name: SDK Android du runner
+        run: |
+          sdkmanager --version
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Compiler et vérifier l'APK
+      - name: Compiler l'APK
         run: gradle -p android-app --no-daemon :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
