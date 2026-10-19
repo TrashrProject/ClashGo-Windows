@@ -49,6 +49,7 @@ public final class GameBridgeService extends AccessibilityService {
 
     @Override protected void onServiceConnected() {
         active = this;
+        DiagnosticStore.record(this, DiagnosticTrail.Event.SERVICE_CONNECTED);
         report("Service Android activé. Aucun geste automatique.");
     }
 
@@ -63,6 +64,7 @@ public final class GameBridgeService extends AccessibilityService {
     }
 
     @Override public void onInterrupt() {
+        DiagnosticStore.record(this, DiagnosticTrail.Event.SERVICE_INTERRUPTED);
         report("Service interrompu.");
     }
 
@@ -72,6 +74,7 @@ public final class GameBridgeService extends AccessibilityService {
         capturePending = false;
         if (active == this) active = null;
         main.removeCallbacksAndMessages(null);
+        DiagnosticStore.record(this, DiagnosticTrail.Event.SERVICE_STOPPED);
         report("Service arrêté.");
         super.onDestroy();
     }
@@ -99,6 +102,7 @@ public final class GameBridgeService extends AccessibilityService {
     }
 
     private void block(String explanation) {
+        DiagnosticStore.record(this, DiagnosticTrail.Event.GESTURE_BLOCKED);
         gesturePending = false;
         setPhase(RequestJournal.Phase.BLOCKED);
         report(explanation);
@@ -152,6 +156,7 @@ public final class GameBridgeService extends AccessibilityService {
                 || s.phase() == RequestJournal.Phase.ARMED) return false;
         s.capturePending = true;
         int generation = ++s.operationGeneration;
+        DiagnosticStore.record(s, DiagnosticTrail.Event.CAPTURE_REQUESTED);
         s.report("Capture demandée : ouverture du jeu.");
         s.main.postDelayed(() -> s.captureNow(generation, false), 2200);
         return true;
@@ -161,6 +166,7 @@ public final class GameBridgeService extends AccessibilityService {
         if (generation != operationGeneration) return;
         if (Build.VERSION.SDK_INT < 30 || !gameForeground()) {
             capturePending = false;
+            DiagnosticStore.record(this, DiagnosticTrail.Event.CAPTURE_REJECTED);
             report("Capture annulée : jeu non confirmé au premier plan.");
             return;
         }
@@ -168,6 +174,7 @@ public final class GameBridgeService extends AccessibilityService {
             @Override public void onFailure(int code) {
                 if (generation != operationGeneration) return;
                 capturePending = false;
+                DiagnosticStore.record(GameBridgeService.this, DiagnosticTrail.Event.CAPTURE_REJECTED);
                 report("Capture Android refusée (code " + code + ").");
             }
 
@@ -178,6 +185,7 @@ public final class GameBridgeService extends AccessibilityService {
                     frame = bitmapFromResult(result);
                     if (phase() == RequestJournal.Phase.DISPATCHED_UNVERIFIED || afterGestureOnly) {
                         store(frame, "post_action_capture.png");
+                        DiagnosticStore.record(GameBridgeService.this, DiagnosticTrail.Event.CAPTURE_SAVED);
                         FrameFingerprint.Score difference = compareWithReference(frame, -1, -1)[0];
                         prefs().edit().putString("comparison", String.format(Locale.ROOT,
                                 "Différence moyenne %.1f %% ; pixels modifiés %.1f %% — succès du jeu NON établi.",
@@ -185,6 +193,7 @@ public final class GameBridgeService extends AccessibilityService {
                         report("Capture après le geste enregistrée ; vérification humaine nécessaire.");
                     } else if (phase() != RequestJournal.Phase.ARMED) {
                         store(frame, "latest_game_capture.png");
+                        DiagnosticStore.record(GameBridgeService.this, DiagnosticTrail.Event.CAPTURE_SAVED);
                         new File(getFilesDir(), "post_action_capture.png").delete();
                         prefs().edit().putLong("capture_time", System.currentTimeMillis())
                                 .putInt("capture_width", frame.getWidth())
@@ -216,6 +225,7 @@ public final class GameBridgeService extends AccessibilityService {
                 || !s.setPhase(RequestJournal.Phase.ARMED)) return false;
         s.gesturePending = true;
         int generation = ++s.operationGeneration;
+        DiagnosticStore.record(s, DiagnosticTrail.Event.GESTURE_ARMED);
         s.report("Geste armé : contrôle de l'écran avant le toucher.");
         s.main.postDelayed(() -> s.verifyBeforeTap(generation, x, y), 2200);
         return true;
@@ -279,6 +289,7 @@ public final class GameBridgeService extends AccessibilityService {
             @Override public void onCompleted(GestureDescription description) {
                 if (generation != operationGeneration) return;
                 gesturePending = false;
+                DiagnosticStore.record(GameBridgeService.this, DiagnosticTrail.Event.GESTURE_SENT);
                 report("Geste envoyé. Capture de résultat en préparation...");
                 capturePending = true;
                 main.postDelayed(() -> captureNow(generation, true), 1000);
@@ -286,6 +297,7 @@ public final class GameBridgeService extends AccessibilityService {
             @Override public void onCancelled(GestureDescription description) {
                 if (generation != operationGeneration) return;
                 gesturePending = false;
+                DiagnosticStore.record(GameBridgeService.this, DiagnosticTrail.Event.GESTURE_CANCELLED);
                 report("Geste annulé ; état du jeu incertain, aucune répétition.");
             }
         }, main)) {
