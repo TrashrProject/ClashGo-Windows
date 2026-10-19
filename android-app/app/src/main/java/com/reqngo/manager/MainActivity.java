@@ -38,6 +38,7 @@ public final class MainActivity extends Activity {
     private TextView pointLabel;
     private EditText clan;
     private ImageView screenshot;
+    private TextView captureNotice;
     private ImageView postScreenshot;
     private TextView comparison;
     private TextView detectedScreen;
@@ -152,8 +153,18 @@ public final class MainActivity extends Activity {
             if (Build.VERSION.SDK_INT < 30) {
                 toast("La capture exige Android 11 ou plus sur MuMu."); return;
             }
+            CaptureGate.Reason availability = GameBridgeService.captureReadiness(this);
+            if (availability != CaptureGate.Reason.READY) {
+                toast(CaptureGate.explanation(availability,
+                        GameBridgeService.enabledInSettings(this)));
+                refresh();
+                return;
+            }
             if (!GameBridgeService.captureAfterReturnToGame()) {
-                toast("Active d'abord le service Android."); return;
+                toast(CaptureGate.explanation(GameBridgeService.captureReadiness(this),
+                        GameBridgeService.enabledInSettings(this)));
+                refresh();
+                return;
             }
             if (!openGame()) {
                 GameBridgeService.cancelPending();
@@ -161,6 +172,10 @@ public final class MainActivity extends Activity {
             }
         });
         action("Actualiser la capture", false, v -> refresh());
+        captureNotice = text("État de la capture : en attente.", 13, MUTED);
+        LinearLayout.LayoutParams noticeParams = new LinearLayout.LayoutParams(-1, -2);
+        noticeParams.topMargin = dp(10);
+        screen.addView(captureNotice, noticeParams);
         screenshot = new ImageView(this);
         screenshot.setAdjustViewBounds(true);
         screenshot.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -872,10 +887,20 @@ public final class MainActivity extends Activity {
             Bitmap later = post.isFile() ? BitmapFactory.decodeFile(post.getAbsolutePath()) : null;
             postScreenshot.setImageBitmap(later);
         }
-        String availability = GameBridgeService.connected() ? "Service activé" : "Service inactif";
+        boolean enabled = GameBridgeService.enabledInSettings(this);
+        String availability = GameBridgeService.connected()
+                ? "Service connecté à REQ N GO"
+                : (enabled ? "Service autorisé, mais non connecté"
+                           : "Service non activé dans Android");
         String journal = prefs().getString("journal", "READY");
         String message = prefs().getString("status", "En attente d'une première capture.");
         status.setText(availability + "\nJournal : " + journal + "\n" + message);
+        if (captureNotice != null) {
+            CaptureGate.Reason readiness = GameBridgeService.captureReadiness(this);
+            captureNotice.setText("Capture : "
+                    + CaptureGate.explanation(readiness, enabled)
+                    + "\nDernier diagnostic : " + message);
+        }
         File file = new File(getFilesDir(), "latest_game_capture.png");
         if (!file.isFile()) return;
         Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
