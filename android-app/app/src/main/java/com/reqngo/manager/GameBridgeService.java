@@ -165,7 +165,8 @@ public final class GameBridgeService extends AccessibilityService {
     /** Operator-requested capture: keep reference untouched during unresolved gestures. */
     public static boolean captureAfterReturnToGame() {
         GameBridgeService s = active;
-        if (s == null || Build.VERSION.SDK_INT < 30 || s.autoRunning
+        if (startIndex < 0 || startIndex > 1
+                || s == null || Build.VERSION.SDK_INT < 30 || s.autoRunning
                 || s.capturePending || s.gesturePending
                 || s.phase() == RequestJournal.Phase.ARMED) return false;
         s.capturePending = true;
@@ -327,6 +328,11 @@ public final class GameBridgeService extends AccessibilityService {
      * account switching. Stops on any unknown/ambiguous screen.
      */
     public static boolean startAutomaticRoute() {
+        return startAutomaticRoute(0);
+    }
+
+    /** startIndex=1 is allowed only after opening the clan profile deep link. */
+    public static boolean startAutomaticRoute(int startIndex) {
         GameBridgeService s = active;
         if (s == null || Build.VERSION.SDK_INT < 30 || s.autoRunning
                 || s.capturePending || s.gesturePending
@@ -338,7 +344,7 @@ public final class GameBridgeService extends AccessibilityService {
             int width = s.prefs().getInt("capture_width", 0);
             int height = s.prefs().getInt("capture_height", 0);
             if (width < 20 || height < 20) return false;
-            for (int step = 0; step < GuidedRoute.SIZE; step++) {
+            for (int step = startIndex; step < GuidedRoute.SIZE; step++) {
                 RouteCalibrationStore.loadForAutomaticStep(s, step, width, height);
                 if (!ScreenCatalog.referenceFile(s, GuidedRoute.TO[step]).isFile())
                     return false;
@@ -346,8 +352,10 @@ public final class GameBridgeService extends AccessibilityService {
             s.automatic = AutoRoutePolicy.fresh();
             s.beforeMatches = 0;
             s.afterMatches = 0;
-            s.automatic.start(true, true);
-            if (!s.persistAutomatic()) return false;
+            s.automatic.startAt(startIndex, true, true);
+            if (!s.prefs().edit().putInt("auto_index", s.automatic.index())
+                    .putString("auto_phase", s.automatic.state().name())
+                    .putInt("route_index", startIndex).commit()) return false;
             s.autoRunning = true;
             int generation = ++s.operationGeneration;
             s.report("Cycle automatique de test autorisé. Arrêt sur toute incertitude.");
