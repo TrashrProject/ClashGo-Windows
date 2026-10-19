@@ -13,7 +13,7 @@ from reqngo.android.vision import TemplateVision, VisionError
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="REQ N GO Android pilot (opt-in)")
-    parser.add_argument("command", choices=("devices", "inspect", "dry-run", "execute", "resume", "capture"))
+    parser.add_argument("command", choices=("devices", "preflight", "inspect", "dry-run", "execute", "resume", "capture"))
     parser.add_argument("--serial", help="Identifiant ADB precis, jamais choisi automatiquement")
     parser.add_argument("--adb", default=os.environ.get("ADB_BINARY", "adb"))
     parser.add_argument("--manifest", help="References de reconnaissance visuelle calibre")
@@ -23,12 +23,32 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     if args.command == "devices":
-        for device in AdbClient.devices(adb_binary=args.adb):
+        ready = AdbClient.devices(adb_binary=args.adb)
+        if not ready:
+            print("Aucun appareil ADB en ligne. Lance MuMu/BlueStacks, active ADB et connecte son port reel.", file=sys.stderr)
+            return 2
+        for device in ready:
             print(device)
         return 0
     if not args.serial:
         parser.error("--serial obligatoire")
     client = AdbClient(args.serial, adb_binary=args.adb)
+    if args.command == "preflight":
+        # Read-only; no screenshots written, taps, account access or auto-selected device.
+        if client.serial not in AdbClient.devices(adb_binary=args.adb):
+            raise AdbError("Serial ADB non connecte. Choisis un serial affiche par 'devices'.")
+        if not client.game_running():
+            raise AdbError("Clash of Clans n'est pas lance sur l'appareil choisi.")
+        if not client.game_foreground():
+            raise AdbError("Clash of Clans n'est pas confirme au premier plan. Ouvre le village sans fenetre superposee.")
+        first = client.screenshot()
+        second = client.screenshot()
+        if (first.width, first.height) != (second.width, second.height):
+            raise AdbError("Resolution Android instable entre deux captures; calibration refusee.")
+        print("PREFLIGHT OK : ADB, jeu actif, premier plan et deux captures PNG.")
+        print("Resolution :", first.width, "x", first.height)
+        print("Aucun geste envoye. La reconnaissance des etats reste a calibrer.")
+        return 0
     if args.command == "capture":
         if not args.output or Path(args.output).suffix.lower() != ".png":
             parser.error("--output doit nommer un nouveau fichier .png local")
