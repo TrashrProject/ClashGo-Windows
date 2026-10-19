@@ -1,6 +1,7 @@
 package com.reqngo.manager;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 
@@ -25,19 +26,26 @@ public final class ScreenCatalog {
 
     private ScreenCatalog() { }
 
+    private static SharedPreferences prefs(Context context) {
+        return context.getSharedPreferences("local_preferences", Context.MODE_PRIVATE);
+    }
+
     public static final class Result {
         public final String state;
         public final String id;
         public final double difference;
         public final double runnerUpMargin;
         public final int enrolled;
+        public final String method;
 
-        Result(String state, String id, double difference, double margin, int enrolled) {
+        Result(String state, String id, double difference, double margin,
+               int enrolled, String method) {
             this.state = state;
             this.id = id;
             this.difference = difference;
             this.runnerUpMargin = margin;
             this.enrolled = enrolled;
+            this.method = method;
         }
     }
 
@@ -70,6 +78,44 @@ public final class ScreenCatalog {
             pending.delete();
             throw new IllegalStateException("Impossible de conserver cet état");
         }
+        // Reference replacement changes the meaning of its ROI.
+        prefs(context).edit().remove("roi_" + id + "_x")
+                .remove("roi_" + id + "_y").commit();
+    }
+
+    /**
+     * Anchor on a visually stable area selected by the operator; used only
+     * for classification, never to authorize or target a touch directly.
+     */
+    public static void setAnchor(Context context, String id, float x, float y) throws Exception {
+        File reference = referenceFile(context, id);
+        if (!reference.isFile() || !Float.isFinite(x) || !Float.isFinite(y)
+                || x <= .10f || x >= .90f || y <= .10f || y >= .90f) {
+            throw new IllegalArgumentException("Zone ou référence invalide (éviter les bords)");
+        }
+        // Confirm that the selected point was taken on this exact reference.
+        Bitmap saved = BitmapFactory.decodeFile(reference.getAbsolutePath());
+        Bitmap current = BitmapFactory.decodeFile(
+                new File(context.getFilesDir(), "latest_game_capture.png").getAbsolutePath());
+        if (saved == null || current == null)
+            throw new IllegalStateException("Capture de référence non disponible");
+        try {
+            int w = saved.getWidth(), h = saved.getHeight();
+            if (w != current.getWidth() || h != current.getHeight() || w < 20 || h < 20)
+                throw new IllegalStateException("Dimensions incompatibles");
+            int[] a = new int[w * h], b = new int[w * h];
+            saved.getPixels(a, 0, w, 0, 0, w, h);
+            current.getPixels(b, 0, w, 0, 0, w, h);
+            if (!FrameFingerprint.compare(a, b, w, h).similarEnoughForTap())
+                throw new IllegalStateException("Recapture l'écran mémorisé avant de choisir sa zone");
+        } finally {
+            saved.recycle();
+            current.recycle();
+        }
+        if (!prefs(context).edit().putFloat("roi_" + id + "_x", x)
+                .putFloat("roi_" + id + "_y", y).commit()) {
+            throw new IllegalStateException("Enregistrement de zone refusé");
+        }
     }
 
     /**
@@ -97,6 +143,7 @@ public final class ScreenCatalog {
             String bestName = "inconnu";
             String bestId = "unknown";
             boolean bestValid = false;
+            String bestMethod = "globale";
             int enrolled = 0;
             for (int i = 0; i < IDS.length; i++) {
                 File reference = referenceFile(context, IDS[i]);
@@ -108,14 +155,25 @@ public final class ScreenCatalog {
                     if (stored.getWidth() != width || stored.getHeight() != height) continue;
                     int[] referencePixels = new int[width * height];
                     stored.getPixels(referencePixels, 0, width, 0, 0, width, height);
-                    FrameFingerprint.Score score = FrameFingerprint.compare(
-                            referencePixels, currentPixels, width, height);
+                    // Only after explicit ROI calibration. The fallback remains
+                    // full-frame comparison for uncalibrated screen types.
+                    SharedPreferences p = prefs(context);
+                    boolean roi = p.contains("roi_" + IDS[i] + "_x")
+                            && p.contains("roi_" + IDS[i] + "_y");
+                    FrameFingerprint.Score score = roi
+                            ? FrameFingerprint.compareNearTap(
+                                referencePixels, currentPixels, width, height,
+                                p.getFloat("roi_" + IDS[i] + "_x", -1f),
+                                p.getFloat("roi_" + IDS[i] + "_y", -1f))
+                            : FrameFingerprint.compare(
+                                referencePixels, currentPixels, width, height);
                     if (score.averageDifference < best) {
                         next = best;
                         best = score.averageDifference;
                         bestName = LABELS[i];
                         bestId = IDS[i];
                         bestValid = score.similarEnoughForTap();
+                        bestMethod = roi ? "zone stable" : "écran entier";
                     } else if (score.averageDifference < next) {
                         next = score.averageDifference;
                     }
@@ -128,7 +186,7 @@ public final class ScreenCatalog {
                 bestName = "inconnu / ambigu";
                 bestId = "unknown";
             }
-            return new Result(bestName, bestId, best, margin, enrolled);
+            return new Result(bestName, bestId, best, margin, enrolled, bestMethod);
         } finally {
             current.recycle();
         }
