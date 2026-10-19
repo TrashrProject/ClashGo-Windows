@@ -35,6 +35,8 @@ public final class GameBridgeService extends AccessibilityService {
     private boolean gesturePending = false;
     private boolean capturePending = false;
     private int operationGeneration = 0;
+    private boolean autoRunning = false;
+    private AutoRoutePolicy automatic = AutoRoutePolicy.fresh();
 
     public static boolean connected() { return active != null; }
 
@@ -49,6 +51,14 @@ public final class GameBridgeService extends AccessibilityService {
 
     @Override protected void onServiceConnected() {
         active = this;
+        // An unexpected process restart must not replay an unverified touch.
+        String previous = prefs().getString("auto_phase", "IDLE");
+        if (previous.equals("CHECKING") || previous.equals("IN_FLIGHT")
+                || previous.equals("VERIFYING")) {
+            prefs().edit().putString("auto_phase", "BLOCKED")
+                    .putString("journal", "BLOCKED")
+                    .putString("route_phase", "BLOCKED").commit();
+        }
         DiagnosticStore.record(this, DiagnosticTrail.Event.SERVICE_CONNECTED);
         report("Service Android activé. Aucun geste automatique.");
     }
@@ -69,6 +79,7 @@ public final class GameBridgeService extends AccessibilityService {
     }
 
     @Override public void onDestroy() {
+        if (autoRunning) stopAutomaticInternal("Service Android arrêté pendant le parcours.");
         operationGeneration++;
         gesturePending = false;
         capturePending = false;
@@ -152,7 +163,8 @@ public final class GameBridgeService extends AccessibilityService {
     /** Operator-requested capture: keep reference untouched during unresolved gestures. */
     public static boolean captureAfterReturnToGame() {
         GameBridgeService s = active;
-        if (s == null || Build.VERSION.SDK_INT < 30 || s.capturePending || s.gesturePending
+        if (s == null || Build.VERSION.SDK_INT < 30 || s.autoRunning
+                || s.capturePending || s.gesturePending
                 || s.phase() == RequestJournal.Phase.ARMED) return false;
         s.capturePending = true;
         int generation = ++s.operationGeneration;
@@ -216,7 +228,8 @@ public final class GameBridgeService extends AccessibilityService {
     /** A tap is possible only after a new frame confirms the calibrated screen. */
     public static boolean armSingleTap(float x, float y) {
         GameBridgeService s = active;
-        if (s == null || Build.VERSION.SDK_INT < 30 || s.capturePending || s.gesturePending
+        if (s == null || Build.VERSION.SDK_INT < 30 || s.autoRunning
+                || s.capturePending || s.gesturePending
                 || !Float.isFinite(x) || !Float.isFinite(y)
                 || x <= 0 || x >= 1 || y <= 0 || y >= 1) return false;
         long captured = s.prefs().getLong("capture_time", 0L);
@@ -306,6 +319,219 @@ public final class GameBridgeService extends AccessibilityService {
         }
     }
 
+    /**
+     * EXPERIMENTAL: executes one previously calibrated four-transition route
+     * with a single explicit session-wide opt-in. Never handles login or
+     * account switching. Stops on any unknown/ambiguous screen.
+     */
+    public static boolean startAutomaticRoute() {
+        GameBridgeService s = active;
+        if (s == null || Build.VERSION.SDK_INT < 30 || s.autoRunning
+                || s.capturePending || s.gesturePending
+                || s.phase() != RequestJournal.Phase.READY
+                || s.prefs().getInt("route_index", -1) != 0
+                || !s.prefs().getString("route_phase", "").equals("READY")
+                || !s.prefs().getString("auto_phase", "IDLE").equals("IDLE")) return false;
+        try {
+            int width = s.prefs().getInt("capture_width", 0);
+            int height = s.prefs().getInt("capture_height", 0);
+            if (width < 20 || height < 20) return false;
+            for (int step = 0; step < GuidedRoute.SIZE; step++) {
+                RouteCalibrationStore.loadForAutomaticStep(s, step, width, height);
+                if (!ScreenCatalog.referenceFile(s, GuidedRoute.TO[step]).isFile())
+                    return false;
+            }
+            s.automatic = AutoRoutePolicy.fresh();
+            s.automatic.start(true, true);
+            if (!s.persistAutomatic()) return false;
+            s.autoRunning = true;
+            int generation = ++s.operationGeneration;
+            s.report("Cycle automatique de test autorisé. Arrêt sur toute incertitude.");
+            s.main.postDelayed(() -> s.autoCapture(generation, false, 0), 2200);
+            return true;
+        } catch (Exception failure) {
+            s.report("Parcours automatique non calibré : vérifie les cinq écrans et boutons.");
+            return false;
+        }
+    }
+
+    public static void resetAutomaticAfterReview() {
+        GameBridgeService s = active;
+        if (s == null || s.autoRunning) return;
+        s.automatic = AutoRoutePolicy.fresh();
+        s.prefs().edit().putInt("auto_index", 0).putString("auto_phase", "IDLE").commit();
+    }
+
+    private boolean persistAutomatic() {
+        return prefs().edit().putInt("auto_index", automatic.index())
+                .putString("auto_phase", automatic.state().name()).commit();
+    }
+
+    private void stopAutomaticInternal(String cause) {
+        autoRunning = false;
+        automatic.block();
+        operationGeneration++; // invalidate ALL async screenshot/gesture callbacks
+        main.removeCallbacksAndMessages(null);
+        gesturePending = false;
+        capturePending = false;
+        prefs().edit().putInt("auto_index", automatic.index())
+                .putString("auto_phase", "BLOCKED")
+                .putString("route_phase", "BLOCKED")
+                .putString("journal", "BLOCKED").commit();
+        DiagnosticStore.record(this, DiagnosticTrail.Event.ROUTE_BLOCKED);
+        report(cause);
+    }
+
+    public static void stopAutomatic() {
+        GameBridgeService s = active;
+        if (s != null && s.autoRunning) s.stopAutomaticInternal(
+                "Cycle automatique interrompu par l'opérateur.");
+    }
+
+    private void autoCapture(int generation, boolean afterGesture, int attempt) {
+        if (!autoRunning || generation != operationGeneration) return;
+        if (Build.VERSION.SDK_INT < 30 || !gameForeground()) {
+            stopAutomaticInternal("Arrêt auto : Clash of Clans n'est pas au premier plan.");
+            return;
+        }
+        takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
+            @Override public void onFailure(int errorCode) {
+                if (autoRunning && generation == operationGeneration)
+                    stopAutomaticInternal("Arrêt auto : capture Android refusée.");
+            }
+            @Override public void onSuccess(ScreenshotResult result) {
+                Bitmap screenshot = null;
+                try {
+                    if (!autoRunning || generation != operationGeneration || !gameForeground()) return;
+                    screenshot = bitmapFromResult(result);
+                    store(screenshot, "auto_frame.png");
+                    ScreenCatalog.Result detected = ScreenCatalog.identifyAutomatic(
+                            GameBridgeService.this);
+                    if (afterGesture) {
+                        autoVerifyAfter(generation, detected, attempt);
+                    } else {
+                        autoVerifyBefore(generation, screenshot, detected);
+                    }
+                } catch (Exception failure) {
+                    if (autoRunning && generation == operationGeneration)
+                        stopAutomaticInternal("Arrêt auto : image illisible ou calibration incompatible.");
+                } finally {
+                    if (screenshot != null) screenshot.recycle();
+                    result.getHardwareBuffer().close();
+                }
+            }
+        });
+    }
+
+    private boolean targetRegionMatches(Bitmap screenshot, String expectedState,
+                                         float x, float y) {
+        Bitmap reference = BitmapFactory.decodeFile(
+                ScreenCatalog.referenceFile(this, expectedState).getAbsolutePath());
+        if (reference == null) return false;
+        try {
+            int width = screenshot.getWidth(), height = screenshot.getHeight();
+            if (reference.getWidth() != width || reference.getHeight() != height)
+                return false;
+            int[] baseline = new int[width * height];
+            int[] live = new int[width * height];
+            reference.getPixels(baseline, 0, width, 0, 0, width, height);
+            screenshot.getPixels(live, 0, width, 0, 0, width, height);
+            return FrameFingerprint.compareNearTap(baseline, live, width, height,
+                    x, y).similarEnoughForTap();
+        } finally { reference.recycle(); }
+    }
+
+    private void autoVerifyBefore(int generation, Bitmap screenshot,
+                                  ScreenCatalog.Result detected) throws Exception {
+        if (automatic.state() != AutoRoutePolicy.State.CHECKING) {
+            stopAutomaticInternal("Arrêt auto : transition inattendue."); return;
+        }
+        int index = automatic.index();
+        Point display = new Point();
+        if (getDisplay() == null) {
+            stopAutomaticInternal("Arrêt auto : dimensions inconnues."); return;
+        }
+        getDisplay().getRealSize(display);
+        if (display.x != screenshot.getWidth() || display.y != screenshot.getHeight()) {
+            stopAutomaticInternal("Arrêt auto : affichage ou rotation modifiée."); return;
+        }
+        RouteTarget target = RouteCalibrationStore.loadForAutomaticStep(
+                this, index, display.x, display.y);
+        boolean allowed = automatic.before().equals(detected.id)
+                && targetRegionMatches(screenshot, automatic.before(), target.x, target.y)
+                && gameForeground();
+        if (!allowed) {
+            stopAutomaticInternal("Arrêt auto : état ou bouton non reconnu (" + detected.state + ").");
+            return;
+        }
+        automatic.verifiedBefore(detected.id, true, true);
+        if (!persistAutomatic()) {
+            stopAutomaticInternal("Arrêt auto : journal inaccessible."); return;
+        }
+        Path path = new Path();
+        path.moveTo(target.x * display.x, target.y * display.y);
+        GestureDescription gesture = new GestureDescription.Builder().addStroke(
+                new GestureDescription.StrokeDescription(path, 0, 85)).build();
+        // Persist in-flight and unverified BEFORE the Android gesture.
+        automatic.dispatched();
+        if (!prefs().edit().putInt("auto_index", automatic.index())
+                .putString("auto_phase", automatic.state().name())
+                .putInt("route_index", index).putString("route_phase", "AWAITING_REVIEW")
+                .putString("journal", "DISPATCHED_UNVERIFIED").commit()) {
+            stopAutomaticInternal("Arrêt auto : impossible de journaliser le geste."); return;
+        }
+        if (!gameForeground()) {
+            stopAutomaticInternal("Arrêt auto : fenêtre du jeu modifiée."); return;
+        }
+        boolean accepted = dispatchGesture(gesture, new GestureResultCallback() {
+            @Override public void onCompleted(GestureDescription desc) {
+                if (!autoRunning || generation != operationGeneration) return;
+                DiagnosticStore.record(GameBridgeService.this, DiagnosticTrail.Event.GESTURE_SENT);
+                main.postDelayed(() -> autoCapture(generation, true, 0), 1400);
+            }
+            @Override public void onCancelled(GestureDescription desc) {
+                if (autoRunning && generation == operationGeneration)
+                    stopAutomaticInternal("Arrêt auto : geste Android annulé, résultat inconnu.");
+            }
+        }, main);
+        if (!accepted) stopAutomaticInternal("Arrêt auto : geste refusé, résultat inconnu.");
+    }
+
+    private void autoVerifyAfter(int generation, ScreenCatalog.Result detected, int attempt) {
+        if (automatic.state() != AutoRoutePolicy.State.VERIFYING) {
+            stopAutomaticInternal("Arrêt auto : résultat dans une phase inattendue."); return;
+        }
+        if (!automatic.after().equals(detected.id)) {
+            // Re-observe only: NEVER repeat a tap whose effect is uncertain.
+            if (attempt < 2) {
+                main.postDelayed(() -> autoCapture(generation, true, attempt + 1), 950);
+            } else {
+                stopAutomaticInternal("Arrêt auto : écran d'arrivée non confirmé (" + detected.state + ").");
+            }
+            return;
+        }
+        try {
+            store(BitmapFactory.decodeFile(new File(getFilesDir(), "auto_frame.png")
+                    .getAbsolutePath()), "post_action_capture.png");
+        } catch (Exception ignored) { /* Visual audit still available in auto_frame.png */ }
+        automatic.verifiedAfter(detected.id);
+        boolean finished = automatic.state() == AutoRoutePolicy.State.COMPLETE_VISUAL;
+        if (!prefs().edit().putInt("auto_index", automatic.index())
+                .putString("auto_phase", automatic.state().name())
+                .putInt("route_index", automatic.index())
+                .putString("route_phase", finished ? "COMPLETE" : "READY")
+                .putString("journal", finished ? "CONFIRMED" : "READY").commit()) {
+            stopAutomaticInternal("Arrêt auto : résultat non enregistré."); return;
+        }
+        DiagnosticStore.record(this, DiagnosticTrail.Event.ROUTE_STEP_APPROVED);
+        if (finished) {
+            autoRunning = false;
+            report("Cycle terminé VISUELLEMENT : demande serveur NON vérifiée.");
+        } else {
+            main.postDelayed(() -> autoCapture(generation, false, 0), 800);
+        }
+    }
+
     /** Invalidates late screenshot callbacks as well as delayed gestures. */
     public static void cancelPending() {
         GameBridgeService s = active;
@@ -314,6 +540,7 @@ public final class GameBridgeService extends AccessibilityService {
             s.main.removeCallbacksAndMessages(null);
             s.gesturePending = false;
             s.capturePending = false;
+            if (s.autoRunning) s.stopAutomaticInternal("Arrêt explicite du cycle automatique.");
             s.report("Opérations en attente annulées.");
         }
     }
