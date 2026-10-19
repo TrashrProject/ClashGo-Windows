@@ -30,6 +30,7 @@ import java.io.File;
 /** Native Android MVP. No simulated victory or account switching. */
 public final class MainActivity extends Activity {
     private static final int PROJECTION_REQUEST = 4120;
+    private static final int AUTO_PROJECTION_REQUEST = 4121;
     private static final int BG = Color.rgb(16, 18, 22);
     private static final int SURFACE = Color.rgb(28, 31, 37);
     private static final int TEXT = Color.rgb(236, 234, 230);
@@ -49,6 +50,7 @@ public final class MainActivity extends Activity {
     private TextView autoStatus;
     private EditText profileIdInput;
     private int calibrationPreviewStep = -1;
+    private int pendingAutoStartIndex = -1;
     private long shownReferenceTime = -1L;
     private long selectedReferenceTime = -1L;
     private float selectedX = -1, selectedY = -1;
@@ -427,17 +429,21 @@ public final class MainActivity extends Activity {
                             toast("Impossible de verrouiller le profil actif.");
                             return;
                         }
-                        if (!GameBridgeService.startAutomaticRoute(directClanLink ? 1 : 0)) {
+                        // A separate system permission is required for EVERY auto
+                        // session. The accessibility API returns black on MuMu.
+                        try {
+                            if (!GameBridgeService.connected())
+                                throw new IllegalStateException("Accessibilité non connectée");
+                            pendingAutoStartIndex = directClanLink ? 1 : 0;
+                            MediaProjectionManager manager = (MediaProjectionManager)
+                                    getSystemService(MEDIA_PROJECTION_SERVICE);
+                            startActivityForResult(manager.createScreenCaptureIntent(),
+                                    AUTO_PROJECTION_REQUEST);
+                        } catch (RuntimeException error) {
+                            pendingAutoStartIndex = -1;
                             prefs().edit().remove("auto_profile_id").commit();
-                            toast("Cycle refusé : service Android ou calibrations manquantes.");
-                            refresh(); return;
+                            toast("Autorisation de capture impossible : " + error.getMessage());
                         }
-                        boolean opened = directClanLink ? launchClanLink() : openGame();
-                        if (!opened) {
-                            GameBridgeService.stopAutomatic();
-                            toast("Ouverture du jeu ou du clan impossible : cycle bloqué.");
-                        }
-                        refresh();
                     }).show();
         } catch (RuntimeException error) { toast(error.getMessage()); }
     }
@@ -473,24 +479,41 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != PROJECTION_REQUEST) return;
+        if (requestCode != PROJECTION_REQUEST
+                && requestCode != AUTO_PROJECTION_REQUEST) return;
+        final boolean automatic = requestCode == AUTO_PROJECTION_REQUEST;
+        int startIndex = automatic ? pendingAutoStartIndex : -1;
+        pendingAutoStartIndex = -1;
         if (resultCode != RESULT_OK || data == null) {
+            if (automatic) prefs().edit().remove("auto_profile_id").commit();
             toast("Partage d'écran refusé : aucune capture effectuée.");
             return;
         }
+        if (automatic && (startIndex < 0 || startIndex > 1)) {
+            prefs().edit().remove("auto_profile_id").commit();
+            toast("Parcours automatique annulé : étape inconnue.");
+            return;
+        }
         Intent capture = new Intent(this, AlternativeCaptureService.class)
-                .setAction(AlternativeCaptureService.ACTION_CAPTURE)
+                .setAction(automatic
+                        ? AlternativeCaptureService.ACTION_AUTO
+                        : AlternativeCaptureService.ACTION_CAPTURE)
+                .putExtra(AlternativeCaptureService.EXTRA_AUTO_START_INDEX, startIndex)
                 .putExtra(AlternativeCaptureService.EXTRA_RESULT_CODE, resultCode)
                 .putExtra(AlternativeCaptureService.EXTRA_RESULT_DATA, data);
         try {
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(capture);
             else startService(capture);
-            if (!openGame()) {
+            boolean opened = automatic && startIndex == 1
+                    ? launchClanLink() : openGame();
+            if (!opened) {
                 stopService(new Intent(this, AlternativeCaptureService.class));
-                toast("Clash of Clans introuvable : capture alternative annulée.");
+                if (automatic) prefs().edit().remove("auto_profile_id").commit();
+                toast("Clash of Clans introuvable : capture annulée.");
             }
         } catch (RuntimeException error) {
             stopService(new Intent(this, AlternativeCaptureService.class));
+            if (automatic) prefs().edit().remove("auto_profile_id").commit();
             toast("Partage d'écran impossible : " + error.getClass().getSimpleName());
         }
     }
