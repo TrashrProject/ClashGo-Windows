@@ -5,7 +5,13 @@ on:
     branches:
       - main
       - "feature/**"
+    paths-ignore:
+      - "android-app/**"
+      - ".github/workflows/android-apk.yml"
   pull_request:
+    paths-ignore:
+      - "android-app/**"
+      - ".github/workflows/android-apk.yml"
 
 permissions:
   contents: read

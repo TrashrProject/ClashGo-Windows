@@ -1,0 +1,75 @@
+name: Android APK — REQ N GO
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, feature/reqngo-android-apk-v1]
+    paths:
+      - 'android-app/**'
+      - '.github/workflows/android-apk.yml'
+concurrency:
+  group: reqngo-android-${{ github.ref_name }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  debug-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Vérifier les règles de sûreté (Java pur)
+        run: |
+          mkdir -p /tmp/reqngo-tests
+          javac -d /tmp/reqngo-tests android-app/app/src/main/java/com/reqngo/manager/ClanTag.java android-app/app/src/main/java/com/reqngo/manager/RequestJournal.java android-app/app/src/main/java/com/reqngo/manager/FrameFingerprint.java android-app/app/src/main/java/com/reqngo/manager/GuidedRoute.java android-app/app/src/main/java/com/reqngo/manager/RouteTarget.java android-app/app/src/main/java/com/reqngo/manager/DiagnosticTrail.java android-app/app/src/main/java/com/reqngo/manager/AutoRoutePolicy.java android-app/app/src/main/java/com/reqngo/manager/ProfileQueue.java android-app/app/src/main/java/com/reqngo/manager/GameBlocker.java android-app/app/src/main/java/com/reqngo/manager/CaptureGate.java android-app/app/src/main/java/com/reqngo/manager/CaptureQuality.java android-app/tests/FlowChecks.java android-app/tests/AutomationFlowChecks.java
+          java -cp /tmp/reqngo-tests FlowChecks
+          java -cp /tmp/reqngo-tests AutomationFlowChecks
+      - name: SDK Android du runner
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -n "$SDKMANAGER"
+          "$SDKMANAGER" --version
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      # The default Android debug key is otherwise regenerated on every
+      # disposable GitHub runner, preventing an update of the installed APK.
+      # This is a TEST-ONLY key. Publishing a release requires a separate
+      # protected signing key in GitHub Actions Secrets.
+      - name: Restaurer la signature de test Android
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: reqngo-android-debug-key-v1
+      - name: Préparer la signature de test si première compilation
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -storetype JKS \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US" -noprompt
+          fi
+          keytool -list -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey -v \
+            | grep 'SHA256:'
+      - name: Compiler l'APK
+        run: gradle -p android-app --no-daemon :app:assembleDebug
+      - name: Vérifier le paquet et sa signature debug
+        run: |
+          APK=android-app/app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep "package: name='com.reqngo.manager'"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reqngo-android-apk-debug
+          path: android-app/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14

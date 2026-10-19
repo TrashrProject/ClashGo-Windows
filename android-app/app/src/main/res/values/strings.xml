@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">REQ N GO Manager</string>
+    <string name="accessibility_name">REQ N GO — contrôle local</string>
+    <string name="accessibility_description">Capture et gestes limités sur Clash of Clans, uniquement après activation et confirmation explicites. Aucune donnée ne quitte l’appareil.</string>
+</resources>
