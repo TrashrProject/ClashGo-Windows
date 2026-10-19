@@ -130,6 +130,11 @@ public final class ScreenCatalog {
         return identifyFile(context, "post_action_capture.png");
     }
 
+    /** Dedicated transient image; never overrides operator reference screenshots. */
+    public static Result identifyAutomatic(Context context) {
+        return identifyFile(context, "auto_frame.png");
+    }
+
     private static Result identifyFile(Context context, String filename) {
         File source = new File(context.getFilesDir(), filename);
         Bitmap current = BitmapFactory.decodeFile(source.getAbsolutePath());
