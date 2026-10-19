@@ -39,6 +39,7 @@ public final class MainActivity extends Activity {
     private ImageView postScreenshot;
     private TextView comparison;
     private TextView detectedScreen;
+    private TextView routeStatus;
     private long shownReferenceTime = -1L;
     private long selectedReferenceTime = -1L;
     private float selectedX = -1, selectedY = -1;
@@ -218,8 +219,205 @@ public final class MainActivity extends Activity {
             prefs().edit().putString("journal", "BLOCKED").commit();
             refresh(); toast("Actions en attente annulées.");
         });
-        section("État du pilote", "Pas de rotation de comptes, aucun import de session, aucune détection de demande fiable avant calibration de captures du jeu. Automatiser le gameplay peut enfreindre les règles de Supercell.");
+        section("06  /  Parcours guidé : clan → renforts",
+                "Quatre transitions encadrées : village → fiche du clan → chat du clan → fenêtre de demande → demande visible. Chaque geste exige un écran de départ reconnu et chaque passage à l'étape suivante exige une capture d'arrivée et ta confirmation. Aucune action n'est répétée automatiquement.");
+        routeStatus = text("Parcours en attente de vérification.", 14, TEXT);
+        routeStatus.setPadding(dp(13), dp(13), dp(13), dp(13));
+        routeStatus.setBackground(background(SURFACE, 0));
+        screen.addView(routeStatus);
+        action("Exécuter UN geste de l'étape guidée", true, v -> prepareGuidedStep());
+        action("Vérifier et valider l'étape par la capture d'arrivée", false, v -> approveGuidedStep());
+        action("Bloquer le parcours et annuler toute action en attente", false, v -> stopGuidedRoute());
+        action("Réinitialiser le parcours après examen", false, v -> restartGuidedRoute());
+
+        section("État du pilote", "Ce parcours est guidé, PAS autonome : aucune adhésion au clan, demande réussie ou changement de compte ne sont supposés. Les écrans réels doivent d'abord être calibrés sur MuMu. Automatiser le gameplay peut enfreindre les règles de Supercell.");
         refresh();
+    }
+
+    private GuidedRoute route() {
+        return new GuidedRoute(prefs().getInt("route_index", 0),
+                prefs().getString("route_phase", "READY"));
+    }
+
+    private boolean saveRoute(GuidedRoute route) {
+        return prefs().edit().putInt("route_index", route.index())
+                .putString("route_phase", route.phase().name()).commit();
+    }
+
+    private void prepareGuidedStep() {
+        GuidedRoute route = route();
+        if (route.phase() != GuidedRoute.Phase.READY) {
+            toast("Parcours non prêt : vérifie ou réinitialise l'étape en cours."); return;
+        }
+        if (selectedX < 0 || selectedY < 0 || selectedReferenceTime <= 0
+                || selectedReferenceTime != prefs().getLong("capture_time", -1L)
+                || System.currentTimeMillis() - selectedReferenceTime > 120000) {
+            toast("Capture récente et point de geste requis pour cette étape."); return;
+        }
+        if (new RequestJournal(prefs().getString("journal", "READY")).phase()
+                != RequestJournal.Phase.READY) {
+            toast("Journal de geste non prêt : examine l'action précédente."); return;
+        }
+        final ScreenCatalog.Result identified;
+        try {
+            identified = ScreenCatalog.identify(this);
+            if (!route.expectedBefore().equals(identified.id)) {
+                toast("Écran de départ non identifié : attendu « "
+                        + route.expectedBefore() + " », obtenu « " + identified.state + " ».");
+                return;
+            }
+        } catch (RuntimeException e) {
+            toast("Capture ou références absentes : impossible d'armer l'étape."); return;
+        }
+        int currentStep = route.index();
+        new AlertDialog.Builder(this)
+                .setTitle("Étape " + (currentStep + 1) + " / " + GuidedRoute.SIZE)
+                .setMessage(GuidedRoute.TITLE[currentStep]
+                        + "\\nÉcran reconnu : " + identified.state
+                        + "\\nDestination attendue : " + route.expectedAfter()
+                        + "\\nAutoriser exactement un appui sur le point choisi ? "
+                        + "Le résultat ne sera jamais considéré comme réussi automatiquement.")
+                .setNegativeButton("Annuler", null)
+                .setPositiveButton("Autoriser un geste", (dialog, which) -> {
+                    GuidedRoute live = route();
+                    if (live.phase() != GuidedRoute.Phase.READY
+                            || live.index() != currentStep
+                            || selectedReferenceTime != prefs().getLong("capture_time", -1L)) {
+                        toast("Contexte modifié : capture à recommencer."); return;
+                    }
+                    try {
+                        // Durable marker is stored BEFORE possible dispatch.
+                        live.start(identified.id, true);
+                        if (!prefs().edit().putInt("route_index", live.index())
+                                .putString("route_phase", live.phase().name())
+                                .putLong("route_started_ms", System.currentTimeMillis())
+                                .commit()) throw new IllegalStateException("Journal inaccessible");
+                        if (!GameBridgeService.armSingleTap(selectedX, selectedY)) {
+                            live.block(); saveRoute(live);
+                            toast("Action refusée : parcours bloqué, aucune répétition automatique.");
+                            refresh(); return;
+                        }
+                        if (!openGame()) {
+                            GameBridgeService.cancelPending();
+                            prefs().edit().putString("journal", "BLOCKED").commit();
+                            live.block(); saveRoute(live);
+                            toast("Jeu inaccessible : parcours arrêté.");
+                        }
+                        refresh();
+                    } catch (RuntimeException error) {
+                        live.block(); saveRoute(live);
+                        toast("Erreur de parcours : " + error.getMessage());
+                        refresh();
+                    }
+                }).show();
+    }
+
+    private void approveGuidedStep() {
+        GuidedRoute route = route();
+        if (route.phase() != GuidedRoute.Phase.AWAITING_REVIEW) {
+            toast("Aucune étape guidée en attente."); return;
+        }
+        if (new RequestJournal(prefs().getString("journal", "BLOCKED")).phase()
+                != RequestJournal.Phase.DISPATCHED_UNVERIFIED) {
+            toast("Le journal ne confirme pas l'envoi d'un geste : parcours bloqué."); return;
+        }
+        File evidence = new File(getFilesDir(), "post_action_capture.png");
+        long started = prefs().getLong("route_started_ms", Long.MAX_VALUE);
+        if (!evidence.isFile() || evidence.lastModified() < started) {
+            toast("Capture après-action absente ou périmée. Ne pas supposer la réussite."); return;
+        }
+        ScreenCatalog.Result detected;
+        try {
+            detected = ScreenCatalog.identifyPostAction(this);
+            if (!route.expectedAfter().equals(detected.id)) {
+                toast("Écran d'arrivée non confirmé : attendu " + route.expectedAfter()
+                        + ", détecté " + detected.state); return;
+            }
+        } catch (RuntimeException error) {
+            toast("Écran après-action impossible à reconnaître."); return;
+        }
+        final int currentStep = route.index();
+        new AlertDialog.Builder(this)
+                .setTitle("Confirmer le résultat dans Clash of Clans")
+                .setMessage("Capture d'arrivée : " + detected.state
+                        + "\\nVérifie MANUELLEMENT le clan, le bouton ou la demande dans le jeu. "
+                        + "Une ressemblance visuelle ne prouve ni l'adhésion ni l'envoi. "
+                        + "Confirmer explicitement que l'étape est réussie ?")
+                .setNegativeButton("Non, résultat incertain", null)
+                .setPositiveButton("J'ai vérifié dans le jeu", (dialog, which) -> {
+                    try {
+                        GuidedRoute live = route();
+                        if (live.index() != currentStep
+                                || live.phase() != GuidedRoute.Phase.AWAITING_REVIEW
+                                || new RequestJournal(prefs().getString("journal", "BLOCKED"))
+                                .phase() != RequestJournal.Phase.DISPATCHED_UNVERIFIED
+                                || evidence.lastModified() < started) {
+                            toast("Situation modifiée : validation annulée."); return;
+                        }
+                        // Recheck after user confirmation. Never trust a stale preview.
+                        ScreenCatalog.Result last = ScreenCatalog.identifyPostAction(this);
+                        live.accept(last.id, true, true);
+                        if (!prefs().edit().putInt("route_index", live.index())
+                                .putString("route_phase", live.phase().name())
+                                .putString("journal", "CONFIRMED").commit()) {
+                            toast("Enregistrement impossible : ne pas continuer."); return;
+                        }
+                        toast("Étape revue et enregistrée. Capture le prochain écran pour continuer.");
+                        refresh();
+                    } catch (RuntimeException e) {
+                        toast("Validation refusée : résultat incertain."); 
+                    }
+                }).show();
+    }
+
+    private void stopGuidedRoute() {
+        new AlertDialog.Builder(this)
+                .setTitle("Interrompre le parcours")
+                .setMessage("Annuler toute action en attente et bloquer le parcours. "
+                        + "Un geste déjà envoyé ne peut pas être annulé dans le jeu.")
+                .setNegativeButton("Retour", null)
+                .setPositiveButton("Bloquer", (dialog, which) -> {
+                    GameBridgeService.cancelPending();
+                    GuidedRoute progress = route();
+                    progress.block();
+                    prefs().edit().putInt("route_index", progress.index())
+                            .putString("route_phase", progress.phase().name())
+                            .putString("journal", "BLOCKED").commit();
+                    refresh();
+                }).show();
+    }
+
+    private void restartGuidedRoute() {
+        GuidedRoute progress = route();
+        RequestJournal j = new RequestJournal(prefs().getString("journal", "BLOCKED"));
+        if (progress.phase() != GuidedRoute.Phase.BLOCKED
+                && progress.phase() != GuidedRoute.Phase.COMPLETE) {
+            toast("Bloque ou termine d'abord le parcours."); return;
+        }
+        if (j.phase() != RequestJournal.Phase.BLOCKED
+                && j.phase() != RequestJournal.Phase.CONFIRMED) {
+            toast("Une action est incertaine : bloque-la et examine le jeu."); return;
+        }
+        new AlertDialog.Builder(this).setTitle("Nouvelle tentative")
+                .setMessage("Tu confirmes avoir vérifié le jeu après toute action incertaine ? "
+                        + "La reprise repartira du village, sans répéter automatiquement l'action précédente.")
+                .setNegativeButton("Annuler", null)
+                .setPositiveButton("J'ai vérifié", (dialog, which) -> {
+                    GuidedRoute live = route();
+                    try {
+                        live.restartAfterReview();
+                        GameBridgeService.cancelPending();
+                        if (!prefs().edit().putInt("route_index", live.index())
+                                .putString("route_phase", live.phase().name())
+                                .putString("journal", "READY")
+                                .remove("route_started_ms").commit()) {
+                            throw new IllegalStateException("Stockage inaccessible");
+                        }
+                        refresh();
+                    } catch (RuntimeException error) {
+                        toast("Impossible de redémarrer la séquence.");
+                    }
+                }).show();
     }
 
     private void chooseScreenState() {
@@ -350,6 +548,14 @@ public final class MainActivity extends Activity {
 
     private void refresh() {
         if (status == null || screenshot == null) return;
+        if (routeStatus != null) {
+            GuidedRoute current = route();
+            String states = current.index() < GuidedRoute.SIZE
+                    ? "\\nÉcran requis : " + current.expectedBefore()
+                        + " → " + current.expectedAfter()
+                    : "\\nAucune autre étape";
+            routeStatus.setText(current.summary() + states);
+        }
         long referenceTime = prefs().getLong("capture_time", -1L);
         if (referenceTime != shownReferenceTime) {
             shownReferenceTime = referenceTime;
