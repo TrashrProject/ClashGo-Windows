@@ -264,7 +264,9 @@ public final class MainActivity extends Activity {
                 "Après calibration complète et validation de la connexion du profil actif, le moteur peut tenter un cycle de QUATRE gestes. Une seule autorisation au départ, jamais de répétition d'un geste incertain. Réussite visuelle ≠ demande confirmée par Supercell.");
         autoStatus = text("Moteur automatique à l'arrêt.", 13, MUTED);
         screen.addView(autoStatus);
-        action("Lancer UN cycle automatique calibré", true, v -> startOneAutomaticCycle());
+        action("Lancer UN cycle automatique calibré", true, v -> startOneAutomaticCycle(false));
+        action("Cycle rapide : ouvrir directement la fiche du clan", false,
+                v -> startOneAutomaticCycle(true));
         action("ARRÊTER immédiatement le cycle automatique", false, v -> {
             GameBridgeService.stopAutomatic();
             refresh();
@@ -357,7 +359,7 @@ public final class MainActivity extends Activity {
         } catch (RuntimeException error) { toast(error.getMessage()); }
     }
 
-    private void startOneAutomaticCycle() {
+    private void startOneAutomaticCycle(boolean directClanLink) {
         try {
             ProfileQueue q = ProfileStore.load(this);
             ProfileQueue.Item current = findCurrentProfile(q);
@@ -369,22 +371,31 @@ public final class MainActivity extends Activity {
                         != RequestJournal.Phase.READY) {
                 toast("Réinitialise d'abord le parcours après examen du jeu."); return;
             }
+            if (directClanLink) {
+                try { ClanTag.normalize(clan.getText().toString()); }
+                catch (RuntimeException error) {
+                    toast("Tag de clan invalide : raccourci indisponible."); return;
+                }
+            }
             new AlertDialog.Builder(this).setTitle("Cycle automatique expérimental")
                     .setMessage("Profil logique : " + current.id
-                            + "\\nJusqu'à 4 gestes, seulement si les 5 captures et 4 boutons "
+                            + (directClanLink ? "\\nFiche du clan par lien, puis 3 gestes au maximum. "
+                                : "\\nQuatre gestes au maximum. ")
+                            + "Les écrans et boutons nécessaires doivent être "
                             + "sont calibrés. Arrêt à la première différence ou erreur. "
                             + "Ne confirme jamais la réussite côté serveur. "
                             + "L'utilisation peut contrevenir aux règles de Supercell. "
                             + "Autoriser ce cycle unique ?")
                     .setNegativeButton("Annuler", null)
                     .setPositiveButton("Autoriser le cycle", (d, w) -> {
-                        if (!GameBridgeService.startAutomaticRoute()) {
+                        if (!GameBridgeService.startAutomaticRoute(directClanLink ? 1 : 0)) {
                             toast("Cycle refusé : service Android ou calibrations manquantes.");
                             refresh(); return;
                         }
-                        if (!openGame()) {
+                        boolean opened = directClanLink ? launchClanLink() : openGame();
+                        if (!opened) {
                             GameBridgeService.stopAutomatic();
-                            toast("Jeu introuvable : cycle bloqué.");
+                            toast("Ouverture du jeu ou du clan impossible : cycle bloqué.");
                         }
                         refresh();
                     }).show();
@@ -740,14 +751,19 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void openClan() {
-        if (!saveTag()) return;
+    private boolean launchClanLink() {
         try {
             Uri uri = Uri.parse(ClanTag.profileUrl(clan.getText().toString()));
-            startActivity(new Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE));
-        } catch (Exception e) {
+            startActivity(new Intent(Intent.ACTION_VIEW, uri)
+                    .addCategory(Intent.CATEGORY_BROWSABLE));
+            return true;
+        } catch (Exception e) { return false; }
+    }
+
+    private void openClan() {
+        if (!saveTag()) return;
+        if (!launchClanLink())
             toast("Impossible d'ouvrir le lien. Utilise la recherche par tag dans le jeu.");
-        }
     }
 
     private boolean openGame() {
