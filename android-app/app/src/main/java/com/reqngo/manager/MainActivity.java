@@ -216,8 +216,12 @@ public final class MainActivity extends Activity {
         action("Réarmer après examen", false, v -> resetJournal());
         action("ARRÊT : annuler toute action en attente", false, v -> {
             GameBridgeService.cancelPending();
-            prefs().edit().putString("journal", "BLOCKED").commit();
-            refresh(); toast("Actions en attente annulées.");
+            GuidedRoute route = route();
+            route.block();
+            prefs().edit().putString("journal", "BLOCKED")
+                    .putInt("route_index", route.index())
+                    .putString("route_phase", route.phase().name()).commit();
+            refresh(); toast("Actions en attente annulées ; parcours bloqué.");
         });
         section("06  /  Parcours guidé : clan → renforts",
                 "Quatre transitions encadrées : village → fiche du clan → chat du clan → fenêtre de demande → demande visible. Chaque geste exige un écran de départ reconnu et chaque passage à l'étape suivante exige une capture d'arrivée et ta confirmation. Aucune action n'est répétée automatiquement.");
@@ -225,7 +229,8 @@ public final class MainActivity extends Activity {
         routeStatus.setPadding(dp(13), dp(13), dp(13), dp(13));
         routeStatus.setBackground(background(SURFACE, 0));
         screen.addView(routeStatus);
-        action("Exécuter UN geste de l'étape guidée", true, v -> prepareGuidedStep());
+        action("Mémoriser le bouton sélectionné pour cette étape", false, v -> saveGuidedTarget());
+        action("Exécuter UN geste avec le bouton calibré", true, v -> prepareGuidedStep());
         action("Vérifier et valider l'étape par la capture d'arrivée", false, v -> approveGuidedStep());
         action("Bloquer le parcours et annuler toute action en attente", false, v -> stopGuidedRoute());
         action("Réinitialiser le parcours après examen", false, v -> restartGuidedRoute());
@@ -244,22 +249,40 @@ public final class MainActivity extends Activity {
                 .putString("route_phase", route.phase().name()).commit();
     }
 
+    private void saveGuidedTarget() {
+        if (selectedX <= 0 || selectedY <= 0) {
+            toast("Choisis d'abord le centre du bouton sur la capture."); return;
+        }
+        try {
+            GuidedRoute current = route();
+            RouteTarget point = RouteCalibrationStore.store(
+                    this, current, selectedX, selectedY, selectedReferenceTime);
+            toast("Bouton enregistré pour l'étape " + (point.step + 1)
+                    + " (" + Math.round(point.x * 100) + " %, "
+                    + Math.round(point.y * 100) + " %).");
+            refresh();
+        } catch (Exception e) {
+            toast("Calibration refusée : " + e.getMessage());
+        }
+    }
+
     private void prepareGuidedStep() {
         GuidedRoute route = route();
         if (route.phase() != GuidedRoute.Phase.READY) {
             toast("Parcours non prêt : vérifie ou réinitialise l'étape en cours."); return;
         }
-        if (selectedX < 0 || selectedY < 0 || selectedReferenceTime <= 0
-                || selectedReferenceTime > System.currentTimeMillis()
-                || selectedReferenceTime != prefs().getLong("capture_time", -1L)
-                || System.currentTimeMillis() - selectedReferenceTime > 120000) {
-            toast("Capture récente et point de geste requis pour cette étape."); return;
+        final RouteTarget target;
+        try {
+            target = RouteCalibrationStore.loadForCurrentScreen(this, route);
+        } catch (Exception error) {
+            toast("Calibre le bouton de cette étape : " + error.getMessage()); return;
         }
         if (new RequestJournal(prefs().getString("journal", "READY")).phase()
                 != RequestJournal.Phase.READY) {
             toast("Journal de geste non prêt : examine l'action précédente."); return;
         }
         final ScreenCatalog.Result identified;
+        final long referenceTime = prefs().getLong("capture_time", -1L);
         try {
             identified = ScreenCatalog.identify(this);
             if (!route.expectedBefore().equals(identified.id)) {
@@ -283,17 +306,23 @@ public final class MainActivity extends Activity {
                     GuidedRoute live = route();
                     if (live.phase() != GuidedRoute.Phase.READY
                             || live.index() != currentStep
-                            || selectedReferenceTime != prefs().getLong("capture_time", -1L)) {
+                            || referenceTime != prefs().getLong("capture_time", -1L)) {
                         toast("Contexte modifié : capture à recommencer."); return;
                     }
                     try {
+                        RouteTarget currentTarget = RouteCalibrationStore.loadForCurrentScreen(
+                                this, live);
+                        if (!currentTarget.encode().equals(target.encode())) {
+                            toast("Bouton recalibré pendant la confirmation : action refusée.");
+                            return;
+                        }
                         // Durable marker is stored BEFORE possible dispatch.
                         live.start(identified.id, true);
                         if (!prefs().edit().putInt("route_index", live.index())
                                 .putString("route_phase", live.phase().name())
                                 .putLong("route_started_ms", System.currentTimeMillis())
                                 .commit()) throw new IllegalStateException("Journal inaccessible");
-                        if (!GameBridgeService.armSingleTap(selectedX, selectedY)) {
+                        if (!GameBridgeService.armSingleTap(target.x, target.y)) {
                             live.block(); saveRoute(live);
                             toast("Action refusée : parcours bloqué, aucune répétition automatique.");
                             refresh(); return;
@@ -360,7 +389,8 @@ public final class MainActivity extends Activity {
                         live.accept(last.id, true, true);
                         if (!prefs().edit().putInt("route_index", live.index())
                                 .putString("route_phase", live.phase().name())
-                                .putString("journal", "CONFIRMED").commit()) {
+                                .putString("journal", "READY")
+                                .remove("route_started_ms").commit()) {
                             toast("Enregistrement impossible : ne pas continuer."); return;
                         }
                         toast("Étape revue et enregistrée. Capture le prochain écran pour continuer.");
@@ -564,7 +594,12 @@ public final class MainActivity extends Activity {
                     ? "\nÉcran requis : " + current.expectedBefore()
                         + " → " + current.expectedAfter()
                     : "\\nAucune autre étape";
-            routeStatus.setText(current.summary() + states);
+            String calibrated = current.index() < GuidedRoute.SIZE
+                    ? "\nBouton : " + (RouteCalibrationStore.stored(this, current.index())
+                        ? "enregistré (à vérifier pour l'écran actuel)"
+                        : "à calibrer pour cette étape")
+                    : "";
+            routeStatus.setText(current.summary() + states + calibrated);
         }
         long referenceTime = prefs().getLong("capture_time", -1L);
         if (referenceTime != shownReferenceTime) {
