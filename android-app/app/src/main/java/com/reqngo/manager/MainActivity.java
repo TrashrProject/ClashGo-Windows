@@ -36,6 +36,10 @@ public final class MainActivity extends Activity {
     private TextView pointLabel;
     private EditText clan;
     private ImageView screenshot;
+    private ImageView postScreenshot;
+    private TextView comparison;
+    private long shownReferenceTime = -1L;
+    private long selectedReferenceTime = -1L;
     private float selectedX = -1, selectedY = -1;
 
     private SharedPreferences prefs() {
@@ -170,15 +174,32 @@ public final class MainActivity extends Activity {
                     || mapped[1] <= 0 || mapped[1] >= height) return true;
             selectedX = mapped[0] / width;
             selectedY = mapped[1] / height;
+            selectedReferenceTime = prefs().getLong("capture_time", -1L);
             pointLabel.setText(String.format(java.util.Locale.ROOT,
                     "Point choisi : %.1f %% × %.1f %%", selectedX * 100, selectedY * 100));
             return true;
         });
 
-        section("04  /  Appui de calibration", "Touche un point sur la capture puis confirme UN appui. Le jeu doit être au premier plan et la résolution identique. Ce n'est pas une demande automatique.");
+        section("04  /  Contrôle avant et après l'appui",
+                "Touche un point de la capture. Avant le geste, l'APK recapture le jeu et bloque l'action si l'écran diffère trop. Le résultat sera photographié sans être déclaré réussi.");
         pointLabel = text("Aucun point sélectionné", 13, MUTED);
         screen.addView(pointLabel);
         action("Envoyer un seul appui de test", true, v -> confirmTap());
+        comparison = text("Aucune mesure visuelle après action.", 12, MUTED);
+        LinearLayout.LayoutParams comp = new LinearLayout.LayoutParams(-1, -2);
+        comp.topMargin = dp(16);
+        screen.addView(comparison, comp);
+        TextView afterTitle = text("CAPTURE APRÈS LE GESTE (PREUVE VISUELLE)", 12, MUTED);
+        LinearLayout.LayoutParams afterLp = new LinearLayout.LayoutParams(-1, -2);
+        afterLp.topMargin = dp(14);
+        screen.addView(afterTitle, afterLp);
+        postScreenshot = new ImageView(this);
+        postScreenshot.setAdjustViewBounds(true);
+        postScreenshot.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        postScreenshot.setBackground(background(SURFACE, Color.rgb(63,67,72)));
+        LinearLayout.LayoutParams postLp = new LinearLayout.LayoutParams(-1, dp(210));
+        postLp.topMargin = dp(9);
+        screen.addView(postScreenshot, postLp);
         action("Confirmer manuellement l'effet constaté", false, v -> review(true));
         action("Signaler échec / résultat incertain", false, v -> review(false));
         action("Réarmer après examen", false, v -> resetJournal());
@@ -221,8 +242,9 @@ public final class MainActivity extends Activity {
     }
 
     private void confirmTap() {
-        if (selectedX < 0 || selectedY < 0) {
-            toast("Sélectionne d'abord un point sur la capture."); return;
+        if (selectedX < 0 || selectedY < 0 || selectedReferenceTime <= 0
+                || selectedReferenceTime != prefs().getLong("capture_time", -1L)) {
+            toast("Choisis un point sur la capture de référence actuelle."); return;
         }
         new AlertDialog.Builder(this)
                 .setTitle("Un seul geste Android")
@@ -261,6 +283,21 @@ public final class MainActivity extends Activity {
 
     private void refresh() {
         if (status == null || screenshot == null) return;
+        long referenceTime = prefs().getLong("capture_time", -1L);
+        if (referenceTime != shownReferenceTime) {
+            shownReferenceTime = referenceTime;
+            selectedReferenceTime = -1L;
+            selectedX = -1f;
+            selectedY = -1f;
+            if (pointLabel != null) pointLabel.setText("Choisis un nouveau point sur cette capture.");
+        }
+        if (comparison != null) comparison.setText(
+                prefs().getString("comparison", "Aucune mesure après geste — confirmation manuelle requise."));
+        if (postScreenshot != null) {
+            File post = new File(getFilesDir(), "post_action_capture.png");
+            Bitmap later = post.isFile() ? BitmapFactory.decodeFile(post.getAbsolutePath()) : null;
+            postScreenshot.setImageBitmap(later);
+        }
         String availability = GameBridgeService.connected() ? "Service activé" : "Service inactif";
         String journal = prefs().getString("journal", "READY");
         String message = prefs().getString("status", "En attente d'une première capture.");
