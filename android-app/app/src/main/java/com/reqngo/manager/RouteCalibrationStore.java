@@ -80,6 +80,23 @@ public final class RouteCalibrationStore {
         return target;
     }
 
+    /**
+     * Read a previously operator-calibrated point for an automatic test.
+     * Full-screen recognition and current-frame button checks happen in the
+     * Android service immediately before every dispatched gesture.
+     */
+    public static RouteTarget loadForAutomaticStep(Context context, int step,
+                                                    int width, int height) throws Exception {
+        if (step < 0 || step >= GuidedRoute.SIZE)
+            throw new IllegalArgumentException("Étape inconnue");
+        SharedPreferences p = prefs(context);
+        RouteTarget target = RouteTarget.decode(p.getString(key(step), null));
+        String referenceHash = sha256(ScreenCatalog.referenceFile(context, GuidedRoute.FROM[step]));
+        if (!target.validFor(step, width, height, referenceHash))
+            throw new IllegalStateException("Écran ou référence du bouton modifié");
+        return target;
+    }
+
     public static boolean stored(Context context, int step) {
         return prefs(context).contains(key(step));
     }
