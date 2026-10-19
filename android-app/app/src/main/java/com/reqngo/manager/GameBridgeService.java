@@ -416,7 +416,8 @@ public final class GameBridgeService extends AccessibilityService {
     /** startIndex=1 is allowed only after opening the clan profile deep link. */
     public static boolean startAutomaticRoute(int startIndex) {
         GameBridgeService s = active;
-        if (s == null || Build.VERSION.SDK_INT < 30 || s.autoRunning
+        if (!AlternativeCaptureService.automaticCaptureAvailable()) return false;
+        if (startIndex < 0 || startIndex > 1 || s == null || Build.VERSION.SDK_INT < 30 || s.autoRunning
                 || s.capturePending || s.gesturePending
                 || s.phase() != RequestJournal.Phase.READY
                 || s.prefs().getInt("route_index", -1) != 0
@@ -484,58 +485,81 @@ public final class GameBridgeService extends AccessibilityService {
                 .putString("journal", "BLOCKED").remove("auto_profile_id").commit();
         DiagnosticStore.record(this, DiagnosticTrail.Event.ROUTE_BLOCKED);
         report(cause);
+        AlternativeCaptureService.stopAutomaticProjection(this);
+    }
+
+    /** Called when the user or Android revokes the screen-sharing session. */
+    public static void onAutomaticProjectionStopped() {
+        GameBridgeService s = active;
+        if (s != null && s.autoRunning)
+            s.stopAutomaticInternal("Arrêt auto : partage d'écran interrompu.");
     }
 
     public static void stopAutomatic() {
         GameBridgeService s = active;
         if (s != null && s.autoRunning) s.stopAutomaticInternal(
                 "Cycle automatique interrompu par l'opérateur.");
+        else if (s != null) AlternativeCaptureService.stopAutomaticProjection(s);
     }
 
     private void autoCapture(int generation, boolean afterGesture, int attempt) {
         if (!autoRunning || generation != operationGeneration) return;
         if (!profileLeaseValid()) {
-            stopAutomaticInternal("Arrêt auto : profil ou bail de session différent.");
+            stopAutomaticInternal("Arrêt auto : bail du profil expiré ou compte logique modifié.");
             return;
         }
-        if (Build.VERSION.SDK_INT < 30 || !gameForeground()) {
+        if (!gameForeground()) {
             stopAutomaticInternal("Arrêt auto : Clash of Clans n'est pas au premier plan.");
             return;
         }
-        takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
-            @Override public void onFailure(int errorCode) {
-                if (autoRunning && generation == operationGeneration)
-                    stopAutomaticInternal("Arrêt auto : capture Android refusée.");
-            }
-            @Override public void onSuccess(ScreenshotResult result) {
-                Bitmap screenshot = null;
-                try {
-                    if (!autoRunning || generation != operationGeneration || !gameForeground()) return;
-                    screenshot = bitmapFromResult(result);
-                    store(screenshot, "auto_frame.png");
-                    ScreenCatalog.Result detected = ScreenCatalog.identifyAutomatic(
-                            GameBridgeService.this);
-                    String blocker = GameBlocker.reason(detected.id);
-                    if (blocker != null) {
-                        DiagnosticTrail.Event code = GameBlocker.diagnosticEvent(detected.id);
-                        if (code != null) DiagnosticStore.record(GameBridgeService.this, code);
-                        stopAutomaticInternal("Arrêt auto : " + blocker);
-                        return;
+        // Accessibility screenshots are black on this tested MuMu version.
+        // All automatic observations come from one explicitly user-approved
+        // MediaProjection session. A failed frame aborts without repeating taps.
+        if (!AlternativeCaptureService.requestAutomaticFrame(
+                new AlternativeCaptureService.FrameCallback() {
+                    @Override public void onFrame(Bitmap frame) {
+                        try {
+                            if (!autoRunning || generation != operationGeneration) return;
+                            if (!profileLeaseValid() || !gameForeground()) {
+                                stopAutomaticInternal("Arrêt auto : profil ou fenêtre du jeu modifié.");
+                                return;
+                            }
+                            if (frame == null || CaptureQuality.nearlyBlack(
+                                    BitmapSamples.extract(frame))) {
+                                stopAutomaticInternal("Arrêt auto : image MediaProjection noire.");
+                                return;
+                            }
+                            store(frame, "auto_frame.png");
+                            ScreenCatalog.Result detected =
+                                    ScreenCatalog.identifyAutomatic(GameBridgeService.this);
+                            String blocker = GameBlocker.reason(detected.id);
+                            if (blocker != null) {
+                                DiagnosticTrail.Event code = GameBlocker.diagnosticEvent(detected.id);
+                                if (code != null) DiagnosticStore.record(
+                                        GameBridgeService.this, code);
+                                stopAutomaticInternal("Arrêt auto : " + blocker);
+                                return;
+                            }
+                            if (afterGesture) autoVerifyAfter(generation, detected, attempt);
+                            else autoVerifyBefore(generation, frame, detected);
+                        } catch (Exception error) {
+                            if (autoRunning && generation == operationGeneration)
+                                stopAutomaticInternal(
+                                        "Arrêt auto : capture ou écran non reconnu.");
+                        } finally {
+                            if (frame != null) frame.recycle();
+                        }
                     }
-                    if (afterGesture) {
-                        autoVerifyAfter(generation, detected, attempt);
-                    } else {
-                        autoVerifyBefore(generation, screenshot, detected);
+
+                    @Override public void onError(String message) {
+                        if (autoRunning && generation == operationGeneration)
+                            stopAutomaticInternal(
+                                    "Arrêt auto : MediaProjection ne fournit pas d'image.");
                     }
-                } catch (Exception failure) {
-                    if (autoRunning && generation == operationGeneration)
-                        stopAutomaticInternal("Arrêt auto : image illisible ou calibration incompatible.");
-                } finally {
-                    if (screenshot != null) screenshot.recycle();
-                    result.getHardwareBuffer().close();
-                }
-            }
-        });
+                })) {
+            stopAutomaticInternal(
+                    "Arrêt auto : partage d'écran non autorisé ou non connecté.");
+        }
     }
 
     private boolean targetRegionMatches(Bitmap screenshot, String expectedState,
@@ -666,6 +690,7 @@ public final class GameBridgeService extends AccessibilityService {
         DiagnosticStore.record(this, DiagnosticTrail.Event.ROUTE_STEP_APPROVED);
         if (finished) {
             autoRunning = false;
+            AlternativeCaptureService.stopAutomaticProjection(this);
             report("Cycle terminé VISUELLEMENT : demande serveur NON vérifiée.");
         } else {
             main.postDelayed(() -> autoCapture(generation, false, 0), 800);
