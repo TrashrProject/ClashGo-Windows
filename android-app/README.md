@@ -1,4 +1,4 @@
-# REQ N GO — application Android native (V1.4 alpha)
+# REQ N GO — application Android native (V2.0 alpha, expérimental)
 
 **Une APK Android native, et non un programme Windows ou une interface web.**
 
@@ -23,9 +23,17 @@
 - Arrêt qui annule tout geste en attente.
 - Aucun SDK tiers et aucune permission réseau.
 
+### Ajouts V2.0 — à tester sur le véritable jeu
+
+- **Cycle automatique expérimental sur UN compte préalablement connecté et autorisé**, après opt-in explicite. La séquence tente jusqu'à quatre gestes (ou trois après l'ouverture du profil du clan par lien profond), si les écrans et les boutons ont été calibrés localement. Avant chaque geste et après chaque résultat, **deux captures concordantes** sont exigées. Aucune nouvelle action n'est envoyée lorsque l'état de l'écran est incertain.
+- **Raccourci clan** : ouverture de la fiche d'un clan par tag via `link.clashofclans.com`. Le raccourci n'ajoute pas automatiquement l'utilisateur au clan. L'application poursuit la séquence uniquement si le profil attendu est identifié.
+- **File multicomptes locale** : jusqu'à **5 000 profils logiques**, sans lancer un émulateur par profil. Réservation d'un seul profil à la fois, bail limité dans le temps, blocage après redémarrage imprévu. Les connexions doivent être effectuées par le propriétaire via les méthodes officielles et confirmées explicitement ; aucun fichier de session ni jeton n'est importé.
+- **Arrêt et blocage automatique** : redémarrage, changement d'écran, capture inconnue, fermeture du jeu, décalage de résolution, refus d'un geste ou absence de preuve visuelle empêchent toute répétition automatique.
+- **Tests synthétiques** : parcours auto, transitions invalides, redémarrage, isolation et sérialisation de 5 000 profils. Voir `docs/VALIDATION_AUTOMATISATION_V2.md`.
+
 ### Limites : ne pas confondre avec le bot terminé
 
-**Cette version n'envoie pas automatiquement de demande de renforts et ne rejoint pas automatiquement un clan.** Il faut d'abord collecter les captures authentiques d'avant/après et calibrer la détection fiable des états du jeu. Le raccourci de clan ouvre la fiche et **ne rejoint pas automatiquement** le clan. Aucune connexion ou rotation de compte, aucun import de session, aucun module de CA.apk. Pas de fonctionnement cloud 24 h/24 dans cette APK.
+**La V2 propose maintenant une tentative automatique à partir d'écrans et de boutons calibrés, mais l'envoi réel d'une demande et l'adhésion au clan ne sont pas encore validés sur MuMu.** Il faut d'abord collecter les captures authentiques d'avant/après et calibrer la détection fiable des états du jeu. Le raccourci de clan ouvre la fiche et **ne rejoint pas automatiquement** le clan. Aucune connexion ni rotation de session de compte sans opérateur, aucun import de session, aucun module de CA.apk. Pas de fonctionnement cloud 24 h/24 dans cette APK.
 
 Les gestes ne sont **jamais** présentés comme une réussite du gameplay sur la seule base de `dispatchGesture`. À ce stade, le contrôle du résultat est réalisé par l'opérateur. La disponibilité peut varier selon MuMu, la version Android et le rendu de l'interface.
 
