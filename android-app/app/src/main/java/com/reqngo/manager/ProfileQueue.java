@@ -72,6 +72,20 @@ public final class ProfileQueue {
         item.leaseUntilMs = now + LEASE_MS;
     }
 
+    /** Only one active, unexpired lease may authorize a game run. */
+    public boolean holdsActive(String id, long now) {
+        if (id == null || now <= 0) return false;
+        Item requested;
+        try { requested = get(id); }
+        catch (RuntimeException invalid) { return false; }
+        if (requested.status != Status.ACTIVE || requested.leaseUntilMs <= now) return false;
+        for (Item other : entries) {
+            if (other != requested && (other.status == Status.ACTIVE
+                    || other.status == Status.NEEDS_OPERATOR_LOGIN)) return false;
+        }
+        return true;
+    }
+
     public void finish(String id, boolean visuallyConfirmed) {
         Item item = get(id);
         if (item.status != Status.ACTIVE) throw new IllegalStateException("Bail inactif");
