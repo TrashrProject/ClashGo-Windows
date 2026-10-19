@@ -123,7 +123,8 @@ public final class GameBridgeService extends AccessibilityService {
         }
     }
 
-    private FrameFingerprint.Score compareWithReference(Bitmap frame) {
+    private FrameFingerprint.Score[] compareWithReference(Bitmap frame, double normalizedX,
+                                                         double normalizedY) {
         Bitmap reference = BitmapFactory.decodeFile(
                 new File(getFilesDir(), "latest_game_capture.png").getAbsolutePath());
         if (reference == null) throw new IllegalStateException("Capture de référence absente");
@@ -136,7 +137,11 @@ public final class GameBridgeService extends AccessibilityService {
             int[] right = new int[width * height];
             reference.getPixels(left, 0, width, 0, 0, width, height);
             frame.getPixels(right, 0, width, 0, 0, width, height);
-            return FrameFingerprint.compare(left, right, width, height);
+            FrameFingerprint.Score overall = FrameFingerprint.compare(left, right, width, height);
+            FrameFingerprint.Score near = normalizedX > 0 && normalizedY > 0
+                    ? FrameFingerprint.compareNearTap(left, right, width, height,
+                            normalizedX, normalizedY) : null;
+            return new FrameFingerprint.Score[]{ overall, near };
         } finally { reference.recycle(); }
     }
 
@@ -173,7 +178,7 @@ public final class GameBridgeService extends AccessibilityService {
                     frame = bitmapFromResult(result);
                     if (phase() == RequestJournal.Phase.DISPATCHED_UNVERIFIED) {
                         store(frame, "post_action_capture.png");
-                        FrameFingerprint.Score difference = compareWithReference(frame);
+                        FrameFingerprint.Score difference = compareWithReference(frame, -1, -1)[0];
                         prefs().edit().putString("comparison", String.format(Locale.ROOT,
                                 "Différence moyenne %.1f %% ; pixels modifiés %.1f %% — succès du jeu NON établi.",
                                 difference.averageDifference * 100, difference.changedFraction * 100)).commit();
@@ -238,11 +243,12 @@ public final class GameBridgeService extends AccessibilityService {
                     if (generation != operationGeneration || phase() != RequestJournal.Phase.ARMED
                             || !gameForeground()) return;
                     frame = bitmapFromResult(result);
-                    FrameFingerprint.Score comparison = compareWithReference(frame);
-                    if (!comparison.similarEnoughForTap()) {
+                    FrameFingerprint.Score[] measurements = compareWithReference(frame, x, y);
+                    FrameFingerprint.Score overall = measurements[0], aroundTap = measurements[1];
+                    if (!overall.similarEnoughForTap() || !aroundTap.similarEnoughForTap()) {
                         block(String.format(Locale.ROOT,
-                                "Geste bloqué : écran changé (%.1f %% de pixels différents).",
-                                comparison.changedFraction * 100));
+                                "Geste bloqué : écran modifié (%.1f %% global, %.1f %% près du bouton).",
+                                overall.changedFraction * 100, aroundTap.changedFraction * 100));
                         return;
                     }
                     dispatchVerifiedTap(generation, x, y, display);
