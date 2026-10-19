@@ -67,6 +67,36 @@ class AndroidBridgeTests(unittest.TestCase):
                     "subprocess.run", return_value=Mock(returncode=0, stdout=output)):
                 self.assertEqual(bridge.game_foreground(), expected)
 
+    def test_foreground_falls_back_to_displays_when_windows_lacks_field(self):
+        bridge = AdbClient("emulator-5554")
+        outputs = [
+            Mock(returncode=0, stdout=b"Window dump without focus\\n"),
+            Mock(returncode=0, stdout=b"mCurrentFocus=Window{u0 com.supercell.clashofclans/.Game}\\n"),
+        ]
+        with patch("subprocess.run", side_effect=outputs) as run:
+            self.assertTrue(bridge.game_foreground())
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(run.call_args.args[0][-2:], ["window", "displays"])
+
+    def test_foreground_never_overrides_other_focused_window(self):
+        bridge = AdbClient("emulator-5554")
+        output = b"mFocusedApp=com.supercell.clashofclans/.Game\\nmCurrentFocus=Window{u0 com.android.systemui/.Dialog}\\n"
+        with patch("subprocess.run", return_value=Mock(returncode=0, stdout=output)) as run:
+            self.assertFalse(bridge.game_foreground())
+            self.assertEqual(run.call_count, 1)
+
+    def test_foreground_full_window_fallback_rejects_stale_focused_app(self):
+        bridge = AdbClient("emulator-5554")
+        outputs = [
+            Mock(returncode=0, stdout=b"no current focus\\n"),
+            Mock(returncode=0, stdout=b"mFocusedApp=com.supercell.clashofclans/.Game\\n"),
+            Mock(returncode=0, stdout=b"mCurrentFocus=Window{u0 com.android.settings/.Settings}\\n"),
+        ]
+        with patch("subprocess.run", side_effect=outputs) as run:
+            self.assertFalse(bridge.game_foreground())
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual(run.call_args.args[0][-1:], ["window"])
+
     def test_reject_unexpected_device_serial(self):
         for serial in ("", "a b", "$(touch x)", "device;rm -rf /", "x" * 100):
             with self.assertRaises(ValueError):
