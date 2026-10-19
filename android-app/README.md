@@ -1,4 +1,4 @@
-# REQ N GO — application Android native (V1.2 alpha)
+# REQ N GO — application Android native (V1.3 alpha)
 
 **Une APK Android native, et non un programme Windows ou une interface web.**
 
@@ -14,6 +14,7 @@
 - Catalogue de cinq états visuels locaux : village, fiche clan, chat de clan, fenêtre de demande et demande visible dans le chat. L'utilisateur peut enregistrer les images de MuMu et tester leur reconnaissance ; une ambiguïté produit « inconnu ».
 - Vérification visuelle supplémentaire **autour du bouton sélectionné**, afin qu'une petite superposition ne passe pas inaperçue dans la comparaison de l'écran entier.
 - **Parcours guidé à quatre transitions** : village → fiche du clan → chat du clan → fenêtre de demande → demande visible. Chaque étape exige la reconnaissance du départ, un geste explicitement approuvé, une capture d'arrivée récente et une confirmation humaine. L'index et le verrou d'action sont persistants en cas de fermeture.
+- **Boutons mémorisés par étape** : le point choisi est enregistré seulement si la capture de départ correspond à l'écran attendu. Chaque cible conserve son numéro d'étape, ses dimensions et l'empreinte SHA-256 de sa référence locale. Toute nouvelle capture de référence ou modification de résolution exige une recalibration. Le point n'est utilisé qu'après une confirmation explicite et une nouvelle vérification de l'écran.
 - **Reprise prudente** : pas d'avance ni de nouvelle tentative à partir d'un résultat ambigu. L'utilisateur doit bloquer puis examiner le jeu avant de réinitialiser la séquence. Pas de boucle automatique.
  Confirmation et réarmement manuels.
 - Arrêt qui annule tout geste en attente.
@@ -41,7 +42,7 @@ Ou dans Android Studio : ouvrir le dossier `android-app` en tant que projet, syn
 6. Cliquer sur la capture pour calibrer un point. Confirmer **un appui de test**. L'APK recapture le jeu avant l'action et refuse d'appuyer si le contenu diffère trop de la référence ; après l'appui, il tente une capture du résultat.
 7. Revenir dans REQ N GO et comparer les captures avant/après. La comparaison statistique n'est pas une preuve de demande réussie.
 8. Pour préparer les cinq étapes du futur parcours, capturer successivement les écrans réels du village, de la fiche clan, du chat, de la fenêtre de demande et du chat contenant la demande. Après chaque nouvelle capture, choisir **Mémoriser la capture comme état connu** puis sélectionner le bon nom. **Identifier l'écran capturé** donne une correspondance indicative et bloque les classifications ambiguës.
-9. Dans « Parcours guidé », choisis un point sur la capture actuelle correspondant exactement à l'état de départ ; utilise « Exécuter UN geste de l'étape guidée ». Le moteur bloque si l'écran de départ est inconnu ou si le jeu a changé avant le clic.
+9. Dans « Parcours guidé », choisis un point sur la capture actuelle correspondant exactement à l'état de départ ; utilise « Mémoriser le bouton sélectionné pour cette étape ». Puis « Exécuter UN geste avec le bouton calibré ». Le moteur vérifie le hash de la référence et la résolution avant d'armer l'action. Les étapes suivantes nécessitent chacune leur propre calibration.
 10. Après l'appui, actualise l'interface puis contrôle la photo « après » et l'état affiché. « Vérifier et valider l'étape » compare l'image de résultat à l'état d'arrivée calibré ; il te demande aussi de confirmer dans le jeu.
 11. En cas d'écran ou résultat inattendu, bloque le parcours et examine le jeu. La réinitialisation est explicite, et **aucune demande incertaine n'est automatiquement répétée**.
 
@@ -60,3 +61,7 @@ La route guidée **n'est pas une démonstration que rejoindre le clan fonctionne
 La confirmation finale signifie uniquement qu'une **capture ressemblante a été examinée et acceptée par l'opérateur** ; elle ne prouve pas indépendamment l'envoi de la demande côté serveur, et ne valide ni l'arrivée de dons ni le changement de compte.
 
 GitHub Actions vérifie la compilation APK et les règles Java hors jeu. Aucun test d'exécution sur MuMu n'a été effectué par ce workflow.
+
+### Version 1.3 — limitations connues
+
+Les coordonnées préenregistrées ne sont **pas une preuve** d'identification du bon bouton. La validation reste conditionnée par une capture récente concordant avec l'état attendu et par un seul geste confirmé. La capture complète peut varier selon les animations du jeu et provoquer des blocages : ne pas abaisser automatiquement les seuils pour forcer le fonctionnement. Aucun test réel MuMu ou demande réussie côté serveur n'est garanti par GitHub Actions. Lorsqu'une étape est validée, le journal du geste passe à READY uniquement en même temps que le numéro de l'étape suivante, afin de pouvoir reprendre une nouvelle capture sans débloquer la précédente manuellement.
