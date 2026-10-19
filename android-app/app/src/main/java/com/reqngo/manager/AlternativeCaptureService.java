@@ -66,6 +66,10 @@ public final class AlternativeCaptureService extends Service {
         if (finished) return;
         finished = true;
         if (message != null) status(message);
+        DiagnosticStore.record(this, message != null && message.startsWith(
+                "Capture alternative réussie")
+                ? DiagnosticTrail.Event.CAPTURE_SAVED
+                : DiagnosticTrail.Event.CAPTURE_REJECTED);
         stopSelf();
     }
 
@@ -99,6 +103,7 @@ public final class AlternativeCaptureService extends Service {
                 return START_NOT_STICKY;
             }
 
+            DiagnosticStore.record(this, DiagnosticTrail.Event.CAPTURE_REQUESTED);
             worker = new HandlerThread("reqngo-projection-once");
             worker.start();
             handler = new Handler(worker.getLooper());
