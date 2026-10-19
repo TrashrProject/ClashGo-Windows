@@ -96,19 +96,29 @@ class AdbClient:
         self._device("shell", "input", "keyevent", "KEYCODE_BACK")
 
     def game_foreground(self):
-        """Fail closed unless Android explicitly reports the game as focused."""
+        """Fail closed unless Android reports the *window* focused on the game.
+
+        Android versions differ: some report mCurrentFocus in 'displays'
+        rather than 'windows'. Never substitute mFocusedApp or a resumed
+        activity, as a system dialog may cover a still-resumed game.
+        """
         pkg = "com.supercell.clashofclans/"
-        try:
-            raw = self._device("shell", "dumpsys", "window", "windows")
-        except AdbError:
-            return False
-        lines = raw.decode("utf-8", errors="replace").splitlines()
-        focus = [line for line in lines if "mCurrentFocus=" in line]
-        if not focus:
-            return False
-        # Inspect the LAST current-focus record, not historical tasks or
-        # running package lists. Unknown Android layouts must be calibrated.
-        return pkg in focus[-1]
+        # Test narrower dumps first; only broaden if the field is ABSENT.
+        # If a window explicitly belongs to another app, it is NOT safe
+        # to override that fact with a later fallback.
+        for section in ("windows", "displays", None):
+            args = ("shell", "dumpsys", "window")
+            if section is not None:
+                args += (section,)
+            try:
+                raw = self._device(*args)
+            except AdbError:
+                continue
+            lines = raw.decode("utf-8", errors="replace").splitlines()
+            focus = [line for line in lines if "mCurrentFocus=" in line]
+            if focus:
+                return pkg in focus[-1]
+        return False
 
     def game_running(self, package="com.supercell.clashofclans"):
         """Read-only process check; no login, launch or package installation."""
