@@ -1,4 +1,4 @@
-# REQ N GO — application Android native (V2.0 alpha, expérimental)
+# REQ N GO — application Android native (V2.1 alpha, expérimental)
 
 **Une APK Android native, et non un programme Windows ou une interface web.**
 
@@ -30,6 +30,15 @@
 - **File multicomptes locale** : jusqu'à **5 000 profils logiques**, sans lancer un émulateur par profil. Réservation d'un seul profil à la fois, bail limité dans le temps, blocage après redémarrage imprévu. Les connexions doivent être effectuées par le propriétaire via les méthodes officielles et confirmées explicitement ; aucun fichier de session ni jeton n'est importé.
 - **Arrêt et blocage automatique** : redémarrage, changement d'écran, capture inconnue, fermeture du jeu, décalage de résolution, refus d'un geste ou absence de preuve visuelle empêchent toute répétition automatique.
 - **Tests synthétiques** : parcours auto, transitions invalides, redémarrage, isolation et sérialisation de 5 000 profils. Voir `docs/VALIDATION_AUTOMATISATION_V2.md`.
+
+### Ajouts V2.1 — stabilité, erreurs et séparation des profils
+
+- **Six écrans bloquants calibrables** dans le même catalogue que les cinq écrans du cycle : clan fermé, adhésion sur invitation, candidature en attente, délai de renforts, château de clan plein, erreur de connexion. Chaque état détecté arrête le cycle sans renvoyer de geste ; un code de diagnostic non sensible est conservé.
+- **Contrôle de profil pendant le cycle** : chaque tentative automatique est associée au profil logique autorisé au démarrage, et son bail de 120 secondes est vérifié avant chaque capture automatique. Un bail expiré, une autre session réservée ou un profil modifié bloque la suite. Ceci **ne prouve pas** quelle session Supercell est connectée : cette identification exige toujours une connexion et une vérification légitimes.
+- **Reconnaissance optimisée** : comparaison sur un échantillonnage fixe de 96 × 96 pixels plutôt que des tableaux entiers pour chaque référence, ce qui limite les allocations mémoire. Les captures PNG originales restent disponibles localement pour inspection.
+- **Classement visuel corrigé** : les onze états sont classés sur une mesure plein écran comparable, une zone locale configurée sert de vérification complémentaire. Cela évite de comparer abusivement un petit rectangle d'une référence à l'écran entier d'une autre.
+- **Interruption Android** : arrêt du cycle ou blocage du geste armé si le service d'accessibilité est interrompu. Aucun geste incertain n'est relancé automatiquement.
+- **Tests synthétiques supplémentaires** : six cas d'erreur et leurs codes de diagnostic, identification et expiration du profil actif.
 
 ### Limites : ne pas confondre avec le bot terminé
 
