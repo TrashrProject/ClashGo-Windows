@@ -1,6 +1,7 @@
 package com.reqngo.manager;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.accessibilityservice.GestureDescription;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -15,10 +16,14 @@ import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.content.SharedPreferences;
+import android.content.ComponentName;
+import android.content.Context;
+import android.view.accessibility.AccessibilityManager;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.util.Locale;
+import java.util.List;
 
 /**
  * Explicit opt-in local service. Limited to one Google Play Clash of Clans
@@ -29,11 +34,13 @@ public final class GameBridgeService extends AccessibilityService {
     private static volatile GameBridgeService active;
     private static final String PREFS = "local_preferences";
     private static final String LOG_TAG = "REQNGO";
+    private static final long MANUAL_CAPTURE_TIMEOUT_MS = 15000L;
     private final Handler main = new Handler(Looper.getMainLooper());
     private String windowPackage = "";
     private long lastWindowTime = 0L;
     private boolean gesturePending = false;
     private boolean capturePending = false;
+    private long captureStartedMs = 0L;
     private int operationGeneration = 0;
     private boolean autoRunning = false;
     private AutoRoutePolicy automatic = AutoRoutePolicy.fresh();
@@ -41,6 +48,34 @@ public final class GameBridgeService extends AccessibilityService {
     private int afterMatches = 0;
 
     public static boolean connected() { return active != null; }
+
+    /**
+     * Android keeps the accessibility permission when the service disconnects.
+     * Distinguish "enabled in settings" from "actually connected in our process".
+     */
+    public static boolean enabledInSettings(Context context) {
+        AccessibilityManager manager = (AccessibilityManager)
+                context.getSystemService(Context.ACCESSIBILITY_SERVICE);
+        if (manager == null) return false;
+        ComponentName expected = new ComponentName(context, GameBridgeService.class);
+        List<AccessibilityServiceInfo> enabled = manager.getEnabledAccessibilityServiceList(
+                AccessibilityServiceInfo.FEEDBACK_ALL_MASK);
+        if (enabled == null) return false;
+        for (AccessibilityServiceInfo info : enabled) {
+            if (expected.equals(ComponentName.unflattenFromString(info.getId()))) return true;
+        }
+        return false;
+    }
+
+    public static CaptureGate.Reason captureReadiness(Context context) {
+        GameBridgeService service = active;
+        return CaptureGate.check(Build.VERSION.SDK_INT >= 30,
+                service != null,
+                service != null && service.autoRunning,
+                service != null && service.gesturePending,
+                service != null && service.capturePending,
+                service != null && service.phase() == RequestJournal.Phase.ARMED);
+    }
 
     private SharedPreferences prefs() {
         return getSharedPreferences(PREFS, MODE_PRIVATE);
@@ -95,6 +130,7 @@ public final class GameBridgeService extends AccessibilityService {
         operationGeneration++;
         gesturePending = false;
         capturePending = false;
+        captureStartedMs = 0L;
         if (active == this) active = null;
         main.removeCallbacksAndMessages(null);
         DiagnosticStore.record(this, DiagnosticTrail.Event.SERVICE_STOPPED);
@@ -174,11 +210,20 @@ public final class GameBridgeService extends AccessibilityService {
     /** Operator-requested capture: keep reference untouched during unresolved gestures. */
     public static boolean captureAfterReturnToGame() {
         GameBridgeService s = active;
-        if (s == null || Build.VERSION.SDK_INT < 30 || s.autoRunning
-                || s.capturePending || s.gesturePending
-                || s.phase() == RequestJournal.Phase.ARMED) return false;
+        if (captureReadiness(s != null ? s : null) != CaptureGate.Reason.READY) return false;
         s.capturePending = true;
+        s.captureStartedMs = SystemClock.elapsedRealtime();
         int generation = ++s.operationGeneration;
+        s.main.postDelayed(() -> {
+            if (generation != s.operationGeneration || !s.capturePending
+                    || s.gesturePending || s.autoRunning) return;
+            s.capturePending = false;
+            s.captureStartedMs = 0L;
+            s.operationGeneration++;
+            DiagnosticStore.record(s, DiagnosticTrail.Event.CAPTURE_REJECTED);
+            s.report("Capture Android sans réponse après 15 secondes : demande débloquée. "
+                    + "Tu peux réessayer sans réactiver l'accessibilité.");
+        }, MANUAL_CAPTURE_TIMEOUT_MS);
         DiagnosticStore.record(s, DiagnosticTrail.Event.CAPTURE_REQUESTED);
         s.report("Capture demandée : ouverture du jeu.");
         s.main.postDelayed(() -> s.captureNow(generation, false), 2200);
@@ -189,14 +234,17 @@ public final class GameBridgeService extends AccessibilityService {
         if (generation != operationGeneration) return;
         if (Build.VERSION.SDK_INT < 30 || !gameForeground()) {
             capturePending = false;
+            captureStartedMs = 0L;
             DiagnosticStore.record(this, DiagnosticTrail.Event.CAPTURE_REJECTED);
             report("Capture annulée : jeu non confirmé au premier plan.");
             return;
         }
+        try {
         takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
             @Override public void onFailure(int code) {
                 if (generation != operationGeneration) return;
                 capturePending = false;
+                captureStartedMs = 0L;
                 DiagnosticStore.record(GameBridgeService.this, DiagnosticTrail.Event.CAPTURE_REJECTED);
                 report("Capture Android refusée (code " + code + ").");
             }
@@ -206,6 +254,14 @@ public final class GameBridgeService extends AccessibilityService {
                 try {
                     if (generation != operationGeneration || !gameForeground()) return;
                     frame = bitmapFromResult(result);
+                    if (CaptureQuality.nearlyBlack(BitmapSamples.extract(frame))) {
+                        DiagnosticStore.record(GameBridgeService.this,
+                                DiagnosticTrail.Event.CAPTURE_REJECTED);
+                        report("Capture reçue mais image noire (rendu de MuMu/Clash of Clans). "
+                                + "Le service peut être actif : ne pas réactiver l'accessibilité. "
+                                + "Vérifie le mode graphique de l'émulateur.");
+                        return;
+                    }
                     if (phase() == RequestJournal.Phase.DISPATCHED_UNVERIFIED || afterGestureOnly) {
                         store(frame, "post_action_capture.png");
                         DiagnosticStore.record(GameBridgeService.this, DiagnosticTrail.Event.CAPTURE_SAVED);
@@ -228,12 +284,24 @@ public final class GameBridgeService extends AccessibilityService {
                 } catch (Exception e) {
                     report("Échec capture : " + e.getClass().getSimpleName());
                 } finally {
-                    if (generation == operationGeneration) capturePending = false;
+                    if (generation == operationGeneration) {
+                        capturePending = false;
+                        captureStartedMs = 0L;
+                    }
                     if (frame != null) frame.recycle();
                     result.getHardwareBuffer().close();
                 }
             }
         });
+        } catch (RuntimeException failure) {
+            if (generation == operationGeneration) {
+                capturePending = false;
+                captureStartedMs = 0L;
+                DiagnosticStore.record(this, DiagnosticTrail.Event.CAPTURE_REJECTED);
+                report("Capture refusée par Android : " + failure.getClass().getSimpleName()
+                        + ". Autorisation et compatibilité MuMu à vérifier.");
+            }
+        }
     }
 
     /** A tap is possible only after a new frame confirms the calibrated screen. */
@@ -606,6 +674,7 @@ public final class GameBridgeService extends AccessibilityService {
             s.main.removeCallbacksAndMessages(null);
             s.gesturePending = false;
             s.capturePending = false;
+            s.captureStartedMs = 0L;
             if (s.autoRunning) s.stopAutomaticInternal("Arrêt explicite du cycle automatique.");
             s.report("Opérations en attente annulées.");
         }
