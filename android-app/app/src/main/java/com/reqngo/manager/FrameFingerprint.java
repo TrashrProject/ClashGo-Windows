@@ -28,6 +28,29 @@ public final class FrameFingerprint {
     }
 
     public static Score compare(int[] before, int[] after, int width, int height) {
+        return compareRect(before, after, width, height, 0, 0, width, height);
+    }
+
+    /** Compare an area around the intended touch. A small popup near the
+     *  button must block a tap even if the remainder of the screen is stable. */
+    public static Score compareNearTap(int[] before, int[] after, int width, int height,
+                                       double normalizedX, double normalizedY) {
+        if (!Double.isFinite(normalizedX) || !Double.isFinite(normalizedY)
+                || normalizedX <= 0 || normalizedX >= 1
+                || normalizedY <= 0 || normalizedY >= 1) {
+            throw new IllegalArgumentException("Coordonnées incorrectes");
+        }
+        int x = (int) (normalizedX * width);
+        int y = (int) (normalizedY * height);
+        int rx = Math.max(12, width / 10);
+        int ry = Math.max(12, height / 10);
+        return compareRect(before, after, width, height,
+                Math.max(0, x - rx), Math.max(0, y - ry),
+                Math.min(width, x + rx), Math.min(height, y + ry));
+    }
+
+    private static Score compareRect(int[] before, int[] after, int width, int height,
+                                     int left, int top, int right, int bottom) {
         if (before == null || after == null || width < 20 || height < 20
                 || (long) width * height > Integer.MAX_VALUE
                 || before.length != width * height || after.length != width * height) {
@@ -40,9 +63,9 @@ public final class FrameFingerprint {
         final int rows = 48;
         final int cols = 48;
         for (int y = 0; y < rows; y++) {
-            int py = Math.min(height - 1, (int) ((y + .5) * height / rows));
+            int py = Math.min(height - 1, top + (int) ((y + .5) * (bottom - top) / rows));
             for (int x = 0; x < cols; x++) {
-                int px = Math.min(width - 1, (int) ((x + .5) * width / cols));
+                int px = Math.min(width - 1, left + (int) ((x + .5) * (right - left) / cols));
                 int a = before[py * width + px];
                 int b = after[py * width + px];
                 int r = Math.abs(((a >>> 16) & 255) - ((b >>> 16) & 255));
